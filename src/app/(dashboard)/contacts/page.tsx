@@ -396,7 +396,7 @@ export default function ContactsPage() {
                 setPage(0);
               }}
               placeholder={t('searchPlaceholder')}
-              className="pl-8 bg-card border-border text-foreground placeholder:text-muted-foreground"
+              className="ps-8 bg-card border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>
 

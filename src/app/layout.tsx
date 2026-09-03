@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
-import { Inter } from "next/font/google";
+import { Inter, Noto_Sans_Arabic } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
+import { LocaleProvider } from "@/hooks/use-locale";
 import { ThemedToaster } from "@/components/themed-toaster";
 import {
   DEFAULT_MODE,
@@ -14,10 +15,28 @@ import {
   STORAGE_KEY,
   THEME_IDS,
 } from "@/lib/themes";
+import {
+  DEFAULT_LOCALE,
+  LOCALE_STORAGE_KEY,
+  LOCALES,
+  RTL_LOCALES,
+  dirForLocale,
+  isLocale,
+  type Locale,
+} from "@/lib/locale";
 
+// Latin UI font — drives --font-sans-latin. Applied for LTR locales.
 const inter = Inter({
-  variable: "--font-sans",
+  variable: "--font-sans-latin",
   subsets: ["latin"],
+});
+
+// Arabic UI font — drives --font-sans-arabic. globals.css swaps
+// --font-sans over to this variable when <html dir="rtl">.
+const notoSansArabic = Noto_Sans_Arabic({
+  variable: "--font-sans-arabic",
+  subsets: ["arabic"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -77,20 +96,52 @@ const THEME_BOOT_SCRIPT = `
 })();
 `;
 
+// Inline boot script for the language — sibling to the theme boot
+// script above. Runs before React hydrates so `<html lang>` and
+// `<html dir>` match the user's saved locale before first paint,
+// preventing an LTR→RTL flash (and a wrong-font flash) on load.
+//
+// Reads the same `wacrm.locale` localStorage key the client
+// LocaleProvider writes. Kept dependency-free (a plain string the
+// browser runs as one <script>); valid locales + the RTL set come
+// from the shared LOCALES / RTL_LOCALES constants so adding a locale
+// can't silently break the boot path.
+const LOCALE_BOOT_SCRIPT = `
+(function(){
+  var d = document.documentElement;
+  try {
+    var KEY = ${JSON.stringify(LOCALE_STORAGE_KEY)};
+    var LOCALES = ${JSON.stringify(LOCALES)};
+    var RTL = ${JSON.stringify(RTL_LOCALES)};
+    var DEFAULT = ${JSON.stringify(DEFAULT_LOCALE)};
+    var saved = localStorage.getItem(KEY);
+    var locale = LOCALES.indexOf(saved) !== -1 ? saved : d.lang || DEFAULT;
+    if (LOCALES.indexOf(locale) === -1) locale = DEFAULT;
+    d.lang = locale;
+    d.dir = RTL.indexOf(locale) !== -1 ? "rtl" : "ltr";
+  } catch (_e) {
+    d.dir = d.dir || "ltr";
+  }
+})();
+`;
+
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const locale = await getLocale();
+  const rawLocale = await getLocale();
   const messages = await getMessages();
+  const locale: Locale = isLocale(rawLocale) ? rawLocale : DEFAULT_LOCALE;
+  const dir = dirForLocale(locale);
 
   return (
     <html
       lang={locale}
+      dir={dir}
       data-theme={DEFAULT_THEME}
       data-mode={DEFAULT_MODE}
-      className={`${inter.variable} h-full antialiased`}
+      className={`${inter.variable} ${notoSansArabic.variable} h-full antialiased`}
       // The `theme-boot` script below rewrites `data-theme` and
       // `data-mode` on <html> from localStorage before React hydrates,
       // so for any non-default choice the client DOM intentionally
@@ -106,13 +157,20 @@ export default async function RootLayout({
           strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }}
         />
+        <Script
+          id="locale-boot"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: LOCALE_BOOT_SCRIPT }}
+        />
       </head>
       <body className="min-h-full bg-background text-foreground font-sans">
         <NextIntlClientProvider messages={messages} locale={locale}>
-          <ThemeProvider>
-            {children}
-            <ThemedToaster />
-          </ThemeProvider>
+          <LocaleProvider initialLocale={locale}>
+            <ThemeProvider>
+              {children}
+              <ThemedToaster />
+            </ThemeProvider>
+          </LocaleProvider>
         </NextIntlClientProvider>
       </body>
     </html>
