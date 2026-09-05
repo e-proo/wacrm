@@ -9,14 +9,39 @@
 export type AiProvider = 'openai' | 'anthropic'
 
 /**
+ * Re-resolved connection fields for the multi-provider Phase 05 path.
+ * `ProviderProtocol` lives in providers/contract.ts — mirrored here
+ * as a literal type to avoid a cycles between domain ↔ adapter code.
+ */
+export type AiConnectionProtocol = 'openai' | 'anthropic' | 'gemini_native'
+
+/** Embedding-connection state for the KB (Phase 05). */
+export interface EmbeddingSetup {
+  embeddingConnectionId: string
+  embeddingModel: string
+  /** Ready-to-search revision — null until the first re-index succeeds. */
+  activeRevision: string | null
+  /** Revision the next re-index will produce and stamp. */
+  pendingRevision: string | null
+  reindexState:
+    | 'legacy'
+    | 'pending'
+    | 'building'
+    | 'ready'
+    | 'failed'
+    | 'disabled'
+}
+
+/**
  * Account AI setup, decrypted and ready to use. Produced by
  * `loadAiConfig` — `apiKey` is the plaintext BYO provider key
- * (stored AES-256-GCM-encrypted at rest).
+ * (stored AES-256-GCM-encrypted at rest). It is null on the
+ * connection-only path, where `chat` carries the credentials instead.
  */
 export interface AiConfig {
   provider: AiProvider
   model: string
-  apiKey: string
+  apiKey: string | null
   systemPrompt: string | null
   isActive: boolean
   autoReplyEnabled: boolean
@@ -27,8 +52,28 @@ export interface AiConfig {
   handoffAgentId: string | null
   /** Optional OpenAI-compatible key for embeddings. When set, the
    *  knowledge base is embedded and semantic retrieval turns on; when
-   *  null, retrieval falls back to lexical full-text search. */
+   *  null, retrieval falls back to lexical full-text search. Deprecated
+   *  with the connection path (Phase 06 contract). */
   embeddingsApiKey: string | null
+  /**
+   * Connection-based chat (multi-provider path). When present, the
+   * adapter registry resolves these instead of `provider`/`apiKey` —
+   * this is what lets an account chat on Gemini while embeddings run
+   * on OpenAI, with zero knowledge of brands in the consumers.
+   */
+  chat?: {
+    connectionId: string
+    protocol: AiConnectionProtocol
+    /** Decrypted server-only key of the connection. */
+    apiKey: string
+    /** Validated API root (URL string) of the connection. */
+    apiRoot: string
+    /** True for custom-preset roots — requests go through the outbound policy. */
+    customEndpoint: boolean
+    model: string
+  } | null
+  /** Connection-based embeddings for the knowledge base. */
+  embeddingSetup?: EmbeddingSetup | null
 }
 
 /** A single conversation turn in the shape both providers accept. */

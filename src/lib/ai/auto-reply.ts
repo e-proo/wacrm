@@ -2,7 +2,7 @@ import { supabaseAdmin } from './admin-client'
 import { loadAiConfig } from './config'
 import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
-import { generateReply } from './generate'
+import { generateReply, usageProvider, usageModel } from './generate'
 import { buildSystemPrompt } from './defaults'
 import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
@@ -43,12 +43,20 @@ export async function dispatchInboundToAiReply(
   args: DispatchArgs,
 ): Promise<void> {
   const { accountId, conversationId, contactId, configOwnerUserId } = args
+  // Every skipped path is announced with a machine-readable reason —
+  // silently returning made "why didn't the bot answer?" undiagnosable
+  // from the terminal (same lesson as the claim-slot gate below).
+  // INFO level keeps production quiet; dev/preview consoles show it.
+  const skip = (reason: string) =>
+    console.info(`[ai auto-reply] skip (${reason}) conv=${conversationId.slice(0, 8)}`)
 
   try {
     const db = supabaseAdmin()
 
     const config = await loadAiConfig(db, accountId)
-    if (!config || !config.autoReplyEnabled) return
+    if (!config) return skip('ai_not_configured_or_inactive')
+    if (!config.autoReplyEnabled) return skip('account_auto_reply_disabled')
+    if (!config.chat && !config.apiKey) return skip('no_credentials_after_load')
 
     // Deterministic, user-configured responders win over the LLM — the
     // caller already excludes messages a Flow consumed. Message-level
@@ -65,22 +73,26 @@ export async function dispatchInboundToAiReply(
       .eq('is_active', true)
       .in('trigger_type', ['new_message_received', 'keyword_match'])
       .limit(1)
-    if (autoResponders && autoResponders.length > 0) return
+    if (autoResponders && autoResponders.length > 0) {
+      return skip('per-message-automation-active')
+    }
 
     const { data: conv, error: convErr } = await db
       .from('conversations')
       .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count')
       .eq('id', conversationId)
       .maybeSingle()
-    if (convErr || !conv) return
-    if (conv.assigned_agent_id) return // a human owns this thread
-    if (conv.ai_autoreply_disabled) return // handed off / turned off here
+    if (convErr || !conv) return skip(convErr ? 'conversation_read_failed' : 'conversation_not_found')
+    if (conv.assigned_agent_id) return skip('human_agent_assigned') // a human owns this thread
+    if (conv.ai_autoreply_disabled) return skip('conversation_bot_paused') // handed off / turned off here
     // Cheap early-out; the authoritative cap check is the atomic claim
     // below (this read can race a concurrent inbound).
-    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
+    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) {
+      return skip('conversation_reply_cap_reached')
+    }
 
     const messages = await buildConversationContext(db, conversationId)
-    if (messages.length === 0) return
+    if (messages.length === 0) return skip('no_text_context')
 
     // Account-wide throttle on the shared BYO key. The per-conversation
     // cap bounds one thread; this bounds a burst across many threads (a
@@ -92,11 +104,9 @@ export async function dispatchInboundToAiReply(
       RATE_LIMITS.aiAutoReplyAccount,
     )
     if (!acctLimit.success) {
-      console.warn(
-        `[ai auto-reply] account ${accountId} hit the per-account rate limit — skipping this inbound.`,
-      )
-      return
+      return skip('account_rate_limited')
     }
+    console.info(`[ai auto-reply] generating conv=${conversationId.slice(0, 8)}`)
 
     // Ground the reply in the account's knowledge base (best-effort).
     const knowledge = await retrieveKnowledge(
@@ -122,13 +132,15 @@ export async function dispatchInboundToAiReply(
     // never adds latency to the customer-facing send: `logAiUsage`
     // swallows its own errors, so the floating promise can't reject.
     // Logged regardless of handoff — the provider call happened either
-    // way.
+    // way. Provider/model follow the LIVE source (chat connection beats
+    // legacy column) so Gemini/DeepSeek spend is attributed (042).
     void logAiUsage(db, {
       accountId,
       conversationId,
       mode: 'auto_reply',
-      provider: config.provider,
-      model: config.model,
+      provider: usageProvider(config),
+      model: usageModel(config),
+      connectionId: config.chat?.connectionId ?? null,
       usage,
     })
 
@@ -140,6 +152,7 @@ export async function dispatchInboundToAiReply(
       // and (c) leave a short internal note so whoever picks it up has
       // context. Assigning fires the `on_conversation_assigned` trigger,
       // which notifies the agent.
+      skip(handoff ? 'model_requested_handoff' : 'model_returned_empty')
       const summary = buildHandoffSummary({
         messages,
         replyCount: conv.ai_reply_count ?? 0,
@@ -177,16 +190,24 @@ export async function dispatchInboundToAiReply(
       console.error('[ai auto-reply] claim_ai_reply_slot failed:', claimErr)
       return
     }
-    if (claimed !== true) return // lost the per-conversation cap race
+    if (claimed !== true) return skip('reply_slot_lost_or_cap') // lost the per-conversation cap race
 
-    await engineSendText({
-      accountId,
-      userId: configOwnerUserId,
-      conversationId,
-      contactId,
-      text,
-      aiGenerated: true,
-    })
+    try {
+      await engineSendText({
+        accountId,
+        userId: configOwnerUserId,
+        conversationId,
+        contactId,
+        text,
+        aiGenerated: true,
+      })
+      console.info(
+        `[ai auto-reply] replied conv=${conversationId.slice(0, 8)} tokens=${usage?.totalTokens ?? 'n/a'}`,
+      )
+    } catch (err) {
+      console.error('[ai auto-reply] outbound send failed:', err)
+      throw err
+    }
   } catch (err) {
     console.error('[ai auto-reply] dispatch failed:', err)
   }

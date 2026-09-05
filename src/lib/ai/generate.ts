@@ -6,8 +6,8 @@ import {
   type GenerateResult,
 } from './types'
 import { HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults'
-import { generateOpenAi } from './providers/openai'
-import { generateAnthropic } from './providers/anthropic'
+import { getAdapter } from './providers/registry'
+import type { ProviderProtocol } from './providers/contract'
 
 export interface GenerateArgs {
   config: AiConfig
@@ -19,36 +19,55 @@ export interface GenerateArgs {
 
 /**
  * Generate the next reply from the account's configured provider.
- * Dispatches to the right adapter, then parses the handoff sentinel out
- * of the raw text. Throws `AiError` on any provider/network failure.
+ * Dispatches via the protocol registry to the registered adapter, then
+ * parses the handoff sentinel out of the raw text. Throws `AiError` on
+ * any provider/network failure.
+ *
+ * Priority (Phase 05): when the config carries a decrypted chat
+ * connection (`config.chat`, flag-gated in `loadAiConfig`), that drives
+ * the call — protocol, key, validated API root, model. Otherwise the
+ * legacy provider fields do. Either path ends up in the same registry
+ * lookup with the same error contract, and no consumer knows a brand.
  */
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
   const { config, systemPrompt, messages } = args
   const timeoutMs = aiRequestTimeoutMs()
-  const providerArgs = {
-    apiKey: config.apiKey,
-    model: config.model,
-    systemPrompt,
-    messages,
-    timeoutMs,
+  const chat = config.chat
+  const apiKey = chat?.apiKey ?? config.apiKey
+  if (!apiKey) {
+    // Defensive only: `loadAiConfig` already returns null for configs
+    // with neither a legacy key nor a linked connection.
+    throw new AiError('No provider credentials are configured for this account.', {
+      code: 'key_decrypt_failed',
+      status: 400,
+    })
   }
-
-  let result: { text: string; usage: AiUsage | null }
-  switch (config.provider) {
-    case 'openai':
-      result = await generateOpenAi(providerArgs)
-      break
-    case 'anthropic':
-      result = await generateAnthropic(providerArgs)
-      break
-    default:
-      throw new AiError(`Unsupported AI provider: ${config.provider}`, {
-        code: 'unsupported_provider',
-        status: 400,
-      })
-  }
+  const adapter = getAdapter((chat?.protocol ?? config.provider) as ProviderProtocol)
+  const result = await adapter.generate(
+    {
+      apiKey,
+      timeoutMs,
+      apiRoot: chat?.apiRoot,
+      customEndpoint: chat?.customEndpoint ?? false,
+    },
+    { model: chat?.model ?? config.model, systemPrompt, messages },
+  )
 
   return parseGeneration(result.text, result.usage)
+}
+
+/**
+ * The protocol/mode a *usage log* row should record for this config:
+ * the live chat connection wins so Gemini/DeepSeek spend is attributed
+ * correctly (042 widened the CHECK accordingly).
+ */
+export function usageProvider(config: AiConfig): string {
+  return config.chat?.protocol ?? config.provider
+}
+
+/** Live model name for logging/UI when chat may come from a connection. */
+export function usageModel(config: AiConfig): string {
+  return config.chat?.model ?? config.model
 }
 
 /**

@@ -26,14 +26,38 @@ describe('logAiUsage', () => {
       mode: 'auto_reply',
       provider: 'anthropic',
       model: 'claude-x',
+      connection_id: null,
       prompt_tokens: 30,
       completion_tokens: 6,
       total_tokens: 36,
+      usage_reported: true,
     })
   })
 
-  it('is a no-op when the provider reported no usage', async () => {
-    const { db, from } = fakeDb()
+  it('records the connection for connection-driven calls', async () => {
+    const { db, insert } = fakeDb()
+    await logAiUsage(db, {
+      accountId: 'acct-1',
+      conversationId: null,
+      mode: 'playground',
+      provider: 'openai',
+      model: 'qwen3.8-flash',
+      connectionId: 'conn-bi',
+      usage: { promptTokens: 5, completionTokens: 7, totalTokens: 12 },
+    })
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'playground',
+        connection_id: 'conn-bi',
+        total_tokens: 12,
+        usage_reported: true,
+      }),
+    )
+  })
+
+  it('logs a CALL (zero tokens, usage_reported=false) when the provider reported no usage', async () => {
+    // 044: gateways that omit usage blocks must still show spend activity.
+    const { db, insert } = fakeDb()
     await logAiUsage(db, {
       accountId: 'acct-1',
       conversationId: null,
@@ -42,7 +66,14 @@ describe('logAiUsage', () => {
       model: 'gpt-x',
       usage: null,
     })
-    expect(from).not.toHaveBeenCalled()
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        usage_reported: false,
+      }),
+    )
   })
 
   it('never throws when the insert errors', async () => {

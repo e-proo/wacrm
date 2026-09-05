@@ -77,12 +77,18 @@ export async function PATCH(request: Request, { params }: Params) {
     if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     if (content !== undefined) {
-      const { key: embeddingsApiKey, corrupt } = await loadEmbeddingsKey(
+      const { key: embeddingsApiKey, corrupt, embedSetup } = await loadEmbeddingsKey(
         supabase,
         accountId,
       )
       try {
-        await ingestDocument(supabase, accountId, { embeddingsApiKey }, id, content)
+        await ingestDocument(
+          supabase,
+          accountId,
+          { embeddingsApiKey, embeddingSetup: embedSetup },
+          id,
+          content,
+        )
       } catch (err) {
         const message = err instanceof AiError ? err.message : 'indexing failed'
         console.error('[ai/knowledge/[id] PATCH] ingest error:', err)
@@ -94,7 +100,7 @@ export async function PATCH(request: Request, { params }: Params) {
           { status: 200 },
         )
       }
-      if (corrupt) {
+      if (corrupt && !embedSetup) {
         return NextResponse.json({
           success: true,
           warning:

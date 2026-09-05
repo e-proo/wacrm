@@ -20,7 +20,14 @@ const h = vi.hoisted(() => ({
 vi.mock('./config', () => ({ loadAiConfig: h.loadAiConfig }))
 vi.mock('./context', () => ({ buildConversationContext: h.buildConversationContext }))
 vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }))
-vi.mock('./generate', () => ({ generateReply: h.generateReply }))
+vi.mock('./generate', async (importActual) => {
+  const actual = await importActual<typeof import('./generate')>()
+  return {
+    generateReply: h.generateReply,
+    usageProvider: actual.usageProvider,
+    usageModel: actual.usageModel,
+  }
+})
 vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({

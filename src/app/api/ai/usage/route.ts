@@ -12,7 +12,7 @@ const DEFAULT_WINDOW_DAYS = 30
 
 interface UsageRow {
   created_at: string
-  mode: 'auto_reply' | 'draft'
+  mode: 'auto_reply' | 'draft' | 'playground'
   provider: string
   model: string
   prompt_tokens: number
@@ -23,10 +23,12 @@ interface UsageRow {
 /**
  * GET /api/ai/usage?days=30  (admin+)
  *
- * Token-spend summary for the account's BYO key over the last `days`
- * (1–90, default 30): totals, per-mode + per-model breakdowns, and a
- * zero-filled daily series for charting. Admin-only, mirroring the
- * `ai_usage_log` SELECT policy — spend is billing-class.
+ * Token-spend summary over the last `days` (1–90, default 30): totals,
+ * per-mode + per-model breakdowns, and a zero-filled daily series for
+ * charting. Admin-only, mirroring the `ai_usage_log` SELECT policy —
+ * spend is billing-class. Provider-agnostic: drafts, the auto-reply
+ * bot, Playground calls and connection-only accounts all land here
+ * (042/044; gateways that omit usage show as zero-token calls).
  */
 export async function GET(request: Request) {
   try {
@@ -54,7 +56,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabase
       .from('ai_usage_log')
       .select(
-        'created_at, mode, provider, model, prompt_tokens, completion_tokens, total_tokens',
+        'created_at, mode, provider, model, prompt_tokens, completion_tokens, total_tokens, usage_reported',
       )
       .eq('account_id', accountId)
       .gte('created_at', since.toISOString())
@@ -77,11 +79,16 @@ export async function GET(request: Request) {
     let promptTokens = 0
     let completionTokens = 0
     let totalTokens = 0
+    // Calls whose gateway returned no usage block (044) — real spend,
+    // unmeasured size. Surfaced so "0 tokens" cannot be mistaken for
+    // "no calls happened".
+    let callsUnreported = 0
 
     // Per-mode + per-model tallies.
     const byMode = {
       auto_reply: { calls: 0, tokens: 0 },
       draft: { calls: 0, tokens: 0 },
+      playground: { calls: 0, tokens: 0 },
     }
     const modelMap = new Map<
       string,
@@ -100,8 +107,11 @@ export async function GET(request: Request) {
       promptTokens += r.prompt_tokens
       completionTokens += r.completion_tokens
       totalTokens += r.total_tokens
+      if ((r as UsageRow & { usage_reported?: boolean }).usage_reported === false) {
+        callsUnreported += 1
+      }
 
-      // `mode` is DB-CHECK-constrained to these two values.
+      // `mode` is DB-CHECK-constrained to the three surfaces (044).
       byMode[r.mode].calls += 1
       byMode[r.mode].tokens += r.total_tokens
 
@@ -130,6 +140,7 @@ export async function GET(request: Request) {
         prompt_tokens: promptTokens,
         completion_tokens: completionTokens,
         total_tokens: totalTokens,
+        calls_without_usage_report: callsUnreported,
       },
       by_mode: byMode,
       by_model: byModel,

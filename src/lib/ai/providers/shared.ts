@@ -1,15 +1,62 @@
 import { AiError, type AiUsage, type ChatMessage } from '../types'
+import { validateUrl, resolveTarget } from '../outbound/url-policy'
+import type { AdapterContext } from './contract'
 
 // ============================================================
-// Bits shared by the OpenAI + Anthropic adapters.
+// Bits shared by the protocol adapters.
 // ============================================================
 
-export interface ProviderArgs {
-  apiKey: string
-  model: string
-  systemPrompt: string
-  messages: ChatMessage[]
-  timeoutMs: number
+/**
+ * The single outbound gate every adapter provider call must use.
+ *
+ *  • Fixed preset roots (code-defined official hostnames) take the
+ *    plain path — zero behavioral change, zero extra lookups.
+ *  • Custom roots (admin-supplied gateways, e.g.
+ *    `https://api.b.ai/v1/`) run the full SSRF policy BEFORE any
+ *    request: scheme/port/credential/fragment validation and DNS
+ *    answers classified in bulk (private/loopback/metadata/CGNAT/
+ *    TEST-NET blocked unless the deployment opts into private
+ *    endpoints). 3xx replies are refused (`redirect: 'manual'`) —
+ *    a gateway must not bounce us to an unvalidated target.
+ *
+ * Residual (documented in the Phase 05 report): the policy's DNS
+ * view can race with the OS resolver (TOCTOU). Mitigated by:
+ * private endpoints behind an extra explicit flag + exact-host
+ * allowlist + the operator's own network (self-host), and by
+ * HTTPS-only; full connection pinning is reserved for custom
+ * roots only. Fixed roots are not affected at all.
+ */
+export async function providerFetch(
+  ctx: AdapterContext,
+  url: string,
+  init: RequestInit & { signal?: AbortSignal },
+): Promise<Response> {
+  const custom = ctx.customEndpoint === true
+  if (custom) {
+    const allowPrivate = process.env.AI_PRIVATE_ENDPOINTS_ENABLED === 'true'
+    const v = validateUrl(url, { allowPrivate })
+    if (v.blockedReason || !v.url) {
+      throw new AiError(
+        'The endpoint address is blocked by the outbound security policy.',
+        { code: 'endpoint_blocked', status: 502 },
+      )
+    }
+    const target = await resolveTarget(v.url, { allowPrivate })
+    if (!target.allowed) {
+      throw new AiError(
+        'The endpoint address is blocked by the outbound security policy.',
+        { code: 'endpoint_blocked', status: 502 },
+      )
+    }
+  }
+  const res = await fetch(url, custom ? { ...init, redirect: 'manual' } : init)
+  if (custom && res.status >= 300 && res.status < 400) {
+    throw new AiError(
+      'The endpoint responded with a redirect, which the outbound policy does not allow.',
+      { code: 'endpoint_blocked', status: 502 },
+    )
+  }
+  return res
 }
 
 /**

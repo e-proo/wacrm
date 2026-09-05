@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   getCurrentAccount,
   requireRole,
@@ -7,11 +8,39 @@ import {
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 import { validateAiCredentials } from '@/lib/ai/validate'
-import { embedTexts } from '@/lib/ai/embeddings'
-import { AiError, type AiProvider } from '@/lib/ai/types'
+import { embedTexts, EMBEDDING_DIMENSIONS } from '@/lib/ai/embeddings'
+import { multiProviderEnabled } from '@/lib/ai/config'
+import { getAdapter } from '@/lib/ai/providers/registry'
+import { computeEmbeddingRevision } from '@/lib/ai/connections/embed'
+import { AiError, type AiConnectionProtocol, type AiProvider } from '@/lib/ai/types'
 
 function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 })
+}
+
+interface OwnedConnection {
+  id: string
+  protocol: string
+  preset_id: string
+  status: string
+}
+
+/** Validate a connection id belongs to this account (defense in depth
+ *  on top of RLS) and return its row essentials. Only meaningful with
+ *  the flag on; used exclusively for Phase 05 link columns. */
+async function loadOwnedConnection(
+  db: SupabaseClient,
+  accountId: string,
+  id: string,
+): Promise<OwnedConnection | null> {
+  const { data, error } = await db
+    .from('ai_provider_connections')
+    .select('id, protocol, preset_id, status')
+    .eq('id', id)
+    .eq('account_id', accountId)
+    .maybeSingle()
+  if (error) throw error
+  return (data as OwnedConnection | null) ?? null
 }
 
 /**
@@ -28,9 +57,10 @@ export async function GET() {
     const { data, error } = await supabase
       .from('ai_configs')
       // `api_key` is selected only to derive `has_key` — it is stripped
-      // out below and never returned to the client.
+      // out below and never returned to the client. The Phase 05 link
+      // columns are ids/flags only — never secrets.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key, chat_connection_id, chat_model, embedding_connection_id, embedding_model, embedding_dimensions, embedding_revision, embedding_pending_revision, embedding_reindex_state',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -43,7 +73,7 @@ export async function GET() {
       )
     }
 
-    if (!data) return NextResponse.json({ configured: false })
+    if (!data) return NextResponse.json({ configured: false, multi_provider_enabled: multiProviderEnabled() })
     // The keys are selected only to derive the has_* flags; neither is
     // returned to the client.
     const { api_key, embeddings_api_key, ...safe } = data
@@ -51,6 +81,7 @@ export async function GET() {
       configured: true,
       has_key: !!api_key,
       has_embeddings_key: !!embeddings_api_key,
+      multi_provider_enabled: multiProviderEnabled(),
       ...safe,
     })
   } catch (err) {
@@ -77,12 +108,12 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null)
     if (!body || typeof body !== 'object') return bad('Invalid request body')
 
-    const provider = body.provider as AiProvider
-    if (provider !== 'openai' && provider !== 'anthropic') {
-      return bad('provider must be "openai" or "anthropic"')
-    }
-    const model = typeof body.model === 'string' ? body.model.trim() : ''
-    if (!model) return bad('model is required')
+    // provider/model are resolved AFTER the existing row + chat
+    // connection are loaded (below): when a chat connection is linked,
+    // the legacy columns become CONNECTION-DERIVED so the merged
+    // Settings form has exactly one source for provider identity.
+    // `existing` is loaded first: the update path must not trust
+    // anything a client omitted (e.g. a hidden legacy card's fields).
 
     const systemPrompt =
       typeof body.system_prompt === 'string' && body.system_prompt.trim()
@@ -128,11 +159,67 @@ export async function POST(request: Request) {
     // Reuse the stored key when the form didn't send a fresh one.
     const { data: existing } = await supabase
       .from('ai_configs')
-      .select('id, provider, model, api_key')
+      .select(
+        'id, provider, model, api_key, chat_connection_id, chat_model, embedding_connection_id, embedding_model, embedding_revision, embedding_pending_revision',
+      )
       .eq('account_id', accountId)
       .maybeSingle()
+    const existingRow = existing as
+      | {
+          id: string
+          provider: string
+          model: string
+          api_key: string
+          chat_connection_id: string | null
+          chat_model: string | null
+          embedding_connection_id: string | null
+          embedding_model: string | null
+          embedding_revision: string | null
+          embedding_pending_revision: string | null
+        }
+      | null
 
-    let apiKeyPlain: string
+    // ---- resolve the chat link FIRST: it decides whether the legacy
+    // provider/model/key contract below applies at all ----
+    const flagOn = multiProviderEnabled()
+    let chatConn: OwnedConnection | null = null
+    if ('chat_connection_id' in body && body.chat_connection_id !== null && body.chat_connection_id !== '') {
+      if (
+        flagOn &&
+        typeof body.chat_connection_id === 'string' &&
+        /^[0-9a-f-]{36}$/i.test(body.chat_connection_id.trim())
+      ) {
+        const found = await loadOwnedConnection(supabase, accountId, body.chat_connection_id.trim())
+        if (!found) return bad('chat_connection_id must reference one of your own connections')
+        chatConn = found
+      } else {
+        return bad('chat_connection_id is invalid')
+      }
+    }
+
+    let provider: AiProvider
+    let model: string
+    if (chatConn) {
+      // Connection-derived: the legacy columns mirror the connection's
+      // protocol family (gemini_native has no legacy family — 'openai'
+      // is a harmless placeholder; generation uses the connection).
+      provider = chatConn.protocol === 'anthropic' ? 'anthropic' : 'openai'
+      model = typeof body.chat_model === 'string' ? body.chat_model.trim() : ''
+      if (!model || model.length > 200) {
+        return bad('chat_model is required (max 200 chars) when a chat connection is selected')
+      }
+    } else {
+      provider = body.provider as AiProvider
+      if (provider !== 'openai' && provider !== 'anthropic') {
+        return bad('provider must be "openai" or "anthropic"')
+      }
+      model = typeof body.model === 'string' ? body.model.trim() : ''
+      if (!model) return bad('model is required')
+    }
+
+    // Legacy key resolution — OPTIONAL when a chat connection carries
+    // the credentials (migration 043 allows a NULL api_key column).
+    let apiKeyPlain: string | null = null
     if (rawKey) {
       apiKeyPlain = rawKey
     } else if (existing?.api_key) {
@@ -141,7 +228,7 @@ export async function POST(request: Request) {
       } catch {
         return bad('Stored API key could not be decrypted — re-enter your key.')
       }
-    } else {
+    } else if (!chatConn) {
       return bad('api_key is required')
     }
 
@@ -149,13 +236,16 @@ export async function POST(request: Request) {
     // reachability actually changed. A save that just flips a toggle or
     // edits the system prompt on an existing, already-validated config
     // skips the call — no wasted token/latency on the account's key.
+    // With a chat connection there is nothing legacy to validate at all:
+    // the connection was verified through its own probe routes.
     const credentialsChanged =
-      !existing ||
-      rawKey !== '' ||
-      provider !== existing.provider ||
-      model !== existing.model
+      !chatConn &&
+      (!existing ||
+        rawKey !== '' ||
+        provider !== existing.provider ||
+        model !== existing.model)
 
-    if (credentialsChanged) {
+    if (credentialsChanged && apiKeyPlain) {
       try {
         await validateAiCredentials({
           provider,
@@ -213,6 +303,78 @@ export async function POST(request: Request) {
       shared.embeddings_api_key = encrypt(rawEmbeddingsKey)
     } else if (clearEmbeddingsKey) {
       shared.embeddings_api_key = null
+    }
+
+    // ------------------------------------------------------------
+    // Phase 05 — connection links (flag-gated). A linked chat connection
+    // overrides the legacy provider fields at generation time; a linked
+    // embedding connection QUEUES a revision rebuild (state 'pending')
+    // — semantic is never activated for an unverified selection, and
+    // activation happens only when reindex succeeds (reindex route).
+    // ------------------------------------------------------------
+    if (flagOn) {
+      const linkPatch: Record<string, unknown> = {}
+
+      // ---- chat side ---- (connection already resolved above;
+      // presence in body decides link/unlink)
+      if ('chat_connection_id' in body) {
+        linkPatch.chat_connection_id = chatConn ? chatConn.id : null
+        if (chatConn) {
+          linkPatch.chat_model = model // already validated non-empty
+        } else {
+          linkPatch.chat_model = null
+        }
+      }
+
+      // ---- embeddings side ----
+      if ('embedding_connection_id' in body || 'embedding_model' in body) {
+        const clearing = body.embedding_connection_id === null && body.embedding_model === null
+        if (clearing) {
+          // Disconnect: revert to the legacy key path (state 'legacy'
+          // simply means "revision machinery idle"; retrieval ignores it).
+          linkPatch.embedding_connection_id = null
+          linkPatch.embedding_model = null
+          linkPatch.embedding_dimensions = null
+          linkPatch.embedding_pending_revision = null
+          linkPatch.embedding_reindex_state = 'legacy'
+        } else {
+          if (typeof body.embedding_connection_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.embedding_connection_id.trim())) {
+            return bad('embedding_connection_id is required and must be a connection id')
+          }
+          if (typeof body.embedding_model !== 'string' || !body.embedding_model.trim() || body.embedding_model.length > 200) {
+            return bad('embedding_model is required (max 200 chars)')
+          }
+          const conn = await loadOwnedConnection(supabase, accountId, body.embedding_connection_id.trim())
+          if (!conn) return bad('embedding_connection_id must reference one of your own connections')
+          const adapter = getAdapter(conn.protocol as AiConnectionProtocol)
+          if (!adapter.embed) {
+            // Reject BEFORE queueing a rebuild that can only fail.
+            return bad('This connection\'s provider does not support embeddings.')
+          }
+          const model = body.embedding_model.trim()
+          // NO-OP GUARD: re-saving the pair that is already selected must
+          // NOT re-queue a rebuild (the UI always sends the current pair).
+          const sameSelection =
+            existingRow?.embedding_connection_id === conn.id &&
+            existingRow?.embedding_model === model
+          linkPatch.embedding_connection_id = conn.id
+          linkPatch.embedding_model = model
+          linkPatch.embedding_dimensions = EMBEDDING_DIMENSIONS
+          if (!sameSelection) {
+            linkPatch.embedding_pending_revision = computeEmbeddingRevision({
+              protocol: conn.protocol,
+              connectionId: conn.id,
+              model,
+              dimensions: EMBEDDING_DIMENSIONS,
+            })
+            // Selection change = queued rebuild. Semantic keeps serving the
+            // PREVIOUS revision until the reindex flips state to 'ready'.
+            linkPatch.embedding_reindex_state = 'pending'
+          }
+        }
+      }
+
+      Object.assign(shared, linkPatch)
     }
 
     if (existing) {

@@ -4,7 +4,7 @@ import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit
 import { loadAiConfig } from '@/lib/ai/config'
 import { buildConversationContext } from '@/lib/ai/context'
 import { retrieveKnowledge } from '@/lib/ai/knowledge'
-import { generateReply } from '@/lib/ai/generate'
+import { generateReply, usageProvider, usageModel } from '@/lib/ai/generate'
 import { buildSystemPrompt } from '@/lib/ai/defaults'
 import { latestUserMessage } from '@/lib/ai/query'
 import { logAiUsage } from '@/lib/ai/usage'
@@ -118,8 +118,10 @@ export async function POST(request: Request) {
         accountId,
         conversationId,
         mode: 'draft',
-        provider: config.provider,
-        model: config.model,
+        // Live source: chat connection > legacy column (Phase 05/042).
+        provider: usageProvider(config),
+        model: usageModel(config),
+        connectionId: config.chat?.connectionId ?? null,
         usage,
       })
     } catch (logErr) {
