@@ -1303,6 +1303,23 @@
       "filterConversation": "Conversation ID"
     }
   },
+  "Services": {
+    "title": "Services",
+    "description": "Catalog, pricing, exchange rates, and coverage. Phase 2 ships the data layer + admin surface; the AI integration arrives in Phase 3.",
+    "tabCategories": "Categories",
+    "tabServices": "Services",
+    "loading": "Loading…",
+    "empty": "No items yet.",
+    "addCategory": "Add a category",
+    "addService": "Add a service",
+    "create": "Create",
+    "slug": "Slug",
+    "name": "Name",
+    "code": "Code",
+    "category": "Category",
+    "categoriesTitle": "Service categories",
+    "servicesTitle": "Services"
+  },
   "Settings": {
     "pageTitle": "Settings",
     "pageDesc": "Everything in one place — your account and your workspace. Pick a section to manage it.",

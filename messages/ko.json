@@ -1303,6 +1303,23 @@
       "filterConversation": "대화 ID"
     }
   },
+  "Services": {
+    "title": "서비스",
+    "description": "카탈로그, 가격, 환율, 커버리지. 2단계는 데이터 계층 + 관리 화면을 제공하며 AI 통합은 3단계에서 추가됩니다.",
+    "tabCategories": "분류",
+    "tabServices": "서비스",
+    "loading": "불러오는 중…",
+    "empty": "아직 항목이 없습니다.",
+    "addCategory": "분류 추가",
+    "addService": "서비스 추가",
+    "create": "생성",
+    "slug": "슬러그",
+    "name": "이름",
+    "code": "코드",
+    "category": "분류",
+    "categoriesTitle": "서비스 분류",
+    "servicesTitle": "서비스"
+  },
   "Settings": {
     "pageTitle": "설정",
     "pageDesc": "계정과 워크스페이스에 관한 모든 것을 한곳에서 관리하세요. 관리할 섹션을 선택하세요.",
