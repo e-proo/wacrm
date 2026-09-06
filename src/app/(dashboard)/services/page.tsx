@@ -6,8 +6,9 @@ import { FolderTree, ListChecks, Banknote, Briefcase } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ServicesCategoriesPanel } from '@/components/services/categories-panel';
 import { ServicesListPanel } from '@/components/services/services-list-panel';
+import { ExchangeRateBooksPanel } from '@/components/services/exchange-rate-books-panel';
 
-type Tab = 'categories' | 'services';
+type Tab = 'categories' | 'services' | 'fx';
 
 export default function ServicesPage() {
   const t = useTranslations('Services');
@@ -31,6 +32,9 @@ export default function ServicesPage() {
           <TabsTrigger value="services">
             <ListChecks className="me-1.5 h-4 w-4" /> {t('tabServices')}
           </TabsTrigger>
+          <TabsTrigger value="fx">
+            <Banknote className="me-1.5 h-4 w-4" /> {t('tabFx')}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="categories" className="mt-4">
@@ -39,6 +43,10 @@ export default function ServicesPage() {
 
         <TabsContent value="services" className="mt-4">
           <ServicesListPanel />
+        </TabsContent>
+
+        <TabsContent value="fx" className="mt-4">
+          <ExchangeRateBooksPanel />
         </TabsContent>
       </Tabs>
     </div>
