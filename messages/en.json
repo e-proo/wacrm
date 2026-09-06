@@ -1406,7 +1406,7 @@
       "addCurrency": "Add a currency",
       "create": "Create",
       "code": "Code",
-      "codeHint": "3-8 uppercase letters (e.g. SAR, USD, EUR, YER_OLD).",
+      "codeHint": "3-8 uppercase letters or underscores (e.g. SAR, USD, EUR, YER_OLD).",
       "name": "Display name",
       "kind": "Kind",
       "kindIso": "ISO 4217",
@@ -1421,7 +1421,11 @@
       "statusDisabled": "Disabled",
       "empty": "No currencies yet.",
       "disable": "Disable",
-      "enable": "Enable"
+      "enable": "Enable",
+      "edit": "Edit",
+      "editCurrency": "Edit currency",
+      "saveChanges": "Save changes",
+      "cancel": "Cancel"
     }
   },
   "Settings": {

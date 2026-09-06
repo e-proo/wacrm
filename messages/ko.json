@@ -1406,7 +1406,7 @@
       "addCurrency": "통화 추가",
       "create": "생성",
       "code": "코드",
-      "codeHint": "3-8개의 대문자 영문 (예: SAR, USD, EUR, YER_OLD).",
+      "codeHint": "3-8개의 대문자 또는 밑줄 (예: SAR, USD, EUR, YER_OLD).",
       "name": "표시 이름",
       "kind": "유형",
       "kindIso": "ISO 4217",
@@ -1421,7 +1421,11 @@
       "statusDisabled": "비활성",
       "empty": "아직 통화가 없습니다.",
       "disable": "비활성화",
-      "enable": "활성화"
+      "enable": "활성화",
+      "edit": "편집",
+      "editCurrency": "통화 편집",
+      "saveChanges": "변경 사항 저장",
+      "cancel": "취소"
     }
   },
   "Settings": {

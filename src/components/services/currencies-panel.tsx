@@ -8,6 +8,8 @@ import {
   Coins,
   Power,
   PowerOff,
+  Pencil,
+  Save,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,6 +42,16 @@ export function CurrenciesPanel() {
   const [symbol, setSymbol] = useState('');
   const [decimalDigits, setDecimalDigits] = useState('2');
   const [notes, setNotes] = useState('');
+
+  // Edit state.
+  const [editing, setEditing] = useState<CurrencyRow | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [editKind, setEditKind] = useState<'iso_4217' | 'historical' | 'local'>(
+    'iso_4217',
+  );
+  const [editSymbol, setEditSymbol] = useState('');
+  const [editDecimalDigits, setEditDecimalDigits] = useState('2');
+  const [editNotes, setEditNotes] = useState('');
 
   async function load() {
     setError(null);
@@ -95,31 +107,76 @@ export function CurrenciesPanel() {
 
   const toggleStatus = useCallback(
     async (c: CurrencyRow) => {
-      const next = c.status === 'active' ? 'disabled' : 'active'
-      setBusy(`toggle:${c.id}`)
-      setError(null)
+      const next = c.status === 'active' ? 'disabled' : 'active';
+      setBusy(`toggle:${c.id}`);
+      setError(null);
       try {
         const res = await fetch(`/api/currencies/${c.id}`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ status: next }),
-        })
+        });
         const json = (await res.json()) as {
-          currency?: CurrencyRow
-          error?: string
-        }
+          currency?: CurrencyRow;
+          error?: string;
+        };
         if (!res.ok || !json.currency) {
-          throw new Error(json.error ?? 'Toggle failed')
+          throw new Error(json.error ?? 'Toggle failed');
         }
-        await load()
+        await load();
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Unknown error')
+        setError(e instanceof Error ? e.message : 'Unknown error');
       } finally {
-        setBusy(null)
+        setBusy(null);
       }
     },
     [],
-  )
+  );
+
+  const startEdit = useCallback((c: CurrencyRow) => {
+    setEditing(c);
+    setEditDisplayName(c.display_name);
+    setEditKind(c.kind);
+    setEditSymbol(c.symbol ?? '');
+    setEditDecimalDigits(String(c.decimal_digits));
+    setEditNotes(c.notes ?? '');
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditing(null);
+  }, []);
+
+  async function saveEdit() {
+    if (!editing) return;
+    setBusy(`edit:${editing.id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/currencies/${editing.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          displayName: editDisplayName.trim(),
+          kind: editKind,
+          symbol: editSymbol.trim() || null,
+          decimalDigits: Number(editDecimalDigits) || 2,
+          notes: editNotes.trim() || null,
+        }),
+      });
+      const json = (await res.json()) as {
+        currency?: CurrencyRow;
+        error?: string;
+      };
+      if (!res.ok || !json.currency) {
+        throw new Error(json.error ?? 'Save failed');
+      }
+      setEditing(null);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setBusy(null);
+    }
+  }
 
   if (currencies === null) {
     return (
@@ -127,14 +184,12 @@ export function CurrenciesPanel() {
         <Loader2 className="h-4 w-4 animate-spin" />
         {t('loading')}
       </div>
-    )
+    );
   }
 
   return (
     <div className="space-y-6">
-      {error ? (
-        <p className="text-sm text-destructive">{error}</p>
-      ) : null}
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       {/* Create form */}
       <Card>
@@ -254,18 +309,26 @@ export function CurrenciesPanel() {
                   <div className="text-sm">{c.display_name}</div>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     {c.symbol ? (
-                      <span>{tCur('symbol')}: {c.symbol}</span>
+                      <span>
+                        {tCur('symbol')}: {c.symbol}
+                      </span>
                     ) : null}
                     <span>
                       {tCur('decimalDigits')}: {c.decimal_digits}
                     </span>
                   </div>
                   {c.notes ? (
-                    <p className="text-xs text-muted-foreground">
-                      {c.notes}
-                    </p>
+                    <p className="text-xs text-muted-foreground">{c.notes}</p>
                   ) : null}
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => startEdit(c)}
+                    >
+                      <Pencil className="me-1.5 h-4 w-4" />
+                      {tCur('edit')}
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"
@@ -290,6 +353,81 @@ export function CurrenciesPanel() {
           </div>
         )}
       </div>
+
+      {/* Edit dialog */}
+      {editing ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Pencil className="h-4 w-4" />
+              {tCur('editCurrency')} ({editing.code})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">{tCur('name')}</label>
+                <Input
+                  value={editDisplayName}
+                  onChange={(e) => setEditDisplayName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">{tCur('kind')}</label>
+                <select
+                  className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                  value={editKind}
+                  onChange={(e) =>
+                    setEditKind(e.target.value as typeof editKind)
+                  }
+                >
+                  <option value="iso_4217">{tCur('kindIso')}</option>
+                  <option value="historical">{tCur('kindHistorical')}</option>
+                  <option value="local">{tCur('kindLocal')}</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">{tCur('symbol')}</label>
+                <Input
+                  value={editSymbol}
+                  onChange={(e) => setEditSymbol(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">{tCur('decimalDigits')}</label>
+                <Input
+                  value={editDecimalDigits}
+                  onChange={(e) => setEditDecimalDigits(e.target.value)}
+                  inputMode="numeric"
+                />
+              </div>
+              <div className="space-y-1 md:col-span-3">
+                <label className="text-sm font-medium">{tCur('notes')}</label>
+                <Input
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={() => void saveEdit()}
+                disabled={busy === `edit:${editing.id}` || !editDisplayName.trim()}
+              >
+                {busy === `edit:${editing.id}` ? (
+                  <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="me-1.5 h-4 w-4" />
+                )}
+                {tCur('saveChanges')}
+              </Button>
+              <Button variant="outline" onClick={cancelEdit}>
+                {tCur('cancel')}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
-  )
+  );
 }

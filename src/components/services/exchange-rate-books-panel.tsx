@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { evaluateStaleness } from '@/lib/services/rates/staleness';
+import { CurrencyDropdown } from './currency-dropdown';
 
 interface BookRow {
   id: string;
@@ -594,23 +595,21 @@ export function ExchangeRateBooksPanel() {
                         key={idx}
                         className="grid grid-cols-1 gap-2 rounded border p-3 md:grid-cols-7"
                       >
-                        <Input
-                          placeholder="BASE"
+                        <CurrencyDropdown
+                          label="BASE"
                           value={r.base_currency}
-                          onChange={(e) =>
-                            updateRateRow(idx, {
-                              base_currency: e.target.value.toUpperCase(),
-                            })
+                          onChange={(code) =>
+                            updateRateRow(idx, { base_currency: code })
                           }
+                          disabled={Boolean(selectedVersion && selectedVersion.status !== 'draft')}
                         />
-                        <Input
-                          placeholder="QUOTE"
+                        <CurrencyDropdown
+                          label="QUOTE"
                           value={r.quote_currency}
-                          onChange={(e) =>
-                            updateRateRow(idx, {
-                              quote_currency: e.target.value.toUpperCase(),
-                            })
+                          onChange={(code) =>
+                            updateRateRow(idx, { quote_currency: code })
                           }
+                          disabled={Boolean(selectedVersion && selectedVersion.status !== 'draft')}
                         />
                         <Input
                           placeholder={tFx('buy')}

@@ -1406,7 +1406,7 @@
       "addCurrency": "إضافة عملة",
       "create": "إنشاء",
       "code": "الرمز",
-      "codeHint": "3-8 أحرف كبيرة بالإنجليزية (مثل SAR، USD، EUR، YER_OLD).",
+      "codeHint": "3-8 أحرف كبيرة أو underscores (مثل SAR، USD، EUR، YER_OLD).",
       "name": "اسم العرض",
       "kind": "النوع",
       "kindIso": "ISO 4217",
@@ -1421,7 +1421,11 @@
       "statusDisabled": "معطلة",
       "empty": "لا توجد عملات بعد.",
       "disable": "تعطيل",
-      "enable": "تفعيل"
+      "enable": "تفعيل",
+      "edit": "تعديل",
+      "editCurrency": "تعديل العملة",
+      "saveChanges": "حفظ التغييرات",
+      "cancel": "إلغاء"
     }
   },
   "Settings": {

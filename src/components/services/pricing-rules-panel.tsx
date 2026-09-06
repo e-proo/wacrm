@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { CurrencyDropdown } from './currency-dropdown';
 
 interface PricingRuleRow {
   id: string;
@@ -314,19 +315,19 @@ export function PricingRulesPanel() {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-sm font-medium">{tRules('feeCurrency')}</label>
-              <Input
+              <CurrencyDropdown
+                label={tRules('feeCurrency')}
                 value={feeCurrency}
-                onChange={(e) => setFeeCurrency(e.target.value.toUpperCase())}
-                placeholder="YER"
+                onChange={setFeeCurrency}
+                disabled={Boolean(selectedRule && selectedRule.status === 'published')}
               />
             </div>
             <div className="space-y-1">
-              <label className="text-sm font-medium">{tRules('inputCurrency')}</label>
-              <Input
+              <CurrencyDropdown
+                label={tRules('inputCurrency')}
                 value={inputCurrency}
-                onChange={(e) => setInputCurrency(e.target.value.toUpperCase())}
-                placeholder="YER"
+                onChange={setInputCurrency}
+                disabled={Boolean(selectedRule && selectedRule.status === 'published')}
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
