@@ -2,13 +2,22 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { FolderTree, ListChecks, Banknote, Briefcase } from 'lucide-react';
+import {
+  FolderTree,
+  ListChecks,
+  Banknote,
+  Briefcase,
+  Coins,
+  Activity,
+} from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ServicesCategoriesPanel } from '@/components/services/categories-panel';
 import { ServicesListPanel } from '@/components/services/services-list-panel';
 import { ExchangeRateBooksPanel } from '@/components/services/exchange-rate-books-panel';
+import { PricingRulesPanel } from '@/components/services/pricing-rules-panel';
+import { ActivityFeedPanel } from '@/components/services/activity-feed-panel';
 
-type Tab = 'categories' | 'services' | 'fx';
+type Tab = 'categories' | 'services' | 'fx' | 'rules' | 'activity';
 
 export default function ServicesPage() {
   const t = useTranslations('Services');
@@ -32,8 +41,14 @@ export default function ServicesPage() {
           <TabsTrigger value="services">
             <ListChecks className="me-1.5 h-4 w-4" /> {t('tabServices')}
           </TabsTrigger>
+          <TabsTrigger value="rules">
+            <Coins className="me-1.5 h-4 w-4" /> {t('tabRules')}
+          </TabsTrigger>
           <TabsTrigger value="fx">
             <Banknote className="me-1.5 h-4 w-4" /> {t('tabFx')}
+          </TabsTrigger>
+          <TabsTrigger value="activity">
+            <Activity className="me-1.5 h-4 w-4" /> {t('tabActivity')}
           </TabsTrigger>
         </TabsList>
 
@@ -45,8 +60,16 @@ export default function ServicesPage() {
           <ServicesListPanel />
         </TabsContent>
 
+        <TabsContent value="rules" className="mt-4">
+          <PricingRulesPanel />
+        </TabsContent>
+
         <TabsContent value="fx" className="mt-4">
           <ExchangeRateBooksPanel />
+        </TabsContent>
+
+        <TabsContent value="activity" className="mt-4">
+          <ActivityFeedPanel />
         </TabsContent>
       </Tabs>
     </div>
