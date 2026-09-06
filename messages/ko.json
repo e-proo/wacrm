@@ -15,10 +15,11 @@
     "createAccount": "계정 만들기"
   },
   "Sidebar": {
-    "title": "WhatsApp용 CRM 템플릿",
+    "title": "WhatsApp CRM Template",
     "dashboard": "대시보드",
-    "inbox": "인박스",
+    "inbox": "받은편지함",
     "notifications": "알림",
+    "services": "서비스",
     "contacts": "연락처",
     "pipelines": "파이프라인",
     "broadcasts": "브로드캐스트",

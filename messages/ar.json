@@ -17,8 +17,9 @@
   "Sidebar": {
     "title": "قالب CRM لواتساب",
     "dashboard": "لوحة التحكم",
-    "inbox": "البريد الوارد",
+    "inbox": "صندوق الوارد",
     "notifications": "الإشعارات",
+    "services": "الخدمات",
     "contacts": "جهات الاتصال",
     "pipelines": "مسارات البيع",
     "broadcasts": "البثّات",
