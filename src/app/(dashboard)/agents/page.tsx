@@ -2,16 +2,35 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Bot, Sparkles, Settings2, BarChart3, Boxes } from 'lucide-react';
+import {
+  Bot,
+  Sparkles,
+  Settings2,
+  BarChart3,
+  Boxes,
+  Users,
+  ListChecks,
+  ShieldCheck,
+} from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AiPlayground } from '@/components/agents/ai-playground';
 import { AiUsageCard } from '@/components/agents/ai-usage';
 import { AiConfig } from '@/components/settings/ai-config';
 import { AiProvidersPanel } from '@/components/settings/ai-providers';
+import { MultiAgentPanel } from '@/components/agents/multi-agent-panel';
+import { TrustedAdminsPanel } from '@/components/agents/trusted-admins-panel';
+import { AgentRunsPanel } from '@/components/agents/agent-runs-panel';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 
-type Tab = 'playground' | 'providers' | 'setup' | 'usage';
+type Tab =
+  | 'playground'
+  | 'providers'
+  | 'setup'
+  | 'usage'
+  | 'multi_agent'
+  | 'trusted_admins'
+  | 'runs';
 
 export default function AgentsPage() {
   const { accountId, accountRole } = useAuth();
@@ -19,11 +38,8 @@ export default function AgentsPage() {
   const canViewUsage = accountRole ? canEditSettings(accountRole) : false;
   const [tab, setTab] = useState<Tab>('playground');
   const [decided, setDecided] = useState(false);
-  // The Providers tab only exists while the multi-provider deployment
-  // flag is on; classic single-key setups keep the old three-tab shape.
   const [multiProvider, setMultiProvider] = useState(false);
 
-  // Land first-time users on Setup, returning users on the Playground.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -43,6 +59,8 @@ export default function AgentsPage() {
       cancelled = true;
     };
   }, []);
+
+  const canSeeMultiAgent = accountRole ? canEditSettings(accountRole) : false;
 
   return (
     <div>
@@ -66,6 +84,21 @@ export default function AgentsPage() {
             <TabsTrigger value="playground">
               <Sparkles className="me-1.5 h-4 w-4" /> {t('tabPlayground')}
             </TabsTrigger>
+            {canSeeMultiAgent && (
+              <TabsTrigger value="multi_agent">
+                <Users className="me-1.5 h-4 w-4" /> {t('tabMultiAgent')}
+              </TabsTrigger>
+            )}
+            {canSeeMultiAgent && (
+              <TabsTrigger value="trusted_admins">
+                <ShieldCheck className="me-1.5 h-4 w-4" /> {t('tabTrustedAdmins')}
+              </TabsTrigger>
+            )}
+            {canSeeMultiAgent && (
+              <TabsTrigger value="runs">
+                <ListChecks className="me-1.5 h-4 w-4" /> {t('tabRuns')}
+              </TabsTrigger>
+            )}
             {multiProvider && (
               <TabsTrigger value="providers">
                 <Boxes className="me-1.5 h-4 w-4" /> {t('tabProviders')}
@@ -84,6 +117,24 @@ export default function AgentsPage() {
           <TabsContent value="playground" className="mt-4">
             <AiPlayground onGoToSetup={() => setTab('setup')} />
           </TabsContent>
+
+          {canSeeMultiAgent && (
+            <TabsContent value="multi_agent" className="mt-4">
+              <MultiAgentPanel />
+            </TabsContent>
+          )}
+
+          {canSeeMultiAgent && (
+            <TabsContent value="trusted_admins" className="mt-4">
+              <TrustedAdminsPanel />
+            </TabsContent>
+          )}
+
+          {canSeeMultiAgent && (
+            <TabsContent value="runs" className="mt-4">
+              <AgentRunsPanel />
+            </TabsContent>
+          )}
 
           {multiProvider && (
             <TabsContent value="providers" className="mt-4">

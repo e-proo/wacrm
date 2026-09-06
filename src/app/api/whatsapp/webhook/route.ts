@@ -10,6 +10,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
+import { dispatchInboundToAiAgent } from '@/lib/ai/runtime/dispatch'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
   handleTemplateWebhookChange,
@@ -879,6 +880,38 @@ async function processMessage(
       configOwnerUserId,
     })
   }
+
+  // ============================================================
+  // Phase 1 multi-agent dispatcher (shadow path).
+  //
+  // Invoked after the legacy auto-reply so the new schema is
+  // observably active without changing existing behavior. In
+  // Phase 1 the dispatcher resolves routing + creates a run
+  // row + marks it `skipped` (`phase1_legacy_path_only`) — the
+  // actual generation still flows through the legacy path above.
+  // Phase 3 swaps the two: the new dispatcher becomes the source
+  // of truth and the legacy path is retired per-account via the
+  // `multi_agent_enabled` flag.
+  //
+  // Important: this is the FIRST hook that consults the trusted-
+  // admin identities. Per the architecture §4.2 it MUST run
+  // before any flow / automation that could reply to the admin
+  // as if it were a customer. In Phase 1 we add it here (post-
+  // legacy) to keep the legacy behavior unchanged, but the
+  // `routeInboundMessage` function still applies the admin gate
+  // first; the legacy reply path is only reached when the
+  // snapshot's trustedIdentities list is empty (the migration
+  // backfill seeds no identities).
+  // ============================================================
+  await dispatchInboundToAiAgent({
+    accountId,
+    conversationId: conversation.id,
+    inboundMessageId: insertedRows[0].id,
+    senderAddress: normalizePhone(senderPhone),
+    hasHumanAssignee: Boolean(conversation.assigned_agent_id),
+    multiAgentEnabled: process.env.MULTI_AGENT_ENABLED === 'true',
+    workerId: 'webhook',
+  })
 
   // message.received webhook (public API). Awaited — not fire-and-forget
   // — because we're inside the route's `after()` block, which only keeps
