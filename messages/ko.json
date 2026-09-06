@@ -1309,6 +1309,7 @@
     "description": "카탈로그, 가격, 환율, 커버리지. 2단계는 데이터 계층 + 관리 화면을 제공하며 AI 통합은 3단계에서 추가됩니다.",
     "tabCategories": "분류",
     "tabServices": "서비스",
+    "tabCurrencies": "통화",
     "tabRules": "가격 규칙",
     "tabFx": "환율",
     "tabActivity": "활동",
@@ -1400,6 +1401,27 @@
       "filterByType": "대상별 필터",
       "all": "전체",
       "empty": "아직 활동이 없습니다."
+    },
+    "currencies": {
+      "addCurrency": "통화 추가",
+      "create": "생성",
+      "code": "코드",
+      "codeHint": "3-8개의 대문자 영문 (예: SAR, USD, EUR, YER_OLD).",
+      "name": "표시 이름",
+      "kind": "유형",
+      "kindIso": "ISO 4217",
+      "kindHistorical": "역사적",
+      "kindLocal": "지역",
+      "symbol": "기호",
+      "decimalDigits": "소수 자릿수",
+      "notes": "메모",
+      "notesPlaceholder": "2018년 이전 옌멘 리알, 비공식 시장에서 여전히 참조됨.",
+      "currenciesTitle": "통화",
+      "statusActive": "활성",
+      "statusDisabled": "비활성",
+      "empty": "아직 통화가 없습니다.",
+      "disable": "비활성화",
+      "enable": "활성화"
     }
   },
   "Settings": {

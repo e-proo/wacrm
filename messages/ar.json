@@ -1309,6 +1309,7 @@
     "description": "الكتالوج والتسعير وأسعار الصرف والتغطيات. المرحلة الثانية تحتوي على طبقة البيانات وواجهة الإدارة؛ تكامل الذكاء الاصطناعي في المرحلة الثالثة.",
     "tabCategories": "التصنيفات",
     "tabServices": "الخدمات",
+    "tabCurrencies": "العملات",
     "tabRules": "قواعد التسعير",
     "tabFx": "أسعار الصرف",
     "tabActivity": "السجل",
@@ -1400,6 +1401,27 @@
       "filterByType": "تصفية حسب الهدف",
       "all": "الكل",
       "empty": "لا توجد أحداث بعد."
+    },
+    "currencies": {
+      "addCurrency": "إضافة عملة",
+      "create": "إنشاء",
+      "code": "الرمز",
+      "codeHint": "3-8 أحرف كبيرة بالإنجليزية (مثل SAR، USD، EUR، YER_OLD).",
+      "name": "اسم العرض",
+      "kind": "النوع",
+      "kindIso": "ISO 4217",
+      "kindHistorical": "تاريخية",
+      "kindLocal": "محلية",
+      "symbol": "الرمز",
+      "decimalDigits": "الخانات العشرية",
+      "notes": "ملاحظات",
+      "notesPlaceholder": "الريال اليمني القديم قبل 2018، لا يزال مستخدماً في الأسواق غير الرسمية.",
+      "currenciesTitle": "العملات",
+      "statusActive": "نشطة",
+      "statusDisabled": "معطلة",
+      "empty": "لا توجد عملات بعد.",
+      "disable": "تعطيل",
+      "enable": "تفعيل"
     }
   },
   "Settings": {

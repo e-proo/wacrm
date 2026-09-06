@@ -9,6 +9,7 @@ import {
   Briefcase,
   Coins,
   Activity,
+  Globe,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ServicesCategoriesPanel } from '@/components/services/categories-panel';
@@ -16,8 +17,9 @@ import { ServicesListPanel } from '@/components/services/services-list-panel';
 import { ExchangeRateBooksPanel } from '@/components/services/exchange-rate-books-panel';
 import { PricingRulesPanel } from '@/components/services/pricing-rules-panel';
 import { ActivityFeedPanel } from '@/components/services/activity-feed-panel';
+import { CurrenciesPanel } from '@/components/services/currencies-panel';
 
-type Tab = 'categories' | 'services' | 'fx' | 'rules' | 'activity';
+type Tab = 'categories' | 'services' | 'currencies' | 'fx' | 'rules' | 'activity';
 
 export default function ServicesPage() {
   const t = useTranslations('Services');
@@ -41,6 +43,9 @@ export default function ServicesPage() {
           <TabsTrigger value="services">
             <ListChecks className="me-1.5 h-4 w-4" /> {t('tabServices')}
           </TabsTrigger>
+          <TabsTrigger value="currencies">
+            <Globe className="me-1.5 h-4 w-4" /> {t('tabCurrencies')}
+          </TabsTrigger>
           <TabsTrigger value="rules">
             <Coins className="me-1.5 h-4 w-4" /> {t('tabRules')}
           </TabsTrigger>
@@ -58,6 +63,10 @@ export default function ServicesPage() {
 
         <TabsContent value="services" className="mt-4">
           <ServicesListPanel />
+        </TabsContent>
+
+        <TabsContent value="currencies" className="mt-4">
+          <CurrenciesPanel />
         </TabsContent>
 
         <TabsContent value="rules" className="mt-4">

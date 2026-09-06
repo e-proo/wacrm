@@ -1309,6 +1309,7 @@
     "description": "Catalog, pricing, exchange rates, and coverage. Phase 2 ships the data layer + admin surface; the AI integration arrives in Phase 3.",
     "tabCategories": "Categories",
     "tabServices": "Services",
+    "tabCurrencies": "Currencies",
     "tabRules": "Pricing rules",
     "tabFx": "Exchange rates",
     "tabActivity": "Activity",
@@ -1400,6 +1401,27 @@
       "filterByType": "Filter by target",
       "all": "All",
       "empty": "No activity yet."
+    },
+    "currencies": {
+      "addCurrency": "Add a currency",
+      "create": "Create",
+      "code": "Code",
+      "codeHint": "3-8 uppercase letters (e.g. SAR, USD, EUR, YER_OLD).",
+      "name": "Display name",
+      "kind": "Kind",
+      "kindIso": "ISO 4217",
+      "kindHistorical": "Historical",
+      "kindLocal": "Local",
+      "symbol": "Symbol",
+      "decimalDigits": "Decimals",
+      "notes": "Notes",
+      "notesPlaceholder": "Pre-2018 Yemeni Rial still referenced in informal markets.",
+      "currenciesTitle": "Currencies",
+      "statusActive": "Active",
+      "statusDisabled": "Disabled",
+      "empty": "No currencies yet.",
+      "disable": "Disable",
+      "enable": "Enable"
     }
   },
   "Settings": {
