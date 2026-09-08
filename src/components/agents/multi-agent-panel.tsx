@@ -6,6 +6,8 @@ import { Bot, ShieldCheck, Loader2, Pause, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { AgentTemplatePicker } from './agent-template-picker';
+import { AgentBuilderActions } from './agent-builder-actions';
 
 interface AiAgentRow {
   id: string;
@@ -16,6 +18,7 @@ interface AiAgentRow {
   status: 'draft' | 'active' | 'paused' | 'archived';
   published_revision_id: string | null;
   updated_at: string;
+  latest_draft_revision_id: string | null;
 }
 
 interface AiAgentRevision {
@@ -70,6 +73,32 @@ export function MultiAgentPanel() {
     }
   }
 
+  async function runBackfill() {
+    setBusy('backfill');
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/backfill-legacy', {
+        method: 'POST',
+      });
+      const json = (await res.json()) as {
+        skipped?: boolean;
+        reason?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(json.error ?? 'Backfill failed');
+      }
+      if (json.skipped && json.reason === 'no_usable_connection') {
+        throw new Error(t('multiAgent.backfillNoConnection'));
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   // Hydrate revisions for each agent (best-effort, lightweight: the
   // list endpoint already returns enough; published_revision_id is
   // all we need to surface "Revision N · model" if we later expose
@@ -95,7 +124,21 @@ export function MultiAgentPanel() {
 
   if (agents.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">{t('multiAgent.empty')}</p>
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">{t('multiAgent.empty')}</p>
+        <Button
+          onClick={() => void runBackfill()}
+          disabled={busy === 'backfill'}
+        >
+          {busy === 'backfill' ? (
+            <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
+          ) : null}
+          {t('multiAgent.runBackfill')}
+        </Button>
+        {error ? (
+          <p className="text-sm text-destructive">{error}</p>
+        ) : null}
+      </div>
     );
   }
 
@@ -181,10 +224,18 @@ export function MultiAgentPanel() {
                     </Button>
                   ))}
               </div>
+              <AgentBuilderActions
+                agentId={agent.id}
+                revisionId={agent.latest_draft_revision_id}
+                onChanged={() => void load()}
+              />
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {/* Phase 4 builder entry — create a new agent from a template. */}
+      <AgentTemplatePicker onCreated={() => void load()} />
     </div>
   );
 }

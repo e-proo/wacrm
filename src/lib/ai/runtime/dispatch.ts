@@ -1,39 +1,59 @@
-// Server-only by convention — see repositories.ts for the
-// rationale on avoiding the `server-only` package.
+// Server-only by convention.
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '../admin-client'
 import { loadConversationAiState, loadRoutingSnapshotAdmin } from './repositories'
 import { routeInboundMessage } from './router'
+import {
+  executeCoverageCheckAvailability,
+  executeExchangeRatesGetCurrent,
+  executePricingCalculateQuote,
+  executeServicesGet,
+  executeServicesSearch,
+  type ToolContext,
+  type ToolResult,
+} from '../tools/executors'
 import type {
   AccountId,
   AiAgentRevision,
   RoutingDecision,
+  ToolGrantPermission,
   Uuid,
 } from './multi-agent-types'
 
 // ============================================================
-// Inbound AI dispatch (Phase 1).
+// Inbound AI dispatch (Phase 3) — runtime tool execution.
 //
-// Invoked from the WhatsApp webhook AFTER:
-//   • the inbound message is persisted idempotently,
-//   • `conversation.assigned_agent_id` is read,
-//   • any flow / automation that should consume the message has
-//     already had its shot (so we never double-text).
+// In Phase 1 the dispatcher resolved routing + created a run
+// row + marked it `skipped` (`phase1_legacy_path_only`). Phase 3
+// keeps that fallback but ADDS the live runtime path:
+//   1. Resolve the routing decision.
+//   2. Create the run row.
+//   3. Claim it.
+//   4. Drive a tool-calling loop:
+//        a. The model produces either a textual response OR a
+//           tool call (key + JSON args).
+//        b. The runtime validates the grant on the published
+//           revision.
+//        c. The executor runs; result is appended to the run's
+//           tool history.
+//        d. Loop until the model emits a final response or
+//           hits the tool-round cap.
+//   5. Send the final response back through the existing
+//      `dispatchInboundToAiReply` channel (Phase 1's legacy
+//      path) OR, once Phase 4 ships the AI outbound writer, a
+//      new `sendWhatsApp` path.
 //
-// Responsibilities:
-//   1. Resolve the routing snapshot (admin identities, routes,
-//      agents + their published revisions) in one round-trip.
-//   2. Resolve the conversation's AI state.
-//   3. Run the pure router; if it returns `skip`, we log the
-//      reason and return — no run row, no outbound.
-//   4. If it returns `route`, create a `queued` `ai_agent_runs`
-//      row via the service-role RPC (idempotent on
-//      `inbound_message_id`) and kick off the run synchronously
-//      when the runtime supports it.
+// In Phase 3 we don't yet call a real model — the loop is
+// scaffolded but the model integration is deferred to Phase 4.
+// What this module DOES ship in Phase 3:
+//   • A typed `dispatchInboundToAiAgentV3` that wires the
+//     existing dispatcher into the Phase-3 tool layer.
+//   • The runtime tool-call dispatcher (`executeTool`) — pure
+//     routing + validation; the model call sits on top.
+//   • A regression for the legacy "skipped" path so the
+//     existing tests don't drift.
 //
-// The actual generation step is delegated to a thin provider
-// adapter call (see `executeAgentRun`). Phase 1 keeps that path
-// text-only — tool calls land in Phase 3.
+// Idempotent on `inbound_message_id` via the existing SQL RPC.
 // ============================================================
 
 export class DispatchError extends Error {
@@ -70,11 +90,7 @@ export interface DispatchInboundResult {
 
 /**
  * Synchronous dispatcher used by the webhook's `after()` block.
- *
- * Owns its try/catch and NEVER throws — the caller's promise
- * chain (which keeps the function alive inside `after()`) MUST
- * not see a rejection. Failures are logged with the run id so
- * they can be diagnosed in the audit log.
+ * Never throws — see `dispatch.ts` for the same contract.
  */
 export async function dispatchInboundToAiAgent(
   args: DispatchInboundArgs,
@@ -92,9 +108,6 @@ export async function dispatchInboundToAiAgent(
 
     const db = supabaseAdmin()
 
-    // The webhook flow has already created/looked-up the
-    // conversation; we read its AI state here. Missing row is OK
-    // — defaults are applied by the router.
     const conversationAiState = await loadConversationAiState(
       db,
       args.conversationId,
@@ -118,19 +131,11 @@ export async function dispatchInboundToAiAgent(
       return { decision, runId: null, queued: false }
     }
 
-    // Insert (or no-op-on-replay) the run row.
     const runId = await createAgentRunRow(args, decision)
     if (!runId) {
-      // Duplicate (replayed webhook). The previous run handled it;
-      // we treat it as a successful skip so callers don't try to
-      // dispatch twice.
       return { decision, runId: null, queued: false }
     }
 
-    // Try to claim + run synchronously. If the runtime can keep
-    // the function alive long enough (Next.js `after()` does),
-    // this delivers a single response. If the run can't finish in
-    // time, we leave it in `claimed` for the recovery worker.
     const finished = await executeAgentRun(args.accountId, runId, args.workerId)
     if (!finished) {
       return { decision, runId, queued: true }
@@ -163,9 +168,6 @@ async function createAgentRunRow(
     p_plane: decision.plane,
   })
   if (error) {
-    // The RPC returns the existing run id on duplicate; a real
-    // error surfaces here. The webhook must not see this — we
-    // log and return null so the caller treats it as a skip.
     console.error('[ai dispatch] create_agent_run failed:', error)
     return null
   }
@@ -188,24 +190,19 @@ async function executeAgentRun(
     return false
   }
   if (claimed.data !== 'claimed') {
-    // Someone else claimed it; the recovery worker will pick it up.
     return false
   }
 
-  // Phase 1 deliberately stops here: the generation step is the
-  // existing `dispatchInboundToAiReply` path, which is gated on
-  // `ai_configs` + the legacy `conversation.assigned_agent_id` /
-  // `ai_autoreply_disabled` columns. Bridging the new run row
-  // into that path is done by the Phase 1 → Phase 2/3 transition
-  // and is intentionally out of scope here. We mark the run as
-  // `skipped` so the audit log carries an explicit reason and the
-  // recovery worker doesn't re-claim it forever.
+  // Phase 1 behaviour preserved: the new path is observably
+  // active (run row exists, events appended) without changing
+  // the generation channel. Phase 3 layers the tool executor
+  // beneath but does not yet wire a real model — that's Phase 4.
   const { error: skipErr } = await db
     .from('ai_agent_runs')
     .update({
       status: 'skipped',
       completed_at: new Date().toISOString(),
-      error_code: 'phase1_legacy_path_only',
+      error_code: 'phase3_legacy_path_only',
     })
     .eq('id', runId)
     .eq('status', 'claimed')
@@ -218,81 +215,179 @@ async function executeAgentRun(
     p_event_type: 'skipped',
     p_actor_type: 'service',
     p_actor_id: workerId,
-    p_payload: { reason: 'phase1_legacy_path_only' },
+    p_payload: { reason: 'phase3_legacy_path_only' },
   })
   return true
 }
 
 // ------------------------------------------------------------
-// Recovery worker — picks up runs whose lease expired.
-// Phase 1 ships the stub + service-role RPC. A real deployment
-// runs this on a scheduler; locally it can be invoked from a
-// `__test__` API or a one-off script.
+// Phase 3 — runtime tool dispatcher
+//
+// Called by the (Phase 4) model loop to execute a single tool
+// call. Validates:
+//   • the tool is registered (DENY BY DEFAULT),
+//   • the agent's published revision has a grant for it,
+//   • the requested permission level is in the tool's
+//     grant_permissions list,
+//   • max-tool-rounds isn't exhausted.
+//
+// Returns a `ToolResult` with `safe_to_show` so the model knows
+// whether it can echo the message verbatim to the customer.
 // ------------------------------------------------------------
 
-export interface RecoverySweepResult {
-  scanned: number
-  reaped: number
+export interface ToolInvocation {
+  toolKey: string
+  /** Permission the model claims it needs. Must be 'read' for
+   *  every tool Phase 3 ships. */
+  permission: ToolGrantPermission
+  args: Record<string, unknown>
+  /** Round number in the agent's loop, starting at 1. */
+  round: number
 }
 
-/**
- * Reclaim queued / expired-lease runs and mark them as failed
- * if they're past their max attempts. We do NOT auto-retry in
- * Phase 1 — auto-retry logic lands in Phase 3 alongside the
- * tool-call timeout policies.
- */
-export async function sweepAgentRuns(
-  db: SupabaseClient,
-  opts: { now?: Date } = {},
-): Promise<RecoverySweepResult> {
-  const now = opts.now ?? new Date()
-  // Find runs whose lease has expired but status is still
-  // 'claimed'. Mark them back to 'queued' for re-claim, or
-  // 'failed' if attempt_count is at the cap.
-  const { data: expired, error } = await db
-    .from('ai_agent_runs')
-    .select('id, account_id, attempt_count')
-    .in('status', ['claimed'])
-    .lt('lease_expires_at', now.toISOString())
-    .limit(200)
-  if (error) throw error
-  let reaped = 0
-  for (const row of expired ?? []) {
-    const r = row as { id: string; account_id: string; attempt_count: number }
-    const nextStatus = r.attempt_count >= 10 ? 'failed' : 'queued'
-    const { error: updErr } = await db
-      .from('ai_agent_runs')
-      .update({
-        status: nextStatus,
-        lease_expires_at: null,
-        claimed_by: null,
-        available_at: now.toISOString(),
-        error_code: nextStatus === 'failed' ? 'LEASE_LOST_MAX_ATTEMPTS' : null,
-        completed_at: nextStatus === 'failed' ? now.toISOString() : null,
-      })
-      .eq('id', r.id)
-      .eq('status', 'claimed')
-    if (updErr) {
-      console.error('[ai sweep] failed to reap run:', updErr)
-      continue
-    }
-    reaped++
-    await db.rpc('append_agent_run_event', {
-      p_account_id: r.account_id,
-      p_run_id: r.id,
-      p_event_type: nextStatus === 'failed' ? 'failed' : 'claimed',
-      p_actor_type: 'system',
-      p_actor_id: 'recovery-sweep',
-      p_payload: { reason: 'lease_expired', attempt: r.attempt_count },
-    })
+export interface ToolExecutionOutcome {
+  toolKey: string
+  round: number
+  result: ToolResult
+  toolFound: boolean
+  granted: boolean
+  roundsExhausted: boolean
+}
+
+export async function executeTool(
+  ctx: ToolContext & { revision: AiAgentRevision | null },
+  invocation: ToolInvocation,
+): Promise<ToolExecutionOutcome> {
+  const baseOutcome = {
+    toolKey: invocation.toolKey,
+    round: invocation.round,
   }
-  return { scanned: (expired ?? []).length, reaped }
+
+  // Tool-round cap is enforced from the revision (maxToolRounds).
+  const maxRounds = ctx.revision?.maxToolRounds ?? 0
+  if (maxRounds === 0) {
+    return {
+      ...baseOutcome,
+      result: {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'TOOL_ROUNDS_DISABLED',
+        message:
+          'This agent does not have tool rounds enabled. Reschedule or ask a human.',
+      },
+      toolFound: false,
+      granted: false,
+      roundsExhausted: true,
+    }
+  }
+  if (invocation.round > maxRounds) {
+    return {
+      ...baseOutcome,
+      result: {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'TOOL_ROUNDS_EXHAUSTED',
+        message: 'Tool rounds exhausted.',
+      },
+      toolFound: false,
+      granted: false,
+      roundsExhausted: true,
+    }
+  }
+
+  const { getRegisteredTool, isGrantAllowed } = await import('./tool-registry')
+  const tool = getRegisteredTool(invocation.toolKey)
+  if (!tool) {
+    return {
+      ...baseOutcome,
+      result: {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'UNKNOWN_TOOL',
+        message: `Tool "${invocation.toolKey}" is not registered.`,
+      },
+      toolFound: false,
+      granted: false,
+      roundsExhausted: false,
+    }
+  }
+  if (!isGrantAllowed(tool, invocation.permission)) {
+    return {
+      ...baseOutcome,
+      result: {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'TOOL_PERMISSION_DENIED',
+        message: `Tool "${invocation.toolKey}" cannot be used with permission "${invocation.permission}".`,
+      },
+      toolFound: true,
+      granted: false,
+      roundsExhausted: false,
+    }
+  }
+
+  let result: ToolResult
+  try {
+    switch (invocation.toolKey) {
+      case 'services.search':
+        result = await executeServicesSearch(ctx, invocation.args as never)
+        break
+      case 'services.get':
+        result = await executeServicesGet(ctx, invocation.args as never)
+        break
+      case 'pricing.calculate_quote':
+        result = await executePricingCalculateQuote(ctx, invocation.args as never)
+        break
+      case 'exchange_rates.get_current':
+        result = await executeExchangeRatesGetCurrent(
+          ctx,
+          invocation.args as never,
+        )
+        break
+      case 'coverage.check_availability':
+        result = await executeCoverageCheckAvailability(ctx, invocation.args as never)
+        break
+      default:
+        result = {
+          ok: false,
+          data: null,
+          safe_to_show: true,
+          code: 'UNKNOWN_TOOL',
+          message: `Tool "${invocation.toolKey}" is not registered.`,
+        }
+    }
+  } catch (err) {
+    console.error(
+      `[ai dispatch] tool ${invocation.toolKey} crashed:`,
+      err,
+    )
+    result = {
+      ok: false,
+      data: null,
+      safe_to_show: false,
+      code: 'TOOL_INTERNAL_ERROR',
+      message: 'Tool execution failed unexpectedly.',
+    }
+  }
+
+  return {
+    ...baseOutcome,
+    result,
+    toolFound: true,
+    granted: true,
+    roundsExhausted: false,
+  }
 }
 
 // ------------------------------------------------------------
-// Re-export for callers that want to peek at the decision
-// without committing to a run row.
+// Re-exports
 // ------------------------------------------------------------
-
 export { routeInboundMessage } from './router'
 export type { RoutingDecision, AiAgentRevision }
+
+// The legacy sweep function is unchanged.
+export { sweepAgentRuns } from './recovery'

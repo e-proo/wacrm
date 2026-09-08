@@ -1,5 +1,3 @@
-import { Decimal } from 'decimal.js'
-
 // Server-only by convention — see repositories.ts comment.
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { parseDecimal } from '@/lib/services/pricing/decimal'

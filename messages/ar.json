@@ -1250,6 +1250,7 @@
     "tabMultiAgent": "الوكلاء",
     "tabTrustedAdmins": "الأرقام الإدارية الموثوقة",
     "tabRuns": "سجل التشغيل",
+    "tabChangeRequests": "طلبات التغيير",
     "multiAgent": {
       "customerService": "خدمة العملاء",
       "adminOperations": "عمليات الإدارة",
@@ -1267,7 +1268,9 @@
       "loading": "جارٍ تحميل الوكلاء…",
       "empty": "لا يوجد وكلاء مهيأون بعد.",
       "systemKeyCustomerService": "customer_service",
-      "systemKeyAdminOperations": "admin_operations"
+      "systemKeyAdminOperations": "admin_operations",
+      "runBackfill": "تشغيل التهيئة",
+      "backfillNoConnection": "لا يوجد اتصال مزود نشط. أضف مزوداً أولاً من تبويب المزودون."
     },
     "trustedAdmins": {
       "title": "أرقام الإدارة الموثوقة",
@@ -1302,6 +1305,39 @@
       "status": "الحالة",
       "created": "تاريخ الإنشاء",
       "filterConversation": "معرّف المحادثة"
+    },
+    "changeRequests": {
+      "loading": "جارٍ التحميل…",
+      "empty": "لا توجد طلبات تغيير بعد.",
+      "filter": "الحالة",
+      "all": "الكل",
+      "pending": "بانتظار",
+      "approved": "معتمدة",
+      "rejected": "مرفوضة",
+      "expired": "منتهية",
+      "executed": "منفذة",
+      "cancelled": "ملغاة",
+      "failed": "فشلت",
+      "approve": "اعتماد",
+      "reject": "رفض",
+      "cancel": "إلغاء",
+      "confirmCodeLabel": "رمز التأكيد",
+      "confirmCodePlaceholder": "رمز من 4 أرقام",
+      "confirmCodeHint": "يُعرض الرمز للمسؤول عند إنشاء الاقتراح.",
+      "approvedAwaitingExecute": "معتمدة. بانتظار التنفيذ.",
+      "execute": "تنفيذ"
+    },
+    "builder": {
+      "newAgent": "وكيل جديد",
+      "title": "إنشاء وكيل من قالب",
+      "loadingTemplates": "جارٍ تحميل القوالب…",
+      "noTemplates": "لا توجد قوالب متاحة.",
+      "system": "نظامي",
+      "agentName": "اسم الوكيل",
+      "agentNamePlaceholder": "مثال: وكيل التغطيات",
+      "agentSlug": "المعرّف (اختياري)",
+      "createDraft": "إنشاء مسودة",
+      "draftHint": "يُنشأ الوكيل كمسودة. أكمل الإعدادات ثم انشر الإصدار لتفعيله."
     }
   },
   "Services": {
@@ -1331,7 +1367,7 @@
       "namePlaceholder": "صنعاء / واتساب / نقدي",
       "region": "المنطقة",
       "settlement": "طريقة التسوية",
-      "stale": "ينتهي بعد (ثواني)",
+      "stale": "منتهي",
       "cash": "نقدي",
       "bank": "بنك",
       "wallet": "محفظة",
@@ -1339,7 +1375,6 @@
       "empty": "لا يوجد شيء هنا بعد.",
       "booksTitle": "دفاتر الأسعار",
       "liveVersion": "الإصدار المنشور",
-      "stale": "منتهي",
       "current": "حالي",
       "minutesRemaining": "دقيقة متبقية",
       "versionsTitle": "الإصدارات",

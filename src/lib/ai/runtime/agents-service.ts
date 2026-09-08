@@ -135,6 +135,46 @@ export async function publishAgentRevision(
     )
   }
 
+  // 2b) Route-conflict gate (Phase 4 §8 item 11): a publish is
+  //     refused when the account's route table contains a
+  //     blocker (double default, admin plane without a trusted
+  //     identity, indeterminate tie). The check reads the same
+  //     tables the runtime reads, so a fix in the UI immediately
+  //     unblocks publishing.
+  {
+    const [routesRes, agentsRes, identityRes] = await Promise.all([
+      db
+        .from('ai_agent_routes')
+        .select(
+          'id, account_id, agent_id, name, channel, route_kind, priority, is_active, conditions, stop_processing, created_at, updated_at',
+        )
+        .eq('account_id', accountId),
+      db.from('ai_agents').select('id, status, purpose').eq('account_id', accountId),
+      db
+        .from('trusted_admin_identities')
+        .select('id', { head: true, count: 'exact' })
+        .eq('account_id', accountId)
+        .eq('status', 'active')
+        .limit(1),
+    ])
+    if (routesRes.error) throw routesRes.error
+    if (agentsRes.error) throw agentsRes.error
+    const { analyzeRouteConflicts } = await import('./route-conflicts')
+    const conflicts = analyzeRouteConflicts({
+      routes: (routesRes.data ?? []) as never,
+      agents: (agentsRes.data ?? []) as never,
+      hasActiveTrustedIdentity: (identityRes.count ?? 0) > 0,
+    })
+    const blocker = conflicts.find((c) => c.severity === 'blocker')
+    if (blocker) {
+      throw new PublishError(
+        'ROUTE_CONFLICT',
+        `Publishing blocked by a route conflict (${blocker.code}): ${blocker.message}`,
+        409,
+      )
+    }
+  }
+
   // 3) The atomic swap. The migration uses REST-style clients
   //    (no direct transaction handle), so we emulate a transaction
   //    by sequencing three dependent UPDATEs whose WHERE clauses

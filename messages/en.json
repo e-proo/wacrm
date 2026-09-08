@@ -1250,6 +1250,7 @@
     "tabMultiAgent": "Agents",
     "tabTrustedAdmins": "Trusted admins",
     "tabRuns": "Run log",
+    "tabChangeRequests": "Change requests",
     "multiAgent": {
       "customerService": "Customer service",
       "adminOperations": "Admin operations",
@@ -1267,7 +1268,9 @@
       "loading": "Loading agents…",
       "empty": "No agents configured yet.",
       "systemKeyCustomerService": "customer_service",
-      "systemKeyAdminOperations": "admin_operations"
+      "systemKeyAdminOperations": "admin_operations",
+      "runBackfill": "Run backfill",
+      "backfillNoConnection": "No active provider connection. Add one from the Providers tab first."
     },
     "trustedAdmins": {
       "title": "Trusted admin numbers",
@@ -1302,6 +1305,39 @@
       "status": "Status",
       "created": "Created",
       "filterConversation": "Conversation ID"
+    },
+    "changeRequests": {
+      "loading": "Loading…",
+      "empty": "No change requests yet.",
+      "filter": "Status",
+      "all": "All",
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "expired": "Expired",
+      "executed": "Executed",
+      "cancelled": "Cancelled",
+      "failed": "Failed",
+      "approve": "Approve",
+      "reject": "Reject",
+      "cancel": "Cancel",
+      "confirmCodeLabel": "Confirmation code",
+      "confirmCodePlaceholder": "4-digit code",
+      "confirmCodeHint": "Code is shown to the admin when the proposal is created.",
+      "approvedAwaitingExecute": "Approved. Awaiting execution.",
+      "execute": "Execute"
+    },
+    "builder": {
+      "newAgent": "New agent",
+      "title": "Create agent from template",
+      "loadingTemplates": "Loading templates…",
+      "noTemplates": "No templates available.",
+      "system": "System",
+      "agentName": "Agent name",
+      "agentNamePlaceholder": "e.g. Coverage agent",
+      "agentSlug": "Slug (optional)",
+      "createDraft": "Create draft",
+      "draftHint": "The agent is created as a draft. Finish the settings, then publish the revision to activate it."
     }
   },
   "Services": {
@@ -1331,7 +1367,7 @@
       "namePlaceholder": "Sanaa / WhatsApp / Cash",
       "region": "Region",
       "settlement": "Settlement",
-      "stale": "Stale after (seconds)",
+      "stale": "Stale",
       "cash": "Cash",
       "bank": "Bank",
       "wallet": "Wallet",
@@ -1339,7 +1375,6 @@
       "empty": "Nothing here yet.",
       "booksTitle": "Rate books",
       "liveVersion": "Live version",
-      "stale": "Stale",
       "current": "Current",
       "minutesRemaining": "minutes remaining",
       "versionsTitle": "Versions",
