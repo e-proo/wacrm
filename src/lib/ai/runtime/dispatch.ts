@@ -25,6 +25,7 @@ import type {
   AccountId,
   AiAgentRevision,
   RoutingDecision,
+  RoutingSnapshot,
   ToolGrantPermission,
   Uuid,
 } from './multi-agent-types'
@@ -171,7 +172,13 @@ export async function dispatchInboundToAiAgent(
       return { decision, runId: null, queued: false }
     }
 
-    const finished = await executeAgentRun(args, runId, decision, args.workerId)
+    const finished = await executeAgentRun(
+      args,
+      runId,
+      decision,
+      snapshot,
+      args.workerId,
+    )
     if (finished === 'lost') {
       return { decision, runId, queued: true }
     }
@@ -213,6 +220,7 @@ async function executeAgentRun(
   args: DispatchInboundArgs,
   runId: Uuid,
   decision: Extract<RoutingDecision, { action: 'route' }>,
+  snapshot: RoutingSnapshot,
   workerId: string,
 ): Promise<'succeeded' | 'handoff' | 'failed' | 'lost'> {
   const db = supabaseAdmin()
@@ -229,11 +237,14 @@ async function executeAgentRun(
     return 'lost'
   }
 
-  // Load the frozen revision snapshot for this run.
+  // Load the frozen revision snapshot for this run. No join: the
+  // purpose comes from the routing snapshot via the caller (the two
+  // tables share TWO FKs, so an embedded ai_agents(...) is ambiguous
+  // to PostgREST — PGRST201).
   const { data: revision, error: revErr } = await db
     .from('ai_agent_revisions')
     .select(
-      'id, agent_id, status, model, system_prompt, response_style, language_policy, max_tool_rounds, max_ai_replies_per_conversation, purpose, agent_purpose:ai_agents(purpose)',
+      'id, agent_id, status, model, system_prompt, response_style, language_policy, max_tool_rounds, max_ai_replies_per_conversation',
     )
     .eq('id', decision.revisionId)
     .maybeSingle()
@@ -242,9 +253,7 @@ async function executeAgentRun(
     await markRun(db, args.accountId, runId, 'failed', 'REVISION_NOT_FOUND')
     return 'failed'
   }
-  const rev = revision as unknown as AiAgentRevision & {
-    agent_purpose?: { purpose: string }
-  }
+  const rev = revision as unknown as AiAgentRevision
 
   // Conversation history for grounding. NOTE the real column
   // names: sender_type ('customer'|'agent'|'bot') and content_text
@@ -275,8 +284,8 @@ async function executeAgentRun(
     runId,
     agentId: decision.agentId,
     agentPurpose:
-      (rev.agent_purpose?.purpose as AiAgentRevision extends never ? never : 'customer_support' | 'admin_operations' | 'custom') ??
-      'custom',
+      snapshot.agents.find((entry: { agent: { id: string; purpose: string } }) => entry.agent.id === decision.agentId)?.agent
+        .purpose ?? 'custom',
     revision: rev,
     messages: history,
     contactId: args.contactId,
