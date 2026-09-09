@@ -272,7 +272,13 @@ async function createAgentFromTemplate(
         agent_revision_id: revisionId,
         tool_key: t.key,
         tool_version: t.version,
-        permission: 'read' as const,
+        // Read tools get 'read'; propose-class tools (intents.record,
+        // coverage.propose_offer) MUST get 'propose' — seeding them
+        // as 'read' would fail publish validation with
+        // PERMISSION_NOT_ALLOWED.
+        permission: (t.grantPermissions.includes('read')
+          ? 'read'
+          : t.grantPermissions[0]) as 'read' | 'propose' | 'execute',
         constraints: {},
         granted_by: ctx.userId,
       })),
