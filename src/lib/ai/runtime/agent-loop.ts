@@ -107,6 +107,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       accountId,
       config,
       latestUserMessage(input.messages),
+      5,
+      { scopeRevisionId: revision.id },
     )
 
     // 3) System prompt = user instructions + agent role framing.

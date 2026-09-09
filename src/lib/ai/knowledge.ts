@@ -168,15 +168,49 @@ export async function ingestDocument(
  * failure (no KB, embedding error, RPC error) degrades to fewer or
  * zero results and never throws into the draft / auto-reply path.
  */
+export interface RetrieveKnowledgeOptions {
+  /**
+   * When set, retrieval is SCOPED to the chunks assigned to this
+   * agent revision (ai_agent_knowledge_assignments). An agent with
+   * assignments sees only its assigned chunks; with NO assignments
+   * it falls back to the whole account KB (backward compatible).
+   */
+  scopeRevisionId?: string
+}
+
 export async function retrieveKnowledge(
   db: SupabaseClient,
   accountId: string,
   config: EmbeddingContext,
   queryText: string,
   k = 5,
+  opts: RetrieveKnowledgeOptions = {},
 ): Promise<string[]> {
   const query = queryText.trim()
   if (!query || k <= 0) return []
+
+  // Per-revision scoping: resolve the allowed chunk set ONCE (one
+  // cheap read). No assignments for the revision → no restriction
+  // (legacy accounts keep working); assignments present → they are
+  // the whitelist, and post-filtering below enforces it on BOTH the
+  // semantic and lexical paths.
+  let allowedIds: Set<string> | null = null
+  if (opts.scopeRevisionId) {
+    const { data: assignments, error } = await db
+      .from('ai_agent_knowledge_assignments')
+      .select('knowledge_chunk_id, enabled')
+      .eq('agent_revision_id', opts.scopeRevisionId)
+    if (error) {
+      console.error('[ai knowledge] assignment scope read failed:', error)
+    } else if (assignments && assignments.length > 0) {
+      allowedIds = new Set(
+        (assignments as Array<{ knowledge_chunk_id: string; enabled: boolean }>)
+          .filter((a) => a.enabled)
+          .map((a) => a.knowledge_chunk_id),
+      )
+      if (allowedIds.size === 0) return []
+    }
+  }
 
   // Skip everything when the account has no knowledge base — otherwise
   // every draft / auto-reply would pay for a query embedding + two RPCs
@@ -237,7 +271,8 @@ export async function retrieveKnowledge(
     }
   }
 
-  return lexicalTopUp(db, accountId, query, picked, k)
+  const lexical = await lexicalTopUp(db, accountId, query, picked, k, allowedIds)
+  return lexical
 }
 
 /** Lexical full-text top-up (also the sole path with no semantic space). */
@@ -247,6 +282,7 @@ async function lexicalTopUp(
   query: string,
   picked: Map<string, string>,
   k: number,
+  allowedIds: Set<string> | null = null,
 ): Promise<string[]> {
   if (picked.size < k) {
     try {
@@ -264,6 +300,13 @@ async function lexicalTopUp(
     } catch (err) {
       console.error('[ai knowledge] lexical retrieval failed:', err)
     }
+  }
+  // Per-revision whitelist enforcement (single choke point).
+  if (allowedIds) {
+    return [...picked.entries()]
+      .filter(([id]) => allowedIds.has(id))
+      .map(([, content]) => content)
+      .slice(0, k)
   }
   return Array.from(picked.values()).slice(0, k)
 }

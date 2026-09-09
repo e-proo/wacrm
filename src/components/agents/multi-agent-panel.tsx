@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AgentTemplatePicker } from './agent-template-picker';
 import { AgentBuilderActions } from './agent-builder-actions';
+import { AgentKnowledgePanel } from './agent-knowledge-panel';
 
 interface AiAgentRow {
   id: string;
@@ -228,6 +229,10 @@ export function MultiAgentPanel() {
                 agentId={agent.id}
                 revisionId={agent.latest_draft_revision_id}
                 onChanged={() => void load()}
+              />
+              <AgentKnowledgePanel
+                agentId={agent.id}
+                hasRevision={Boolean(agent.published_revision_id || agent.latest_draft_revision_id)}
               />
             </CardContent>
           </Card>

@@ -220,6 +220,38 @@ export async function publishAgentRevision(
     )
   }
 
+  //  2b) Copy knowledge assignments forward so the new published
+  //      revision keeps the same KB scope as the draft it replaces
+  //      (assignments bind to the revision id, and the runtime reads
+  //      them via the PUBLISHED revision). Idempotent per revision.
+  const { data: prevAssignments } = await db
+    .from('ai_agent_knowledge_assignments')
+    .select('knowledge_chunk_id, priority, enabled')
+    .eq('account_id', accountId)
+    .eq('agent_revision_id', revisionId)
+  if (!prevAssignments || prevAssignments.length === 0) {
+    // First publish: seed from the previous published revision (or
+    // nothing) — this is the "inherit the KB" default.
+    if (previousId) {
+      const { data: inherited } = await db
+        .from('ai_agent_knowledge_assignments')
+        .select('knowledge_chunk_id, priority, enabled')
+        .eq('account_id', accountId)
+        .eq('agent_revision_id', previousId)
+      if (inherited && inherited.length > 0) {
+        await db.from('ai_agent_knowledge_assignments').insert(
+          (inherited as Array<{ knowledge_chunk_id: string; priority: number; enabled: boolean }>).map((a) => ({
+            account_id: accountId,
+            agent_revision_id: revisionId,
+            knowledge_chunk_id: a.knowledge_chunk_id,
+            priority: a.priority,
+            enabled: a.enabled,
+          })),
+        )
+      }
+    }
+  }
+
   //    3c) Swap the agent pointer + bump version.
   const { data: swapped, error: swapErr } = await db
     .from('ai_agents')
