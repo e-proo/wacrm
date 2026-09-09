@@ -12,6 +12,7 @@ import {
   ListChecks,
   ShieldCheck,
   ClipboardCheck,
+  Activity,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AiPlayground } from '@/components/agents/ai-playground';
@@ -22,6 +23,7 @@ import { MultiAgentPanel } from '@/components/agents/multi-agent-panel';
 import { TrustedAdminsPanel } from '@/components/agents/trusted-admins-panel';
 import { AgentRunsPanel } from '@/components/agents/agent-runs-panel';
 import { ChangeRequestsPanel } from '@/components/agents/change-requests-panel';
+import { ObservabilityPanel } from '@/components/agents/observability-panel';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 
@@ -33,7 +35,8 @@ type Tab =
   | 'multi_agent'
   | 'trusted_admins'
   | 'runs'
-  | 'change_requests';
+  | 'change_requests'
+  | 'observability';
 
 export default function AgentsPage() {
   const { accountId, accountRole } = useAuth();
@@ -107,6 +110,11 @@ export default function AgentsPage() {
                 <ClipboardCheck className="me-1.5 h-4 w-4" /> {t('tabChangeRequests')}
               </TabsTrigger>
             )}
+            {canSeeMultiAgent && (
+              <TabsTrigger value="observability">
+                <Activity className="me-1.5 h-4 w-4" /> {t('tabObservability')}
+              </TabsTrigger>
+            )}
             {multiProvider && (
               <TabsTrigger value="providers">
                 <Boxes className="me-1.5 h-4 w-4" /> {t('tabProviders')}
@@ -157,6 +165,12 @@ export default function AgentsPage() {
           {canSeeMultiAgent && (
             <TabsContent value="change_requests" className="mt-4">
               <ChangeRequestsPanel />
+            </TabsContent>
+          )}
+
+          {canSeeMultiAgent && (
+            <TabsContent value="observability" className="mt-4">
+              <ObservabilityPanel />
             </TabsContent>
           )}
 

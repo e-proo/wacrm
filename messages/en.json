@@ -1338,7 +1338,8 @@
       "agentSlug": "Slug (optional)",
       "createDraft": "Create draft",
       "draftHint": "The agent is created as a draft. Finish the settings, then publish the revision to activate it."
-    }
+    },
+    "tabObservability": "Observability"
   },
   "Services": {
     "title": "Services",

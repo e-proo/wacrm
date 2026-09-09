@@ -1338,7 +1338,8 @@
       "agentSlug": "슬러그 (선택)",
       "createDraft": "초안 만들기",
       "draftHint": "에이전트는 초안으로 생성됩니다. 설정을 완료한 후 버전을 게시하여 활성화하세요."
-    }
+    },
+    "tabObservability": "운영 모니터링"
   },
   "Services": {
     "title": "서비스",
