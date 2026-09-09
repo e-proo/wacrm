@@ -1,5 +1,4 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { supabaseAdmin } from '../admin-client'
 
 // ============================================================
 // Recovery worker — picks up runs whose lease expired.
@@ -64,5 +63,3 @@ export async function sweepAgentRuns(
   }
   return { scanned: (expired ?? []).length, reaped }
 }
-
-export const _recoveryDeps = { supabaseAdmin }

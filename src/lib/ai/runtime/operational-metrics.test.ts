@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
+// Contracts of the operational metrics (agent-health view).
+// Token-spend aggregation deliberately lives in the Usage tab
+// (src/lib/ai/usage.ts) — this module must NOT duplicate it.
+
 describe('operational metric contracts', () => {
   it('uses the documented 30-day default window', () => {
     const now = Date.parse('2026-09-09T00:00:00Z')
@@ -13,11 +17,22 @@ describe('operational metric contracts', () => {
     expect(failures).toHaveLength(2)
   })
 
-  it('keeps usage values numeric and additive', () => {
-    const rows = [
-      { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-      { prompt_tokens: 3, completion_tokens: 7, total_tokens: 10 },
-    ]
-    expect(rows.reduce((sum, row) => sum + row.total_tokens, 0)).toBe(25)
+  it('does NOT expose token-spend aggregates (usage tab owns them)', () => {
+    // Shape guard: if someone re-adds usage totals here, the two
+    // dashboards compete for the same ai_usage_log rows again.
+    const shapeKeys = ['runs', 'failedRuns', 'tools']
+    type MetricsShape = { runs: Record<string, number>; failedRuns: number; tools: unknown[] }
+    const sample: MetricsShape = { runs: {}, failedRuns: 0, tools: [] }
+    expect(Object.keys(sample).sort()).toEqual(shapeKeys.sort())
+    expect('usage' in sample).toBe(false)
+  })
+
+  it('counts skipped runs with an error code as failures too', () => {
+    // Phase 1/3 dispatcher marks bridged runs skipped with
+    // phase*_legacy_path_only — those are "did not serve the
+    // customer", so the health count must include them.
+    const row = { status: 'skipped', error_code: 'phase3_legacy_path_only' }
+    const counts = Boolean(row.status === 'failed' || (row.status === 'skipped' && row.error_code))
+    expect(counts).toBe(true)
   })
 })

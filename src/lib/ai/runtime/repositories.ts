@@ -108,65 +108,10 @@ export async function loadConversationAiState(
   return data ? mapAiState(data) : null
 }
 
-export async function loadAgent(
-  db: Db,
-  accountId: AccountId,
-  agentId: Uuid,
-): Promise<AiAgent | null> {
-  const { data, error } = await db
-    .from('ai_agents')
-    .select(
-      'id, account_id, system_key, slug, name, description, purpose, status, published_revision_id, version, created_at, updated_at',
-    )
-    .eq('account_id', accountId)
-    .eq('id', agentId)
-    .maybeSingle()
-  if (error) throw error
-  return data ? (data as unknown as AiAgent) : null
-}
-
-export async function loadAgentRevision(
-  db: Db,
-  accountId: AccountId,
-  revisionId: Uuid,
-): Promise<AiAgentRevision | null> {
-  const { data, error } = await db
-    .from('ai_agent_revisions')
-    .select(
-      'id, account_id, agent_id, revision_number, status, provider_connection_id, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id, settings, created_at, published_at, published_by, rejection_reason',
-    )
-    .eq('account_id', accountId)
-    .eq('id', revisionId)
-    .maybeSingle()
-  if (error) throw error
-  return data ? (data as unknown as AiAgentRevision) : null
-}
-
-export async function loadRevisionGrants(
-  db: Db,
-  accountId: AccountId,
-  revisionId: Uuid,
-): Promise<
-  Array<{
-    toolKey: string
-    toolVersion: number
-    permission: 'read' | 'propose' | 'execute'
-    constraints: Record<string, unknown>
-  }>
-> {
-  const { data, error } = await db
-    .from('ai_agent_tool_grants')
-    .select('tool_key, tool_version, permission, constraints')
-    .eq('account_id', accountId)
-    .eq('agent_revision_id', revisionId)
-  if (error) throw error
-  return (data ?? []).map((row) => ({
-    toolKey: row.tool_key as string,
-    toolVersion: row.tool_version as number,
-    permission: row.permission as 'read' | 'propose' | 'execute',
-    constraints: (row.constraints as Record<string, unknown>) ?? {},
-  }))
-}
+// NOTE: per-id loaders (loadAgent / loadAgentRevision /
+// loadRevisionGrants) were removed in the 2026-09 cleanup —
+// nothing imported them. The API routes read via the RLS-scoped
+// client directly, and the runtime uses loadRoutingSnapshot.
 
 // --- convenience for the webhook (uses admin client + skips RLS) --------
 

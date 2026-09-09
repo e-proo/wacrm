@@ -190,22 +190,6 @@ export async function listChangeRequests(
   return (data ?? []) as unknown as ChangeRequestRow[]
 }
 
-export async function getChangeRequest(
-  accountId: string,
-  id: string,
-): Promise<ChangeRequestRow | null> {
-  const { data, error } = await supabaseAdmin()
-    .from('change_requests')
-    .select(
-      'id, account_id, code, target_type, target_id, intent, proposed_payload, expected_version, idempotency_key, status, confirmation_code, summary, expires_at, created_by, created_at, approved_by, approved_at, rejected_by, rejected_at, executed_at, execution_result, error_code',
-    )
-    .eq('account_id', accountId)
-    .eq('id', id)
-    .maybeSingle()
-  if (error) throw error
-  return data as unknown as ChangeRequestRow | null
-}
-
 export class ChangeRequestError extends Error {
   readonly code: string
   readonly status: number
