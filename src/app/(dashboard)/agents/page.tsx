@@ -13,7 +13,8 @@ import {
   ShieldCheck,
   ClipboardCheck,
   Activity,
-} from 'lucide-react';
+  Brain,
+ } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AiPlayground } from '@/components/agents/ai-playground';
 import { AiUsageCard } from '@/components/agents/ai-usage';
@@ -24,6 +25,7 @@ import { TrustedAdminsPanel } from '@/components/agents/trusted-admins-panel';
 import { AgentRunsPanel } from '@/components/agents/agent-runs-panel';
 import { ChangeRequestsPanel } from '@/components/agents/change-requests-panel';
 import { ObservabilityPanel } from '@/components/agents/observability-panel';
+import { IntentsPanel } from '@/components/agents/intents-panel';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 
@@ -36,7 +38,8 @@ type Tab =
   | 'trusted_admins'
   | 'runs'
   | 'change_requests'
-  | 'observability';
+  | 'observability'
+  | 'intents';
 
 export default function AgentsPage() {
   const { accountId, accountRole } = useAuth();
@@ -115,6 +118,11 @@ export default function AgentsPage() {
                 <Activity className="me-1.5 h-4 w-4" /> {t('tabObservability')}
               </TabsTrigger>
             )}
+            {canSeeMultiAgent && (
+              <TabsTrigger value="intents">
+                <Brain className="me-1.5 h-4 w-4" /> {t('tabIntents')}
+              </TabsTrigger>
+            )}
             {multiProvider && (
               <TabsTrigger value="providers">
                 <Boxes className="me-1.5 h-4 w-4" /> {t('tabProviders')}
@@ -171,6 +179,12 @@ export default function AgentsPage() {
           {canSeeMultiAgent && (
             <TabsContent value="observability" className="mt-4">
               <ObservabilityPanel />
+            </TabsContent>
+          )}
+
+          {canSeeMultiAgent && (
+            <TabsContent value="intents" className="mt-4">
+              <IntentsPanel />
             </TabsContent>
           )}
 

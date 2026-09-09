@@ -40,7 +40,7 @@ export interface ToolDefinition {
   /** Closed permission levels this tool can be granted at. */
   grantPermissions: ReadonlyArray<ToolGrantPermission>
   /** The runtime category of this tool — used to group docs. */
-  category: 'services' | 'pricing' | 'rates' | 'coverage'
+  category: 'services' | 'pricing' | 'rates' | 'coverage' | 'intents'
   risk: 'read' | 'low' | 'medium' | 'high'
 }
 
@@ -207,6 +207,120 @@ const COVERAGE_CHECK_AVAILABILITY: ToolDefinition = {
   risk: 'read',
 }
 
+const SERVICES_MATCH_REQUEST: ToolDefinition = {
+  key: 'services.match_request',
+  version: 1,
+  description:
+    'Match a customer request against equipped service schemas. Returns exact / partial / none with missing fields. NEVER prices or promises on "none" — escalate instead.',
+  argumentSchema: {
+    service_hint: {
+      type: 'string',
+      description: 'What the customer asked for, in a few words (e.g. "outward remittance").',
+      required: false,
+    },
+    attributes: {
+      type: 'object',
+      description: 'What the agent understood from the customer, as key/value pairs.',
+      required: true,
+    },
+    limit: {
+      type: 'number',
+      description: 'Max candidates. Default 10, max 50.',
+      required: false,
+    },
+  },
+  returnSchema:
+    'MatchResult { match: exact|partial|none, candidates: [{ service_id, name, classification, missing_fields, unknown_fields }] }',
+  grantPermissions: ['read'],
+  category: 'services',
+  risk: 'read',
+}
+
+const INTENTS_RECORD: ToolDefinition = {
+  key: 'intents.record',
+  version: 1,
+  description:
+    "Record a general observation about a customer's need or offer — even for services NOT equipped yet. Optionally escalates to the trusted admin for a decision.",
+  argumentSchema: {
+    contact_id: {
+      type: 'string',
+      description: 'Contact UUID of the customer.',
+      required: true,
+    },
+    conversation_id: {
+      type: 'string',
+      description: 'Current conversation UUID.',
+      required: false,
+    },
+    direction: {
+      type: 'enum',
+      description: 'Whether the customer provides or needs the service.',
+      values: ['offer', 'request'],
+      required: true,
+    },
+    service_hint: {
+      type: 'string',
+      description: 'Short label of the service (e.g. "outward remittance to KL").',
+      required: true,
+    },
+    summary: {
+      type: 'string',
+      description: 'One-paragraph human summary for the admin.',
+      required: false,
+    },
+    attributes: {
+      type: 'object',
+      description: 'Key/value details the agent understood (city, amount, currency...).',
+      required: false,
+    },
+    escalate_to_admin: {
+      type: 'boolean',
+      description: 'True when the admin must decide before anything is promised.',
+      required: false,
+    },
+  },
+  returnSchema:
+    '{ intent_id, status, change_request?: { id, code, confirmation_code } }',
+  grantPermissions: ['propose'],
+  category: 'intents',
+  risk: 'low',
+}
+
+const INTENTS_SEARCH: ToolDefinition = {
+  key: 'intents.search',
+  version: 1,
+  description:
+    "Search the account's recorded customer intents (general memory) by contact, status, or free text.",
+  argumentSchema: {
+    contact_id: {
+      type: 'string',
+      description: 'Restrict to one contact.',
+      required: false,
+    },
+    status: {
+      type: 'enum',
+      description: 'Filter by lifecycle status.',
+      values: ['new', 'clarifying', 'forwarded_to_admin', 'fulfilled', 'rejected', 'matched'],
+      required: false,
+    },
+    q: {
+      type: 'string',
+      description: 'Free text over service_hint and summary.',
+      required: false,
+    },
+    limit: {
+      type: 'number',
+      description: 'Max results. Default 20, max 100.',
+      required: false,
+    },
+  },
+  returnSchema:
+    'Array<{ intent_id, contact_id, direction, service_hint, summary, status, attributes, created_at }>',
+  grantPermissions: ['read'],
+  category: 'intents',
+  risk: 'read',
+}
+
 // ------------------------------------------------------------
 // Phase 3 (later): propose_* tools
 // ------------------------------------------------------------
@@ -229,6 +343,9 @@ const REGISTRY: ReadonlyArray<ToolDefinition> = [
   PRICING_CALCULATE_QUOTE,
   EXCHANGE_RATES_GET_CURRENT,
   COVERAGE_CHECK_AVAILABILITY,
+  SERVICES_MATCH_REQUEST,
+  INTENTS_RECORD,
+  INTENTS_SEARCH,
 ]
 
 export function listRegisteredTools(): ReadonlyArray<ToolDefinition> {

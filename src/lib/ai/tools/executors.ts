@@ -2,6 +2,8 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { previewServiceQuote } from '@/lib/services/domain-services'
 import { getCurrentExchangeRate } from '@/lib/services/domain-services'
+import { matchServiceRequest } from './service-matcher'
+import { recordIntent, listIntents } from '@/lib/services/intents/intents-service'
 import type {
   AccountId,
   Uuid,
@@ -25,6 +27,8 @@ import type {
 
 export interface ToolContext {
   accountId: AccountId
+  agentId?: Uuid | null
+  revisionId?: Uuid | null
   /** Optional caller for audit; null when the agent invokes directly. */
   actorUserId: string | null
   /** The run id — used to record which tool calls belong to which run. */
@@ -496,4 +500,172 @@ function subPositives(a: string, b: string): string {
 
 function negatePositiveString(n: string): string {
   return n.startsWith('-') ? n.slice(1) : '-' + n
+}
+
+// ------------------------------------------------------------
+// services.match_request
+// ------------------------------------------------------------
+export interface ServicesMatchRequestArgs {
+  service_hint?: string
+  attributes?: Record<string, unknown>
+  limit?: number
+}
+
+export async function executeServicesMatchRequest(
+  ctx: ToolContext,
+  args: ServicesMatchRequestArgs,
+): Promise<ToolResult<unknown>> {
+  if (!args.attributes || typeof args.attributes !== 'object' || Array.isArray(args.attributes)) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: true,
+      code: 'INVALID_INPUT',
+      message: 'attributes must be an object of what the customer said.',
+    }
+  }
+  try {
+    const result = await matchServiceRequest({
+      accountId: ctx.accountId,
+      serviceHint: args.service_hint,
+      attributes: args.attributes,
+      limit: args.limit,
+    })
+    return { ok: true, data: result, safe_to_show: true }
+  } catch (err) {
+    console.error('[tool] services.match_request failed:', err)
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: false,
+      code: 'MATCH_FAILED',
+      message: 'Could not run the service match.',
+    }
+  }
+}
+
+// ------------------------------------------------------------
+// intents.record
+// ------------------------------------------------------------
+export interface IntentsRecordArgs {
+  contact_id: string
+  conversation_id?: string
+  direction: 'offer' | 'request'
+  service_hint: string
+  summary?: string
+  attributes?: Record<string, unknown>
+  escalate_to_admin?: boolean
+}
+
+export async function executeIntentsRecord(
+  ctx: ToolContext,
+  args: IntentsRecordArgs,
+): Promise<ToolResult<unknown>> {
+  if (!args.contact_id || !args.service_hint?.trim()) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: true,
+      code: 'INVALID_INPUT',
+      message: 'contact_id and service_hint are required.',
+    }
+  }
+  if (args.direction !== 'offer' && args.direction !== 'request') {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: true,
+      code: 'INVALID_INPUT',
+      message: 'direction must be "offer" or "request".',
+    }
+  }
+  try {
+    const result = await recordIntent({
+      accountId: ctx.accountId,
+      contactId: args.contact_id,
+      conversationId: args.conversation_id ?? null,
+      direction: args.direction,
+      serviceHint: args.service_hint,
+      summary: args.summary ?? null,
+      attributes: args.attributes ?? {},
+      escalateToAdmin: args.escalate_to_admin ?? false,
+      actorUserId: ctx.actorUserId,
+    })
+    return { ok: true, data: result, safe_to_show: true }
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? 'INTENT_RECORD_FAILED'
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: code !== 'INTENT_CREATE_FAILED',
+      code,
+      message: (err as { message?: string }).message ?? 'Could not record the observation.',
+    }
+  }
+}
+
+// ------------------------------------------------------------
+// intents.search
+// ------------------------------------------------------------
+export interface IntentsSearchArgs {
+  contact_id?: string
+  status?: string
+  q?: string
+  limit?: number
+}
+
+export async function executeIntentsSearch(
+  ctx: ToolContext,
+  args: IntentsSearchArgs,
+): Promise<ToolResult<unknown>> {
+  const allowedStatuses = new Set([
+    'new',
+    'clarifying',
+    'forwarded_to_admin',
+    'fulfilled',
+    'rejected',
+    'matched',
+  ])
+  if (args.status && !allowedStatuses.has(args.status)) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: true,
+      code: 'INVALID_INPUT',
+      message: `status must be one of: ${[...allowedStatuses].join(', ')}.`,
+    }
+  }
+  try {
+    const intents = await listIntents(ctx.accountId, {
+      contactId: args.contact_id,
+      status: args.status,
+      q: args.q,
+      limit: Math.min(args.limit ?? 20, 100),
+    })
+    return {
+      ok: true,
+      data: intents.map((intent) => ({
+        intent_id: intent.id,
+        contact_id: intent.contact_id,
+        conversation_id: intent.conversation_id,
+        direction: intent.direction,
+        service_hint: intent.service_hint,
+        summary: intent.summary,
+        status: intent.status,
+        attributes: intent.attributes,
+        matched_service_id: intent.matched_service_id,
+        created_at: intent.created_at,
+      })),
+      safe_to_show: true,
+    }
+  } catch (err) {
+    console.error('[tool] intents.search failed:', err)
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: false,
+      code: 'INTENT_SEARCH_FAILED',
+      message: 'Could not search intents.',
+    }
+  }
 }

@@ -55,6 +55,39 @@ export async function executeApprovedChangeRequest(input: {
       actorUserId: input.actorUserId,
     })
     result = { target_type: row.target_type, target_id: row.target_id, operation: 'publish', ...published }
+  } else if (row.target_type === 'service_intent' && row.intent === 'create' && row.target_id) {
+    // Admin decision on an escalated unequipped-service intent.
+    // payload.decision ∈ 'fulfilled' | 'rejected' | 'matched';
+    // 'matched' additionally requires payload.matched_service_id
+    // (a service the admin equipped for this need).
+    const decision = row.proposed_payload.decision as string | undefined
+    const allowed = new Set(['fulfilled', 'rejected', 'matched', 'clarifying'])
+    if (!decision || !allowed.has(decision)) {
+      throw new ChangeExecutionError('DECISION_REQUIRED', `decision must be one of: ${[...allowed].join(', ')}.`)
+    }
+    const db2 = supabaseAdmin()
+    const update: Record<string, unknown> = { status: decision }
+    if (decision === 'matched') {
+      const serviceId = row.proposed_payload.matched_service_id as string | undefined
+      if (!serviceId) {
+        throw new ChangeExecutionError('MATCHED_SERVICE_REQUIRED', 'matched_service_id is required when decision=matched.')
+      }
+      const { data: svc } = await db2
+        .from('services')
+        .select('id')
+        .eq('account_id', input.accountId)
+        .eq('id', serviceId)
+        .maybeSingle()
+      if (!svc) throw new ChangeExecutionError('SERVICE_NOT_FOUND', 'Matched service not found in this account.', 404)
+      update.matched_service_id = serviceId
+    }
+    const { error: intentError } = await db2
+      .from('customer_intents')
+      .update(update)
+      .eq('account_id', input.accountId)
+      .eq('id', row.target_id)
+    if (intentError) throw intentError
+    result = { target_type: row.target_type, target_id: row.target_id, operation: 'intent_decision', decision }
   } else {
     throw new ChangeExecutionError('UNSUPPORTED_TARGET', `No deterministic executor for ${row.target_type}/${row.intent}.`)
   }

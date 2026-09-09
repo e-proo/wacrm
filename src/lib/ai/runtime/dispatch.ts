@@ -9,9 +9,13 @@ import {
   executePricingCalculateQuote,
   executeServicesGet,
   executeServicesSearch,
+  executeServicesMatchRequest,
+  executeIntentsRecord,
+  executeIntentsSearch,
   type ToolContext,
   type ToolResult,
 } from '../tools/executors'
+import { recordToolAttempt } from './tool-attempt-audit'
 import type {
   AccountId,
   AiAgentRevision,
@@ -263,9 +267,30 @@ export async function executeTool(
     round: invocation.round,
   }
 
+  const audit = async (input: {
+    status: 'accepted' | 'denied' | 'succeeded' | 'failed'
+    errorCode?: string
+    toolVersion?: number
+    durationMs?: number
+  }) => recordToolAttempt({
+    accountId: ctx.accountId,
+    runId: ctx.runId,
+    agentId: ctx.agentId ?? null,
+    revisionId: ctx.revisionId ?? ctx.revision?.id ?? null,
+    toolKey: invocation.toolKey,
+    toolVersion: input.toolVersion ?? 1,
+    round: invocation.round,
+    permission: invocation.permission,
+    status: input.status,
+    errorCode: input.errorCode,
+    args: invocation.args,
+    durationMs: input.durationMs,
+  })
+
   // Tool-round cap is enforced from the revision (maxToolRounds).
   const maxRounds = ctx.revision?.maxToolRounds ?? 0
   if (maxRounds === 0) {
+    await audit({ status: 'denied', errorCode: 'TOOL_ROUNDS_DISABLED' })
     return {
       ...baseOutcome,
       result: {
@@ -282,6 +307,7 @@ export async function executeTool(
     }
   }
   if (invocation.round > maxRounds) {
+    await audit({ status: 'denied', errorCode: 'TOOL_ROUNDS_EXHAUSTED' })
     return {
       ...baseOutcome,
       result: {
@@ -300,6 +326,7 @@ export async function executeTool(
   const { getRegisteredTool, isGrantAllowed } = await import('./tool-registry')
   const tool = getRegisteredTool(invocation.toolKey)
   if (!tool) {
+    await audit({ status: 'denied', errorCode: 'UNKNOWN_TOOL' })
     return {
       ...baseOutcome,
       result: {
@@ -315,6 +342,7 @@ export async function executeTool(
     }
   }
   if (!isGrantAllowed(tool, invocation.permission)) {
+    await audit({ status: 'denied', errorCode: 'TOOL_PERMISSION_DENIED', toolVersion: tool.version })
     return {
       ...baseOutcome,
       result: {
@@ -330,6 +358,7 @@ export async function executeTool(
     }
   }
 
+  const startedAt = Date.now()
   let result: ToolResult
   try {
     switch (invocation.toolKey) {
@@ -350,6 +379,15 @@ export async function executeTool(
         break
       case 'coverage.check_availability':
         result = await executeCoverageCheckAvailability(ctx, invocation.args as never)
+        break
+      case 'services.match_request':
+        result = await executeServicesMatchRequest(ctx, invocation.args as never)
+        break
+      case 'intents.record':
+        result = await executeIntentsRecord(ctx, invocation.args as never)
+        break
+      case 'intents.search':
+        result = await executeIntentsSearch(ctx, invocation.args as never)
         break
       default:
         result = {
@@ -374,6 +412,12 @@ export async function executeTool(
     }
   }
 
+  await audit({
+    status: result.ok ? 'succeeded' : 'failed',
+    errorCode: result.ok ? undefined : result.code,
+    toolVersion: tool.version,
+    durationMs: Date.now() - startedAt,
+  })
   return {
     ...baseOutcome,
     result,

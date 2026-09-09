@@ -1339,7 +1339,8 @@
       "createDraft": "Create draft",
       "draftHint": "The agent is created as a draft. Finish the settings, then publish the revision to activate it."
     },
-    "tabObservability": "Observability"
+    "tabObservability": "Observability",
+    "tabIntents": "Customer intents"
   },
   "Services": {
     "title": "Services",
