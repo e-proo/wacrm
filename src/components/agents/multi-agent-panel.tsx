@@ -105,19 +105,28 @@ export function MultiAgentPanel() {
     const agentId = agents?.find((a) => a.system_key === 'customer_service')?.id;
     setBusy('ingest');
     setError(null);
+    setMessage(null);
     try {
       const res = await fetch('/api/admin/ingest-knowledge-base', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(agentId ? { agentId } : {}),
       });
-      const json = (await res.json()) as {
-        ingested?: number;
-        assignedToRevision?: number;
-        error?: string;
-      };
+      // Some failures (expired session redirect, stale server without
+      // this route) answer with an HTML page — surface that clearly
+      // instead of a cryptic JSON parse error.
+      const raw = await res.text();
+      let json: { ingested?: number; assignedToRevision?: number; error?: string };
+      try {
+        json = JSON.parse(raw) as typeof json;
+      } catch {
+        const snippet = raw.slice(0, 80).replace(/\s+/g, ' ');
+        throw new Error(
+          `Server answered ${res.status} with non-JSON (${snippet}…). Restart the dev server so the new route is loaded; if it persists, your session may have expired — reload the page and log in again.`,
+        );
+      }
       if (!res.ok) {
-        throw new Error(json.error ?? 'Ingest failed');
+        throw new Error(json.error ?? `Request failed (${res.status})`);
       }
       await load();
       setError(null);
