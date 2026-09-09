@@ -56,6 +56,47 @@ export class DispatchError extends Error {
   }
 }
 
+// ------------------------------------------------------------
+// Pre-check gate: decides BEFORE any generation which path owns
+// the message. Called by the webhook instead of firing both the
+// legacy auto-reply AND the agent loop (which would double-reply
+// or double-bill). Fail-safe: any error here returns false so
+// the battle-tested legacy path keeps serving customers.
+// ------------------------------------------------------------
+export interface MultiAgentPreCheckArgs {
+  accountId: AccountId
+  conversationId: Uuid
+  senderAddress: string
+  hasHumanAssignee: boolean
+}
+
+export async function shouldRouteToMultiAgent(
+  args: MultiAgentPreCheckArgs,
+): Promise<boolean> {
+  try {
+    const db = supabaseAdmin()
+    const [conversationAiState, snapshot] = await Promise.all([
+      loadConversationAiState(db, args.conversationId),
+      loadRoutingSnapshotAdmin(args.accountId),
+    ])
+    const decision = routeInboundMessage(
+      {
+        accountId: args.accountId,
+        channel: 'whatsapp',
+        senderAddress: args.senderAddress,
+        conversationAiState,
+        hasHumanAssignee: args.hasHumanAssignee,
+        multiAgentEnabled: true,
+      },
+      snapshot,
+    )
+    return decision.action === 'route'
+  } catch (err) {
+    console.error('[ai dispatch] pre-check failed, falling back to legacy:', err)
+    return false
+  }
+}
+
 export interface DispatchInboundArgs {
   accountId: AccountId
   conversationId: Uuid

@@ -10,7 +10,10 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
-import { dispatchInboundToAiAgent } from '@/lib/ai/runtime/dispatch'
+import {
+  dispatchInboundToAiAgent,
+  shouldRouteToMultiAgent,
+} from '@/lib/ai/runtime/dispatch'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
   handleTemplateWebhookChange,
@@ -867,52 +870,47 @@ async function processMessage(
     }).catch((err) => console.error('[automations] dispatch failed:', err))
   }
 
-  // AI auto-reply. Runs only for plain-text inbound the deterministic
-  // flow runner did NOT consume (flows win over the LLM), and only when
-  // the account has enabled it. Awaited inside `after()` (same reason as
-  // the webhook dispatch below); `dispatchInboundToAiReply` owns its
-  // eligibility gates + try/catch and never throws.
+  // AI reply — EXACTLY ONE path owns the message.
+  //
+  // Gate order (fail-safe to the legacy path):
+  //   1. Flows/automations already consumed it → no AI.
+  //   2. MULTI_AGENT_ENABLED + pre-check routes it → the multi-agent
+  //      loop replies (agent loop handles admin plane, tools, and
+  //      its own handoff policy).
+  //   3. Otherwise → the legacy single-config auto-reply.
+  // `shouldRouteToMultiAgent` is fail-safe: on any internal error
+  // it returns false, so customers keep getting the proven path.
   if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
-    await dispatchInboundToAiReply({
-      accountId,
-      conversationId: conversation.id,
-      contactId: contactRecord.id,
-      configOwnerUserId,
-    })
+    const multiAgent = process.env.MULTI_AGENT_ENABLED === 'true'
+    let handledByAgent = false
+    if (multiAgent) {
+      handledByAgent = await shouldRouteToMultiAgent({
+        accountId,
+        conversationId: conversation.id,
+        senderAddress: normalizePhone(senderPhone),
+        hasHumanAssignee: Boolean(conversation.assigned_agent_id),
+      })
+    }
+    if (handledByAgent) {
+      await dispatchInboundToAiAgent({
+        accountId,
+        conversationId: conversation.id,
+        inboundMessageId: insertedRows[0].id,
+        contactId: contactRecord.id,
+        senderAddress: normalizePhone(senderPhone),
+        hasHumanAssignee: Boolean(conversation.assigned_agent_id),
+        multiAgentEnabled: true,
+        workerId: 'webhook',
+      })
+    } else {
+      await dispatchInboundToAiReply({
+        accountId,
+        conversationId: conversation.id,
+        contactId: contactRecord.id,
+        configOwnerUserId,
+      })
+    }
   }
-
-  // ============================================================
-  // Phase 1 multi-agent dispatcher (shadow path).
-  //
-  // Invoked after the legacy auto-reply so the new schema is
-  // observably active without changing existing behavior. In
-  // Phase 1 the dispatcher resolves routing + creates a run
-  // row + marks it `skipped` (`phase1_legacy_path_only`) — the
-  // actual generation still flows through the legacy path above.
-  // Phase 3 swaps the two: the new dispatcher becomes the source
-  // of truth and the legacy path is retired per-account via the
-  // `multi_agent_enabled` flag.
-  //
-  // Important: this is the FIRST hook that consults the trusted-
-  // admin identities. Per the architecture §4.2 it MUST run
-  // before any flow / automation that could reply to the admin
-  // as if it were a customer. In Phase 1 we add it here (post-
-  // legacy) to keep the legacy behavior unchanged, but the
-  // `routeInboundMessage` function still applies the admin gate
-  // first; the legacy reply path is only reached when the
-  // snapshot's trustedIdentities list is empty (the migration
-  // backfill seeds no identities).
-  // ============================================================
-  await dispatchInboundToAiAgent({
-    accountId,
-    conversationId: conversation.id,
-    inboundMessageId: insertedRows[0].id,
-    contactId: contactRecord.id,
-    senderAddress: normalizePhone(senderPhone),
-    hasHumanAssignee: Boolean(conversation.assigned_agent_id),
-    multiAgentEnabled: process.env.MULTI_AGENT_ENABLED === 'true',
-    workerId: 'webhook',
-  })
 
   // message.received webhook (public API). Awaited — not fire-and-forget
   // — because we're inside the route's `after()` block, which only keeps
