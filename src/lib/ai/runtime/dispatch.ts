@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../admin-client'
 import { loadConversationAiState, loadRoutingSnapshotAdmin } from './repositories'
 import { routeInboundMessage } from './router'
 import { runAgentLoop } from './agent-loop'
+import { engineSendText } from '@/lib/automations/meta-send'
 import type { ChatMessage } from '../types'
 import {
   executeCoverageCheckAvailability,
@@ -103,6 +104,8 @@ export interface DispatchInboundArgs {
   inboundMessageId: Uuid
   /** Contact UUID of the sender (for context + loop). */
   contactId: Uuid | null
+  /** Owner of the WhatsApp config — audit identity for the send. */
+  configOwnerUserId: string | null
   senderAddress: string
   /** Pre-loaded conversation row (avoids an extra read). */
   hasHumanAssignee: boolean
@@ -291,13 +294,52 @@ async function executeAgentRun(
     return 'failed'
   }
 
-  // Persist the final text on the run before sending, so a crash
-  // mid-send still leaves the answer auditable.
+  // Per-conversation reply cap — same atomic slot claim the legacy
+  // path uses, so both paths share one budget per thread.
+  const maxReplies =
+    revision.max_ai_replies_per_conversation ?? 3
+  const { data: slot, error: slotErr } = await db.rpc('claim_ai_reply_slot', {
+    conversation_id: args.conversationId,
+    max_replies: maxReplies,
+  })
+  if (slotErr) {
+    console.error('[ai dispatch] claim_ai_reply_slot failed:', slotErr)
+    await markRun(db, args.accountId, runId, 'failed', 'SLOT_CLAIM_FAILED')
+    return 'failed'
+  }
+  if (slot !== true) {
+    await markRun(db, args.accountId, runId, 'failed', 'REPLY_SLOT_LOST')
+    return 'failed'
+  }
+
+  // Persist the run as succeeded BEFORE the network send so a
+  // crash mid-send still leaves the answer auditable (and the
+  // idempotency key prevents any retry from double-sending).
   await db
     .from('ai_agent_runs')
     .update({ status: 'succeeded', completed_at: new Date().toISOString() })
     .eq('id', runId)
     .eq('status', 'claimed')
+
+  // LIVE SEND via the shared engine channel (service-role scoped,
+  // account-verified contact + WhatsApp config, phone-variant
+  // retry built in). Requires a config owner for audit identity.
+  if (!args.configOwnerUserId) {
+    await markRun(db, args.accountId, runId, 'failed', 'NO_CONFIG_OWNER')
+    return 'failed'
+  }
+  const sent = await engineSendText({
+    accountId: args.accountId,
+    userId: args.configOwnerUserId,
+    conversationId: args.conversationId,
+    contactId: args.contactId ?? '',
+    text: loop.text,
+  })
+
+  await db
+    .from('ai_agent_runs')
+    .update({ outbound_message_id: sent.whatsapp_message_id })
+    .eq('id', runId)
 
   return 'succeeded'
 }
