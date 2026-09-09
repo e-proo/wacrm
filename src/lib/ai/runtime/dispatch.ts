@@ -246,11 +246,12 @@ async function executeAgentRun(
     agent_purpose?: { purpose: string }
   }
 
-  // Conversation history for grounding (bounded by the existing
-  // context helper the legacy path uses).
+  // Conversation history for grounding. NOTE the real column
+  // names: sender_type ('customer'|'agent'|'bot') and content_text
+  // — NOT role/content. bot+agent senders map to 'assistant'.
   const { data: convMsgs, error: msgErr } = await db
     .from('messages')
-    .select('role, content, created_at')
+    .select('sender_type, content_text, created_at')
     .eq('conversation_id', args.conversationId)
     .order('created_at', { ascending: true })
   if (msgErr) {
@@ -260,10 +261,13 @@ async function executeAgentRun(
   }
   const history: ChatMessage[] = (convMsgs ?? [])
     .slice(-20)
-    .map((m) => ({
-      role: ((m as { role: string }).role === 'assistant' ? 'assistant' : 'user') as ChatMessage['role'],
-      content: String((m as { content: string }).content ?? ''),
-    }))
+    .map((m) => {
+      const r = m as { sender_type: string; content_text: string | null }
+      return {
+        role: (r.sender_type === 'customer' ? 'user' : 'assistant') as ChatMessage['role'],
+        content: String(r.content_text ?? ''),
+      }
+    })
     .filter((m) => m.content.trim().length > 0)
 
   const loop = await runAgentLoop({
