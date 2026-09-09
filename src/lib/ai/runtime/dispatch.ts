@@ -234,8 +234,10 @@ async function executeAgentRun(
     return 'lost'
   }
   if (claimed.data !== 'claimed') {
+    console.info('[ai dispatch] claim lost (another worker?) run=' + runId.slice(0, 8))
     return 'lost'
   }
+  console.info('[ai dispatch] claimed run=' + runId.slice(0, 8))
 
   // Load the frozen revision snapshot for this run. No join: the
   // purpose comes from the routing snapshot via the caller (the two
@@ -254,6 +256,9 @@ async function executeAgentRun(
     return 'failed'
   }
   const rev = revision as unknown as AiAgentRevision
+  console.info(
+    `[ai dispatch] revision=${rev.id.slice(0, 8)} model=${rev.model} rounds=${rev.maxToolRounds} prompt=${rev.systemPrompt ? rev.systemPrompt.length + 'ch' : 'empty'}`,
+  )
 
   // Conversation history for grounding. NOTE the real column
   // names: sender_type ('customer'|'agent'|'bot') and content_text
@@ -278,6 +283,34 @@ async function executeAgentRun(
       }
     })
     .filter((m) => m.content.trim().length > 0)
+  console.info(
+    `[ai dispatch] history=${history.length} msgs, purpose=${snapshot.agents.find((entry: { agent: { id: string; purpose: string } }) => entry.agent.id === decision.agentId)?.agent.purpose ?? 'custom'}`,
+  )
+
+  // The send needs an audit identity — fail BEFORE claiming a
+  // reply slot or marking succeeded.
+  if (!args.configOwnerUserId) {
+    console.error('[ai dispatch] no configOwnerUserId — cannot send')
+    await markRun(db, args.accountId, runId, 'failed', 'NO_CONFIG_OWNER')
+    return 'failed'
+  }
+
+  // Per-conversation reply cap — same atomic slot claim the legacy
+  // path uses, so both paths share one budget per thread.
+  const { data: slot, error: slotErr } = await db.rpc('claim_ai_reply_slot', {
+    conversation_id: args.conversationId,
+    max_replies: rev.maxAiRepliesPerConversation ?? 3,
+  })
+  if (slotErr) {
+    console.error('[ai dispatch] claim_ai_reply_slot failed:', slotErr)
+    await markRun(db, args.accountId, runId, 'failed', 'SLOT_CLAIM_FAILED')
+    return 'failed'
+  }
+  if (slot !== true) {
+    console.info('[ai dispatch] reply slot lost/cap reached run=' + runId.slice(0, 8))
+    await markRun(db, args.accountId, runId, 'failed', 'REPLY_SLOT_LOST')
+    return 'failed'
+  }
 
   const loop = await runAgentLoop({
     accountId: args.accountId,
@@ -290,6 +323,9 @@ async function executeAgentRun(
     messages: history,
     contactId: args.contactId,
   })
+  console.info(
+    `[ai dispatch] loop=${loop.status} tools=${loop.toolCalls.length} text=${loop.text ? loop.text.length + 'ch' : 'null'}`,
+  )
 
   // Handoff → mirror the legacy behaviour: stop auto-replying and
   // leave the thread for a human.
@@ -307,24 +343,6 @@ async function executeAgentRun(
     return 'failed'
   }
 
-  // Per-conversation reply cap — same atomic slot claim the legacy
-  // path uses, so both paths share one budget per thread.
-  const maxReplies =
-    revision.max_ai_replies_per_conversation ?? 3
-  const { data: slot, error: slotErr } = await db.rpc('claim_ai_reply_slot', {
-    conversation_id: args.conversationId,
-    max_replies: maxReplies,
-  })
-  if (slotErr) {
-    console.error('[ai dispatch] claim_ai_reply_slot failed:', slotErr)
-    await markRun(db, args.accountId, runId, 'failed', 'SLOT_CLAIM_FAILED')
-    return 'failed'
-  }
-  if (slot !== true) {
-    await markRun(db, args.accountId, runId, 'failed', 'REPLY_SLOT_LOST')
-    return 'failed'
-  }
-
   // Persist the run as succeeded BEFORE the network send so a
   // crash mid-send still leaves the answer auditable (and the
   // idempotency key prevents any retry from double-sending).
@@ -336,11 +354,8 @@ async function executeAgentRun(
 
   // LIVE SEND via the shared engine channel (service-role scoped,
   // account-verified contact + WhatsApp config, phone-variant
-  // retry built in). Requires a config owner for audit identity.
-  if (!args.configOwnerUserId) {
-    await markRun(db, args.accountId, runId, 'failed', 'NO_CONFIG_OWNER')
-    return 'failed'
-  }
+  // retry built in).
+  console.info('[ai dispatch] sending reply via WhatsApp...')
   const sent = await engineSendText({
     accountId: args.accountId,
     userId: args.configOwnerUserId,
@@ -353,6 +368,7 @@ async function executeAgentRun(
     .from('ai_agent_runs')
     .update({ outbound_message_id: sent.whatsapp_message_id })
     .eq('id', runId)
+  console.info(`[ai dispatch] SENT run=${runId.slice(0, 8)} wa_id=${sent.whatsapp_message_id}`)
 
   return 'succeeded'
 }

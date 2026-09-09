@@ -91,6 +91,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     // 1) Provider config for the account (BYO key / connection).
     const config = await loadAiConfig(db, accountId)
     if (!config) {
+      console.error('[agent loop] no provider config for account ' + accountId)
       return {
         status: 'failed',
         text: null,
@@ -99,6 +100,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         error: 'no_provider_config',
       }
     }
+    console.info(`[agent loop] provider=${config.chat?.protocol ?? config.provider} model=${config.chat?.model ?? config.model}`)
 
     // 2) Knowledge grounding, scoped to THIS revision's assigned
     //    chunks when any exist; falls back to the account KB.
