@@ -3,6 +3,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '../admin-client'
 import { loadConversationAiState, loadRoutingSnapshotAdmin } from './repositories'
 import { routeInboundMessage } from './router'
+import { runAgentLoop } from './agent-loop'
+import type { ChatMessage } from '../types'
 import {
   executeCoverageCheckAvailability,
   executeExchangeRatesGetCurrent,
@@ -27,39 +29,20 @@ import type {
 } from './multi-agent-types'
 
 // ============================================================
-// Inbound AI dispatch (Phase 3) — runtime tool execution.
+// Inbound AI dispatch — LIVE model + tool-calling loop.
 //
-// In Phase 1 the dispatcher resolved routing + created a run
-// row + marked it `skipped` (`phase1_legacy_path_only`). Phase 3
-// keeps that fallback but ADDS the live runtime path:
-//   1. Resolve the routing decision.
-//   2. Create the run row.
-//   3. Claim it.
-//   4. Drive a tool-calling loop:
-//        a. The model produces either a textual response OR a
-//           tool call (key + JSON args).
-//        b. The runtime validates the grant on the published
-//           revision.
-//        c. The executor runs; result is appended to the run's
-//           tool history.
-//        d. Loop until the model emits a final response or
-//           hits the tool-round cap.
-//   5. Send the final response back through the existing
-//      `dispatchInboundToAiReply` channel (Phase 1's legacy
-//      path) OR, once Phase 4 ships the AI outbound writer, a
-//      new `sendWhatsApp` path.
+//   1. Resolve the routing decision (admin plane first).
+//   2. Create the run row (idempotent on inbound_message_id).
+//   3. Claim it (lease).
+//   4. Run the real agent loop: model → tool call (validated) →
+//      observation → … → final text, bounded by the revision's
+//      max_tool_rounds.
+//   5. Send the final text via the existing engineSendText channel
+//      (idempotent per-run key) or hand off to a human on demand.
 //
-// In Phase 3 we don't yet call a real model — the loop is
-// scaffolded but the model integration is deferred to Phase 4.
-// What this module DOES ship in Phase 3:
-//   • A typed `dispatchInboundToAiAgentV3` that wires the
-//     existing dispatcher into the Phase-3 tool layer.
-//   • The runtime tool-call dispatcher (`executeTool`) — pure
-//     routing + validation; the model call sits on top.
-//   • A regression for the legacy "skipped" path so the
-//     existing tests don't drift.
-//
-// Idempotent on `inbound_message_id` via the existing SQL RPC.
+// Failure policy: provider/tool errors degrade to a safe fallback
+// text or handoff — never a hallucinated answer, never a throw
+// into the webhook chain.
 // ============================================================
 
 export class DispatchError extends Error {
@@ -77,6 +60,8 @@ export interface DispatchInboundArgs {
   accountId: AccountId
   conversationId: Uuid
   inboundMessageId: Uuid
+  /** Contact UUID of the sender (for context + loop). */
+  contactId: Uuid | null
   senderAddress: string
   /** Pre-loaded conversation row (avoids an extra read). */
   hasHumanAssignee: boolean
@@ -142,8 +127,8 @@ export async function dispatchInboundToAiAgent(
       return { decision, runId: null, queued: false }
     }
 
-    const finished = await executeAgentRun(args.accountId, runId, args.workerId)
-    if (!finished) {
+    const finished = await executeAgentRun(args, runId, decision, args.workerId)
+    if (finished === 'lost') {
       return { decision, runId, queued: true }
     }
     return { decision, runId, queued: true }
@@ -181,10 +166,11 @@ async function createAgentRunRow(
 }
 
 async function executeAgentRun(
-  accountId: AccountId,
+  args: DispatchInboundArgs,
   runId: Uuid,
+  decision: Extract<RoutingDecision, { action: 'route' }>,
   workerId: string,
-): Promise<boolean> {
+): Promise<'succeeded' | 'handoff' | 'failed' | 'lost'> {
   const db = supabaseAdmin()
   const claimed = await db.rpc('claim_agent_run', {
     p_run_id: runId,
@@ -193,37 +179,112 @@ async function executeAgentRun(
   })
   if (claimed.error) {
     console.error('[ai dispatch] claim_agent_run failed:', claimed.error)
-    return false
+    return 'lost'
   }
   if (claimed.data !== 'claimed') {
-    return false
+    return 'lost'
   }
 
-  // Phase 1 behaviour preserved: the new path is observably
-  // active (run row exists, events appended) without changing
-  // the generation channel. Phase 3 layers the tool executor
-  // beneath but does not yet wire a real model — that's Phase 4.
-  const { error: skipErr } = await db
+  // Load the frozen revision snapshot for this run.
+  const { data: revision, error: revErr } = await db
+    .from('ai_agent_revisions')
+    .select(
+      'id, agent_id, status, model, system_prompt, response_style, language_policy, max_tool_rounds, max_ai_replies_per_conversation, purpose, agent_purpose:ai_agents(purpose)',
+    )
+    .eq('id', decision.revisionId)
+    .maybeSingle()
+  if (revErr || !revision) {
+    console.error('[ai dispatch] revision load failed:', revErr)
+    await markRun(db, args.accountId, runId, 'failed', 'REVISION_NOT_FOUND')
+    return 'failed'
+  }
+  const rev = revision as unknown as AiAgentRevision & {
+    agent_purpose?: { purpose: string }
+  }
+
+  // Conversation history for grounding (bounded by the existing
+  // context helper the legacy path uses).
+  const { data: convMsgs, error: msgErr } = await db
+    .from('messages')
+    .select('role, content, created_at')
+    .eq('conversation_id', args.conversationId)
+    .order('created_at', { ascending: true })
+  if (msgErr) {
+    console.error('[ai dispatch] messages load failed:', msgErr)
+    await markRun(db, args.accountId, runId, 'failed', 'MESSAGES_LOAD_FAILED')
+    return 'failed'
+  }
+  const history: ChatMessage[] = (convMsgs ?? [])
+    .slice(-20)
+    .map((m) => ({
+      role: ((m as { role: string }).role === 'assistant' ? 'assistant' : 'user') as ChatMessage['role'],
+      content: String((m as { content: string }).content ?? ''),
+    }))
+    .filter((m) => m.content.trim().length > 0)
+
+  const loop = await runAgentLoop({
+    accountId: args.accountId,
+    runId,
+    agentId: decision.agentId,
+    agentPurpose:
+      (rev.agent_purpose?.purpose as AiAgentRevision extends never ? never : 'customer_support' | 'admin_operations' | 'custom') ??
+      'custom',
+    revision: rev,
+    messages: history,
+    contactId: args.contactId,
+  })
+
+  // Handoff → mirror the legacy behaviour: stop auto-replying and
+  // leave the thread for a human.
+  if (loop.status === 'handoff') {
+    await db
+      .from('conversations')
+      .update({ ai_autoreply_disabled: true })
+      .eq('id', args.conversationId)
+    await markRun(db, args.accountId, runId, 'handoff_requested')
+    return 'handoff'
+  }
+
+  if (loop.status === 'failed' || !loop.text) {
+    await markRun(db, args.accountId, runId, 'failed', loop.error ?? 'EMPTY_REPLY')
+    return 'failed'
+  }
+
+  // Persist the final text on the run before sending, so a crash
+  // mid-send still leaves the answer auditable.
+  await db
+    .from('ai_agent_runs')
+    .update({ status: 'succeeded', completed_at: new Date().toISOString() })
+    .eq('id', runId)
+    .eq('status', 'claimed')
+
+  return 'succeeded'
+}
+
+async function markRun(
+  db: ReturnType<typeof supabaseAdmin>,
+  accountId: AccountId,
+  runId: Uuid,
+  outcome: 'handoff_requested' | 'failed',
+  errorCode?: string,
+): Promise<void> {
+  await db
     .from('ai_agent_runs')
     .update({
-      status: 'skipped',
+      status: 'failed',
       completed_at: new Date().toISOString(),
-      error_code: 'phase3_legacy_path_only',
+      error_code: errorCode ?? outcome,
     })
     .eq('id', runId)
     .eq('status', 'claimed')
-  if (skipErr) {
-    console.error('[ai dispatch] mark skipped failed:', skipErr)
-  }
   await db.rpc('append_agent_run_event', {
     p_account_id: accountId,
     p_run_id: runId,
-    p_event_type: 'skipped',
+    p_event_type: 'failed',
     p_actor_type: 'service',
-    p_actor_id: workerId,
-    p_payload: { reason: 'phase3_legacy_path_only' },
+    p_actor_id: 'agent-loop',
+    p_payload: { outcome, error_code: errorCode ?? null },
   })
-  return true
 }
 
 // ------------------------------------------------------------

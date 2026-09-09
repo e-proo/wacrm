@@ -907,6 +907,7 @@ async function processMessage(
     accountId,
     conversationId: conversation.id,
     inboundMessageId: insertedRows[0].id,
+    contactId: contactRecord.id,
     senderAddress: normalizePhone(senderPhone),
     hasHumanAssignee: Boolean(conversation.assigned_agent_id),
     multiAgentEnabled: process.env.MULTI_AGENT_ENABLED === 'true',
