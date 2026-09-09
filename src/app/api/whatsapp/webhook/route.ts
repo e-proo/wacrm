@@ -891,6 +891,11 @@ async function processMessage(
         hasHumanAssignee: Boolean(conversation.assigned_agent_id),
       })
     }
+    // Permanent diagnostic: one line per message shows which path
+    // owns it — makes 'who replied?' instantly answerable.
+    console.info(
+      `[ai gate] path=${handledByAgent ? 'multi-agent' : 'legacy'} env=${multiAgent}`,
+    )
     if (handledByAgent) {
       await dispatchInboundToAiAgent({
         accountId,
