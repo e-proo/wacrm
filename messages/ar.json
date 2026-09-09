@@ -1270,7 +1270,10 @@
       "systemKeyCustomerService": "customer_service",
       "systemKeyAdminOperations": "admin_operations",
       "runBackfill": "تشغيل التهيئة",
-      "backfillNoConnection": "لا يوجد اتصال مزود نشط. أضف مزوداً أولاً من تبويب المزودون."
+      "backfillNoConnection": "لا يوجد اتصال مزود نشط. أضف مزوداً أولاً من تبويب المزودون.",
+      "ingestKb": "حقن قاعدة المعرفة",
+      "kbIngested": "تم حقن {count} مستنداً",
+      "kbAssigned": "أُسند {count} مقطعاً للوكيل"
     },
     "trustedAdmins": {
       "title": "أرقام الإدارة الموثوقة",

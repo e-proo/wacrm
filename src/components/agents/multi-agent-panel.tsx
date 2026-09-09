@@ -37,6 +37,7 @@ export function MultiAgentPanel() {
   const [revisions, setRevisions] = useState<Record<string, AiAgentRevision | null>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   async function load() {
     setError(null);
@@ -100,6 +101,36 @@ export function MultiAgentPanel() {
     }
   }
 
+  async function ingestKnowledge() {
+    const agentId = agents?.find((a) => a.system_key === 'customer_service')?.id;
+    setBusy('ingest');
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/ingest-knowledge-base', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(agentId ? { agentId } : {}),
+      });
+      const json = (await res.json()) as {
+        ingested?: number;
+        assignedToRevision?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(json.error ?? 'Ingest failed');
+      }
+      await load();
+      setError(null);
+      setMessage(
+        `${t('multiAgent.kbIngested', { count: json.ingested ?? 0 })} — ${t('multiAgent.kbAssigned', { count: json.assignedToRevision ?? 0 })}`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   // Hydrate revisions for each agent (best-effort, lightweight: the
   // list endpoint already returns enough; published_revision_id is
   // all we need to surface "Revision N · model" if we later expose
@@ -127,17 +158,32 @@ export function MultiAgentPanel() {
     return (
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">{t('multiAgent.empty')}</p>
-        <Button
-          onClick={() => void runBackfill()}
-          disabled={busy === 'backfill'}
-        >
-          {busy === 'backfill' ? (
-            <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
-          ) : null}
-          {t('multiAgent.runBackfill')}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => void runBackfill()}
+            disabled={busy === 'backfill'}
+          >
+            {busy === 'backfill' ? (
+              <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
+            ) : null}
+            {t('multiAgent.runBackfill')}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void ingestKnowledge()}
+            disabled={busy === 'ingest'}
+          >
+            {busy === 'ingest' ? (
+              <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
+            ) : null}
+            {t('multiAgent.ingestKb')}
+          </Button>
+        </div>
         {error ? (
           <p className="text-sm text-destructive">{error}</p>
+        ) : null}
+        {message ? (
+          <p className="text-sm text-emerald-600">{message}</p>
         ) : null}
       </div>
     );
@@ -240,7 +286,26 @@ export function MultiAgentPanel() {
       </div>
 
       {/* Phase 4 builder entry — create a new agent from a template. */}
-      <AgentTemplatePicker onCreated={() => void load()} />
+      <div className="flex flex-wrap items-center gap-2">
+        <AgentTemplatePicker onCreated={() => void load()} />
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void ingestKnowledge()}
+          disabled={busy === 'ingest'}
+        >
+          {busy === 'ingest' ? (
+            <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
+          ) : null}
+          {t('multiAgent.ingestKb')}
+        </Button>
+      </div>
+      {error ? (
+        <p className="text-sm text-destructive">{error}</p>
+      ) : null}
+      {message ? (
+        <p className="text-sm text-emerald-600">{message}</p>
+      ) : null}
     </div>
   );
 }

@@ -1270,7 +1270,10 @@
       "systemKeyCustomerService": "customer_service",
       "systemKeyAdminOperations": "admin_operations",
       "runBackfill": "Run backfill",
-      "backfillNoConnection": "No active provider connection. Add one from the Providers tab first."
+      "backfillNoConnection": "No active provider connection. Add one from the Providers tab first.",
+      "ingestKb": "Ingest knowledge base",
+      "kbIngested": "Ingested {count} documents",
+      "kbAssigned": "Assigned {count} chunks to the agent"
     },
     "trustedAdmins": {
       "title": "Trusted admin numbers",
