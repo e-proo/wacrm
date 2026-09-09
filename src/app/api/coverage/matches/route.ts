@@ -21,6 +21,34 @@ import {
   ServiceError,
 } from '@/lib/services/domain-services'
 
+export async function GET() {
+  try {
+    const ctx = await requireRole('admin')
+    const limit = checkRateLimit(
+      `admin:coverageMatchesList:${ctx.userId}`,
+      RATE_LIMITS.adminAction,
+    )
+    if (!limit.success) return rateLimitResponse(limit)
+    const { data, error } = await ctx.supabase
+      .from('coverage_matches')
+      .select(
+        'id, account_id, offer_id, request_id, service_id, matched_amount, currency, status, created_at',
+      )
+      .eq('account_id', ctx.accountId)
+      .order('created_at', { ascending: false })
+    if (error) {
+      console.error('[GET /api/coverage/matches] error:', error)
+      return NextResponse.json(
+        { error: 'Failed to list matches' },
+        { status: 500 },
+      )
+    }
+    return NextResponse.json({ matches: data ?? [] })
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+}
+
 interface CreateMatchBody {
   offerId: string
   requestId: string

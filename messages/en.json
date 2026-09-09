@@ -1463,7 +1463,8 @@
       "editCurrency": "Edit currency",
       "saveChanges": "Save changes",
       "cancel": "Cancel"
-    }
+    },
+    "tabCoverage": "Coverage"
   },
   "Settings": {
     "pageTitle": "Settings",
@@ -2065,5 +2066,31 @@
       "truncated": "Showing a partial window — usage is high enough that only the most recent records are summarized here.",
       "unreportedNote": "{count} {count, plural, one {call} other {calls}} came through a gateway that does not report token counts — counted as calls with 0 tokens."
     }
+  },
+  "Coverage": {
+    "offers": "Offers",
+    "requests": "Requests",
+    "matches": "Matches",
+    "new": "New",
+    "newOffer": "New coverage offer",
+    "newRequest": "New coverage request",
+    "contact": "Contact",
+    "service": "Service",
+    "reference": "Reference",
+    "amount": "Amount",
+    "currency": "Currency",
+    "priority": "Priority",
+    "low": "Low",
+    "normal": "Normal",
+    "high": "High",
+    "create": "Create",
+    "reserveTitle": "Reserve a match",
+    "reserve": "Reserve",
+    "release": "Release",
+    "remaining": "Remaining",
+    "atomicHint": "Booking is atomic: two operators racing for the last unit — exactly one succeeds.",
+    "emptyOffers": "No offers yet.",
+    "emptyRequests": "No requests yet.",
+    "emptyMatches": "No matches yet."
   }
 }

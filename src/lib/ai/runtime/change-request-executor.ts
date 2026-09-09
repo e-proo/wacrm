@@ -88,6 +88,48 @@ export async function executeApprovedChangeRequest(input: {
       .eq('id', row.target_id)
     if (intentError) throw intentError
     result = { target_type: row.target_type, target_id: row.target_id, operation: 'intent_decision', decision }
+  } else if (row.target_type === 'coverage_offer' && row.intent === 'create' && !row.target_id && row.proposed_payload.contact_id) {
+    // Coverage offer proposal approved: create the offer row as
+    // ACTIVE so the marketplace can reserve against it. Fields
+    // come ONLY from the approved payload (never re-read from a
+    // client), and the linked intent (if any) flips to fulfilled.
+    const p = row.proposed_payload as {
+      contact_id?: string
+      service_id?: string
+      total_amount?: string
+      currency?: string
+      attributes?: Record<string, unknown>
+      intent_id?: string
+    }
+    if (!p.service_id || !p.total_amount || !p.currency) {
+      throw new ChangeExecutionError('OFFER_PAYLOAD_INCOMPLETE', 'Approved payload must carry service_id, total_amount, currency.')
+    }
+    const db2 = supabaseAdmin()
+    const reference = `CHG-${row.id.slice(0, 8).toUpperCase()}`
+    const { data: offer, error: offerError } = await db2
+      .from('coverage_offers')
+      .insert({
+        account_id: input.accountId,
+        service_id: p.service_id,
+        provider_contact_id: p.contact_id,
+        reference_code: reference,
+        total_amount: p.total_amount,
+        currency: p.currency,
+        attributes: p.attributes ?? {},
+        status: 'active',
+        created_by: input.actorUserId,
+      })
+      .select('id, reference_code')
+      .single()
+    if (offerError) throw offerError
+    if (p.intent_id) {
+      await db2
+        .from('customer_intents')
+        .update({ status: 'fulfilled', matched_service_id: p.service_id })
+        .eq('account_id', input.accountId)
+        .eq('id', p.intent_id)
+    }
+    result = { target_type: row.target_type, operation: 'create', offer }
   } else {
     throw new ChangeExecutionError('UNSUPPORTED_TARGET', `No deterministic executor for ${row.target_type}/${row.intent}.`)
   }

@@ -4,6 +4,7 @@ import { previewServiceQuote } from '@/lib/services/domain-services'
 import { getCurrentExchangeRate } from '@/lib/services/domain-services'
 import { matchServiceRequest } from './service-matcher'
 import { recordIntent, listIntents } from '@/lib/services/intents/intents-service'
+import { supabaseAdmin as adminClient } from '@/lib/ai/admin-client'
 import type {
   AccountId,
   Uuid,
@@ -500,6 +501,177 @@ function subPositives(a: string, b: string): string {
 
 function negatePositiveString(n: string): string {
   return n.startsWith('-') ? n.slice(1) : '-' + n
+}
+
+// ------------------------------------------------------------
+// coverage.find_offers — anonymized provider view.
+// The runtime may see which contact supplies liquidity (to route
+// the admin decision), but the result handed to the model strips
+// provider identity and cost so it can never leak to the
+// requesting customer.
+// ------------------------------------------------------------
+export interface CoverageFindOffersArgs {
+  service_id: string
+  currency: string
+  min_available?: string
+  limit?: number
+}
+
+export async function executeCoverageFindOffers(
+  ctx: ToolContext,
+  args: CoverageFindOffersArgs,
+): Promise<ToolResult<unknown>> {
+  if (!args.service_id || !args.currency) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: true,
+      code: 'INVALID_INPUT',
+      message: 'service_id and currency are required.',
+    }
+  }
+  try {
+    const { data, error } = await adminClient()
+      .from('coverage_offers')
+      .select(
+        'id, reference_code, total_amount, reserved_amount, fulfilled_amount, currency, attributes, provider_cost, status',
+      )
+      .eq('account_id', ctx.accountId)
+      .eq('service_id', args.service_id)
+      .eq('currency', args.currency)
+      .in('status', ['active', 'partially_reserved'])
+    if (error) throw error
+    const minAvailable = args.min_available ? Number(args.min_available) : 0
+    const rows = (data ?? []) as Array<{
+      id: string
+      reference_code: string
+      total_amount: string
+      reserved_amount: string
+      fulfilled_amount: string
+      currency: string
+      attributes: Record<string, unknown>
+      provider_cost: string | null
+      status: string
+    }>
+    const safe = rows
+      .map((row) => ({
+        offer_id: row.id,
+        reference_code: row.reference_code,
+        available_amount: String(
+          Math.max(
+            Number(row.total_amount) -
+              Number(row.reserved_amount) -
+              Number(row.fulfilled_amount),
+            0,
+          ),
+        ),
+        currency: row.currency,
+        attributes: row.attributes ?? {},
+      }))
+      .filter((row) => Number(row.available_amount) >= minAvailable)
+      .slice(0, Math.min(args.limit ?? 10, 50))
+    return { ok: true, data: safe, safe_to_show: true }
+  } catch (err) {
+    console.error('[tool] coverage.find_offers failed:', err)
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: false,
+      code: 'COVERAGE_SEARCH_FAILED',
+      message: 'Could not search coverage offers.',
+    }
+  }
+}
+
+// ------------------------------------------------------------
+// coverage.propose_offer — propose → admin approval → deterministic
+// creation. The offer row is created here as DRAFT only when the
+// change request is APPROVED (see executor below); the tool itself
+// only records the proposal.
+// ------------------------------------------------------------
+export interface CoverageProposeOfferArgs {
+  contact_id: string
+  service_id: string
+  total_amount: string
+  currency: string
+  attributes?: Record<string, unknown>
+}
+
+export async function executeCoverageProposeOffer(
+  ctx: ToolContext,
+  args: CoverageProposeOfferArgs,
+): Promise<ToolResult<unknown>> {
+  if (
+    !args.contact_id ||
+    !args.service_id ||
+    !args.total_amount ||
+    !args.currency
+  ) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: true,
+      code: 'INVALID_INPUT',
+      message: 'contact_id, service_id, total_amount, and currency are required.',
+    }
+  }
+  const amount = Number(args.total_amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: true,
+      code: 'INVALID_INPUT',
+      message: 'total_amount must be a positive number.',
+    }
+  }
+  try {
+    const escalation = await recordIntent({
+      accountId: ctx.accountId,
+      contactId: args.contact_id,
+      conversationId: null,
+      direction: 'offer',
+      serviceHint: 'coverage offer',
+      summary: `Coverage offer proposal: ${args.total_amount} ${args.currency}`,
+      attributes: {
+        service_id: args.service_id,
+        total_amount: args.total_amount,
+        currency: args.currency,
+        ...(args.attributes ?? {}),
+      },
+      escalateToAdmin: true,
+      actorUserId: ctx.actorUserId,
+    })
+    if (!escalation.changeRequest) {
+      return {
+        ok: false,
+        data: null,
+        safe_to_show: false,
+        code: 'ESCALATION_FAILED',
+        message: 'Escalation change request could not be created.',
+      }
+    }
+    return {
+      ok: true,
+      data: {
+        intent: {
+          intent_id: escalation.intentId,
+          status: escalation.status,
+        },
+        change_request: escalation.changeRequest,
+      },
+      safe_to_show: true,
+    }
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? 'PROPOSAL_FAILED'
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: code !== 'INTENT_CREATE_FAILED',
+      code,
+      message: (err as { message?: string }).message ?? 'Could not record the proposal.',
+    }
+  }
 }
 
 // ------------------------------------------------------------

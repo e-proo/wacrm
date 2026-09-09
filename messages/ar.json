@@ -1463,7 +1463,8 @@
       "editCurrency": "تعديل العملة",
       "saveChanges": "حفظ التغييرات",
       "cancel": "إلغاء"
-    }
+    },
+    "tabCoverage": "التغطيات"
   },
   "Settings": {
     "pageTitle": "الإعدادات",
@@ -2065,5 +2066,31 @@
       "truncated": "عرض نافذة جزئية — الاستخدام مرتفع بما يكفي بحيث تُلعّص هنا أحدث السجلات فقط.",
       "unreportedNote": "{count} {count, plural, one {استدعاء} other {استدعاءات}} مرّت عبر بوابة لا تُبلّغ عن عدد التوكنات — وتُحسب استدعاءات بصفر توكنات."
     }
+  },
+  "Coverage": {
+    "offers": "العروض",
+    "requests": "الطلبات",
+    "matches": "المطابقات",
+    "new": "جديد",
+    "newOffer": "عرض تغطية جديد",
+    "newRequest": "طلب تغطية جديد",
+    "contact": "جهة الاتصال",
+    "service": "الخدمة",
+    "reference": "المرجع",
+    "amount": "المبلغ",
+    "currency": "العملة",
+    "priority": "الأولوية",
+    "low": "منخفضة",
+    "normal": "عادية",
+    "high": "عالية",
+    "create": "إنشاء",
+    "reserveTitle": "حجز مطابقة",
+    "reserve": "حجز",
+    "release": "تحرير",
+    "remaining": "المتبقي",
+    "atomicHint": "الحجز ذري: عاملان متنافسان على آخر وحدة — واحد فقط ينجح.",
+    "emptyOffers": "لا توجد عروض بعد.",
+    "emptyRequests": "لا توجد طلبات بعد.",
+    "emptyMatches": "لا توجد مطابقات بعد."
   }
 }

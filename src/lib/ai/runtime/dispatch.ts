@@ -12,6 +12,8 @@ import {
   executeServicesMatchRequest,
   executeIntentsRecord,
   executeIntentsSearch,
+  executeCoverageFindOffers,
+  executeCoverageProposeOffer,
   type ToolContext,
   type ToolResult,
 } from '../tools/executors'
@@ -379,6 +381,12 @@ export async function executeTool(
         break
       case 'coverage.check_availability':
         result = await executeCoverageCheckAvailability(ctx, invocation.args as never)
+        break
+      case 'coverage.find_offers':
+        result = await executeCoverageFindOffers(ctx, invocation.args as never)
+        break
+      case 'coverage.propose_offer':
+        result = await executeCoverageProposeOffer(ctx, invocation.args as never)
         break
       case 'services.match_request':
         result = await executeServicesMatchRequest(ctx, invocation.args as never)

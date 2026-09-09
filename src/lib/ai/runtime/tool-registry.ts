@@ -321,6 +321,79 @@ const INTENTS_SEARCH: ToolDefinition = {
   risk: 'read',
 }
 
+const COVERAGE_FIND_OFFERS: ToolDefinition = {
+  key: 'coverage.find_offers',
+  version: 1,
+  description:
+    'Search ACTIVE coverage offers by service, currency, and minimum headroom. Returns aggregated rows WITHOUT provider identity or cost — the requester-facing DTO stays anonymous.',
+  argumentSchema: {
+    service_id: {
+      type: 'string',
+      description: 'Service UUID to match.',
+      required: true,
+    },
+    currency: {
+      type: 'string',
+      description: 'ISO-4217-like code.',
+      required: true,
+    },
+    min_available: {
+      type: 'string',
+      description: 'Minimum remaining headroom (decimal string).',
+      required: false,
+    },
+    limit: {
+      type: 'number',
+      description: 'Max rows. Default 10, max 50.',
+      required: false,
+    },
+  },
+  returnSchema:
+    'Array<{ offer_id, reference_code, available_amount, currency, attributes (public only) }> — NO provider_contact_id, NO provider_cost.',
+  grantPermissions: ['read'],
+  category: 'coverage',
+  risk: 'read',
+}
+
+const COVERAGE_PROPOSE_OFFER: ToolDefinition = {
+  key: 'coverage.propose_offer',
+  version: 1,
+  description:
+    "Propose creating a coverage offer from a customer's stated liquidity. Creates a change request for the trusted admin — the offer is NOT created until the admin approves with the confirmation code.",
+  argumentSchema: {
+    contact_id: {
+      type: 'string',
+      description: 'Customer contact UUID providing the liquidity.',
+      required: true,
+    },
+    service_id: {
+      type: 'string',
+      description: 'Service UUID.',
+      required: true,
+    },
+    total_amount: {
+      type: 'string',
+      description: 'Offered amount (decimal string).',
+      required: true,
+    },
+    currency: {
+      type: 'string',
+      description: 'ISO-4217-like code.',
+      required: true,
+    },
+    attributes: {
+      type: 'object',
+      description: 'Coverage attributes per the service schema (region, city...).',
+      required: false,
+    },
+  },
+  returnSchema:
+    '{ intent?: { intent_id, status }, change_request: { id, code, confirmation_code } } — quote the code + confirmation to the admin over WhatsApp.',
+  grantPermissions: ['propose'],
+  category: 'coverage',
+  risk: 'medium',
+}
+
 // ------------------------------------------------------------
 // Phase 3 (later): propose_* tools
 // ------------------------------------------------------------
@@ -343,6 +416,8 @@ const REGISTRY: ReadonlyArray<ToolDefinition> = [
   PRICING_CALCULATE_QUOTE,
   EXCHANGE_RATES_GET_CURRENT,
   COVERAGE_CHECK_AVAILABILITY,
+  COVERAGE_FIND_OFFERS,
+  COVERAGE_PROPOSE_OFFER,
   SERVICES_MATCH_REQUEST,
   INTENTS_RECORD,
   INTENTS_SEARCH,

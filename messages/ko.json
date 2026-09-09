@@ -1463,7 +1463,8 @@
       "editCurrency": "통화 편집",
       "saveChanges": "변경 사항 저장",
       "cancel": "취소"
-    }
+    },
+    "tabCoverage": "커버리지"
   },
   "Settings": {
     "pageTitle": "설정",
@@ -2065,5 +2066,31 @@
       "truncated": "일부 창만 표시 중 — 사용량이 많아 최신 기록만 요약됩니다.",
       "unreportedNote": "{count}회는 토큰 수를 보고하지 않는 게이트웨이를 통한 호출입니다 — 0토큰 호출로 집계됩니다."
     }
+  },
+  "Coverage": {
+    "offers": "오퍼",
+    "requests": "요청",
+    "matches": "매칭",
+    "new": "새로 만들기",
+    "newOffer": "새 커버리지 오퍼",
+    "newRequest": "새 커버리지 요청",
+    "contact": "연락처",
+    "service": "서비스",
+    "reference": "참조",
+    "amount": "금액",
+    "currency": "통화",
+    "priority": "우선순위",
+    "low": "낮음",
+    "normal": "보통",
+    "high": "높음",
+    "create": "생성",
+    "reserveTitle": "매칭 예약",
+    "reserve": "예약",
+    "release": "해제",
+    "remaining": "잔여",
+    "atomicHint": "예약은 원자적입니다: 마지막 단위를 두 명이 경쟁하면 한 명만 성공합니다.",
+    "emptyOffers": "아직 오퍼가 없습니다.",
+    "emptyRequests": "아직 요청이 없습니다.",
+    "emptyMatches": "아직 매칭이 없습니다."
   }
 }
