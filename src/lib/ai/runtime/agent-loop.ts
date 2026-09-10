@@ -114,12 +114,16 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     )
 
     // 3) System prompt = user instructions + agent role framing.
+    // The framing explicitly counters the base prompt's aggressive
+    // handoff default: answer-first from knowledge/tools, ask a
+    // clarifying question when a detail is missing, and reserve
+    // handoff for explicit human requests / out-of-scope asks.
     const roleFraming =
       input.agentPurpose === 'admin_operations'
-        ? 'You are an operations assistant for the business owner. Only act on instructions from the verified admin channel. Never reveal internal tooling to customers.'
+        ? 'You are the operations assistant for the business owner, reachable only on the verified admin channel. Complete the requested task with the tools and knowledge you have. Hand off only for tasks outside your registered tools — and say exactly what is missing.'
         : input.agentPurpose === 'customer_support'
-          ? 'You are the business customer-service assistant. Answer only from the provided knowledge and tool results; never invent prices or promises.'
-          : ''
+          ? 'You ARE the business assistant described below. ALWAYS attempt an answer first: use the knowledge excerpts and any tool results provided. If one specific detail is missing, ask the customer a short clarifying question instead of handing off. Hand off (HANDOFF) ONLY when the customer explicitly demands a human, is abusive, or asks for something clearly outside this business.'
+          : 'Answer using the knowledge and tools provided; ask clarifying questions when details are missing.'
 
     const systemPrompt = buildSystemPrompt({
       userPrompt: [revision.systemPrompt ?? '', roleFraming]
@@ -128,6 +132,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       mode: 'auto_reply',
       knowledge,
     })
+    console.info(`[agent loop] knowledge=${knowledge.length} chunks`)
 
     // 4) The bounded tool-calling loop.
     // Defensive: a NaN/undefined cap must never silently skip the
