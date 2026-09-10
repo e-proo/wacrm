@@ -130,7 +130,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     })
 
     // 4) The bounded tool-calling loop.
-    const maxRounds = revision.maxToolRounds
+    // Defensive: a NaN/undefined cap must never silently skip the
+    // whole loop (that bug shipped once — rounds=undefined made
+    // Math.max(undefined,1) === NaN and the for-loop ran zero times).
+    const maxRounds = Math.max(Number.isFinite(revision.maxToolRounds) ? revision.maxToolRounds : 0, 1)
     const messages = [...input.messages]
     let finalText: string | null = null
     let handoffRequested = false
@@ -209,4 +212,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       error: err instanceof Error ? err.message : 'unknown',
     }
   }
+}
+
+// Guard: when the loop finishes without text and without an error
+// (rounds consumed, no final answer), surface WHY in the status.
+export function describeLoopFailure(result: AgentLoopResult): string {
+  return result.error ?? 'no_final_text'
 }

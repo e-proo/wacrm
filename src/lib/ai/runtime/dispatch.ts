@@ -255,7 +255,43 @@ async function executeAgentRun(
     await markRun(db, args.accountId, runId, 'failed', 'REVISION_NOT_FOUND')
     return 'failed'
   }
-  const rev = revision as unknown as AiAgentRevision
+  // Map the snake_case row onto the camelCase revision type
+  // EXPLICITLY. A blind `as AiAgentRevision` cast silently yields
+  // undefined for maxToolRounds => the tool loop executed ZERO
+  // rounds => 'failed' with no error (this exact bug).
+  const rawRev = revision as {
+    id: string
+    agent_id: string
+    status: string
+    model: string
+    system_prompt: string | null
+    response_style: string
+    language_policy: string
+    max_tool_rounds: number
+    max_ai_replies_per_conversation: number
+  }
+  const rev: AiAgentRevision = {
+    id: rawRev.id,
+    accountId: args.accountId,
+    agentId: rawRev.agent_id ?? decision.agentId,
+    revisionNumber: 0,
+    status: (rawRev.status as AiAgentRevision['status']) ?? 'published',
+    providerConnectionId: decision.providerConnectionId,
+    model: rawRev.model,
+    systemPrompt: rawRev.system_prompt,
+    responseStyle: (rawRev.response_style as AiAgentRevision['responseStyle']) ?? 'balanced',
+    languagePolicy: rawRev.language_policy ?? 'auto',
+    temperature: null,
+    maxOutputTokens: null,
+    maxToolRounds: rawRev.max_tool_rounds ?? 0,
+    maxAiRepliesPerConversation: rawRev.max_ai_replies_per_conversation ?? 3,
+    handoffHumanMemberId: null,
+    settings: {},
+    createdAt: '',
+    publishedAt: null,
+    publishedBy: null,
+    rejectionReason: null,
+  }
   console.info(
     `[ai dispatch] revision=${rev.id.slice(0, 8)} model=${rev.model} rounds=${rev.maxToolRounds} prompt=${rev.systemPrompt ? rev.systemPrompt.length + 'ch' : 'empty'}`,
   )
