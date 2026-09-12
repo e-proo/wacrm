@@ -107,6 +107,17 @@ export async function backfillAccountFromLegacyConfig(
 
   const legacyRow = legacy as LegacyConfigRow
 
+  // An old `ai_configs` row can exist but be useless — e.g. a
+  // leftover stub with an empty `api_key` saved before BYO keys
+  // were introduced, or a row whose ciphertext no longer matches
+  // the current `ENCRYPTION_KEY`. In either case we must NOT abort
+  // with `legacy_key_undecryptable`: fall through to the existing
+  // provider-connection path so the account's multi-agent onboarding
+  // is not blocked by a dangling legacy row.
+  if (!legacyRow.api_key || legacyRow.api_key.trim() === '') {
+    return backfillFromExistingConnection(accountId, db)
+  }
+
   // Idempotency guard: did we already backfill this account?
   const { data: existingConn, error: connErr } = await db
     .from('ai_provider_connections')
@@ -133,10 +144,15 @@ export async function backfillAccountFromLegacyConfig(
     connectionId = (existingConn as { id: string }).id
   } else {
     // Validate the ciphertext can be decrypted (we don't keep
-    // the plaintext, but a corrupted key MUST fail loudly).
+    // the plaintext, but a corrupted key MUST fail loudly). If the
+    // legacy key is undecryptable (e.g. encrypted under an older
+    // ENCRYPTION_KEY), do not abort the whole onboarding — try to
+    // seed from an existing usable provider connection instead.
     try {
       decrypt(legacyRow.api_key)
     } catch {
+      const fromConn = await backfillFromExistingConnection(accountId, db)
+      if (!fromConn.skipped) return fromConn
       return {
         skipped: true,
         reason: 'legacy_key_undecryptable',
