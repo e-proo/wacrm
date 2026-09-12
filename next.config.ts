@@ -70,6 +70,20 @@ const nextConfig: NextConfig = {
   output: process.env.DOCKER_BUILD ? "standalone" : undefined,
 
   /**
+   * Keep the repo-shipped `knowledge-base/` folder next to the
+   * ingest route inside serverless / standalone bundles.
+   *
+   * POST /api/admin/ingest-knowledge-base reads the `.md` files from
+   * the filesystem at runtime (fs.readdir is invisible to Next's
+   * automatic file tracing), so without this include the folder is
+   * missing in Docker-standalone and Vercel deployments and the
+   * route answers 404 "knowledge-base directory not found".
+   */
+  outputFileTracingIncludes: {
+    "/api/admin/ingest-knowledge-base": ["./knowledge-base/**"],
+  },
+
+  /**
    * Cross-origin dev access (Next.js 16).
    *
    * Next 16 blocks requests to dev-only resources (`/_next/*` internals,

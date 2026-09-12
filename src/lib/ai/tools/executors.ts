@@ -4,6 +4,7 @@ import { previewServiceQuote } from '@/lib/services/domain-services'
 import { getCurrentExchangeRate } from '@/lib/services/domain-services'
 import { matchServiceRequest } from './service-matcher'
 import { recordIntent, listIntents } from '@/lib/services/intents/intents-service'
+import { readCoverageAttributes } from '@/lib/services/coverage/attributes'
 import { supabaseAdmin as adminClient } from '@/lib/ai/admin-client'
 import type {
   AccountId,
@@ -514,6 +515,9 @@ export interface CoverageFindOffersArgs {
   service_id: string
   currency: string
   min_available?: string
+  receive_region_id?: string
+  receive_macro?: 'north' | 'south' | 'international'
+  receive_method?: 'cash' | 'networks' | 'bank_deposit' | 'any'
   limit?: number
 }
 
@@ -531,44 +535,84 @@ export async function executeCoverageFindOffers(
     }
   }
   try {
-    const { data, error } = await adminClient()
-      .from('coverage_offers')
-      .select(
-        'id, reference_code, total_amount, reserved_amount, fulfilled_amount, currency, attributes, provider_cost, status',
-      )
-      .eq('account_id', ctx.accountId)
-      .eq('service_id', args.service_id)
-      .eq('currency', args.currency)
-      .in('status', ['active', 'partially_reserved'])
-    if (error) throw error
+    const db = adminClient()
+    const [offersRes, regionsRes] = await Promise.all([
+      db
+        .from('coverage_offers')
+        .select(
+          'id, reference_code, total_amount, reserved_amount, fulfilled_amount, currency, commission_per_thousand, commission_currency, attributes, provider_cost, status',
+        )
+        .eq('account_id', ctx.accountId)
+        .eq('service_id', args.service_id)
+        .eq('currency', args.currency)
+        .in('status', ['active', 'partially_reserved']),
+      args.receive_macro
+        ? db
+            .from('coverage_regions')
+            .select('id, macro_region')
+            .eq('account_id', ctx.accountId)
+            .eq('status', 'active')
+            .eq('macro_region', args.receive_macro)
+        : Promise.resolve({ data: null, error: null }),
+    ])
+    if (offersRes.error) throw offersRes.error
+    if (regionsRes.error) throw regionsRes.error
     const minAvailable = args.min_available ? Number(args.min_available) : 0
-    const rows = (data ?? []) as Array<{
+    const macroRegionIds = new Set(
+      ((regionsRes.data ?? []) as Array<{ id: string }>).map((r) => r.id),
+    )
+    const rows = (offersRes.data ?? []) as Array<{
       id: string
       reference_code: string
       total_amount: string
       reserved_amount: string
       fulfilled_amount: string
       currency: string
+      commission_per_thousand: string | null
+      commission_currency: string | null
       attributes: Record<string, unknown>
       provider_cost: string | null
       status: string
     }>
     const safe = rows
-      .map((row) => ({
-        offer_id: row.id,
-        reference_code: row.reference_code,
-        available_amount: String(
-          Math.max(
-            Number(row.total_amount) -
-              Number(row.reserved_amount) -
-              Number(row.fulfilled_amount),
-            0,
+      .map((row) => {
+        const attrs = readCoverageAttributes(row.attributes)
+        return {
+          offer_id: row.id,
+          reference_code: row.reference_code,
+          available_amount: String(
+            Math.max(
+              Number(row.total_amount) -
+                Number(row.reserved_amount) -
+                Number(row.fulfilled_amount),
+              0,
+            ),
           ),
-        ),
-        currency: row.currency,
-        attributes: row.attributes ?? {},
-      }))
+          currency: row.currency,
+          commission_per_thousand: row.commission_per_thousand,
+          commission_currency: row.commission_currency ?? row.currency,
+          attributes: attrs,
+        }
+      })
       .filter((row) => Number(row.available_amount) >= minAvailable)
+      .filter((row) =>
+        args.receive_region_id
+          ? row.attributes.receive_region_id === args.receive_region_id
+          : true,
+      )
+      .filter((row) =>
+        args.receive_macro
+          ? row.attributes.receive_region_id !== null &&
+            macroRegionIds.has(row.attributes.receive_region_id)
+          : true,
+      )
+      .filter((row) =>
+        args.receive_method
+          ? row.attributes.receive_method === args.receive_method ||
+            row.attributes.receive_method === 'any' ||
+            args.receive_method === 'any'
+          : true,
+      )
       .slice(0, Math.min(args.limit ?? 10, 50))
     return { ok: true, data: safe, safe_to_show: true }
   } catch (err) {
@@ -595,6 +639,9 @@ export interface CoverageProposeOfferArgs {
   total_amount: string
   currency: string
   attributes?: Record<string, unknown>
+  commission_per_thousand?: string
+  commission_currency?: string
+  deal_date?: string
 }
 
 export async function executeCoverageProposeOffer(
@@ -625,6 +672,53 @@ export async function executeCoverageProposeOffer(
       message: 'total_amount must be a positive number.',
     }
   }
+  // Validate the structured coverage legs early so the admin sees a
+  // clean proposal, never a malformed one.
+  const attrs = readCoverageAttributes(args.attributes)
+  if (
+    args.attributes &&
+    Object.keys(args.attributes).some(
+      (k) =>
+        ![
+          'coverage_scope',
+          'coverage_country',
+          'receive_region_id',
+          'receive_method',
+          'pay_region_id',
+          'pay_method',
+        ].includes(k),
+    )
+  ) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: true,
+      code: 'INVALID_INPUT',
+      message:
+        'attributes may only contain: coverage_scope, coverage_country, receive_region_id, receive_method, pay_region_id, pay_method.',
+    }
+  }
+  if (args.commission_per_thousand !== undefined) {
+    const rate = Number(args.commission_per_thousand)
+    if (!Number.isFinite(rate) || rate < 0) {
+      return {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'INVALID_INPUT',
+        message: 'commission_per_thousand must be a non-negative number.',
+      }
+    }
+    if (!args.commission_currency) {
+      return {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'INVALID_INPUT',
+        message: 'commission_currency is required when commission_per_thousand is set.',
+      }
+    }
+  }
   try {
     const escalation = await recordIntent({
       accountId: ctx.accountId,
@@ -632,12 +726,23 @@ export async function executeCoverageProposeOffer(
       conversationId: null,
       direction: 'offer',
       serviceHint: 'coverage offer',
-      summary: `Coverage offer proposal: ${args.total_amount} ${args.currency}`,
+      summary: `Coverage offer proposal: ${args.total_amount} ${args.currency}${
+        args.commission_per_thousand !== undefined
+          ? ` @ ${args.commission_per_thousand}/1000 ${args.commission_currency}`
+          : ''
+      }`,
       attributes: {
         service_id: args.service_id,
         total_amount: args.total_amount,
         currency: args.currency,
-        ...(args.attributes ?? {}),
+        ...attrs,
+        ...(args.commission_per_thousand !== undefined
+          ? {
+              commission_per_thousand: args.commission_per_thousand,
+              commission_currency: args.commission_currency,
+            }
+          : {}),
+        ...(args.deal_date ? { deal_date: args.deal_date } : {}),
       },
       escalateToAdmin: true,
       actorUserId: ctx.actorUserId,

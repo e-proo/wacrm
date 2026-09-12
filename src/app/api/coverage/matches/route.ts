@@ -6,15 +6,21 @@
 // (migration 050) so the offer/request row locks happen in a
 // single transaction. Two concurrent callers racing for the last
 // unit of availability must result in exactly one success.
+//
+// v2: the commission in force is snapshotted SERVER-SIDE from the
+// offer row (per-thousand rate × matched amount ÷ 1000) into
+// fee_snapshot — the client can never dictate the commission.
 // ============================================================
 
 import { NextResponse } from 'next/server'
+import { Decimal } from 'decimal.js'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import {
   checkRateLimit,
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
 import {
   releaseCoverageMatch,
   reserveCoverageMatch,
@@ -32,7 +38,7 @@ export async function GET() {
     const { data, error } = await ctx.supabase
       .from('coverage_matches')
       .select(
-        'id, account_id, offer_id, request_id, service_id, matched_amount, currency, status, created_at',
+        'id, account_id, offer_id, request_id, service_id, matched_amount, currency, fee_snapshot, status, created_at',
       )
       .eq('account_id', ctx.accountId)
       .order('created_at', { ascending: false })
@@ -57,7 +63,6 @@ interface CreateMatchBody {
   idempotencyKey: string
   reservedUntil?: string | null
   rateSnapshot?: Record<string, unknown>
-  feeSnapshot?: Record<string, unknown>
   providerCost?: string | null
   customerFee?: string | null
 }
@@ -83,6 +88,42 @@ export async function POST(request: Request) {
         { status: 400 },
       )
     }
+
+    // Server-side commission snapshot from the OFFER row.
+    let feeSnapshot: Record<string, unknown> = {}
+    const db = supabaseAdmin()
+    const { data: offerRow, error: offerError } = await db
+      .from('coverage_offers')
+      .select('id, commission_per_thousand, commission_currency, currency')
+      .eq('account_id', ctx.accountId)
+      .eq('id', body.offerId)
+      .maybeSingle()
+    if (offerError) {
+      console.error('[POST /api/coverage/matches] offer read failed:', offerError)
+      return NextResponse.json(
+        { error: 'Failed to read the offer for the commission snapshot' },
+        { status: 500 },
+      )
+    }
+    if (!offerRow) {
+      return NextResponse.json(
+        { error: 'Offer not found.', code: 'COVERAGE_OFFER_NOT_FOUND' },
+        { status: 404 },
+      )
+    }
+    const rate = offerRow.commission_per_thousand as string | null
+    if (rate !== null && rate !== undefined) {
+      const matched = new Decimal(body.matchedAmount || '0')
+      const commissionAmount = matched.times(rate).dividedBy(1000)
+      feeSnapshot = {
+        commission_per_thousand: rate,
+        commission_currency:
+          (offerRow.commission_currency as string | null) ??
+          (offerRow.currency as string),
+        commission_amount: commissionAmount.toFixed(4),
+      }
+    }
+
     try {
       const result = await reserveCoverageMatch({
         accountId: ctx.accountId,
@@ -93,7 +134,7 @@ export async function POST(request: Request) {
         idempotencyKey: body.idempotencyKey,
         reservedUntil: body.reservedUntil ?? null,
         rateSnapshot: body.rateSnapshot ?? {},
-        feeSnapshot: body.feeSnapshot ?? {},
+        feeSnapshot,
         providerCost: body.providerCost ?? null,
         customerFee: body.customerFee ?? null,
         actorUserId: ctx.userId,

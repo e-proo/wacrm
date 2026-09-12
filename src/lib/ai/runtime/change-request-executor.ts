@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { publishExchangeRateVersion } from '@/lib/services/domain-services'
 import { publishPricingRuleRaw } from '@/lib/services/pricing/rules-crud'
+import { readCoverageAttributes } from '@/lib/services/coverage/attributes'
 
 export class ChangeExecutionError extends Error {
   readonly code: string
@@ -99,11 +100,17 @@ export async function executeApprovedChangeRequest(input: {
       total_amount?: string
       currency?: string
       attributes?: Record<string, unknown>
+      commission_per_thousand?: string
+      commission_currency?: string
+      deal_date?: string
       intent_id?: string
     }
     if (!p.service_id || !p.total_amount || !p.currency) {
       throw new ChangeExecutionError('OFFER_PAYLOAD_INCOMPLETE', 'Approved payload must carry service_id, total_amount, currency.')
     }
+    // Validate the coverage legs from the approved payload — the
+    // normalized shape is what lands in the row.
+    const offerAttrs = readCoverageAttributes(p.attributes ?? {})
     const db2 = supabaseAdmin()
     const reference = `CHG-${row.id.slice(0, 8).toUpperCase()}`
     const { data: offer, error: offerError } = await db2
@@ -115,7 +122,14 @@ export async function executeApprovedChangeRequest(input: {
         reference_code: reference,
         total_amount: p.total_amount,
         currency: p.currency,
-        attributes: p.attributes ?? {},
+        attributes: offerAttrs,
+        ...(p.commission_per_thousand
+          ? { commission_per_thousand: p.commission_per_thousand }
+          : {}),
+        ...(p.commission_currency
+          ? { commission_currency: p.commission_currency }
+          : {}),
+        ...(p.deal_date ? { deal_date: p.deal_date } : {}),
         status: 'active',
         created_by: input.actorUserId,
       })

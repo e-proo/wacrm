@@ -323,9 +323,9 @@ const INTENTS_SEARCH: ToolDefinition = {
 
 const COVERAGE_FIND_OFFERS: ToolDefinition = {
   key: 'coverage.find_offers',
-  version: 1,
+  version: 2,
   description:
-    'Search ACTIVE coverage offers by service, currency, and minimum headroom. Returns aggregated rows WITHOUT provider identity or cost — the requester-facing DTO stays anonymous.',
+    'Search ACTIVE coverage offers by service, currency, and minimum headroom, optionally filtered by receive region (exact id or macro north/south/international) and method. Returns aggregated rows WITHOUT provider identity or cost — the requester-facing DTO stays anonymous.',
   argumentSchema: {
     service_id: {
       type: 'string',
@@ -342,6 +342,21 @@ const COVERAGE_FIND_OFFERS: ToolDefinition = {
       description: 'Minimum remaining headroom (decimal string).',
       required: false,
     },
+    receive_region_id: {
+      type: 'string',
+      description: 'Exact coverage region UUID for the RECEIVE leg.',
+      required: false,
+    },
+    receive_macro: {
+      type: 'string',
+      description: "Macro region filter: 'north' | 'south' | 'international'.",
+      required: false,
+    },
+    receive_method: {
+      type: 'string',
+      description: "'cash' | 'networks' | 'bank_deposit' | 'any'.",
+      required: false,
+    },
     limit: {
       type: 'number',
       description: 'Max rows. Default 10, max 50.',
@@ -349,7 +364,7 @@ const COVERAGE_FIND_OFFERS: ToolDefinition = {
     },
   },
   returnSchema:
-    'Array<{ offer_id, reference_code, available_amount, currency, attributes (public only) }> — NO provider_contact_id, NO provider_cost.',
+    'Array<{ offer_id, reference_code, available_amount, currency, commission_per_thousand, commission_currency, attributes (validated coverage legs) }> — NO provider_contact_id, NO provider_cost.',
   grantPermissions: ['read'],
   category: 'coverage',
   risk: 'read',
@@ -383,7 +398,23 @@ const COVERAGE_PROPOSE_OFFER: ToolDefinition = {
     },
     attributes: {
       type: 'object',
-      description: 'Coverage attributes per the service schema (region, city...).',
+      description:
+        'Coverage legs: coverage_scope (domestic|international), coverage_country, receive_region_id, receive_method, pay_region_id, pay_method (cash|networks|bank_deposit|any).',
+      required: false,
+    },
+    commission_per_thousand: {
+      type: 'string',
+      description: 'Commission RATE per 1000 units (e.g. "7" = 7 per 1000). Optional.',
+      required: false,
+    },
+    commission_currency: {
+      type: 'string',
+      description: 'Commission currency code; required when commission_per_thousand is set.',
+      required: false,
+    },
+    deal_date: {
+      type: 'string',
+      description: 'Business date (YYYY-MM-DD). Defaults to today.',
       required: false,
     },
   },
