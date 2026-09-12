@@ -328,7 +328,7 @@ async function backfillFromExistingConnection(
   // verified, most recently created).
   const { data: conn, error: connErr } = await db
     .from('ai_provider_connections')
-    .select('id, name, status, model')
+    .select('id, name, status')
     .eq('account_id', accountId)
     .in('status', ['active', 'verified'])
     .order('created_at', { ascending: false })
@@ -339,11 +339,12 @@ async function backfillFromExistingConnection(
     return { skipped: true, reason: 'no_usable_connection' }
   }
   const connectionId = (conn as { id: string }).id
-  // The connections table may store the model inside `capabilities`
-  // or a per-connection config; fall back to a safe placeholder
-  // the admin can change from the agent detail screen.
-  const fallbackModel =
-    (conn as { model?: string | null }).model ?? 'gpt-4o-mini'
+  // `ai_provider_connections` has no `model` column (model lives on
+  // `ai_configs` or in the connection's provider catalog). There is
+  // no legacy model on this path, so seed a safe placeholder the
+  // admin can change from the agent detail screen. This matches the
+  // previous behaviour, where `conn.model` was always undefined.
+  const fallbackModel = 'gpt-4o-mini'
 
   // 1) Create/reuse the customer_service agent. The global
   //    idempotency guard above already returned early when a
