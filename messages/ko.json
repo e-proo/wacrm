@@ -1271,6 +1271,8 @@
       "systemKeyAdminOperations": "admin_operations",
       "runBackfill": "백필 실행",
       "backfillNoConnection": "활성 프로바이더 연결이 없습니다. 먼저 프로바이더 탭에서 추가하세요.",
+      "backfillKeyUndecryptable": "저장된 API 키를 복호화할 수 없습니다 — 서버의 ENCRYPTION_KEY가 저장 시 사용한 키와 일치하는지 확인한 후 설정에서 프로바이더 키를 다시 입력하세요.",
+      "backfillSkipped": "에이전트가 생성되지 않았습니다: {reason}",
       "ingestKb": "지식 베이스 주입",
       "kbIngested": "{count}개 문서 주입됨",
       "kbAssigned": "에이전트에 {count}개 청크 할당됨"

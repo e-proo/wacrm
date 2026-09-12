@@ -1271,6 +1271,8 @@
       "systemKeyAdminOperations": "admin_operations",
       "runBackfill": "Run backfill",
       "backfillNoConnection": "No active provider connection. Add one from the Providers tab first.",
+      "backfillKeyUndecryptable": "Could not decrypt the stored API key — make sure ENCRYPTION_KEY on the server matches the key used when it was saved, then re-enter the provider key in Settings.",
+      "backfillSkipped": "Agents were not created: {reason}",
       "ingestKb": "Ingest knowledge base",
       "kbIngested": "Ingested {count} documents",
       "kbAssigned": "Assigned {count} chunks to the agent"

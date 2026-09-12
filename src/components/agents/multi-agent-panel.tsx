@@ -93,6 +93,14 @@ export function MultiAgentPanel() {
       if (json.skipped && json.reason === 'no_usable_connection') {
         throw new Error(t('multiAgent.backfillNoConnection'));
       }
+      if (json.skipped && json.reason === 'legacy_key_undecryptable') {
+        throw new Error(t('multiAgent.backfillKeyUndecryptable'));
+      }
+      if (json.skipped && json.reason && json.reason !== 'already_backfilled') {
+        throw new Error(
+          t('multiAgent.backfillSkipped', { reason: json.reason }),
+        );
+      }
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');

@@ -1271,6 +1271,8 @@
       "systemKeyAdminOperations": "admin_operations",
       "runBackfill": "تشغيل التهيئة",
       "backfillNoConnection": "لا يوجد اتصال مزود نشط. أضف مزوداً أولاً من تبويب المزودون.",
+      "backfillKeyUndecryptable": "تعذر فك تشفير مفتاح API المخزن — تأكد أن ENCRYPTION_KEY على الخادم يطابق المفتاح المستخدم عند الحفظ، ثم أعد إدخال مفتاح المزود من الإعدادات.",
+      "backfillSkipped": "لم تُنشأ الوكلاء: {reason}",
       "ingestKb": "حقن قاعدة المعرفة",
       "kbIngested": "تم حقن {count} مستنداً",
       "kbAssigned": "أُسند {count} مقطعاً للوكيل"
