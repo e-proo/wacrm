@@ -37,14 +37,14 @@ export async function providerFetch(
     const v = validateUrl(url, { allowPrivate })
     if (v.blockedReason || !v.url) {
       throw new AiError(
-        'The endpoint address is blocked by the outbound security policy.',
+        `The endpoint address is blocked by the outbound security policy (${v.blockedReason ?? 'unparseable'}).`,
         { code: 'endpoint_blocked', status: 502 },
       )
     }
     const target = await resolveTarget(v.url, { allowPrivate })
     if (!target.allowed) {
       throw new AiError(
-        'The endpoint address is blocked by the outbound security policy.',
+        `The endpoint address is blocked by the outbound security policy (${target.reason}).`,
         { code: 'endpoint_blocked', status: 502 },
       )
     }

@@ -152,6 +152,7 @@ export interface OfferDraftPatch {
   commissionPerThousand?: string | null
   commissionCurrency?: string | null
   dealDate?: string | null
+  notes?: string | null
   attributes?: Record<string, unknown>
   availableFrom?: string | null
   expiresAt?: string | null
@@ -235,6 +236,7 @@ export async function patchCoverageOfferDraft(
     }
     update.deal_date = patch.dealDate ?? null
   }
+  if (patch.notes !== undefined) update.notes = patch.notes ? String(patch.notes).slice(0, 1000) : null
   if (patch.attributes !== undefined) {
     const attrs = normalizeCoverageAttributes(patch.attributes)
     if (!attrs.ok) {
@@ -259,7 +261,7 @@ export async function patchCoverageOfferDraft(
     .eq('account_id', accountId)
     .eq('id', rowId)
     .select(
-      'id, reference_code, total_amount, currency, attributes, commission_per_thousand, commission_currency, commission_amount, deal_date, available_from, expires_at, status, version, updated_at',
+      'id, reference_code, total_amount, currency, attributes, commission_per_thousand, commission_currency, commission_amount, deal_date, notes, available_from, expires_at, status, version, updated_at',
     )
     .single()
   if (updateError || !data) {

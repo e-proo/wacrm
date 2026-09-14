@@ -3,18 +3,20 @@ import {
   listRegisteredTools,
   getRegisteredTool,
   isGrantAllowed,
+  renderToolCatalog,
 } from './tool-registry'
 
 // Phase 3: registry + the 5 read-only tools it ships.
 
 describe('tool registry (Phase 3)', () => {
-  it('registers exactly the 10 documented tools', () => {
+  it('registers exactly the 11 documented tools', () => {
     const tools = listRegisteredTools()
     const keys = tools.map((t) => t.key).sort()
     expect(keys).toEqual(
       [
         'coverage.check_availability',
         'coverage.find_offers',
+        'coverage.get_rates',
         'coverage.propose_offer',
         'exchange_rates.get_current',
         'intents.record',
@@ -60,5 +62,23 @@ describe('tool registry (Phase 3)', () => {
   it('returns null for unknown tools (DENY BY DEFAULT)', () => {
     expect(getRegisteredTool('does.not.exist')).toBeNull()
     expect(getRegisteredTool('execute_in_arbitrary_sql')).toBeNull()
+  })
+
+  it('renderToolCatalog surfaces exactly the granted, registered tools', () => {
+    const catalog = renderToolCatalog([
+      { tool_key: 'coverage.get_rates', permission: 'read' },
+      { tool_key: 'intents.record', permission: 'propose' },
+    ])
+    expect(catalog).toContain('coverage.get_rates (read)')
+    expect(catalog).toContain('intents.record (propose)')
+    // Compact argument hint so the model can emit the call.
+    expect(catalog).toContain('args: {')
+  })
+
+  it('renderToolCatalog skips stale grant rows for unregistered tools', () => {
+    const catalog = renderToolCatalog([
+      { tool_key: 'legacy.removed_tool', permission: 'read' },
+    ])
+    expect(catalog).toBe('')
   })
 })

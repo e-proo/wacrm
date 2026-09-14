@@ -27,6 +27,116 @@ import { loadEmbeddingsKey } from '@/lib/ai/config'
 import { ingestDocument } from '@/lib/ai/knowledge'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+// ------------------------------------------------------------
+// Binding preservation across a re-ingest.
+//
+// ingestDocument REPLACES every chunk row (new uuids) and the
+// ai_agent_knowledge_assignments cascade-delete with them. A
+// snapshot/restore keyed by chunk_index — stable only across an
+// IDENTICAL or same-count rebuild — means agents keep their KB
+// bound without waiting for the final blanket assign pass. When the
+// document was RE-SPLIT (chunk count changed) the positional key is
+// wrong: index N no longer points at the same text, so bindings are
+// skipped (and the admin is warned) rather than silently rebound to
+// the wrong chunks.
+// ------------------------------------------------------------
+
+interface BindingSnapshot {
+  agent_revision_id: string
+  chunk_index: number
+  priority: number
+  enabled: boolean
+}
+
+interface DocumentBindingSnapshot {
+  bindings: BindingSnapshot[]
+  chunkCount: number
+}
+
+async function snapshotDocumentBindings(
+  db: SupabaseClient,
+  accountId: string,
+  documentId: string,
+): Promise<DocumentBindingSnapshot> {
+  const { data: chunks } = await db
+    .from('ai_knowledge_chunks')
+    .select('id, chunk_index')
+    .eq('account_id', accountId)
+    .eq('document_id', documentId)
+  const rows = (chunks ?? []) as Array<{ id: string; chunk_index: number }>
+  if (rows.length === 0) return { bindings: [], chunkCount: 0 }
+  const indexById = new Map(rows.map((c) => [c.id, c.chunk_index]))
+  const { data: bindings } = await db
+    .from('ai_agent_knowledge_assignments')
+    .select('agent_revision_id, knowledge_chunk_id, priority, enabled')
+    .eq('account_id', accountId)
+  return {
+    chunkCount: rows.length,
+    bindings: ((bindings ?? []) as Array<{
+      agent_revision_id: string
+      knowledge_chunk_id: string
+      priority: number
+      enabled: boolean
+    }>)
+      .filter((b) => indexById.has(b.knowledge_chunk_id))
+      .map((b) => ({
+        agent_revision_id: b.agent_revision_id,
+        chunk_index: indexById.get(b.knowledge_chunk_id) as number,
+        priority: b.priority,
+        enabled: b.enabled,
+      })),
+  }
+}
+
+async function restoreDocumentBindings(
+  db: SupabaseClient,
+  accountId: string,
+  documentId: string,
+  snapshot: DocumentBindingSnapshot,
+): Promise<string | undefined> {
+  if (snapshot.bindings.length === 0) return undefined
+  const { data: chunks } = await db
+    .from('ai_knowledge_chunks')
+    .select('id, chunk_index')
+    .eq('account_id', accountId)
+    .eq('document_id', documentId)
+  const newRows = (chunks ?? []) as Array<{ id: string; chunk_index: number }>
+  if (newRows.length !== snapshot.chunkCount) {
+    // The content was re-split: chunk_index no longer identifies
+    // the same text, so a positional restore would bind agents to
+    // the WRONG chunks. Skip loudly instead.
+    return `bindings-not-restored (${snapshot.chunkCount} chunks before re-ingest, ${newRows.length} after — re-check the agent's knowledge assignments)`
+  }
+  const idByIndex = new Map(
+    newRows.map((c) => [c.chunk_index, c.id]),
+  )
+  const rows = snapshot.bindings
+    .filter((b) => idByIndex.has(b.chunk_index))
+    .map((b) => ({
+      account_id: accountId,
+      agent_revision_id: b.agent_revision_id,
+      knowledge_chunk_id: idByIndex.get(b.chunk_index) as string,
+      priority: b.priority,
+      enabled: b.enabled,
+    }))
+  if (rows.length === 0) return undefined
+  const { error } = await db
+    .from('ai_agent_knowledge_assignments')
+    .upsert(rows, {
+      onConflict: 'agent_revision_id,knowledge_chunk_id',
+    })
+  if (error) {
+    console.error(
+      '[ingest-knowledge-base] restore bindings failed:',
+      error,
+    )
+    return `bindings-not-restored (${error.message})`
+  }
+  return undefined
+}
+
 export async function POST(request: Request) {
   try {
     const ctx = await requireRole('admin')
@@ -127,6 +237,17 @@ export async function POST(request: Request) {
 
       let indexed = true
       let warning: string | undefined
+      // Re-ingest REPLACES every chunk row (new uuids) and the agent
+      // bindings cascade-delete with them. Snapshot this document's
+      // bindings first (by chunk_index — only trustworthy when the
+      // rebuild keeps the same chunk count) and restore them
+      // afterwards, so an identical re-ingest never silently
+      // unbinds the KB from a revision.
+      const snapshot = await snapshotDocumentBindings(
+        db,
+        ctx.accountId,
+        documentId,
+      )
       try {
         await ingestDocument(
           db,
@@ -135,6 +256,13 @@ export async function POST(request: Request) {
           documentId,
           content,
         )
+        const restoreWarning = await restoreDocumentBindings(
+          db,
+          ctx.accountId,
+          documentId,
+          snapshot,
+        )
+        warning = restoreWarning
       } catch (err) {
         indexed = false
         warning =

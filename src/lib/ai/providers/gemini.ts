@@ -128,7 +128,10 @@ export async function generateGemini(
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: toGeminiContents(messages),
-        generationConfig: { maxOutputTokens: MAX_OUTPUT_TOKENS },
+        generationConfig: {
+          maxOutputTokens: ctx.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
+          ...(ctx.temperature != null ? { temperature: ctx.temperature } : {}),
+        },
       }),
       signal: AbortSignal.timeout(timeoutMs),
     })

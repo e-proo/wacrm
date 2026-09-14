@@ -88,7 +88,7 @@ export async function publishAgentRevision(
   const { data: revision, error: revErr } = await db
     .from('ai_agent_revisions')
     .select(
-      'id, account_id, agent_id, revision_number, status, provider_connection_id',
+      'id, account_id, agent_id, revision_number, status, provider_connection_id, settings',
     )
     .eq('account_id', accountId)
     .eq('agent_id', agentId)
@@ -224,6 +224,15 @@ export async function publishAgentRevision(
   //      revision keeps the same KB scope as the draft it replaces
   //      (assignments bind to the revision id, and the runtime reads
   //      them via the PUBLISHED revision). Idempotent per revision.
+  //
+  //      The publish-time inherit is the DEFAULT for a draft that is
+  //      silent about KB scope. When the admin has already edited the
+  //      draft's assignments (the knowledge PUT route stamps
+  //      `kb_assignments_initialized`, including an intentional
+  //      full-clear), we must NOT resurrect the superseded scope —
+  //      that would silently undo the operator's unbinding.
+  const revSettings = (revision as { settings?: Record<string, unknown> }).settings ?? {}
+  const kbInitialized = revSettings.kb_assignments_initialized === true
   const { data: prevAssignments } = await db
     .from('ai_agent_knowledge_assignments')
     .select('knowledge_chunk_id, priority, enabled')
@@ -232,7 +241,7 @@ export async function publishAgentRevision(
   if (!prevAssignments || prevAssignments.length === 0) {
     // First publish: seed from the previous published revision (or
     // nothing) — this is the "inherit the KB" default.
-    if (previousId) {
+    if (previousId && !kbInitialized) {
       const { data: inherited } = await db
         .from('ai_agent_knowledge_assignments')
         .select('knowledge_chunk_id, priority, enabled')

@@ -14,13 +14,15 @@ import {
   ClipboardCheck,
   Activity,
   Brain,
- } from 'lucide-react';
+  Route,
+} from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AiPlayground } from '@/components/agents/ai-playground';
 import { AiUsageCard } from '@/components/agents/ai-usage';
 import { AiConfig } from '@/components/settings/ai-config';
 import { AiProvidersPanel } from '@/components/settings/ai-providers';
 import { MultiAgentPanel } from '@/components/agents/multi-agent-panel';
+import { AgentRoutesPanel } from '@/components/agents/agent-routes-panel';
 import { TrustedAdminsPanel } from '@/components/agents/trusted-admins-panel';
 import { AgentRunsPanel } from '@/components/agents/agent-runs-panel';
 import { ChangeRequestsPanel } from '@/components/agents/change-requests-panel';
@@ -35,6 +37,7 @@ type Tab =
   | 'setup'
   | 'usage'
   | 'multi_agent'
+  | 'routes'
   | 'trusted_admins'
   | 'runs'
   | 'change_requests'
@@ -99,6 +102,11 @@ export default function AgentsPage() {
               </TabsTrigger>
             )}
             {canSeeMultiAgent && (
+              <TabsTrigger value="routes">
+                <Route className="me-1.5 h-4 w-4" /> {t('tabRoutes')}
+              </TabsTrigger>
+            )}
+            {canSeeMultiAgent && (
               <TabsTrigger value="trusted_admins">
                 <ShieldCheck className="me-1.5 h-4 w-4" /> {t('tabTrustedAdmins')}
               </TabsTrigger>
@@ -145,6 +153,12 @@ export default function AgentsPage() {
           {canSeeMultiAgent && (
             <TabsContent value="multi_agent" className="mt-4">
               <MultiAgentPanel />
+            </TabsContent>
+          )}
+
+          {canSeeMultiAgent && (
+            <TabsContent value="routes" className="mt-4">
+              <AgentRoutesPanel />
             </TabsContent>
           )}
 

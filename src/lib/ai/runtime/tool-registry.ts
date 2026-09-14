@@ -370,6 +370,25 @@ const COVERAGE_FIND_OFFERS: ToolDefinition = {
   risk: 'read',
 }
 
+const COVERAGE_GET_RATES: ToolDefinition = {
+  key: 'coverage.get_rates',
+  version: 1,
+  description:
+    "Read the account's CURRENT published commission rate board (migration 062): rates per 1000 for cash pickup / remittance / coverage, grouped by market (north, south, international). Quote ONLY the published numbers, state they are per 1000 and can change; when a rate or the whole board is missing, do NOT invent a figure — say the desk confirms it per case.",
+  argumentSchema: {
+    scope: {
+      type: 'enum',
+      description: "Market to return: 'north' | 'south' | 'international' | 'all' (default).",
+      required: false,
+    },
+  },
+  returnSchema:
+    '{ published: boolean, updated_at, scope rates { cash_per_1000, remittance_per_1000, coverage_per_1000 } } | { published: false }',
+  grantPermissions: ['read'],
+  category: 'coverage',
+  risk: 'read',
+}
+
 const COVERAGE_PROPOSE_OFFER: ToolDefinition = {
   key: 'coverage.propose_offer',
   version: 1,
@@ -448,6 +467,7 @@ const REGISTRY: ReadonlyArray<ToolDefinition> = [
   EXCHANGE_RATES_GET_CURRENT,
   COVERAGE_CHECK_AVAILABILITY,
   COVERAGE_FIND_OFFERS,
+  COVERAGE_GET_RATES,
   COVERAGE_PROPOSE_OFFER,
   SERVICES_MATCH_REQUEST,
   INTENTS_RECORD,
@@ -467,4 +487,32 @@ export function isGrantAllowed(
   permission: ToolGrantPermission,
 ): boolean {
   return tool.grantPermissions.includes(permission)
+}
+
+/**
+ * Prompt-facing catalog of the tools a revision may call — the model
+ * can only use what it is TOLD about. One compact line per granted
+ * + registered tool; unknown/stale grant rows are skipped (they are
+ * surfaced by the publish checklist instead). The caller layers the
+ * ```tool fence protocol around it (see buildSystemPrompt).
+ */
+export function renderToolCatalog(
+  grants: ReadonlyArray<{ tool_key: string; permission: ToolGrantPermission }>,
+): string {
+  const lines: string[] = []
+  for (const g of grants) {
+    const tool = getRegisteredTool(g.tool_key)
+    if (!tool) continue
+    const args = Object.entries(tool.argumentSchema).map(
+      ([name, s]) =>
+        `${name}${s.required === false ? '?' : ''}: ${
+          s.type === 'enum' ? (s.values ?? ['string']).join('|') : s.type
+        }`,
+    )
+    lines.push(
+      `- ${tool.key} (${g.permission}): ${tool.description}` +
+        (args.length > 0 ? ` | args: {${args.join(', ')}}` : ''),
+    )
+  }
+  return lines.join('\n')
 }

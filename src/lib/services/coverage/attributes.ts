@@ -28,6 +28,7 @@
 export const COVERAGE_METHODS = [
   'cash',
   'networks',
+  'remittance',
   'bank_deposit',
   'any',
 ] as const

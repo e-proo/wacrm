@@ -87,7 +87,12 @@ export async function generateAnthropic(
       body: JSON.stringify({
         model,
         system: systemPrompt,
-        max_tokens: MAX_OUTPUT_TOKENS,
+        max_tokens: ctx.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
+        // Anthropic only accepts 0-1; the revision knob is stored
+        // 0-2 for all providers, so clamp rather than 400 at runtime.
+        ...(ctx.temperature != null
+          ? { temperature: Math.min(ctx.temperature, 1) }
+          : {}),
         messages: normalizeForAnthropic(messages),
       }),
       signal: AbortSignal.timeout(timeoutMs),

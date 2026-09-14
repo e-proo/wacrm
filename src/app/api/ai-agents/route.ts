@@ -357,8 +357,10 @@ export async function POST(request: Request) {
     let languagePolicy = 'auto'
     let temperature: number | null = null
     let maxOutputTokens: number | null = null
+    let maxToolRounds = 0
     let maxAiRepliesPerConversation = 3
     let handoffHumanMemberId: string | null = null
+    let settings: Record<string, unknown> = {}
 
     if (
       (agentRow as { published_revision_id: string | null }).published_revision_id
@@ -366,7 +368,7 @@ export async function POST(request: Request) {
       const { data: prev, error: prevErr } = await ctx.supabase
         .from('ai_agent_revisions')
         .select(
-          'revision_number, provider_connection_id, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_ai_replies_per_conversation, handoff_human_member_id',
+          'revision_number, provider_connection_id, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id, settings',
         )
         .eq('account_id', ctx.accountId)
         .eq(
@@ -391,8 +393,10 @@ export async function POST(request: Request) {
           language_policy: string
           temperature: number | null
           max_output_tokens: number | null
+          max_tool_rounds: number
           max_ai_replies_per_conversation: number
           handoff_human_member_id: string | null
+          settings: Record<string, unknown>
         }
         nextRevisionNumber = p.revision_number + 1
         providerConnectionId = providerConnectionId ?? p.provider_connection_id
@@ -404,11 +408,13 @@ export async function POST(request: Request) {
         languagePolicy = body.languagePolicy ?? p.language_policy
         temperature = body.temperature ?? p.temperature
         maxOutputTokens = body.maxOutputTokens ?? p.max_output_tokens
+        maxToolRounds = p.max_tool_rounds
         maxAiRepliesPerConversation =
           body.maxAiRepliesPerConversation ??
           p.max_ai_replies_per_conversation
         handoffHumanMemberId =
           body.handoffHumanMemberId ?? p.handoff_human_member_id
+        settings = p.settings ?? {}
       }
     }
 
@@ -437,10 +443,10 @@ export async function POST(request: Request) {
         language_policy: languagePolicy,
         temperature,
         max_output_tokens: maxOutputTokens,
-        max_tool_rounds: 0,
+        max_tool_rounds: maxToolRounds,
         max_ai_replies_per_conversation: maxAiRepliesPerConversation,
         handoff_human_member_id: handoffHumanMemberId,
-        settings: {},
+        settings,
         created_by: ctx.userId,
       })
       .select('id')

@@ -23,7 +23,7 @@ const COMMISSION_CURRENCY_RE = /^[A-Z_]{3,8}$/
 const DEAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 const OFFER_SELECT =
-  'id, account_id, service_id, provider_contact_id, reference_code, total_amount, reserved_amount, fulfilled_amount, currency, attributes, commission_per_thousand, commission_currency, commission_amount, deal_date, available_from, expires_at, status, version, created_at, updated_at'
+  'id, account_id, service_id, provider_contact_id, reference_code, total_amount, reserved_amount, fulfilled_amount, currency, attributes, commission_per_thousand, commission_currency, commission_amount, deal_date, notes, available_from, expires_at, status, version, created_at, updated_at'
 
 export async function GET() {
   try {
@@ -61,6 +61,7 @@ interface CreateOfferBody {
   commissionPerThousand?: string | null
   commissionCurrency?: string | null
   dealDate?: string | null
+  notes?: string | null
   availableFrom?: string | null
   expiresAt?: string | null
   providerCost?: string | null
@@ -144,6 +145,7 @@ export async function POST(request: Request) {
           commissionRate === null ? null : commissionRate.toString(),
         commission_currency: commissionCurrency,
         deal_date: body.dealDate ?? null,
+        notes: body.notes ? String(body.notes).slice(0, 1000) : null,
         available_from: body.availableFrom ?? null,
         expires_at: body.expiresAt ?? null,
         provider_cost: body.providerCost ?? null,

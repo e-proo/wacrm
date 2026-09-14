@@ -44,7 +44,10 @@ function modelsUrl(ctx: AdapterContext): string {
 }
 
 interface OpenAiResponse {
-  choices?: { message?: { content?: string } }[]
+  choices?: {
+    message?: { content?: string; reasoning_content?: string }
+    finish_reason?: string
+  }[]
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
@@ -78,7 +81,8 @@ export async function generateOpenAi(
           { role: 'system', content: systemPrompt },
           ...mergeConsecutive(messages),
         ],
-        max_completion_tokens: MAX_OUTPUT_TOKENS,
+        max_completion_tokens: ctx.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
+        ...(ctx.temperature != null ? { temperature: ctx.temperature } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     })
@@ -91,10 +95,24 @@ export async function generateOpenAi(
   }
 
   const data = (await res.json().catch(() => null)) as OpenAiResponse | null
-  const text = data?.choices?.[0]?.message?.content
+  const first = data?.choices?.[0]
+  const text = first?.message?.content
   if (!text || typeof text !== 'string' || !text.trim()) {
-    throw new AiError('OpenAI returned an empty response.', {
-      code: 'empty_response',
+    // Distinguish the two empty-response shapes (server log only):
+    // a) reasoning model that spent the whole budget on
+    //    reasoning_content before writing the answer (finish_reason
+    //    'length') — fix by raising max_output_tokens / budget;
+    // b) anything else — the raw body is the only clue.
+    const budgetEaten =
+      first?.finish_reason === 'length' &&
+      typeof first?.message?.reasoning_content === 'string' &&
+      first.message.reasoning_content.length > 0
+    const headline = budgetEaten
+      ? 'OpenAI returned an empty response: the reasoning model consumed the whole token budget on thinking (finish_reason=length). Raise the agent revision "max_output_tokens" (or pick a non-reasoning model).'
+      : 'OpenAI returned an empty response.'
+    const snippet = JSON.stringify(first ?? data ?? null).slice(0, 400)
+    throw new AiError(`${headline} Endpoint said: ${snippet}`, {
+      code: budgetEaten ? 'reasoning_truncated' : 'empty_response',
     })
   }
   const usage: AiUsage | null = normalizeUsage({

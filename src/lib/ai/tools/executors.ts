@@ -9,6 +9,7 @@ import { supabaseAdmin as adminClient } from '@/lib/ai/admin-client'
 import type {
   AccountId,
   Uuid,
+  ToolGrantPermission,
 } from '@/lib/ai/runtime/multi-agent-types'
 
 // ============================================================
@@ -35,6 +36,13 @@ export interface ToolContext {
   actorUserId: string | null
   /** The run id — used to record which tool calls belong to which run. */
   runId: Uuid | null
+  /**
+   * The RUNNING REVISION's grants (tool_key → permission level),
+   * loaded by the agent loop. executeTool DENIES any call whose tool
+   * is absent here or whose claimed level exceeds the granted one —
+   * this is what makes "deny by default" real instead of a comment.
+   */
+  grants: Record<string, ToolGrantPermission>
 }
 
 export interface ToolResult<T = unknown> {
@@ -517,7 +525,7 @@ export interface CoverageFindOffersArgs {
   min_available?: string
   receive_region_id?: string
   receive_macro?: 'north' | 'south' | 'international'
-  receive_method?: 'cash' | 'networks' | 'bank_deposit' | 'any'
+  receive_method?: 'cash' | 'networks' | 'remittance' | 'bank_deposit' | 'any'
   limit?: number
 }
 
@@ -623,6 +631,97 @@ export async function executeCoverageFindOffers(
       safe_to_show: false,
       code: 'COVERAGE_SEARCH_FAILED',
       message: 'Could not search coverage offers.',
+    }
+  }
+}
+
+// ------------------------------------------------------------
+// coverage.get_rates — read the account's CURRENT published
+// commission rate board (migration 062). Returns only the rates
+// actually published; a missing field means "no figure" — the
+// agent must not invent one.
+// ------------------------------------------------------------
+export interface CoverageGetRatesArgs {
+  scope?: 'north' | 'south' | 'international' | 'all'
+}
+
+interface RateCardRow {
+  id: string
+  north_cash: string | null
+  north_remit: string | null
+  north_coverage: string | null
+  south_cash: string | null
+  south_remit: string | null
+  south_coverage: string | null
+  intl_cash: string | null
+      intl_remit: string | null
+      intl_coverage: string | null
+      created_at: string
+    }
+
+export async function executeCoverageGetRates(
+  ctx: ToolContext,
+  args: CoverageGetRatesArgs,
+): Promise<ToolResult<unknown>> {
+  try {
+    const db = adminClient()
+    // NOTE: the card's `notes` column is internal desk context
+    // ("why the board changed") — deliberately NOT selected here:
+    // everything this tool returns is flagged safe_to_show and the
+    // customer-facing agent may quote it.
+    const { data, error } = await db
+      .from('coverage_commission_cards')
+      .select(
+        'id, north_cash, north_remit, north_coverage, south_cash, south_remit, south_coverage, intl_cash, intl_remit, intl_coverage, created_at',
+      )
+      .eq('account_id', ctx.accountId)
+      .eq('is_current', true)
+      .maybeSingle()
+    if (error) throw error
+    if (!data) {
+      return { ok: true, data: { published: false }, safe_to_show: true }
+    }
+    const row = data as RateCardRow
+    const scope = args.scope ?? 'all'
+    const markets: Array<'north' | 'south' | 'international'> =
+      scope === 'all' ? ['north', 'south', 'international'] : [scope]
+    const result: Record<string, unknown> = {
+      published: true,
+      unit: 'per 1000 (e.g. 7 = 7,000 per 1,000,000)',
+      updated_at: row.created_at,
+      markets: {} as Record<string, unknown>,
+    }
+    const marketsOut = result.markets as Record<string, unknown>
+    for (const m of markets) {
+      if (m === 'north') {
+        marketsOut.north = {
+          cash_per_1000: row.north_cash,
+          remittance_per_1000: row.north_remit,
+          coverage_per_1000: row.north_coverage,
+        }
+      } else if (m === 'south') {
+        marketsOut.south = {
+          cash_per_1000: row.south_cash,
+          remittance_per_1000: row.south_remit,
+          coverage_per_1000: row.south_coverage,
+        }
+      } else {
+        marketsOut.international = {
+          cash_per_1000: row.intl_cash,
+          remittance_per_1000: row.intl_remit,
+          coverage_per_1000: row.intl_coverage,
+        }
+      }
+    }
+    return { ok: true, data: result, safe_to_show: true }
+  } catch (err) {
+    console.error('[tool] coverage.get_rates failed:', err)
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: false,
+      code: 'COVERAGE_RATES_READ_FAILED',
+      message: 'Could not read the commission rate board.',
     }
   }
 }

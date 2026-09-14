@@ -1,5 +1,6 @@
 // `URL` is a value (constructor), not just a type — import normally.
 import { URL } from 'url'
+import { aiRequestTimeoutMs } from '../defaults'
 
 // ============================================================
 // Outbound URL policy — the single gatekeeper every connection-aware
@@ -16,7 +17,9 @@ const DEFAULT_PORTS: Record<string, number> = {
 const MAX_URL_LENGTH = 2048
 /** Maximum response body size enforced by the caller before `json()` (Phase 02+). Kept exported so tests can assert the ceiling. */
 export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024 // 2 MB
-const DEFAULT_TIMEOUT_MS = 30_000
+// Single timeout knob with generate/embed: `AI_REQUEST_TIMEOUT_MS`
+// (default 120s for reasoning models). The outbound path used to
+// carry its own 30s constant that aborted slow providers mid-run.
 
 // Deployment-level overrides.
 const PRIVATE_ENDPOINTS_ENABLED =
@@ -293,8 +296,7 @@ export async function sendOutbound(opts: SendOptions): Promise<SendResult> {
   }
 
   const transport = urlOpts?.transport ?? ((input: string | URL, init: Record<string, unknown>) => (globalThis as { fetch: typeof fetch }).fetch(input, init))
-  const timeoutMs =
-    Number(process.env.AI_REQUEST_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS
+  const timeoutMs = aiRequestTimeoutMs()
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)

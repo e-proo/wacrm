@@ -172,6 +172,28 @@ export async function PUT(
         )
       if (insError) throw insError
     }
+    // Mark this draft's KB scope as INITIALIZED by the admin. The
+    // publish flow otherwise re-seeds an assignment-less draft from
+    // the superseded revision — without this flag a deliberate
+    // "unbind everything" could never persist (publish resurrected
+    // the removed chunks).
+    const { data: revRow } = await db
+      .from('ai_agent_revisions')
+      .select('settings')
+      .eq('account_id', ctx.accountId)
+      .eq('id', body.revisionId)
+      .maybeSingle()
+    const { error: markErr } = await db
+      .from('ai_agent_revisions')
+      .update({
+        settings: {
+          ...(((revRow as { settings?: Record<string, unknown> } | null)?.settings) ?? {}),
+          kb_assignments_initialized: true,
+        },
+      })
+      .eq('account_id', ctx.accountId)
+      .eq('id', body.revisionId)
+    if (markErr) throw markErr
     return NextResponse.json({ ok: true, assigned: valid.length })
   } catch (err) {
     return toErrorResponse(err)

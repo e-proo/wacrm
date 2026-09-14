@@ -6,7 +6,8 @@ import { latestUserMessage } from '../query'
 import { retrieveKnowledge } from '../knowledge'
 import type { ChatMessage } from '../types'
 import { executeTool } from './dispatch'
-import type { AiAgentRevision } from './multi-agent-types'
+import { renderToolCatalog } from './tool-registry'
+import type { AiAgentRevision, ToolGrantPermission } from './multi-agent-types'
 
 // ============================================================
 // Agent loop — the REAL model + tool-calling cycle (Phase: loop).
@@ -113,7 +114,30 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       { scopeRevisionId: revision.id },
     )
 
-    // 3) System prompt = user instructions + agent role framing.
+    // 2b) The revision's granted tools. The model can only call what
+    //     it is TOLD about — surfacing this catalog is the missing
+    //     link that kept every run at `tools=0`. Rounds <= 0 means
+    //     tools are off: no catalog, nothing offered.
+    const { data: grantRows, error: grantErr } = await db
+      .from('ai_agent_tool_grants')
+      .select('tool_key, permission')
+      .eq('account_id', accountId)
+      .eq('agent_revision_id', revision.id)
+    if (grantErr) {
+      // Fail open on TEXT, fail closed on tools: a broken grant read
+      // must not block the reply, but nothing is offered/executable.
+      console.error('[agent loop] grants load failed (tools disabled this run):', grantErr)
+    }
+    const grants: Record<string, ToolGrantPermission> = {}
+    for (const g of (grantRows ?? []) as Array<{
+      tool_key: string
+      permission: ToolGrantPermission
+    }>) {
+      grants[g.tool_key] = g.permission
+    }
+
+    // 3) System prompt = user instructions + agent role framing
+    //    (+ granted tool catalog, when rounds allow it).
     // The framing explicitly counters the base prompt's aggressive
     // handoff default: answer-first from knowledge/tools, ask a
     // clarifying question when a detail is missing, and reserve
@@ -122,8 +146,28 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       input.agentPurpose === 'admin_operations'
         ? 'You are the operations assistant for the business owner, reachable only on the verified admin channel. Complete the requested task with the tools and knowledge you have. Hand off only for tasks outside your registered tools — and say exactly what is missing.'
         : input.agentPurpose === 'customer_support'
-          ? 'You ARE the business assistant described below. ALWAYS attempt an answer first: use the knowledge excerpts and any tool results provided. If one specific detail is missing, ask the customer a short clarifying question instead of handing off. Hand off (HANDOFF) ONLY when the customer explicitly demands a human, is abusive, or asks for something clearly outside this business.'
+          ? 'You ARE the business assistant described below. ALWAYS attempt an answer first: use the knowledge excerpts, the System tools below, and any tool results provided. If one specific detail is missing, ask the customer a short clarifying question instead of handing off. Hand off (HANDOFF) ONLY when the customer explicitly demands a human, is abusive, or asks for something clearly outside this business.'
           : 'Answer using the knowledge and tools provided; ask clarifying questions when details are missing.'
+
+    // Rounds gate the CATALOG too — offering tools the loop can't
+    // execute would push the model to fake calls. The NaN guard below
+    // (rounds=undefined once skipped the ENTIRE loop) still applies.
+    const maxRounds = Math.max(
+      Number.isFinite(revision.maxToolRounds) ? revision.maxToolRounds : 0,
+      0,
+    )
+    const toolCatalog =
+      maxRounds > 0 && Object.keys(grants).length > 0
+        ? renderToolCatalog(
+            Object.entries(grants).map(([tool_key, permission]) => ({
+              tool_key,
+              permission,
+            })),
+          )
+        : ''
+    console.info(
+      `[agent loop] tools: ${Object.keys(grants).length} granted, ${toolCatalog ? 'offered to model' : 'hidden (rounds=' + maxRounds + ')'}`,
+    )
 
     const systemPrompt = buildSystemPrompt({
       userPrompt: [revision.systemPrompt ?? '', roleFraming]
@@ -131,14 +175,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         .join('\n\n'),
       mode: 'auto_reply',
       knowledge,
+      tools: toolCatalog || undefined,
     })
     console.info(`[agent loop] knowledge=${knowledge.length} chunks`)
 
     // 4) The bounded tool-calling loop.
-    // Defensive: a NaN/undefined cap must never silently skip the
-    // whole loop (that bug shipped once — rounds=undefined made
-    // Math.max(undefined,1) === NaN and the for-loop ran zero times).
-    const maxRounds = Math.max(Number.isFinite(revision.maxToolRounds) ? revision.maxToolRounds : 0, 1)
     const messages = [...input.messages]
     let finalText: string | null = null
     let handoffRequested = false
@@ -148,6 +189,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         config,
         systemPrompt,
         messages,
+        maxOutputTokens: revision.maxOutputTokens,
+        temperature: revision.temperature,
       })
       if (handoff) {
         handoffRequested = true
@@ -168,12 +211,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           runId,
           actorUserId: null,
           revision,
+          grants,
         },
         {
           toolKey: call.toolKey,
-          // Tool permission is derived from the registry at execute
-          // time; the model only names the tool.
-          permission: 'read',
+          // Claim the level the REVISION was granted at — hardcoding
+          // 'read' here made every propose-class tool unreachable
+          // (isGrantAllowed denies 'read' on a propose-only tool).
+          permission: grants[call.toolKey] ?? 'read',
           args: call.args,
           round,
         },
@@ -195,7 +240,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       if (round === Math.max(maxRounds, 1)) {
         // Rounds exhausted — force a final answer turn.
-        const last = await generateReply({ config, systemPrompt, messages })
+        const last = await generateReply({ config, systemPrompt, messages, maxOutputTokens: revision.maxOutputTokens, temperature: revision.temperature })
         finalText = last.text || null
         handoffRequested = last.handoff
       }

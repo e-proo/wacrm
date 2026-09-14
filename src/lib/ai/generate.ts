@@ -15,6 +15,10 @@ export interface GenerateArgs {
   systemPrompt: string
   /** Recent conversation turns, oldest first. */
   messages: ChatMessage[]
+  /** Per-revision reply token ceiling; falls back to the default. */
+  maxOutputTokens?: number | null
+  /** Per-revision sampling temperature; null = provider default. */
+  temperature?: number | null
 }
 
 /**
@@ -49,6 +53,8 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
       timeoutMs,
       apiRoot: chat?.apiRoot,
       customEndpoint: chat?.customEndpoint ?? false,
+      maxOutputTokens: args.maxOutputTokens,
+      temperature: args.temperature,
     },
     { model: chat?.model ?? config.model, systemPrompt, messages },
   )

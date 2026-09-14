@@ -37,6 +37,19 @@ export interface AdapterContext {
    * roots (code-defined hostnames) skip that indirection.
    */
   customEndpoint?: boolean
+  /**
+   * Per-revision reply token ceiling (ai_agent_revisions.max_output_tokens).
+   * Adapters use this instead of the global default when present —
+   * reasoning models (qwen "thinking" etc.) burn budget on internal
+   * reasoning before emitting `content`, and the small global cap
+   * silently truncates their replies to an empty message.
+   */
+  maxOutputTokens?: number | null
+  /**
+   * Per-revision sampling temperature (ai_agent_revisions.temperature).
+   * null/undefined = provider default (never sent in the request).
+   */
+  temperature?: number | null
 }
 
 export interface ProviderGenerateInput {

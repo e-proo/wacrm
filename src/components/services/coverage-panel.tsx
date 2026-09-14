@@ -1,12 +1,13 @@
 ﻿'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   ArrowDownUp,
   Handshake,
   Layers,
   Loader2,
+  Percent,
   Plus,
   Search,
   ShieldCheck,
@@ -15,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 
 // ============================================================
@@ -43,6 +45,48 @@ interface CoverageAttrs {
   pay_method?: string;
 }
 
+interface RatesCard {
+  id: string;
+  north_cash: string | null;
+  north_remit: string | null;
+  north_coverage: string | null;
+  south_cash: string | null;
+  south_remit: string | null;
+  south_coverage: string | null;
+  intl_cash: string | null;
+  intl_remit: string | null;
+  intl_coverage: string | null;
+  notes: string | null;
+  is_current: boolean;
+  created_at: string;
+}
+
+interface RatesForm {
+  northCash: string;
+  northRemit: string;
+  northCoverage: string;
+  southCash: string;
+  southRemit: string;
+  southCoverage: string;
+  intlCash: string;
+  intlRemit: string;
+  intlCoverage: string;
+}
+
+function ratesFormFromCard(card: RatesCard | null): RatesForm {
+  return {
+    northCash: card?.north_cash ?? '',
+    northRemit: card?.north_remit ?? '',
+    northCoverage: card?.north_coverage ?? '',
+    southCash: card?.south_cash ?? '',
+    southRemit: card?.south_remit ?? '',
+    southCoverage: card?.south_coverage ?? '',
+    intlCash: card?.intl_cash ?? '',
+    intlRemit: card?.intl_remit ?? '',
+    intlCoverage: card?.intl_coverage ?? '',
+  };
+}
+
 interface OfferRow {
   id: string;
   service_id: string;
@@ -57,6 +101,7 @@ interface OfferRow {
   commission_currency: string | null;
   commission_amount: string | null;
   deal_date: string;
+  notes: string | null;
   status: string;
 }
 
@@ -73,6 +118,7 @@ interface RequestRow {
   commission_currency: string | null;
   commission_amount: string | null;
   deal_date: string;
+  notes: string | null;
   priority: string;
   status: string;
 }
@@ -153,9 +199,9 @@ interface RequestSuggestions {
   fully_coverable: boolean;
 }
 
-type View = 'offers' | 'requests' | 'suggestions' | 'matches';
+type View = 'offers' | 'requests' | 'suggestions' | 'matches' | 'rates';
 
-const METHODS = ['cash', 'networks', 'bank_deposit', 'any'] as const;
+const METHODS = ['cash', 'networks', 'remittance', 'bank_deposit', 'any'] as const;
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -177,7 +223,7 @@ export function CoveragePanel() {
   // Endpoints that failed during the last load — surfaced instead
   // of silently empty dropdowns.
   const [loadProblems, setLoadProblems] = useState<string[]>([]);
-  // ظ†ظˆط¹ ط§ظ„طھط؛ط·ظٹط© ط¯ط§ط®ظ„ ط§ظ„ظ†ظ…ظˆط°ط¬ ط§ظ„ظ…ظˆط­ظ‘ط¯: ط¹ط±ط¶ ط£ظ… ط·ظ„ط¨.
+  // Coverage type inside the unified form: offer or request.
   const [createType, setCreateType] = useState<'offer' | 'request'>('offer');
 
   // Create form (shared between offer / request types).
@@ -193,7 +239,19 @@ export function CoveragePanel() {
   const [oCommissionRate, setOCommissionRate] = useState('');
   const [oCommissionCurrency, setOCommissionCurrency] = useState('SAR');
   const [oDealDate, setODealDate] = useState(today());
+  const [oNotes, setONotes] = useState('');
   const [rPriority, setRPriority] = useState<'low' | 'normal' | 'high'>('normal');
+
+  // Commission rate board (migration 062): current card + history.
+  const [ratesCurrent, setRatesCurrent] = useState<RatesCard | null>(null);
+  const [ratesHistory, setRatesHistory] = useState<RatesCard[]>([]);
+  const [ratesForm, setRatesForm] = useState<RatesForm>(ratesFormFromCard(null));
+  const [ratesNotes, setRatesNotes] = useState('');
+  // "seed the rates form once" guard as a REF, not state: making it
+  // reactive (setState → useCallback dep) re-created `load` after
+  // every run, retriggered the mount effect, and doubled ALL 8
+  // parallel no-store fetches on every panel mount.
+  const ratesSeededRef = useRef(false);
 
   // Suggestions view.
   const [sRequestId, setSRequestId] = useState('');
@@ -221,7 +279,7 @@ export function CoveragePanel() {
         return null;
       }
     };
-    const [o, r, m, c, s, rg, cur] = await Promise.all([
+    const [o, r, m, c, s, rg, cur, rt] = await Promise.all([
       get('/api/coverage/offers'),
       get('/api/coverage/requests'),
       get('/api/coverage/matches'),
@@ -229,6 +287,7 @@ export function CoveragePanel() {
       get('/api/services'),
       get('/api/coverage/regions'),
       get('/api/currencies/active'),
+      get('/api/coverage/commission-rates'),
     ]);
     setOffers((o?.offers as OfferRow[] | undefined) ?? []);
     setRequests((r?.requests as RequestRow[] | undefined) ?? []);
@@ -237,6 +296,18 @@ export function CoveragePanel() {
     setServices((s?.services as ServiceOption[] | undefined) ?? []);
     setRegions((rg?.regions as RegionOption[] | undefined) ?? []);
     setCurrencies((cur?.currencies as CurrencyOption[] | undefined) ?? []);
+    if (rt) {
+      const current = (rt.current as RatesCard | null) ?? null;
+      setRatesCurrent(current);
+      setRatesHistory((rt.history as RatesCard[] | undefined) ?? []);
+      // Seed the editable form only once per first load — never
+      // stomp on the admin's in-progress edits on later refreshes.
+      if (!ratesSeededRef.current) {
+        ratesSeededRef.current = true;
+        setRatesForm(ratesFormFromCard(current));
+        if (current?.notes) setRatesNotes(current.notes);
+      }
+    }
     setLoadProblems(problems);
   }, []);
 
@@ -318,6 +389,7 @@ export function CoveragePanel() {
           commissionPerThousand: oCommissionRate === '' ? null : oCommissionRate,
           commissionCurrency: oCommissionRate === '' ? null : oCommissionCurrency,
           dealDate: oDealDate || today(),
+          notes: oNotes.trim() ? oNotes.trim() : null,
         }),
       });
       const json = (await res.json()) as { offer?: OfferRow; error?: string };
@@ -325,6 +397,7 @@ export function CoveragePanel() {
       setShowForm(false);
       setOAmount('');
       setOCommissionRate('');
+      setONotes('');
       await load();
       setView('offers');
     } catch (e) {
@@ -351,14 +424,42 @@ export function CoveragePanel() {
           commissionPerThousand: oCommissionRate === '' ? null : oCommissionRate,
           commissionCurrency: oCommissionRate === '' ? null : oCommissionCurrency,
           dealDate: oDealDate || today(),
+          notes: oNotes.trim() ? oNotes.trim() : null,
         }),
       });
       const json = (await res.json()) as { request?: RequestRow; error?: string };
       if (!res.ok || !json.request) throw new Error(json.error ?? 'Create failed');
       setShowForm(false);
       setOAmount('');
+      setONotes('');
       await load();
       setView('requests');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Publish a NEW version of the commission rate board (062):
+  // previous cards stay in history untouched.
+  async function publishRates() {
+    setBusy('rates');
+    setError(null);
+    try {
+      const res = await fetch('/api/coverage/commission-rates', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...ratesForm,
+          notes: ratesNotes.trim() ? ratesNotes.trim() : null,
+        }),
+      });
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(json.error ?? 'Publish failed');
+      }
+      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
@@ -505,6 +606,8 @@ export function CoveragePanel() {
         return t('methodCash');
       case 'networks':
         return t('methodNetworks');
+      case 'remittance':
+        return t('methodRemittance');
       case 'bank_deposit':
         return t('methodBankDeposit');
       default:
@@ -764,6 +867,13 @@ export function CoveragePanel() {
         </Button>
         <Button
           size="sm"
+          variant={view === 'rates' ? 'default' : 'outline'}
+          onClick={() => setView('rates')}
+        >
+          <Percent className="me-1.5 h-4 w-4" /> {t('ratesTab')}
+        </Button>
+        <Button
+          size="sm"
           variant="outline"
           className="ms-auto"
           onClick={() => {
@@ -810,6 +920,14 @@ export function CoveragePanel() {
               </Field>
               <Field label={t('dealDate')}>
                 <Input type="date" value={oDealDate} onChange={(e) => setODealDate(e.target.value)} />
+              </Field>
+              <Field label={t('notes')}>
+                <Textarea
+                  rows={2}
+                  value={oNotes}
+                  onChange={(e) => setONotes(e.target.value)}
+                  placeholder={t('notesPlaceholder')}
+                />
               </Field>
               <ScopeFields scope={oScope} setScope={setOScope} country={oCountry} setCountry={setOCountry} />
               <Field label={t('receiveRegion')}>
@@ -899,20 +1017,26 @@ export function CoveragePanel() {
                       {t('remaining')}: {rem} / {o.total_amount} {o.currency}
                       {o.commission_per_thousand ? (
                         <>
-                          {' آ· '}
+                          {' · '}
                           {t('commissionRate')}: {o.commission_per_thousand} ({t('commissionAmount')}: {o.commission_amount} {o.commission_currency})
                         </>
                       ) : null}
-                      {' آ· '}
+                      {' · '}
                       {t('dealDate')}: {o.deal_date}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {t('contact')}: {contactName(o.provider_contact_id)}
-                      {' آ· '}
+                      {' · '}
                       {t('receiveRegion')}: {regionLabel(o.attributes?.receive_region_id)} / {methodLabel(o.attributes?.receive_method)}
-                      {' آ· '}
+                      {' · '}
                       {t('payRegion')}: {regionLabel(o.attributes?.pay_region_id)} / {methodLabel(o.attributes?.pay_method)}
                     </p>
+                    {o.notes ? (
+                      <p className="text-xs">
+                        <span className="text-muted-foreground">{t('notes')}: </span>
+                        <span className="italic">{o.notes}</span>
+                      </p>
+                    ) : null}
                     <RowActions kind="offers" row={o} />
                   </CardContent>
                 </Card>
@@ -958,6 +1082,12 @@ export function CoveragePanel() {
                     {' · '}
                     {t('dealDate')}: {r.deal_date}
                   </p>
+                  {r.notes ? (
+                    <p className="text-xs">
+                      <span className="text-muted-foreground">{t('notes')}: </span>
+                      <span className="italic">{r.notes}</span>
+                    </p>
+                  ) : null}
                   <RowActions kind="requests" row={r} />
                 </CardContent>
               </Card>
@@ -1173,10 +1303,148 @@ export function CoveragePanel() {
                   </Card>
                 );
               })}
-            </div>
-          )}
-        </>
+             </div>
+           )}
+         </>
+       ) : null}
+
+      {/* Commission rates board */}
+      {view === 'rates' ? (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t('ratesTitle')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-xs text-muted-foreground">{t('ratesHint')}</p>
+              {!ratesCurrent ? (
+                <p className="text-sm text-muted-foreground">{t('noRates')}</p>
+              ) : null}
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <RateGroup
+                  label={t('marketNorth')}
+                  cash={ratesForm.northCash}
+                  remit={ratesForm.northRemit}
+                  coverage={ratesForm.northCoverage}
+                  onCash={(v) => setRatesForm({ ...ratesForm, northCash: v })}
+                  onRemit={(v) => setRatesForm({ ...ratesForm, northRemit: v })}
+                  onCoverage={(v) => setRatesForm({ ...ratesForm, northCoverage: v })}
+                  t={t}
+                />
+                <RateGroup
+                  label={t('marketSouth')}
+                  cash={ratesForm.southCash}
+                  remit={ratesForm.southRemit}
+                  coverage={ratesForm.southCoverage}
+                  onCash={(v) => setRatesForm({ ...ratesForm, southCash: v })}
+                  onRemit={(v) => setRatesForm({ ...ratesForm, southRemit: v })}
+                  onCoverage={(v) => setRatesForm({ ...ratesForm, southCoverage: v })}
+                  t={t}
+                />
+                <RateGroup
+                  label={t('marketInternational')}
+                  cash={ratesForm.intlCash}
+                  remit={ratesForm.intlRemit}
+                  coverage={ratesForm.intlCoverage}
+                  onCash={(v) => setRatesForm({ ...ratesForm, intlCash: v })}
+                  onRemit={(v) => setRatesForm({ ...ratesForm, intlRemit: v })}
+                  onCoverage={(v) => setRatesForm({ ...ratesForm, intlCoverage: v })}
+                  t={t}
+                />
+              </div>
+              <Field label={t('notes')}>
+                <Textarea
+                  rows={2}
+                  value={ratesNotes}
+                  onChange={(e) => setRatesNotes(e.target.value)}
+                  placeholder={t('notesPlaceholder')}
+                />
+              </Field>
+              <Button onClick={() => void publishRates()} disabled={busy === 'rates'}>
+                {busy === 'rates' ? (
+                  <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <Percent className="me-1.5 h-4 w-4" />
+                )}
+                {t('publishRates')}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {ratesHistory.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">{t('ratesHistory')}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {ratesHistory.map((card) => (
+                  <div key={card.id} className="rounded border px-3 py-2 text-xs">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">
+                        {card.created_at.replace('T', ' ').slice(0, 19)}
+                      </span>
+                      {card.is_current ? <Badge>{t('ratesCurrent')}</Badge> : null}
+                      {card.notes ? (
+                        <span className="italic text-muted-foreground">{card.notes}</span>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 grid grid-cols-1 gap-2 md:grid-cols-3">
+                      {(
+                        [
+                          { label: t('marketNorth'), c: card.north_cash, r: card.north_remit, k: card.north_coverage },
+                          { label: t('marketSouth'), c: card.south_cash, r: card.south_remit, k: card.south_coverage },
+                          { label: t('marketInternational'), c: card.intl_cash, r: card.intl_remit, k: card.intl_coverage },
+                        ] as const
+                      ).map((row) => (
+                        <div key={row.label}>
+                          <span className="font-semibold">{row.label}: </span>
+                          {t('rateCash')} {row.c ?? '—'} · {t('rateRemit')} {row.r ?? '—'} ·{' '}
+                          {t('rateCoverage')} {row.k ?? '—'}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
       ) : null}
+    </div>
+  );
+}
+
+function RateGroup({
+  label,
+  cash,
+  remit,
+  coverage,
+  onCash,
+  onRemit,
+  onCoverage,
+  t,
+}: {
+  label: string;
+  cash: string;
+  remit: string;
+  coverage: string;
+  onCash: (v: string) => void;
+  onRemit: (v: string) => void;
+  onCoverage: (v: string) => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="space-y-2 rounded border p-3">
+      <p className="text-sm font-semibold">{label}</p>
+      <Field label={t('rateCash')}>
+        <Input value={cash} onChange={(e) => onCash(e.target.value)} inputMode="decimal" placeholder="2" />
+      </Field>
+      <Field label={t('rateRemit')}>
+        <Input value={remit} onChange={(e) => onRemit(e.target.value)} inputMode="decimal" placeholder="7" />
+      </Field>
+      <Field label={t('rateCoverage')}>
+        <Input value={coverage} onChange={(e) => onCoverage(e.target.value)} inputMode="decimal" placeholder="5" />
+      </Field>
     </div>
   );
 }

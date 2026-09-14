@@ -245,7 +245,7 @@ export async function retrieveKnowledge(
       queryEmbedding = (await embedWith(db, accountId, config, [query], querySource))[0] ?? null
     } catch (err) {
       console.error('[ai knowledge] query embedding failed, falling back to FTS:', err)
-      return lexicalTopUp(db, accountId, query, picked, k)
+      return lexicalTopUp(db, accountId, query, picked, k, allowedIds)
     }
   }
 
@@ -255,7 +255,10 @@ export async function retrieveKnowledge(
       const { data, error } = await db.rpc('match_ai_knowledge_semantic', {
         p_account_id: accountId,
         p_query_embedding: toVectorLiteral(queryEmbedding),
-        p_match_count: k,
+        // Whitelisted revisions need headroom: semantic top-5 from
+        // the WHOLE account could miss the assigned subset entirely,
+        // which the post-filter below would then zero out.
+        p_match_count: allowedIds ? Math.min(k * 4, 25) : k,
         // Connection queries scope to the ACTIVE revision; the legacy key
         // path passes NO p_revision, hitting the SQL default (`null`) so
         // it keeps matching the un-stamped (NULL) rows — no behavior change.
@@ -264,7 +267,13 @@ export async function retrieveKnowledge(
           : {}),
       })
       if (!error && Array.isArray(data)) {
-        for (const row of data as MatchRow[]) picked.set(row.id, row.content ?? '')
+        for (const row of data as MatchRow[]) {
+          // Keep the whitelist out of `picked` immediately so the
+          // `picked.size < k` check below still lets lexical top-up
+          // run when the widened fetch returned few allowed rows.
+          if (allowedIds && !allowedIds.has(row.id)) continue
+          picked.set(row.id, row.content ?? '')
+        }
       }
     } catch (err) {
       console.error('[ai knowledge] semantic retrieval failed, falling back to FTS:', err)

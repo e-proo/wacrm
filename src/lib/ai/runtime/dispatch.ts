@@ -16,6 +16,7 @@ import {
   executeIntentsRecord,
   executeIntentsSearch,
   executeCoverageFindOffers,
+  executeCoverageGetRates,
   executeCoverageProposeOffer,
   type ToolContext,
   type ToolResult,
@@ -227,7 +228,11 @@ async function executeAgentRun(
   const claimed = await db.rpc('claim_agent_run', {
     p_run_id: runId,
     p_claimed_by: workerId,
-    p_lease_secs: 60,
+    // Lease must comfortably exceed AI_REQUEST_TIMEOUT_MS (default
+    // 30s; reasoning models are configured to 120s) — a lease that
+    // expires mid-run lets the recovery worker reclaim the run and
+    // duplicate an in-flight provider call.
+    p_lease_secs: 300,
   })
   if (claimed.error) {
     console.error('[ai dispatch] claim_agent_run failed:', claimed.error)
@@ -246,7 +251,7 @@ async function executeAgentRun(
   const { data: revision, error: revErr } = await db
     .from('ai_agent_revisions')
     .select(
-      'id, agent_id, status, model, system_prompt, response_style, language_policy, max_tool_rounds, max_ai_replies_per_conversation',
+      'id, agent_id, status, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id',
     )
     .eq('id', decision.revisionId)
     .maybeSingle()
@@ -267,8 +272,11 @@ async function executeAgentRun(
     system_prompt: string | null
     response_style: string
     language_policy: string
+    temperature: number | null
+    max_output_tokens: number | null
     max_tool_rounds: number
     max_ai_replies_per_conversation: number
+    handoff_human_member_id: string | null
   }
   const rev: AiAgentRevision = {
     id: rawRev.id,
@@ -281,11 +289,11 @@ async function executeAgentRun(
     systemPrompt: rawRev.system_prompt,
     responseStyle: (rawRev.response_style as AiAgentRevision['responseStyle']) ?? 'balanced',
     languagePolicy: rawRev.language_policy ?? 'auto',
-    temperature: null,
-    maxOutputTokens: null,
+    temperature: rawRev.temperature ?? null,
+    maxOutputTokens: rawRev.max_output_tokens ?? null,
     maxToolRounds: rawRev.max_tool_rounds ?? 0,
     maxAiRepliesPerConversation: rawRev.max_ai_replies_per_conversation ?? 3,
-    handoffHumanMemberId: null,
+    handoffHumanMemberId: rawRev.handoff_human_member_id ?? null,
     settings: {},
     createdAt: '',
     publishedAt: null,
@@ -552,6 +560,46 @@ export async function executeTool(
       roundsExhausted: false,
     }
   }
+
+  // DENY BY DEFAULT — the RUNNING REVISION must carry a grant for
+  // this exact tool. The doc comment promised this check for phases
+  // now and a half of shipping; without it a prompt-injected tool
+  // call to ANY registered tool would execute.
+  const grantedLvl = ctx.grants?.[invocation.toolKey]
+  if (!grantedLvl) {
+    await audit({ status: 'denied', errorCode: 'TOOL_NOT_GRANTED', toolVersion: tool.version })
+    return {
+      ...baseOutcome,
+      result: {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'TOOL_NOT_GRANTED',
+        message: `Tool "${invocation.toolKey}" is not part of this assistant's capabilities.`,
+      },
+      toolFound: true,
+      granted: false,
+      roundsExhausted: false,
+    }
+  }
+  const RANK: Record<ToolGrantPermission, number> = { read: 1, propose: 2, execute: 3 }
+  if (RANK[invocation.permission] > RANK[grantedLvl]) {
+    await audit({ status: 'denied', errorCode: 'TOOL_GRANT_LEVEL_DENIED', toolVersion: tool.version })
+    return {
+      ...baseOutcome,
+      result: {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'TOOL_GRANT_LEVEL_DENIED',
+        message: `Tool "${invocation.toolKey}" is granted at level "${grantedLvl}", not "${invocation.permission}".`,
+      },
+      toolFound: true,
+      granted: false,
+      roundsExhausted: false,
+    }
+  }
+
   if (!isGrantAllowed(tool, invocation.permission)) {
     await audit({ status: 'denied', errorCode: 'TOOL_PERMISSION_DENIED', toolVersion: tool.version })
     return {
@@ -593,6 +641,9 @@ export async function executeTool(
         break
       case 'coverage.find_offers':
         result = await executeCoverageFindOffers(ctx, invocation.args as never)
+        break
+      case 'coverage.get_rates':
+        result = await executeCoverageGetRates(ctx, invocation.args as never)
         break
       case 'coverage.propose_offer':
         result = await executeCoverageProposeOffer(ctx, invocation.args as never)
