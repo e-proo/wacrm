@@ -61,6 +61,8 @@ function searchTerms(value: string): string[] {
   return [...new Set([normalized, ...parts])].slice(0, 6)
 }
 
+export const serviceSearchTermsForTest = searchTerms
+
 /**
  * PostgREST-safe service search for model-provided free text.
  *
