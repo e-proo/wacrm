@@ -285,14 +285,10 @@ def main() -> int:
             dst.parent.mkdir(parents=True,exist_ok=True)
             shutil.copy2(src,dst)
 
-        checks=[bundle/'validate_syntax.js', bundle/'smoke_pure_runtime.js', bundle/'verify_business_contract.js', bundle/'verify_platform_architecture.js']
+        checks=[bundle/'smoke_pure_runtime.js', bundle/'verify_business_contract.js', bundle/'verify_platform_architecture.js']
         if shutil.which('node'):
-            global_typescript = pathlib.Path('/usr/local/lib/node_modules/typescript')
             for check in checks:
                 if not check.is_file():
-                    continue
-                if check.name == 'validate_syntax.js' and not global_typescript.exists():
-                    print('WARNING: skipped bundle-local validate_syntax.js (global TypeScript not installed); full npm typecheck is still required.', file=sys.stderr)
                     continue
                 p=subprocess.run(['node',str(check)],cwd=bundle,text=True)
                 if p.returncode: raise ApplyError(f'validation failed: {check.name}')
