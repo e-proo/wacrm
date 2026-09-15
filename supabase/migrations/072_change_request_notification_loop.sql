@@ -12,14 +12,19 @@ alter table public.notifications
     references public.change_requests(id) on delete cascade,
   add column if not exists dedupe_key text;
 
--- Migration 027 originally allowed only conversation_assigned. Change-request
--- approval alerts are system notifications to a specific linked admin member.
+-- Migration 027 originally allowed only conversation_assigned; migration 066
+-- extended the table with customer_intent_forwarded. Preserve every existing
+-- business notification type and add change_request_pending additively.
 alter table public.notifications
   drop constraint if exists notifications_type_check;
 
 alter table public.notifications
   add constraint notifications_type_check
-  check (type in ('conversation_assigned', 'change_request_pending'));
+  check (type in (
+    'conversation_assigned',
+    'customer_intent_forwarded',
+    'change_request_pending'
+  ));
 
 -- A regular UNIQUE index is intentional: PostgreSQL already permits multiple
 -- NULL values, and PostgREST/Supabase can infer this index for
