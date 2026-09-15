@@ -25,13 +25,39 @@ function dto(identity: TrustedAdminIdentity) {
   }
 }
 
+const VERIFICATION_OUTCOMES: Record<
+  string,
+  { status: number; code: string; message: string }
+> = {
+  not_found: { status: 404, code: 'IDENTITY_NOT_FOUND', message: 'Identity not found.' },
+  revoked: { status: 409, code: 'IDENTITY_REVOKED', message: 'This identity has been revoked.' },
+  no_pending: { status: 409, code: 'NO_PENDING_OTP', message: 'No pending verification code.' },
+  expired: { status: 410, code: 'OTP_EXPIRED', message: 'The verification code has expired.' },
+  locked: { status: 429, code: 'OTP_TOO_MANY_ATTEMPTS', message: 'Too many verification attempts.' },
+  mismatch: { status: 400, code: 'OTP_MISMATCH', message: 'OTP is incorrect.' },
+  conflict: { status: 409, code: 'VERIFY_CONFLICT', message: 'Identity changed state. Reload and retry.' },
+}
+
+function isPgcryptoLookupError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const value = error as { code?: unknown; message?: unknown }
+  return (
+    value.code === '42883' &&
+    typeof value.message === 'string' &&
+    /\b(digest|crypt|gen_salt|gen_random_bytes)\b/i.test(value.message)
+  )
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; action: string }> },
 ) {
   try {
     const ctx = await requireRole('admin')
-    const limit = checkRateLimit(`admin:trustedAdminAction:${ctx.userId}`, RATE_LIMITS.adminAction)
+    const limit = checkRateLimit(
+      `admin:trustedAdminAction:${ctx.userId}`,
+      RATE_LIMITS.adminAction,
+    )
     if (!limit.success) return rateLimitResponse(limit)
     const { id, action } = await params
 
@@ -43,38 +69,55 @@ export async function POST(
         } catch {
           return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
         }
-        if (!body.otp) return NextResponse.json({ error: 'otp is required' }, { status: 400 })
+
+        const otp = body.otp?.trim() ?? ''
+        if (!/^\d{6}$/.test(otp)) {
+          return NextResponse.json(
+            { error: 'OTP must be exactly six digits.', code: 'INVALID_OTP_FORMAT' },
+            { status: 400 },
+          )
+        }
+
         const { data: verification, error: verifyError } = await supabaseAdmin().rpc(
           'verify_trusted_admin_otp_v2',
           {
             p_account_id: ctx.accountId,
             p_identity_id: id,
-            p_otp: body.otp,
+            p_otp: otp,
             p_actor_user_id: ctx.userId,
           },
         )
-        if (verifyError) throw verifyError
-        const outcome = String(verification ?? 'conflict')
-        const errors: Record<string, { status: number; code: string; message: string }> = {
-          not_found: { status: 404, code: 'IDENTITY_NOT_FOUND', message: 'Identity not found.' },
-          revoked: { status: 409, code: 'IDENTITY_REVOKED', message: 'This identity has been revoked.' },
-          no_pending: { status: 409, code: 'NO_PENDING_OTP', message: 'No pending verification code.' },
-          expired: { status: 410, code: 'OTP_EXPIRED', message: 'The verification code has expired.' },
-          locked: { status: 429, code: 'OTP_TOO_MANY_ATTEMPTS', message: 'Too many verification attempts.' },
-          mismatch: { status: 401, code: 'OTP_MISMATCH', message: 'OTP is incorrect.' },
-          conflict: { status: 409, code: 'VERIFY_CONFLICT', message: 'Identity changed state. Reload and retry.' },
+        if (verifyError) {
+          if (isPgcryptoLookupError(verifyError)) {
+            return NextResponse.json(
+              {
+                error: 'Trusted-admin verification crypto is unavailable. Apply the latest database migrations.',
+                code: 'TRUSTED_ADMIN_CRYPTO_UNAVAILABLE',
+              },
+              { status: 503 },
+            )
+          }
+          throw verifyError
         }
+
+        const outcome = String(verification ?? 'conflict')
         if (outcome !== 'active') {
-          const mapped = errors[outcome] ?? errors.conflict
+          const mapped = VERIFICATION_OUTCOMES[outcome] ?? VERIFICATION_OUTCOMES.conflict
           return NextResponse.json(
-            { error: mapped.message, code: mapped.code },
+            { error: mapped.message, code: mapped.code, verificationStatus: outcome },
             { status: mapped.status },
           )
         }
+
         const identities = await listTrustedAdmins(supabaseAdmin(), ctx.accountId)
         const identity = identities.find((candidate) => candidate.id === id)
-        if (!identity) return NextResponse.json({ error: 'Identity not found' }, { status: 404 })
-        return NextResponse.json({ identity: dto(identity) })
+        if (!identity || identity.status !== 'active') {
+          return NextResponse.json(
+            { error: 'Verification completed but the identity could not be reloaded.', code: 'VERIFY_CONFLICT' },
+            { status: 409 },
+          )
+        }
+        return NextResponse.json({ identity: dto(identity), verificationStatus: 'active' })
       }
 
       if (action === 'revoke') {
@@ -85,7 +128,6 @@ export async function POST(
         })
         return NextResponse.json({ identity: dto(identity) })
       }
-
 
       if (action === 'capabilities') {
         let body: { capabilities?: unknown }
