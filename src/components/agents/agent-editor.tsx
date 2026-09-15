@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import {
   BadgeCheck,
   FlaskConical,
@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { getToolCategoryLabel, getToolPermissionLabel, getToolUiText } from '@/lib/ai/ui/platform-i18n';
 // ============================================================
 // Agent editor — the production control surface for one agent
 // revision (always a DRAFT; published revisions are immutable).
@@ -113,6 +114,7 @@ interface AgentEditorProps {
 
 export function AgentEditor(props: AgentEditorProps) {
   const t = useTranslations('Agents.agentEditor');
+  const locale = useLocale();
   const {
     agentId,
     revisionId,
@@ -686,6 +688,7 @@ export function AgentEditor(props: AgentEditorProps) {
             ) : null}
             {registry.map((tool) => {
               const grant = grants.get(tool.key);
+              const ui = getToolUiText(locale, tool.key, tool.description);
               return (
                 <div key={tool.key} className="flex flex-wrap items-center gap-2 rounded border px-3 py-1.5 text-sm">
                   <Checkbox
@@ -693,10 +696,13 @@ export function AgentEditor(props: AgentEditorProps) {
                     onCheckedChange={(v) => toggleTool(tool, v === true)}
                     id={`tool-${tool.key}`}
                   />
-                  <label htmlFor={`tool-${tool.key}`} className="font-mono text-xs">
-                    {tool.key} <span className="text-muted-foreground">v{tool.version}</span>
+                  <label htmlFor={`tool-${tool.key}`} className="min-w-[180px] text-xs">
+                    <span className="block font-medium">{ui.label}</span>
+                    <span className="block font-mono text-[11px] text-muted-foreground">
+                      {tool.key} · v{tool.version} · {getToolCategoryLabel(locale, tool.category)}
+                    </span>
                   </label>
-                  <span className="text-xs text-muted-foreground">{tool.description.slice(0, 70)}…</span>
+                  <span className="min-w-[220px] flex-1 text-xs text-muted-foreground">{ui.description}</span>
                   {grant ? (
                     <select
                       className="ms-auto rounded border bg-background px-2 py-1 text-xs"
@@ -708,7 +714,7 @@ export function AgentEditor(props: AgentEditorProps) {
                       }
                     >
                       {tool.grantPermissions.map((p) => (
-                        <option key={p} value={p}>{p}</option>
+                        <option key={p} value={p}>{getToolPermissionLabel(locale, p)}</option>
                       ))}
                     </select>
                   ) : null}

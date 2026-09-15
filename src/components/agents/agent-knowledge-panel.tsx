@@ -1,10 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useTranslations } from 'next-intl'
+import { useLocale, useTranslations } from 'next-intl'
 import { BookOpen, Check, Loader2, Plus, RefreshCw, Save, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { getKnowledgeEnumLabel, getKnowledgeUiText } from '@/lib/ai/ui/platform-i18n'
 
 interface KnowledgeBaseOption {
   knowledge_base_id: string
@@ -40,6 +41,7 @@ export function AgentKnowledgePanel({
   hasRevision: boolean
 }) {
   const t = useTranslations('Agents.multiAgent.agentKnowledge')
+  const locale = useLocale()
   const [open, setOpen] = useState(false)
   const [bases, setBases] = useState<KnowledgeBaseOption[] | null>(null)
   const [revision, setRevision] = useState<{ id: string; status: string } | null>(null)
@@ -141,18 +143,18 @@ export function AgentKnowledgePanel({
       })
       const json = (await res.json()) as { success?: boolean; error?: string }
       if (!res.ok || !json.success) {
-        throw new Error(json.error ?? 'Failed to create private knowledge base')
+        throw new Error(json.error ?? getKnowledgeUiText(locale, 'privateCreateFailed'))
       }
       setPrivateName('')
       await load()
       setMessage({
         kind: 'success',
-        text: 'Private knowledge base created as draft. Add and review its documents, activate it, then assign it to a draft revision.',
+        text: getKnowledgeUiText(locale, 'privateCreated'),
       })
     } catch (err) {
       setMessage({
         kind: 'error',
-        text: err instanceof Error ? err.message : 'Failed to create private knowledge base',
+        text: err instanceof Error ? err.message : getKnowledgeUiText(locale, 'privateCreateFailed'),
       })
     } finally {
       setBusy(null)
@@ -201,15 +203,15 @@ export function AgentKnowledgePanel({
             </p>
           ) : null}
           <div className="space-y-1.5 rounded border border-dashed p-2">
-            <p className="text-xs font-medium">Agent-private knowledge</p>
+            <p className="text-xs font-medium">{getKnowledgeUiText(locale, 'privateTitle')}</p>
             <p className="text-[11px] text-muted-foreground">
-              Create a dynamic knowledge base owned by this agent. It cannot be assigned to another agent.
+              {getKnowledgeUiText(locale, 'privateDescription')}
             </p>
             <div className="flex gap-2">
               <Input
                 value={privateName}
                 onChange={(event) => setPrivateName(event.target.value)}
-                placeholder="Private knowledge base name"
+                placeholder={getKnowledgeUiText(locale, 'privateName')}
                 className="h-8 text-xs"
                 disabled={busy === 'create-private'}
               />
@@ -225,13 +227,13 @@ export function AgentKnowledgePanel({
                 ) : (
                   <Plus className="me-1.5 h-4 w-4" />
                 )}
-                Create
+                {getKnowledgeUiText(locale, 'create')}
               </Button>
             </div>
           </div>
           {revision && !editable ? (
             <p className="rounded bg-muted px-2 py-1.5 text-xs text-muted-foreground">
-              Knowledge assignments are frozen on a published revision. Create/edit a draft revision to change them.
+              {getKnowledgeUiText(locale, 'assignmentsFrozen')}
             </p>
           ) : null}
           {bases === null ? (
@@ -258,7 +260,7 @@ export function AgentKnowledgePanel({
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-medium">{base.name}</span>
                         <span className="block truncate text-muted-foreground">
-                          {base.scope} · {base.status} · {base.trust_level}
+                          {getKnowledgeEnumLabel(locale, 'scope', base.scope)} · {getKnowledgeEnumLabel(locale, 'baseStatus', base.status)} · {getKnowledgeEnumLabel(locale, 'trust', base.trust_level)}
                           {base.description ? ` · ${base.description}` : ''}
                         </span>
                       </span>

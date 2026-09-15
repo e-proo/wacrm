@@ -93,6 +93,8 @@ const KNOWLEDGE_ENUMS: Record<AiUiLocale, Record<string, Record<string, string>>
     documentStatus: { draft: 'Draft', reviewed: 'Reviewed', active: 'Active', superseded: 'Superseded', archived: 'Archived', quarantined: 'Quarantined' },
     trust: { admin_verified: 'Admin verified', internal: 'Internal', external: 'External', untrusted: 'Untrusted' },
     injectionRisk: { none: 'None', suspected: 'Suspected', high: 'High' },
+    sourceType: { manual: 'Manual', import: 'Imported', api: 'API', legacy: 'Legacy' },
+    language: { auto: 'Auto', ar: 'Arabic', en: 'English', ko: 'Korean' },
   },
   ar: {
     scope: { shared: 'مشتركة', agent_private: 'خاصة بالوكيل', service: 'مرتبطة بخدمة' },
@@ -100,12 +102,14 @@ const KNOWLEDGE_ENUMS: Record<AiUiLocale, Record<string, Record<string, string>>
     documentStatus: { draft: 'مسودة', reviewed: 'تمت المراجعة', active: 'نشط', superseded: 'مستبدل بإصدار أحدث', archived: 'مؤرشف', quarantined: 'معزول للمراجعة' },
     trust: { admin_verified: 'موثّق من الإدارة', internal: 'داخلي', external: 'خارجي', untrusted: 'غير موثوق' },
     injectionRisk: { none: 'لا يوجد', suspected: 'مشتبه به', high: 'مرتفع' },
+    sourceType: { manual: 'يدوي', import: 'مستورد', api: 'واجهة API', legacy: 'قديم/مرحّل' },
+    language: { auto: 'تلقائي', ar: 'العربية', en: 'الإنجليزية', ko: 'الكورية' },
   },
 }
 
 export function getKnowledgeEnumLabel(
   locale: string,
-  group: 'scope' | 'baseStatus' | 'documentStatus' | 'trust' | 'injectionRisk',
+  group: 'scope' | 'baseStatus' | 'documentStatus' | 'trust' | 'injectionRisk' | 'sourceType' | 'language',
   value: string,
 ): string {
   const lang = pickLocale(locale)

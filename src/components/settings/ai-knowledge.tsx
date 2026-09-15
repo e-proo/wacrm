@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useTranslations } from 'next-intl'
+import { getKnowledgeEnumLabel, getKnowledgeUiText } from '@/lib/ai/ui/platform-i18n'
+import { useLocale, useTranslations } from 'next-intl'
 
 type BaseStatus = 'draft' | 'active' | 'archived'
 type BaseScope = 'shared' | 'agent_private' | 'service'
@@ -52,6 +53,7 @@ export function AiKnowledgeCard({
   hasEmbeddingsKey: boolean
 }) {
   const t = useTranslations('Settings.aiKnowledge')
+  const locale = useLocale()
   const loadedAccountIdRef = useRef<string | null>(null)
   const [bases, setBases] = useState<KnowledgeBaseSummary[]>([])
   const [selectedBaseId, setSelectedBaseId] = useState<string | null>(null)
@@ -134,7 +136,7 @@ export function AiKnowledgeCard({
       setShowBaseForm(false)
       await loadBases()
       setSelectedBaseId(data.id)
-      toast.success('Knowledge base created as draft')
+      toast.success(getKnowledgeUiText(locale, 'baseCreated'))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('saveFailed'))
     } finally {
@@ -154,7 +156,7 @@ export function AiKnowledgeCard({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? t('saveFailed'))
       await loadBases()
-      toast.success(`Knowledge base is now ${status}`)
+      toast.success(getKnowledgeUiText(locale, 'baseStatusChanged', { status: getKnowledgeEnumLabel(locale, 'baseStatus', status) }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('saveFailed'))
     } finally {
@@ -183,8 +185,8 @@ export function AiKnowledgeCard({
       setDocContent('')
       setShowDocForm(false)
       await loadDocuments(selectedBase.id)
-      if (data.injectionRisk === 'high') toast.warning('Document was quarantined for review')
-      else toast.success('Document saved as draft; review and activate it before agents can use it')
+      if (data.injectionRisk === 'high') toast.warning(getKnowledgeUiText(locale, 'docQuarantined'))
+      else toast.success(getKnowledgeUiText(locale, 'docSavedDraft'))
       if (data.indexingWarning) toast.warning(data.indexingWarning)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('saveFailed'))
@@ -209,7 +211,7 @@ export function AiKnowledgeCard({
       if (!res.ok) throw new Error(data.error ?? t('saveFailed'))
       await loadDocuments(selectedBase.id)
       if (status === 'reviewed') setReviewNotes((current) => ({ ...current, [documentId]: '' }))
-      toast.success(`Document is now ${status}`)
+      toast.success(getKnowledgeUiText(locale, 'docStatusChanged', { status: getKnowledgeEnumLabel(locale, 'documentStatus', status) }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('saveFailed'))
     } finally {
@@ -254,7 +256,7 @@ export function AiKnowledgeCard({
           <BookOpen className="h-4 w-4 text-primary" /> {t('title')}
         </CardTitle>
         <CardDescription>
-          Dynamic knowledge bases. Agents use only bases explicitly assigned to their published revision.{' '}
+          {getKnowledgeUiText(locale, 'platformDescription')}{' '}
           {hasEmbeddingsKey ? t('semanticSearchOn') : t('keywordSearchOn')}
         </CardDescription>
       </CardHeader>
@@ -268,25 +270,25 @@ export function AiKnowledgeCard({
             <div className="grid gap-4 lg:grid-cols-[minmax(220px,0.7fr)_minmax(0,1.3fr)]">
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium">Knowledge bases</p>
+                  <p className="text-sm font-medium">{getKnowledgeUiText(locale, 'bases')}</p>
                   {canEdit ? (
                     <Button size="sm" variant="outline" onClick={() => setShowBaseForm((value) => !value)}>
-                      <Plus className="me-1 h-3.5 w-3.5" /> New
+                      <Plus className="me-1 h-3.5 w-3.5" /> {getKnowledgeUiText(locale, 'new')}
                     </Button>
                   ) : null}
                 </div>
                 {showBaseForm ? (
                   <div className="space-y-2 rounded-md border p-2">
-                    <Input value={newBaseName} onChange={(event) => setNewBaseName(event.target.value)} placeholder="Knowledge base name" />
-                    <Input value={newBaseDescription} onChange={(event) => setNewBaseDescription(event.target.value)} placeholder="Description (optional)" />
+                    <Input value={newBaseName} onChange={(event) => setNewBaseName(event.target.value)} placeholder={getKnowledgeUiText(locale, 'baseName')} />
+                    <Input value={newBaseDescription} onChange={(event) => setNewBaseDescription(event.target.value)} placeholder={getKnowledgeUiText(locale, 'optionalDescription')} />
                     <Button size="sm" onClick={() => void createBase()} disabled={!newBaseName.trim() || busy === 'create-base'}>
                       {busy === 'create-base' ? <Loader2 className="me-1 h-3.5 w-3.5 animate-spin" /> : null}
-                      Create draft
+                      {getKnowledgeUiText(locale, 'createDraft')}
                     </Button>
                   </div>
                 ) : null}
                 {bases.length === 0 ? (
-                  <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">No knowledge bases yet.</p>
+                  <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">{getKnowledgeUiText(locale, 'noBases')}</p>
                 ) : (
                   <div className="space-y-1">
                     {bases.map((base) => (
@@ -297,7 +299,7 @@ export function AiKnowledgeCard({
                         className={`w-full rounded-md border px-3 py-2 text-start text-sm ${selectedBaseId === base.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/40'}`}
                       >
                         <span className="block truncate font-medium">{base.name}</span>
-                        <span className="block text-xs text-muted-foreground">{base.scope} · {base.status} · {base.default_trust_level}</span>
+                        <span className="block text-xs text-muted-foreground">{getKnowledgeEnumLabel(locale, 'scope', base.scope)} · {getKnowledgeEnumLabel(locale, 'baseStatus', base.status)} · {getKnowledgeEnumLabel(locale, 'trust', base.default_trust_level)}</span>
                       </button>
                     ))}
                   </div>
@@ -306,24 +308,24 @@ export function AiKnowledgeCard({
 
               <div className="space-y-3">
                 {!selectedBase ? (
-                  <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">Select a knowledge base.</p>
+                  <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">{getKnowledgeUiText(locale, 'selectBase')}</p>
                 ) : (
                   <>
                     <div className="flex flex-wrap items-start justify-between gap-2 rounded-md border p-3">
                       <div>
                         <p className="font-medium">{selectedBase.name}</p>
-                        <p className="text-xs text-muted-foreground">{selectedBase.description ?? 'No description'}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{selectedBase.scope} · {selectedBase.status}</p>
+                        <p className="text-xs text-muted-foreground">{selectedBase.description ?? getKnowledgeUiText(locale, 'noDescription')}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{getKnowledgeEnumLabel(locale, 'scope', selectedBase.scope)} · {getKnowledgeEnumLabel(locale, 'baseStatus', selectedBase.status)}</p>
                       </div>
                       {canEdit ? (
                         <div className="flex gap-2">
                           {selectedBase.status !== 'active' ? (
                             <Button size="sm" onClick={() => void setBaseStatus('active')} disabled={busy !== null}>
-                              <CheckCircle2 className="me-1 h-3.5 w-3.5" /> Activate base
+                              <CheckCircle2 className="me-1 h-3.5 w-3.5" /> {getKnowledgeUiText(locale, 'activateBase')}
                             </Button>
                           ) : (
                             <Button size="sm" variant="outline" onClick={() => void setBaseStatus('archived')} disabled={busy !== null}>
-                              <Archive className="me-1 h-3.5 w-3.5" /> Archive base
+                              <Archive className="me-1 h-3.5 w-3.5" /> {getKnowledgeUiText(locale, 'archiveBase')}
                             </Button>
                           )}
                         </div>
@@ -331,16 +333,16 @@ export function AiKnowledgeCard({
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium">Documents</p>
+                      <p className="text-sm font-medium">{getKnowledgeUiText(locale, 'documents')}</p>
                       <div className="flex gap-2">
                         {hasEmbeddingsKey ? (
                           <Button size="sm" variant="ghost" onClick={() => void reindex()} disabled={busy === 'reindex'}>
-                            <RefreshCw className={`me-1 h-3.5 w-3.5 ${busy === 'reindex' ? 'animate-spin' : ''}`} /> Reindex
+                            <RefreshCw className={`me-1 h-3.5 w-3.5 ${busy === 'reindex' ? 'animate-spin' : ''}`} /> {getKnowledgeUiText(locale, 'reindex')}
                           </Button>
                         ) : null}
                         {canEdit ? (
                           <Button size="sm" variant="outline" onClick={() => setShowDocForm((value) => !value)}>
-                            <Plus className="me-1 h-3.5 w-3.5" /> Add document
+                            <Plus className="me-1 h-3.5 w-3.5" /> {getKnowledgeUiText(locale, 'addDocument')}
                           </Button>
                         ) : null}
                       </div>
@@ -349,19 +351,19 @@ export function AiKnowledgeCard({
                     {showDocForm ? (
                       <div className="space-y-3 rounded-md border p-3">
                         <div className="space-y-1.5">
-                          <Label htmlFor="kb-v2-title">Title</Label>
+                          <Label htmlFor="kb-v2-title">{getKnowledgeUiText(locale, 'title')}</Label>
                           <Input id="kb-v2-title" value={docTitle} onChange={(event) => setDocTitle(event.target.value)} />
                         </div>
                         <div className="space-y-1.5">
-                          <Label htmlFor="kb-v2-content">Content</Label>
+                          <Label htmlFor="kb-v2-content">{getKnowledgeUiText(locale, 'content')}</Label>
                           <Textarea id="kb-v2-content" rows={8} value={docContent} onChange={(event) => setDocContent(event.target.value)} />
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          New content is never active automatically. Injection-like text may be quarantined for review.
+                          {getKnowledgeUiText(locale, 'newContentSafety')}
                         </p>
                         <Button size="sm" onClick={() => void createDocument()} disabled={!docTitle.trim() || !docContent.trim() || busy === 'create-doc'}>
                           {busy === 'create-doc' ? <Loader2 className="me-1 h-3.5 w-3.5 animate-spin" /> : null}
-                          Save draft
+                          {getKnowledgeUiText(locale, 'saveDraft')}
                         </Button>
                       </div>
                     ) : null}
@@ -369,7 +371,7 @@ export function AiKnowledgeCard({
                     {loadingDocs ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : documents.length === 0 ? (
-                      <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">No documents in this base.</p>
+                      <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">{getKnowledgeUiText(locale, 'noDocuments')}</p>
                     ) : (
                       <ul className="space-y-2">
                         {documents.map((doc) => (
@@ -378,11 +380,11 @@ export function AiKnowledgeCard({
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-medium">{doc.title}</p>
                                 <p className="text-xs text-muted-foreground">
-                                  {doc.source_type} · {doc.lifecycle_status} · {doc.trust_level} · {doc.language}
+                                  {getKnowledgeEnumLabel(locale, 'sourceType', doc.source_type)} · {getKnowledgeEnumLabel(locale, 'documentStatus', doc.lifecycle_status)} · {getKnowledgeEnumLabel(locale, 'trust', doc.trust_level)} · {getKnowledgeEnumLabel(locale, 'language', doc.language)}
                                 </p>
                                 {doc.injection_risk !== 'none' ? (
                                   <p className="mt-1 flex items-center gap-1 text-xs text-amber-600">
-                                    <ShieldAlert className="h-3.5 w-3.5" /> Injection risk: {doc.injection_risk}
+                                    <ShieldAlert className="h-3.5 w-3.5" /> {getKnowledgeUiText(locale, 'injectionRisk')}: {getKnowledgeEnumLabel(locale, 'injectionRisk', doc.injection_risk)}
                                   </p>
                                 ) : null}
                               </div>
@@ -393,7 +395,7 @@ export function AiKnowledgeCard({
                                       <Input
                                         value={reviewNotes[doc.id] ?? ''}
                                         onChange={(event) => setReviewNotes((current) => ({ ...current, [doc.id]: event.target.value }))}
-                                        placeholder={doc.injection_risk === 'high' ? 'Review notes required for high-risk content' : 'Review notes (optional)'}
+                                        placeholder={doc.injection_risk === 'high' ? getKnowledgeUiText(locale, 'reviewNotesRequired') : getKnowledgeUiText(locale, 'reviewNotesOptional')}
                                         className="h-8 text-xs"
                                         disabled={busy !== null}
                                       />
@@ -403,19 +405,19 @@ export function AiKnowledgeCard({
                                         onClick={() => void setDocumentStatus(doc.id, 'reviewed')}
                                         disabled={busy !== null || (doc.injection_risk === 'high' && !(reviewNotes[doc.id] ?? '').trim())}
                                       >
-                                        Review
+                                        {getKnowledgeUiText(locale, 'review')}
                                       </Button>
                                     </div>
                                   ) : null}
                                   <div className="flex flex-wrap justify-end gap-1">
                                     {doc.lifecycle_status === 'reviewed' ? (
                                       <Button size="sm" variant="outline" onClick={() => void setDocumentStatus(doc.id, 'active')} disabled={busy !== null}>
-                                        Activate
+                                        {getKnowledgeUiText(locale, 'activate')}
                                       </Button>
                                     ) : null}
                                     {doc.lifecycle_status === 'active' ? (
                                       <Button size="sm" variant="outline" onClick={() => void setDocumentStatus(doc.id, 'archived')} disabled={busy !== null}>
-                                        Archive
+                                        {getKnowledgeUiText(locale, 'archive')}
                                       </Button>
                                     ) : null}
                                     <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void removeDocument(doc.id)} disabled={busy !== null}>
