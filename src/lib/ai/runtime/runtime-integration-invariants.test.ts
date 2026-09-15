@@ -77,15 +77,15 @@ describe('multi-agent runtime integration invariants', () => {
       new URL('../../../../supabase/migrations/070_coverage_agent_template_directional_tools.sql', import.meta.url),
       'utf8',
     )
-    expect(migration).toContain("'coverage.get_rates'")
-    expect(migration).toContain("'coverage.find_offers'")
-    expect(migration).toContain("'coverage.admin_list_offers'")
-    expect(migration).toContain("'coverage.admin_list_requests'")
-    expect(migration).toContain("'change_requests.list_pending'")
+    const expectedAdminAppend =
+      '["coverage.get_rates","coverage.find_offers","coverage.admin_list_offers","coverage.admin_list_requests","change_requests.list_pending"]'
+    expect(migration).toContain(expectedAdminAppend)
 
-    const adminSection = migration.split("where system_key = 'admin_services'")[0].split('with admin_tools')[1] ?? ''
-    expect(adminSection).not.toContain("'coverage.propose_offer'")
-    expect(adminSection).not.toContain("'coverage.propose_request'")
+    const adminUpdate = migration.slice(migration.indexOf('-- Admin operations should read operational coverage data'))
+    const appendedList = adminUpdate.match(/\|\| '(\[[^']+\])'::jsonb/)?.[1] ?? ''
+    expect(appendedList).toBe(expectedAdminAppend)
+    expect(appendedList).not.toContain('coverage.propose_offer')
+    expect(appendedList).not.toContain('coverage.propose_request')
   })
 
   it('registers exact directional coverage and pending-change executors', () => {
