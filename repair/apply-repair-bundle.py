@@ -118,7 +118,12 @@ def apply_semantic_patch(content: str, hunks: list[list[str]], label: str) -> st
             if pos is None:
                 pos = candidates[0]
         else:
-            if old.strip() == '}' and last_anchor < len(content):
+            # Reference patches are grouped semantically, not always in source-file order.
+            # A unique whole-file anchor is safe even if it appears before the prior hunk.
+            anywhere = occurrences(content, old, 0)
+            if len(anywhere) == 1:
+                pos = anywhere[0]
+            elif old.strip() == '}' and last_anchor < len(content):
                 close = brace_close(content, last_anchor)
                 if close is not None:
                     line_start = content.rfind('\n',0,close)+1
@@ -129,7 +134,7 @@ def apply_semantic_patch(content: str, hunks: list[list[str]], label: str) -> st
                         pos=line_start; old=actual
             if pos is None:
                 excerpt = old.replace('\n','\\n')[:180]
-                raise ApplyError(f'{label}: hunk {idx} anchor not found after offset {cursor}: {excerpt!r}')
+                raise ApplyError(f'{label}: hunk {idx} anchor not found unambiguously: {excerpt!r}')
 
         last_anchor = pos
         if changed:
