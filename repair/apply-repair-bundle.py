@@ -216,6 +216,68 @@ def apply_semantic_patch(content: str, hunks: list[list[str]], label: str) -> st
             cursor = pos + len(old)
     return content
 
+def post_apply_type_fixes(root: pathlib.Path) -> None:
+    """Small compile fixes discovered only after applying the full bundle to 13f83ec."""
+    eval_path = root / 'src/app/api/ai-agents/[id]/revisions/[revisionId]/evaluate/route.ts'
+    text = eval_path.read_text('utf-8')
+    text = replace_unique(
+        text,
+        "        contactId: null,\n        plane: testCase.plane,",
+        "        contactId: null,\n        conversationId: null,\n        sourceMessageId: null,\n        plane: testCase.plane,",
+        'evaluation simulation context',
+    )
+    text = replace_unique(
+        text,
+        "        const role = row.role === 'assistant' ? 'assistant' : 'user'\n        return { role, content: typeof row.content === 'string' ? row.content.trim() : '' }",
+        "        const role: ChatMessage['role'] = row.role === 'assistant' ? 'assistant' : 'user'\n        return { role, content: typeof row.content === 'string' ? row.content.trim() : '' }",
+        'evaluation ChatMessage role',
+    )
+    eval_path.write_text(text, 'utf-8')
+
+    policy_path = root / 'src/lib/ai/runtime/tool-policy.ts'
+    text = policy_path.read_text('utf-8')
+    text = replace_unique(
+        text,
+        "  if (constraints.currencies !== undefined) {\n    if (!isStringArray(constraints.currencies)) {\n      return deny('GRANT_CONSTRAINT_INVALID', 'currencies must be an array of strings.')\n    }\n    const currencyCandidates = [args.currency, args.base_currency, args.quote_currency]\n      .filter((value): value is string => typeof value === 'string')\n    if (currencyCandidates.length === 0 || currencyCandidates.some((value) => !constraints.currencies.includes(value))) {\n      return deny('GRANT_CURRENCY_DENIED', 'This grant does not allow the requested currency.')\n    }\n  }",
+        "  const allowedCurrencies = constraints.currencies\n  if (allowedCurrencies !== undefined) {\n    if (!isStringArray(allowedCurrencies)) {\n      return deny('GRANT_CONSTRAINT_INVALID', 'currencies must be an array of strings.')\n    }\n    const currencyCandidates = [args.currency, args.base_currency, args.quote_currency]\n      .filter((value): value is string => typeof value === 'string')\n    if (currencyCandidates.length === 0 || currencyCandidates.some((value) => !allowedCurrencies.includes(value))) {\n      return deny('GRANT_CURRENCY_DENIED', 'This grant does not allow the requested currency.')\n    }\n  }",
+        'tool policy currency narrowing',
+    )
+    policy_path.write_text(text, 'utf-8')
+
+    cr_path = root / 'src/lib/ai/runtime/change-requests-service.ts'
+    text = cr_path.read_text('utf-8')
+    text = replace_unique(
+        text,
+        "  intent: 'create' | 'update' | 'publish' | 'cancel' | 'archive'",
+        "  intent: 'create' | 'create_and_attach' | 'update' | 'publish' | 'cancel' | 'archive'",
+        'change request create_and_attach intent',
+    )
+    cr_path.write_text(text, 'utf-8')
+
+    intents_path = root / 'src/lib/services/intents/intents-service.ts'
+    text = intents_path.read_text('utf-8')
+    text = replace_unique(
+        text,
+        "  changeRequest: { id: string; code: number; confirmationCode: string } | null",
+        "  changeRequest: { id: string; code: number; confirmationCode: string | null } | null",
+        'intent replay confirmation code',
+    )
+    intents_path.write_text(text, 'utf-8')
+
+    test_path = root / 'src/lib/ai/runtime/agent-loop.test.ts'
+    test_path.write_text(
+        "import { readFileSync } from 'node:fs'\n"
+        "import { describe, it, expect } from 'vitest'\n\n"
+        "describe('agent-loop structured tool safety', () => {\n"
+        "  it('uses native structured tools and does not export the legacy fenced parser', () => {\n"
+        "    const source = readFileSync(new URL('./agent-loop.ts', import.meta.url), 'utf8')\n"
+        "    expect(source).toContain('generateNativeAgentTurn')\n"
+        "    expect(source).not.toMatch(/export\\s+(?:async\\s+)?function\\s+parseToolCall/)\n"
+        "  })\n"
+        "})\n",
+        'utf-8',
+    )
+
 def main() -> int:
     root = git_root()
     repair = root / 'repair'
@@ -284,6 +346,8 @@ def main() -> int:
             rel=src.relative_to(overlay); dst=root/rel
             dst.parent.mkdir(parents=True,exist_ok=True)
             shutil.copy2(src,dst)
+
+        post_apply_type_fixes(root)
 
     print('Repair bundle applied successfully.')
     print('Next: npm ci && npm run typecheck && npm test && npm run build && npm run lint')
