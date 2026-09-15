@@ -2,6 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { engineSendText } from '@/lib/automations/meta-send'
 import { findExistingContact } from '@/lib/contacts/dedupe'
+import { sendTextMessage } from '@/lib/whatsapp/meta-api'
+import { decrypt } from '@/lib/whatsapp/encryption'
+import {
+  isRecipientNotAllowedError,
+  phoneVariants,
+  sanitizePhoneForMeta,
+} from '@/lib/whatsapp/phone-utils'
 
 const APPROVAL_CAPABILITY = 'change_requests.approve'
 
@@ -21,6 +28,12 @@ interface TrustedIdentityRow {
   display_name: string | null
   member_id: string | null
   allowed_capabilities: unknown
+}
+
+interface WhatsappRuntimeConfig {
+  user_id: string
+  phone_number_id: string
+  access_token: string
 }
 
 /**
@@ -116,16 +129,17 @@ export async function notifyTrustedAdminsOfChangeRequest(
 
   const { data: config, error: configError } = await db
     .from('whatsapp_config')
-    .select('user_id')
+    .select('user_id, phone_number_id, access_token')
     .eq('account_id', input.accountId)
     .maybeSingle()
-  if (configError || !config?.user_id) {
+  if (configError || !config?.user_id || !config.phone_number_id || !config.access_token) {
     console.error(
       `[change request notification] CHG-${input.requestCode} WhatsApp config unavailable:`,
-      configError?.message ?? 'missing config owner',
+      configError?.message ?? 'missing WhatsApp configuration',
     )
     return { eligible: eligible.length, whatsappSent: 0, inAppCreated }
   }
+  const whatsappConfig = config as WhatsappRuntimeConfig
 
   const approveCommand = `اعتماد CHG-${input.requestCode} ${input.confirmationCode}`
   const rejectCommand = `رفض CHG-${input.requestCode}`
@@ -149,40 +163,48 @@ export async function notifyTrustedAdminsOfChangeRequest(
         input.accountId,
         identity.normalized_address,
       )
-      if (!contact) {
-        console.warn(
-          `[change request notification] CHG-${input.requestCode} trusted admin ${identity.id.slice(0, 8)} has no CRM contact; WhatsApp alert skipped`,
-        )
-        continue
+
+      if (contact) {
+        const { data: conversation, error: conversationError } = await db
+          .from('conversations')
+          .select('id')
+          .eq('account_id', input.accountId)
+          .eq('contact_id', contact.id)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (conversationError) throw conversationError
+
+        if (conversation?.id) {
+          await engineSendText({
+            accountId: input.accountId,
+            userId: whatsappConfig.user_id,
+            conversationId: conversation.id,
+            contactId: contact.id,
+            text,
+            engineIdempotencyKey: `change-request-admin:${input.changeRequestId}:${identity.id}`,
+          })
+          whatsappSent += 1
+          console.info(
+            `[change request notification] CHG-${input.requestCode} sent to trusted admin ${identity.id.slice(0, 8)} via CRM conversation`,
+          )
+          continue
+        }
       }
 
-      const { data: conversation, error: conversationError } = await db
-        .from('conversations')
-        .select('id')
-        .eq('account_id', input.accountId)
-        .eq('contact_id', contact.id)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (conversationError) throw conversationError
-      if (!conversation?.id) {
-        console.warn(
-          `[change request notification] CHG-${input.requestCode} trusted admin ${identity.id.slice(0, 8)} has no CRM conversation; WhatsApp alert skipped`,
-        )
-        continue
-      }
-
-      await engineSendText({
-        accountId: input.accountId,
-        userId: config.user_id,
-        conversationId: conversation.id,
-        contactId: contact.id,
+      // Trusted-admin OTP delivery already supports a verified admin who has
+      // never opened a CRM conversation. Use the same direct Meta transport for
+      // the first approval alert so the business loop does not depend on prior
+      // inbound history. The plaintext PIN exists only on first CR creation, so
+      // an idempotent replay cannot blindly resend this direct message.
+      await sendDirectTrustedAdminText({
+        config: whatsappConfig,
+        normalizedAddress: identity.normalized_address,
         text,
-        engineIdempotencyKey: `change-request-admin:${input.changeRequestId}:${identity.id}`,
       })
       whatsappSent += 1
       console.info(
-        `[change request notification] CHG-${input.requestCode} sent to trusted admin ${identity.id.slice(0, 8)}`,
+        `[change request notification] CHG-${input.requestCode} sent to trusted admin ${identity.id.slice(0, 8)} via direct WhatsApp transport`,
       )
     } catch (sendError) {
       // A free-form WhatsApp send can be unavailable outside Meta's customer
@@ -195,6 +217,36 @@ export async function notifyTrustedAdminsOfChangeRequest(
   }
 
   return { eligible: eligible.length, whatsappSent, inAppCreated }
+}
+
+async function sendDirectTrustedAdminText(input: {
+  config: WhatsappRuntimeConfig
+  normalizedAddress: string
+  text: string
+}): Promise<void> {
+  const phone = sanitizePhoneForMeta(input.normalizedAddress)
+  const accessToken = decrypt(input.config.access_token)
+  let lastError: unknown = null
+
+  for (const candidate of phoneVariants(phone)) {
+    try {
+      await sendTextMessage({
+        phoneNumberId: input.config.phone_number_id,
+        accessToken,
+        to: candidate,
+        text: input.text,
+      })
+      return
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!isRecipientNotAllowedError(message)) throw error
+      lastError = error
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Could not deliver trusted-admin approval alert')
 }
 
 interface CustomerNotificationRow {
