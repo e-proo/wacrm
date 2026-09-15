@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
+import { notifyTrustedAdminsOfChangeRequest } from './business-notifications'
 
 export interface ChangeRequestRow {
   id: string
@@ -80,6 +81,26 @@ export async function createChangeRequest(
     content_digest: string
   }>)[0]
   if (!row) throw new ChangeRequestError('CHANGE_REQUEST_CREATE_FAILED', 'No row returned.', 500)
+
+  try {
+    const notification = await notifyTrustedAdminsOfChangeRequest({
+      accountId: input.accountId,
+      changeRequestId: row.id,
+      requestCode: row.code,
+      confirmationCode: row.confirmation_code,
+      summary: input.summary ?? null,
+      targetType: input.targetType,
+      proposedPayload: input.proposedPayload,
+    })
+    console.info(
+      `[change request] CHG-${row.code} admin notification eligible=${notification.eligible} whatsapp=${notification.whatsappSent} in_app=${notification.inAppCreated}`,
+    )
+  } catch (notifyError) {
+    // The change request is the durable authority. A secondary notification
+    // failure must never roll back or duplicate the proposal itself.
+    console.error(`[change request] CHG-${row.code} admin notification failed:`, notifyError)
+  }
+
   return {
     id: row.id,
     code: row.code,
