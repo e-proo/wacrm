@@ -1,8 +1,6 @@
 name: Repair Bundle CI
 
 on:
-  push:
-    branches: [test/ai-runtime-kb-tools-v2]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -33,18 +31,7 @@ jobs:
       - name: Apply verified repair bundle
         run: bash repair/apply-repair-bundle.sh
 
-      - name: Regenerate lockfile metadata
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-
-      - name: Capture repaired lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: repair-lockfile
-          path: package-lock.json
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Install dependencies
+      - name: Install dependencies from committed lockfile
         run: npm ci --no-audit --no-fund
 
       - name: Typecheck
