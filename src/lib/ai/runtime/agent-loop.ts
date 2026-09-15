@@ -128,14 +128,16 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
     const roleFraming =
       input.agentPurpose === 'admin_operations'
-        ? 'You are the operations assistant for a verified business administrator. Use only native tools offered by the runtime. Never claim a mutation occurred unless a change request was explicitly approved and executed.'
+        ? 'You are the operations assistant for a verified business administrator. Use native READ tools for current services, rates, coverage, requests, and offers whenever relevant. Never use customer-style handoff merely because live data was needed. Never claim a mutation occurred unless a change request was explicitly approved and executed.'
         : input.agentPurpose === 'customer_support'
-          ? 'You are the business customer-service assistant. Answer from approved knowledge and read/proposal tools. Never expose internal-only fields and never claim an administrative write was performed.'
+          ? 'You are the business customer-service assistant. Answer from approved knowledge and read/proposal tools. When a READ tool succeeds, answer from that authoritative result instead of handing off. Never expose internal-only fields and never claim an administrative write was performed.'
           : 'Answer using approved knowledge and native tools. Ask a concise clarifying question when needed.'
 
     const systemPrompt = buildSystemPrompt({
       userPrompt: [revision.systemPrompt ?? '', roleFraming].filter(Boolean).join('\n\n'),
       mode: 'auto_reply',
+      audience: input.agentPurpose === 'admin_operations' ? 'admin' : 'customer',
+      nativeToolsAvailable: offeredTools.length > 0,
       knowledge,
     })
 
@@ -170,7 +172,25 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     const messages: NativeAgentMessage[] = mergeConsecutive(input.messages).map((m) => ({ ...m }))
     let finalText: string | null = null
     let handoffRequested = false
+    let hasAuthoritativeReadResult = false
     const rounds = Math.max(maxRounds, 1)
+
+    const recoverAfterAuthoritativeRead = async () => {
+      const recovery = await generateNativeAgentTurn({
+        connection,
+        model: revision.model,
+        systemPrompt:
+          systemPrompt +
+          '\n\nRuntime grounding rule: a READ tool already returned authoritative safe-to-show data for this turn. Answer from that tool result now. Do not hand off merely because live data was required. If the tool result says the data is unpublished or unavailable, say that explicitly.',
+        messages,
+        tools: [],
+        maxOutputTokens: revision.maxOutputTokens,
+        temperature: revision.temperature,
+      })
+      inputTokens += recovery.usage?.promptTokens ?? 0
+      outputTokens += recovery.usage?.completionTokens ?? 0
+      return parseGeneration(recovery.text, recovery.usage)
+    }
 
     for (let round = 1; round <= rounds; round++) {
       const turn = await generateNativeAgentTurn({
@@ -187,6 +207,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       const parsed = parseGeneration(turn.text, turn.usage)
       if (parsed.handoff) {
+        if (hasAuthoritativeReadResult) {
+          const recovered = await recoverAfterAuthoritativeRead()
+          if (!recovered.handoff && recovered.text) {
+            handoffRequested = false
+            finalText = recovered.text
+            break
+          }
+        }
         handoffRequested = true
         finalText = parsed.text || null
         break
@@ -253,6 +281,17 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           },
         )
         auditCalls.push({ toolKey: call.toolKey, round, ok: outcome.result.ok })
+        console.info(
+          `[agent loop] tool=${call.toolKey} round=${round} ok=${outcome.result.ok} code=${outcome.result.code ?? 'OK'} safe=${outcome.result.safe_to_show}`,
+        )
+        if (
+          grant.permission === 'read' &&
+          outcome.result.ok &&
+          outcome.result.safe_to_show &&
+          outcome.result.data !== null
+        ) {
+          hasAuthoritativeReadResult = true
+        }
         messages.push({
           role: 'tool', callId: call.id, toolKey: call.toolKey,
           content: JSON.stringify(outcome.result),
@@ -276,6 +315,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         const parsedLast = parseGeneration(last.text, last.usage)
         finalText = parsedLast.text || null
         handoffRequested = parsedLast.handoff
+        if (handoffRequested && hasAuthoritativeReadResult) {
+          const recovered = await recoverAfterAuthoritativeRead()
+          if (!recovered.handoff && recovered.text) {
+            finalText = recovered.text
+            handoffRequested = false
+          }
+        }
       }
     }
 

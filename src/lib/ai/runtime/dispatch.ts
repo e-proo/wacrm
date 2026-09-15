@@ -12,6 +12,11 @@ import { executeCurrentPlatformTool } from '../tools/platform/current-executor-r
 import { loadAccountRuntimePolicy } from './runtime-policy'
 import { authorizeToolInvocation } from './tool-policy'
 import { canonicalizeE164 } from './phone-e164'
+import {
+  applyAgentHumanHandoff,
+  localizedAdminFallback,
+  localizedHandoffAcknowledgement,
+} from './handoff-service'
 import type {
   AccountId,
   AiAgentRevision,
@@ -436,8 +441,13 @@ async function executeAgentRun(
       }
     })
     .filter((m) => m.content.trim().length > 0)
+  const agentPurpose =
+    snapshot.agents.find(
+      (entry: { agent: { id: string; purpose: string } }) =>
+        entry.agent.id === decision.agentId,
+    )?.agent.purpose ?? 'custom'
   console.info(
-    `[ai dispatch] history=${history.length} msgs, purpose=${snapshot.agents.find((entry: { agent: { id: string; purpose: string } }) => entry.agent.id === decision.agentId)?.agent.purpose ?? 'custom'}`,
+    `[ai dispatch] history=${history.length} msgs, purpose=${agentPurpose}`,
   )
 
   // The send needs an audit identity — fail BEFORE claiming a
@@ -448,30 +458,34 @@ async function executeAgentRun(
     return 'failed'
   }
 
-  // Per-conversation reply cap — same atomic slot claim the legacy
-  // path uses, so both paths share one budget per thread.
-  const { data: slot, error: slotErr } = await db.rpc('claim_ai_reply_slot', {
-    conversation_id: args.conversationId,
-    max_replies: rev.maxAiRepliesPerConversation ?? 3,
-  })
-  if (slotErr) {
-    console.error('[ai dispatch] claim_ai_reply_slot failed:', slotErr)
-    await markRun(db, args.accountId, runId, 'failed', 'SLOT_CLAIM_FAILED')
-    return 'failed'
-  }
-  if (slot !== true) {
-    console.info('[ai dispatch] reply slot lost/cap reached run=' + runId.slice(0, 8))
-    await markRun(db, args.accountId, runId, 'failed', 'REPLY_SLOT_LOST')
-    return 'failed'
+  // Customer conversations share the same atomic reply cap as the legacy
+  // auto-reply path. Trusted-admin traffic is a separate operational plane:
+  // identity/capability/budget gates apply, but customer reply history cannot
+  // silence an administrator.
+  if (decision.plane === 'customer') {
+    const { data: slot, error: slotErr } = await db.rpc('claim_ai_reply_slot', {
+      conversation_id: args.conversationId,
+      max_replies: rev.maxAiRepliesPerConversation ?? 3,
+    })
+    if (slotErr) {
+      console.error('[ai dispatch] claim_ai_reply_slot failed:', slotErr)
+      await markRun(db, args.accountId, runId, 'failed', 'SLOT_CLAIM_FAILED')
+      return 'failed'
+    }
+    if (slot !== true) {
+      console.info('[ai dispatch] reply slot lost/cap reached run=' + runId.slice(0, 8))
+      await markRun(db, args.accountId, runId, 'failed', 'REPLY_SLOT_LOST')
+      return 'failed'
+    }
+  } else {
+    console.info('[ai dispatch] admin plane bypasses customer reply cap run=' + runId.slice(0, 8))
   }
 
   const loop = await runAgentLoop({
     accountId: args.accountId,
     runId,
     agentId: decision.agentId,
-    agentPurpose:
-      snapshot.agents.find((entry: { agent: { id: string; purpose: string } }) => entry.agent.id === decision.agentId)?.agent
-        .purpose ?? 'custom',
+    agentPurpose: agentPurpose as 'customer_support' | 'admin_operations' | 'custom',
     revision: rev,
     messages: history,
     contactId: args.contactId,
@@ -500,18 +514,56 @@ async function executeAgentRun(
     `[ai dispatch] loop=${loop.status} tools=${loop.toolCalls.length} text=${loop.text ? loop.text.length + 'ch' : 'null'}`,
   )
 
-  // Handoff → mirror the legacy behaviour: stop auto-replying and
-  // leave the thread for a human.
-  if (loop.status === 'handoff') {
-    await db
-      .from('conversations')
-      .update({ ai_autoreply_disabled: true })
-      .eq('id', args.conversationId)
+  const latestInbound =
+    [...history].reverse().find((message) => message.role === 'user')?.content ?? ''
+
+  if (loop.status === 'handoff' && decision.plane === 'customer') {
+    const summary = `AI handoff after customer message: ${latestInbound}`
+    try {
+      const handoff = await applyAgentHumanHandoff({
+        db,
+        accountId: args.accountId,
+        runId,
+        conversationId: args.conversationId,
+        contactId: args.contactId,
+        targetUserId: rev.handoffHumanMemberId,
+        summary,
+      })
+      console.info(
+        `[ai dispatch] handoff assigned=${handoff.assignedUserId ?? 'none'} changed=${handoff.assignmentChanged} explicit_notification=${handoff.explicitNotificationCreated}`,
+      )
+    } catch (handoffErr) {
+      console.error('[ai dispatch] handoff assignment failed:', handoffErr)
+      await markRun(db, args.accountId, runId, 'failed', 'HANDOFF_ASSIGNMENT_FAILED')
+      return 'failed'
+    }
+
+    if (args.contactId) {
+      try {
+        await engineSendText({
+          accountId: args.accountId,
+          userId: args.configOwnerUserId,
+          conversationId: args.conversationId,
+          contactId: args.contactId,
+          text: localizedHandoffAcknowledgement(latestInbound),
+          aiAgentRunId: runId,
+        })
+      } catch (sendErr) {
+        console.error('[ai dispatch] handoff acknowledgement send failed:', sendErr)
+      }
+    }
     await markRun(db, args.accountId, runId, 'handoff_requested')
     return 'handoff'
   }
 
-  if (loop.status === 'failed' || !loop.text) {
+  // A trusted administrator is already the human authority. Model-level
+  // customer handoff semantics must never turn an admin message into silence.
+  const effectiveText =
+    loop.status === 'handoff' && decision.plane === 'admin'
+      ? loop.text || localizedAdminFallback(latestInbound)
+      : loop.text
+
+  if (loop.status === 'failed' || !effectiveText) {
     await markRun(db, args.accountId, runId, 'failed', loop.error ?? 'EMPTY_REPLY')
     return 'failed'
   }
@@ -527,7 +579,7 @@ async function executeAgentRun(
       userId: args.configOwnerUserId,
       conversationId: args.conversationId,
       contactId: args.contactId ?? '',
-      text: loop.text,
+      text: effectiveText,
       aiAgentRunId: runId,
     })
   } catch (sendErr) {
