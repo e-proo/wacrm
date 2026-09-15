@@ -1,0 +1,48 @@
+name: Verify Admin Agent Hardening Once
+
+on:
+  push:
+    branches: [test/ai-runtime-kb-tools-v2]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://ci.example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-dummy-anon-key
+      ENCRYPTION_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+      META_APP_SECRET: 'ci-dummy-meta-secret'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Apply source hardening
+        run: python3 repair/apply-admin-agent-hardening.py
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit verified product changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/agents/agent-editor.tsx src/components/agents/trusted-admins-panel.tsx src/app/api/ai-agents/'[id]'/revisions/'[revisionId]'/route.ts src/lib/ai/runtime/builder-service.ts src/lib/ai/ui/agent-admin-i18n.ts
+          git diff --cached --quiet && exit 0
+          git commit -m "Harden agent editor and trusted admin verification UX"
+          git push origin HEAD:test/ai-runtime-kb-tools-v2
