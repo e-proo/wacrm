@@ -21,9 +21,12 @@ alter table public.notifications
   add constraint notifications_type_check
   check (type in ('conversation_assigned', 'change_request_pending'));
 
+-- A regular UNIQUE index is intentional: PostgreSQL already permits multiple
+-- NULL values, and PostgREST/Supabase can infer this index for
+-- upsert(..., { onConflict: 'dedupe_key' }). A partial unique index would not
+-- be inferred by that ON CONFLICT target.
 create unique index if not exists notifications_dedupe_key_uidx
-  on public.notifications(dedupe_key)
-  where dedupe_key is not null;
+  on public.notifications(dedupe_key);
 
 create index if not exists notifications_change_request_idx
   on public.notifications(account_id, change_request_id, created_at desc)
