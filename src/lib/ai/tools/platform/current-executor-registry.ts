@@ -73,6 +73,35 @@ add('intents.search', 1, (ctx, args) => executeIntentsSearch(ctx, args as never)
 add('intents.propose_decision', 1, (ctx, args) => executeIntentProposeDecision(ctx, args as never))
 add('change_requests.list_pending', 1, (ctx, args) => executeChangeRequestsListPending(ctx, args as never))
 
+const MODEL_SECRET_KEYS = new Set([
+  'confirmation_code',
+  'confirmationCode',
+  'confirmation_code_hash',
+  'confirmationCodeHash',
+])
+
+function stripModelSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripModelSecrets)
+  if (!value || typeof value !== 'object') return value
+
+  const clean: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (MODEL_SECRET_KEYS.has(key)) continue
+    clean[key] = stripModelSecrets(child)
+  }
+  return clean
+}
+
+/**
+ * Final model-boundary projection. Approval credentials are transport secrets
+ * for a verified human administrator, never model context — even when a
+ * domain executor accidentally includes them in a proposal DTO.
+ */
+export function sanitizeToolResultForModel(result: RuntimeResult): RuntimeResult {
+  if (result.data == null) return result
+  return { ...result, data: stripModelSecrets(result.data) }
+}
+
 /**
  * Dispatch after schema/grant/policy validation. Exact version is mandatory;
  * registered manifests and registered executors must move together.
@@ -101,5 +130,6 @@ export async function executeCurrentPlatformTool(
       message: 'Tool is not available.',
     }
   }
-  return CURRENT_EXECUTORS.execute(tool.key, tool.version, ctx, args)
+  const result = await CURRENT_EXECUTORS.execute(tool.key, tool.version, ctx, args)
+  return sanitizeToolResultForModel(result)
 }
