@@ -1,1 +1,0 @@
-One-off source hardening is applied by repair/apply-admin-agent-hardening.py and removed after CI verification.
