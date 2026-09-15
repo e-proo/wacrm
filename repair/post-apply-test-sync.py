@@ -152,11 +152,24 @@ describe('tool registry — repaired platform contract', () => {
 """, 'utf-8')
 
 
+def fix_applied_tree_lint(root: pathlib.Path) -> None:
+    path = root / 'src/lib/ai/tools/business-handoff.ts'
+    text = path.read_text('utf-8')
+    text = replace_unique(
+        text,
+        "    let pricingRuleId = args.pricing_rule_id ?? (revision.pricing_rule_id as string | null)",
+        "    const pricingRuleId = args.pricing_rule_id ?? (revision.pricing_rule_id as string | null)",
+        'business handoff pricingRuleId prefer-const',
+    )
+    path.write_text(text, 'utf-8')
+
+
 def main() -> None:
     root = git_root()
     sync_webhook_mock(root)
     sync_tool_registry_test(root)
-    print('Post-apply tests synchronized with repaired runtime contracts.')
+    fix_applied_tree_lint(root)
+    print('Post-apply tests and lint contract synchronized with repaired runtime.')
 
 
 if __name__ == '__main__':
