@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local AI/editor worktrees are separate checkouts and must not be linted as part of this checkout.
+    ".kilo/**",
     // Vendored minified opus-recorder encoder worker (served statically).
     "public/opus/**",
   ]),
