@@ -3,6 +3,8 @@ name: Repair Bundle CI
 on:
   push:
     branches: [test/ai-runtime-kb-tools-v2]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
