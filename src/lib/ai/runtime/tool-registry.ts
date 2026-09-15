@@ -325,7 +325,7 @@ const COVERAGE_FIND_OFFERS: ToolDefinition = {
   key: 'coverage.find_offers',
   version: 2,
   description:
-    'Search ACTIVE coverage offers by service, currency, and minimum headroom, optionally filtered by receive region (exact id or macro north/south/international) and method. Returns aggregated rows WITHOUT provider identity or cost — the requester-facing DTO stays anonymous.',
+    'Direction-aware coverage matching. Give the CUSTOMER pay and receive legs. Domestic rule: PAY south + RECEIVE north is an OFFER (commission returned to customer); PAY north + RECEIVE south is a REQUEST (customer pays commission). For a canonical request this searches the anti-parallel active offers and returns customer-safe availability plus commission options without provider identity/cost.',
   argumentSchema: {
     service_id: {
       type: 'string',
@@ -334,37 +334,66 @@ const COVERAGE_FIND_OFFERS: ToolDefinition = {
     },
     currency: {
       type: 'string',
-      description: 'ISO-4217-like code.',
+      description: 'Configured currency code, e.g. SAR.',
       required: true,
     },
     min_available: {
       type: 'string',
-      description: 'Minimum remaining headroom (decimal string).',
+      description: 'Customer amount / minimum required available amount as a decimal string.',
+      required: false,
+    },
+    pay_region_id: {
+      type: 'string',
+      description: 'Resolved coverage region UUID where the CUSTOMER pays.',
+      required: false,
+    },
+    pay_region: {
+      type: 'string',
+      description: 'Human region name/code where the CUSTOMER pays, e.g. حضرموت or hadramawt.',
+      required: false,
+    },
+    pay_macro: {
+      type: 'enum',
+      description: 'Customer pay macro region.',
+      values: ['north', 'south', 'international'],
+      required: false,
+    },
+    pay_method: {
+      type: 'enum',
+      description: 'Customer pay method.',
+      values: ['cash', 'networks', 'remittance', 'bank_deposit', 'any'],
       required: false,
     },
     receive_region_id: {
       type: 'string',
-      description: 'Exact coverage region UUID for the RECEIVE leg.',
+      description: 'Resolved coverage region UUID where the CUSTOMER receives.',
+      required: false,
+    },
+    receive_region: {
+      type: 'string',
+      description: 'Human region name/code where the CUSTOMER wants to receive, e.g. صنعاء or sanaa.',
       required: false,
     },
     receive_macro: {
-      type: 'string',
-      description: "Macro region filter: 'north' | 'south' | 'international'.",
+      type: 'enum',
+      description: 'Customer receive macro region.',
+      values: ['north', 'south', 'international'],
       required: false,
     },
     receive_method: {
-      type: 'string',
-      description: "'cash' | 'networks' | 'bank_deposit' | 'any'.",
+      type: 'enum',
+      description: 'Customer receive method.',
+      values: ['cash', 'networks', 'remittance', 'bank_deposit', 'any'],
       required: false,
     },
     limit: {
       type: 'number',
-      description: 'Max rows. Default 10, max 50.',
+      description: 'Max matched offer rows before aggregation. Default 10, max 50.',
       required: false,
     },
   },
   returnSchema:
-    'Array<{ offer_id, reference_code, available_amount, currency, commission_per_thousand, commission_currency, attributes (validated coverage legs) }> — NO provider_contact_id, NO provider_cost.',
+    '{ case_type, available, total_available, currency, matching_offer_count, resolved_legs, direction, commission_options: [{ rate_per_1000, commission_currency, total_available, offer_count, commission_amount_for_requested_amount }] } for customer plane; admin plane may receive anonymous offer rows with no provider cost/identity.',
   grantPermissions: ['read'],
   category: 'coverage',
   risk: 'read',
@@ -374,16 +403,71 @@ const COVERAGE_GET_RATES: ToolDefinition = {
   key: 'coverage.get_rates',
   version: 1,
   description:
-    "Read the account's CURRENT published commission rate board (migration 062): rates per 1000 for cash pickup / remittance / coverage, grouped by market (north, south, international). Quote ONLY the published numbers, state they are per 1000 and can change; when a rate or the whole board is missing, do NOT invent a figure — say the desk confirms it per case.",
+    'Resolve and quote coverage commission from the CURRENT published board. For a concrete customer query pass amount/currency plus CUSTOMER pay and receive regions/methods. Domestic canonical rule is fixed: PAY south + RECEIVE north => offer / commission returned to customer (راجع للعميل); PAY north + RECEIVE south => request / customer pays commission (عمولة). The words راجع/عمولة do not define separate services. Quote ONLY values returned by this tool; if unpublished, never invent.',
   argumentSchema: {
     scope: {
       type: 'enum',
-      description: "Market to return: 'north' | 'south' | 'international' | 'all' (default).",
+      description: "Board-only lookup market: 'north' | 'south' | 'international' | 'all'. For a concrete directional quote, omit or leave all.",
+      values: ['north', 'south', 'international', 'all'],
+      required: false,
+    },
+    amount: {
+      type: 'string',
+      description: 'Customer amount as a positive decimal string; when supplied the tool calculates total commission.',
+      required: false,
+    },
+    currency: {
+      type: 'string',
+      description: 'Currency of amount/commission, e.g. SAR. Required when amount is supplied.',
+      required: false,
+    },
+    pay_region_id: {
+      type: 'string',
+      description: 'Resolved coverage region UUID where the CUSTOMER pays.',
+      required: false,
+    },
+    pay_region: {
+      type: 'string',
+      description: 'Human region name/code where the CUSTOMER pays, e.g. حضرموت or hadramawt.',
+      required: false,
+    },
+    pay_macro: {
+      type: 'enum',
+      description: 'Customer pay macro region.',
+      values: ['north', 'south', 'international'],
+      required: false,
+    },
+    pay_method: {
+      type: 'enum',
+      description: 'Customer pay method.',
+      values: ['cash', 'networks', 'remittance', 'bank_deposit', 'any'],
+      required: false,
+    },
+    receive_region_id: {
+      type: 'string',
+      description: 'Resolved coverage region UUID where the CUSTOMER receives.',
+      required: false,
+    },
+    receive_region: {
+      type: 'string',
+      description: 'Human region name/code where the CUSTOMER wants the money, e.g. صنعاء or sanaa.',
+      required: false,
+    },
+    receive_macro: {
+      type: 'enum',
+      description: 'Customer receive macro region.',
+      values: ['north', 'south', 'international'],
+      required: false,
+    },
+    receive_method: {
+      type: 'enum',
+      description: 'Customer receive method.',
+      values: ['cash', 'networks', 'remittance', 'bank_deposit', 'any'],
       required: false,
     },
   },
   returnSchema:
-    '{ published: boolean, updated_at, scope rates { cash_per_1000, remittance_per_1000, coverage_per_1000 } } | { published: false }',
+    '{ published, markets, resolved_legs?, direction?: { case_type, commission_effect, customer_term_ar, rate_market }, quote?: { status, amount, currency, rate_per_1000, commission_amount, commission_currency, effect, customer_term_ar }, domestic_direction_rules }',
   grantPermissions: ['read'],
   category: 'coverage',
   risk: 'read',
@@ -393,7 +477,7 @@ const COVERAGE_PROPOSE_OFFER: ToolDefinition = {
   key: 'coverage.propose_offer',
   version: 2,
   description:
-    "Forward this conversation's customer's stated liquidity as a coverage offer. Customer/contact identity is injected by the runtime; the offer is NOT created until an admin approves the change request.",
+    'Forward a confirmed domestic coverage case for approval. Canonical OFFER means CUSTOMER pays in SOUTH and receives in NORTH; commission is returned to the customer (راجع للعميل). The server re-resolves direction and snapshots the CURRENT published rate. If this tool is called for the opposite direction, the server auto-corrects to a request instead of persisting the wrong type.',
   argumentSchema: {
     service_id: {
       type: 'string',
@@ -402,28 +486,28 @@ const COVERAGE_PROPOSE_OFFER: ToolDefinition = {
     },
     total_amount: {
       type: 'string',
-      description: 'Offered amount (decimal string).',
+      description: 'Customer coverage amount (decimal string).',
       required: true,
     },
     currency: {
       type: 'string',
-      description: 'ISO-4217-like code.',
+      description: 'Configured currency code.',
       required: true,
     },
     attributes: {
       type: 'object',
       description:
-        'Coverage legs: coverage_scope (domestic|international), coverage_country, receive_region_id, receive_method, pay_region_id, pay_method (cash|networks|bank_deposit|any).',
+        'Coverage legs. For domestic coverage include resolved pay_region_id + receive_region_id and pay_method + receive_method. These are CUSTOMER legs and must never be swapped.',
       required: false,
     },
     commission_per_thousand: {
       type: 'string',
-      description: 'Commission RATE per 1000 units (e.g. "7" = 7 per 1000). Optional.',
+      description: 'Optional legacy/model hint only; NOT authoritative for domestic coverage. Server snapshots the published board rate.',
       required: false,
     },
     commission_currency: {
       type: 'string',
-      description: 'Commission currency code; required when commission_per_thousand is set.',
+      description: 'Optional legacy hint paired with commission_per_thousand; server uses the authoritative quote for domestic coverage.',
       required: false,
     },
     deal_date: {
@@ -433,7 +517,7 @@ const COVERAGE_PROPOSE_OFFER: ToolDefinition = {
     },
   },
   returnSchema:
-    '{ intent?: { intent_id, status }, change_request: { id, code, confirmation_code } } — quote the code + confirmation to the admin over WhatsApp.',
+    '{ intent, change_request, coverage_case: { canonical_type, invoked_tool_type, auto_corrected, direction_code, commission_effect, customer_term_ar, resolved_legs }, commission_snapshot: { rate_per_1000, commission_amount, currency, source } }',
   grantPermissions: ['propose'],
   category: 'coverage',
   risk: 'medium',
@@ -443,18 +527,22 @@ const COVERAGE_PROPOSE_REQUEST: ToolDefinition = {
   key: 'coverage.propose_request',
   version: 1,
   description:
-    "Forward this conversation's customer's coverage need for admin approval. The request becomes active only after the approved deterministic change is executed.",
+    'Forward a confirmed domestic coverage case for approval. Canonical REQUEST means CUSTOMER pays in NORTH and receives in SOUTH; the customer pays the commission (عمولة). The server re-resolves direction and snapshots the CURRENT published rate. If this tool is called for the opposite direction, the server auto-corrects to an offer instead of persisting the wrong type.',
   argumentSchema: {
     service_id: { type: 'string', description: 'Service UUID.', required: true },
-    requested_amount: { type: 'string', description: 'Requested amount as a decimal string.', required: true },
+    requested_amount: { type: 'string', description: 'Customer coverage amount as a decimal string.', required: true },
     currency: { type: 'string', description: 'Configured currency code.', required: true },
-    attributes: { type: 'object', description: 'Structured coverage legs.', required: false },
-    commission_per_thousand: { type: 'string', description: 'Optional target commission per 1000.', required: false },
-    commission_currency: { type: 'string', description: 'Required when commission_per_thousand is set.', required: false },
+    attributes: {
+      type: 'object',
+      description: 'Coverage legs. For domestic coverage include resolved pay_region_id + receive_region_id and methods. These are CUSTOMER legs and must never be swapped.',
+      required: false,
+    },
+    commission_per_thousand: { type: 'string', description: 'Optional legacy/model hint only; NOT authoritative for domestic coverage.', required: false },
+    commission_currency: { type: 'string', description: 'Optional legacy hint; server uses the authoritative quote for domestic coverage.', required: false },
     deal_date: { type: 'string', description: 'Optional YYYY-MM-DD business date.', required: false },
     expires_at: { type: 'string', description: 'Optional ISO timestamp after which the request is no longer useful.', required: false },
   },
-  returnSchema: '{ intent, change_request: { id, code, confirmation_code, status } }',
+  returnSchema: '{ intent, change_request, coverage_case, commission_snapshot }',
   grantPermissions: ['propose'],
   category: 'coverage',
   risk: 'medium',
@@ -537,6 +625,7 @@ const EXCHANGE_RATES_RECORD_TRADE_REQUEST: ToolDefinition = {
   category: 'rates',
   risk: 'medium',
 }
+
 const EXCHANGE_RATES_ADMIN_LIST_BOOKS: ToolDefinition = {
   key: 'exchange_rates.admin_list_books',
   version: 1,
@@ -545,7 +634,7 @@ const EXCHANGE_RATES_ADMIN_LIST_BOOKS: ToolDefinition = {
     status: { type: 'string', description: 'Optional active/archived status.', required: false },
     limit: { type: 'number', description: 'Default 20, max 100.', required: false },
   },
-  returnSchema: 'Array<{ id, name, region, settlement_method, current_published_version_id, status }>',
+  returnSchema: 'Array<{ id, name, region, current_published_version_id, status }>',
   grantPermissions: ['read'], category: 'rates', risk: 'read',
 }
 
@@ -614,20 +703,6 @@ const PRICING_RULES_PROPOSE_SERVICE_PRICE: ToolDefinition = {
   category: 'pricing',
   risk: 'high',
 }
-
-
-// ------------------------------------------------------------
-// Phase 3 (later): propose_* tools
-// ------------------------------------------------------------
-// These will go through the change-request approval flow.
-// Listed here as documentation; not registered until the
-// approval engine ships.
-
-// services.propose_rate_change         (propose)
-// services.propose_offer_creation       (propose)
-// pricing_rules.propose_update          (propose)
-// exchange_rates.propose_publish         (propose)
-// coverage.propose_match_reservation    (propose)
 
 // ------------------------------------------------------------
 // Registry
