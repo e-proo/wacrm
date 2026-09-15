@@ -6,27 +6,18 @@ import { routeInboundMessage } from './router'
 import { runAgentLoop } from './agent-loop'
 import { engineSendText } from '@/lib/automations/meta-send'
 import type { ChatMessage } from '../types'
-import {
-  executeCoverageCheckAvailability,
-  executeExchangeRatesGetCurrent,
-  executePricingCalculateQuote,
-  executeServicesGet,
-  executeServicesSearch,
-  executeServicesMatchRequest,
-  executeIntentsRecord,
-  executeIntentsSearch,
-  executeCoverageFindOffers,
-  executeCoverageGetRates,
-  executeCoverageProposeOffer,
-  type ToolContext,
-  type ToolResult,
-} from '../tools/executors'
+import type { ToolContext, ToolResult } from '../tools/executors'
 import { recordToolAttempt } from './tool-attempt-audit'
+import { executeCurrentPlatformTool } from '../tools/platform/current-executor-registry'
+import { loadAccountRuntimePolicy } from './runtime-policy'
+import { authorizeToolInvocation } from './tool-policy'
+import { canonicalizeE164 } from './phone-e164'
 import type {
   AccountId,
   AiAgentRevision,
   RoutingDecision,
   RoutingSnapshot,
+  TrustedAdminIdentity,
   ToolGrantPermission,
   Uuid,
 } from './multi-agent-types'
@@ -71,6 +62,9 @@ export interface MultiAgentPreCheckArgs {
   conversationId: Uuid
   senderAddress: string
   hasHumanAssignee: boolean
+  inboxId?: string | null
+  tags?: ReadonlyArray<string>
+  language?: string | null
 }
 
 export async function shouldRouteToMultiAgent(
@@ -78,10 +72,12 @@ export async function shouldRouteToMultiAgent(
 ): Promise<boolean> {
   try {
     const db = supabaseAdmin()
-    const [conversationAiState, snapshot] = await Promise.all([
+    const [conversationAiState, snapshot, policy] = await Promise.all([
       loadConversationAiState(db, args.conversationId),
       loadRoutingSnapshotAdmin(args.accountId),
+      loadAccountRuntimePolicy(db, args.accountId),
     ])
+    if (policy.killSwitch || !policy.multiAgentEnabled) return false
     const decision = routeInboundMessage(
       {
         accountId: args.accountId,
@@ -89,7 +85,10 @@ export async function shouldRouteToMultiAgent(
         senderAddress: args.senderAddress,
         conversationAiState,
         hasHumanAssignee: args.hasHumanAssignee,
-        multiAgentEnabled: true,
+        multiAgentEnabled: policy.multiAgentEnabled,
+        inboxId: args.inboxId ?? null,
+        tags: args.tags ?? [],
+        language: args.language ?? null,
       },
       snapshot,
     )
@@ -98,6 +97,29 @@ export async function shouldRouteToMultiAgent(
     console.error('[ai dispatch] pre-check failed, falling back to legacy:', err)
     return false
   }
+}
+
+/**
+ * Resolve a trusted WhatsApp administrator BEFORE customer Flows and
+ * Automations run. Deliberately throws when the routing snapshot cannot be
+ * loaded so the webhook can fail closed instead of treating an unknown
+ * sender plane as a customer message.
+ */
+export async function resolveTrustedAdminIdentity(input: {
+  accountId: AccountId
+  senderAddress: string
+}): Promise<TrustedAdminIdentity | null> {
+  const canonical = canonicalizeE164(input.senderAddress)
+  if (!canonical) return null
+  const snapshot = await loadRoutingSnapshotAdmin(input.accountId)
+  return (
+    snapshot.trustedIdentities.find(
+      (identity) =>
+        identity.status === 'active' &&
+        identity.channel === 'whatsapp' &&
+        identity.normalizedAddress === canonical,
+    ) ?? null
+  )
 }
 
 export interface DispatchInboundArgs {
@@ -116,6 +138,9 @@ export interface DispatchInboundArgs {
   multiAgentEnabled: boolean
   /** Worker identity used to claim the run lease. */
   workerId: string
+  inboxId?: string | null
+  tags?: ReadonlyArray<string>
+  language?: string | null
 }
 
 export interface DispatchInboundResult {
@@ -144,6 +169,9 @@ export async function dispatchInboundToAiAgent(
     }
 
     const db = supabaseAdmin()
+    const policy = await loadAccountRuntimePolicy(db, args.accountId)
+    if (policy.killSwitch) return skip('account_kill_switch')
+    if (!policy.multiAgentEnabled) return skip('account_multi_agent_disabled')
 
     const conversationAiState = await loadConversationAiState(
       db,
@@ -159,7 +187,10 @@ export async function dispatchInboundToAiAgent(
         senderAddress: args.senderAddress,
         conversationAiState,
         hasHumanAssignee: args.hasHumanAssignee,
-        multiAgentEnabled: args.multiAgentEnabled,
+        multiAgentEnabled: args.multiAgentEnabled && policy.multiAgentEnabled,
+        inboxId: args.inboxId ?? null,
+        tags: args.tags ?? [],
+        language: args.language ?? null,
       },
       snapshot,
     )
@@ -215,6 +246,84 @@ async function createAgentRunRow(
     return null
   }
   return data as Uuid | null
+}
+
+/**
+ * Resume a durable queued run outside the webhook request. All routing
+ * references come from the frozen ai_agent_runs row; conversation/contact
+ * reads are only used to reconstruct send/context metadata.
+ */
+export async function resumeQueuedAgentRun(
+  runId: Uuid,
+  workerId: string,
+): Promise<'succeeded' | 'handoff' | 'failed' | 'lost'> {
+  const db = supabaseAdmin()
+  const { data: run, error: runError } = await db
+    .from('ai_agent_runs')
+    .select(
+      'id, account_id, conversation_id, inbound_message_id, ai_agent_id, agent_revision_id, provider_connection_id, route_id, route_reason, plane, status',
+    )
+    .eq('id', runId)
+    .maybeSingle()
+  if (runError) throw runError
+  if (!run) return 'lost'
+  if (run.status === 'succeeded') return 'succeeded'
+  if (run.status !== 'queued' && run.status !== 'claimed') return 'lost'
+
+  const [conversationRes, configRes, snapshot] = await Promise.all([
+    db
+      .from('conversations')
+      .select('id, contact_id, assigned_agent_id')
+      .eq('id', run.conversation_id)
+      .maybeSingle(),
+    db
+      .from('whatsapp_config')
+      .select('user_id')
+      .eq('account_id', run.account_id)
+      .maybeSingle(),
+    loadRoutingSnapshotAdmin(run.account_id),
+  ])
+  if (conversationRes.error) throw conversationRes.error
+  if (configRes.error) throw configRes.error
+  if (!conversationRes.data) return 'failed'
+
+  const contactId = conversationRes.data.contact_id as string | null
+  const { data: contact, error: contactError } = contactId
+    ? await db
+        .from('contacts')
+        .select('phone')
+        .eq('account_id', run.account_id)
+        .eq('id', contactId)
+        .maybeSingle()
+    : { data: null, error: null }
+  if (contactError) throw contactError
+
+  const decision: Extract<RoutingDecision, { action: 'route' }> = {
+    action: 'route',
+    plane: run.plane as 'admin' | 'customer',
+    agentId: run.ai_agent_id,
+    revisionId: run.agent_revision_id,
+    providerConnectionId: run.provider_connection_id,
+    reason: run.route_reason ?? 'durable_worker_resume',
+    routeId: run.route_id,
+  }
+  return executeAgentRun(
+    {
+      accountId: run.account_id,
+      conversationId: run.conversation_id,
+      inboundMessageId: run.inbound_message_id,
+      contactId,
+      configOwnerUserId: configRes.data?.user_id ?? null,
+      senderAddress: contact?.phone ?? '',
+      hasHumanAssignee: Boolean(conversationRes.data.assigned_agent_id),
+      multiAgentEnabled: true,
+      workerId,
+    },
+    runId,
+    decision,
+    snapshot,
+    workerId,
+  )
 }
 
 async function executeAgentRun(
@@ -366,6 +475,26 @@ async function executeAgentRun(
     revision: rev,
     messages: history,
     contactId: args.contactId,
+    conversationId: args.conversationId,
+    sourceMessageId: args.inboundMessageId,
+    plane: decision.plane,
+    channel: 'whatsapp',
+    trustedAdminIdentityId:
+      decision.plane === 'admin'
+        ? snapshot.trustedIdentities.find(
+            (identity) =>
+              identity.status === 'active' &&
+              identity.normalizedAddress === canonicalizeE164(args.senderAddress),
+          )?.id ?? null
+        : null,
+    trustedAdminCapabilities:
+      decision.plane === 'admin'
+        ? snapshot.trustedIdentities.find(
+            (identity) =>
+              identity.status === 'active' &&
+              identity.normalizedAddress === canonicalizeE164(args.senderAddress),
+          )?.allowedCapabilities ?? []
+        : [],
   })
   console.info(
     `[ai dispatch] loop=${loop.status} tools=${loop.toolCalls.length} text=${loop.text ? loop.text.length + 'ch' : 'null'}`,
@@ -387,31 +516,46 @@ async function executeAgentRun(
     return 'failed'
   }
 
-  // Persist the run as succeeded BEFORE the network send so a
-  // crash mid-send still leaves the answer auditable (and the
-  // idempotency key prevents any retry from double-sending).
-  await db
+  // LIVE SEND via the shared engine channel (service-role scoped,
+  // account-verified contact + WhatsApp config). The send helper reserves a
+  // unique local messages row keyed by this run BEFORE talking to Meta.
+  console.info('[ai dispatch] sending reply via WhatsApp...')
+  let sent: Awaited<ReturnType<typeof engineSendText>>
+  try {
+    sent = await engineSendText({
+      accountId: args.accountId,
+      userId: args.configOwnerUserId,
+      conversationId: args.conversationId,
+      contactId: args.contactId ?? '',
+      text: loop.text,
+      aiAgentRunId: runId,
+    })
+  } catch (sendErr) {
+    console.error('[ai dispatch] WhatsApp send failed:', sendErr)
+    await markRun(db, args.accountId, runId, 'failed', 'SEND_FAILED')
+    return 'failed'
+  }
+
+  // Only Meta success + durable local message persistence can make the run
+  // succeeded. outbound_message_id stores messages.id (UUID), never wamid.
+  const { data: completed, error: completeErr } = await db
     .from('ai_agent_runs')
-    .update({ status: 'succeeded', completed_at: new Date().toISOString() })
+    .update({
+      status: 'succeeded',
+      completed_at: new Date().toISOString(),
+      outbound_message_id: sent.local_message_id,
+      input_tokens: loop.inputTokens,
+      output_tokens: loop.outputTokens,
+      error_code: null,
+    })
     .eq('id', runId)
     .eq('status', 'claimed')
-
-  // LIVE SEND via the shared engine channel (service-role scoped,
-  // account-verified contact + WhatsApp config, phone-variant
-  // retry built in).
-  console.info('[ai dispatch] sending reply via WhatsApp...')
-  const sent = await engineSendText({
-    accountId: args.accountId,
-    userId: args.configOwnerUserId,
-    conversationId: args.conversationId,
-    contactId: args.contactId ?? '',
-    text: loop.text,
-  })
-
-  await db
-    .from('ai_agent_runs')
-    .update({ outbound_message_id: sent.whatsapp_message_id })
-    .eq('id', runId)
+    .select('id')
+    .maybeSingle()
+  if (completeErr || !completed) {
+    console.error('[ai dispatch] run completion CAS failed:', completeErr)
+    return 'lost'
+  }
   console.info(`[ai dispatch] SENT run=${runId.slice(0, 8)} wa_id=${sent.whatsapp_message_id}`)
 
   return 'succeeded'
@@ -617,55 +761,60 @@ export async function executeTool(
     }
   }
 
+  const grantedVersion = ctx.grantVersions?.[invocation.toolKey]
+  if (grantedVersion !== tool.version) {
+    await audit({ status: 'denied', errorCode: 'TOOL_VERSION_MISMATCH', toolVersion: tool.version })
+    return {
+      ...baseOutcome,
+      result: {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'TOOL_VERSION_MISMATCH',
+        message: `Tool "${invocation.toolKey}" grant is stale.`,
+      },
+      toolFound: true,
+      granted: false,
+      roundsExhausted: false,
+    }
+  }
+
+  const policy = authorizeToolInvocation({
+    tool,
+    permission: invocation.permission,
+    args: invocation.args,
+    constraints: ctx.grantConstraints?.[invocation.toolKey] ?? {},
+    context: {
+      plane: ctx.plane,
+      channel: ctx.channel,
+      simulation: ctx.simulation,
+      agentPurpose: ctx.agentPurpose,
+      trustedAdminIdentityId: ctx.trustedAdminIdentityId,
+      trustedAdminCapabilities: ctx.trustedAdminCapabilities,
+      features: ctx.features,
+    },
+  })
+  if (!policy.ok) {
+    await audit({ status: 'denied', errorCode: policy.code, toolVersion: tool.version })
+    return {
+      ...baseOutcome,
+      result: {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: policy.code,
+        message: policy.message,
+      },
+      toolFound: true,
+      granted: false,
+      roundsExhausted: false,
+    }
+  }
+
   const startedAt = Date.now()
   let result: ToolResult
   try {
-    switch (invocation.toolKey) {
-      case 'services.search':
-        result = await executeServicesSearch(ctx, invocation.args as never)
-        break
-      case 'services.get':
-        result = await executeServicesGet(ctx, invocation.args as never)
-        break
-      case 'pricing.calculate_quote':
-        result = await executePricingCalculateQuote(ctx, invocation.args as never)
-        break
-      case 'exchange_rates.get_current':
-        result = await executeExchangeRatesGetCurrent(
-          ctx,
-          invocation.args as never,
-        )
-        break
-      case 'coverage.check_availability':
-        result = await executeCoverageCheckAvailability(ctx, invocation.args as never)
-        break
-      case 'coverage.find_offers':
-        result = await executeCoverageFindOffers(ctx, invocation.args as never)
-        break
-      case 'coverage.get_rates':
-        result = await executeCoverageGetRates(ctx, invocation.args as never)
-        break
-      case 'coverage.propose_offer':
-        result = await executeCoverageProposeOffer(ctx, invocation.args as never)
-        break
-      case 'services.match_request':
-        result = await executeServicesMatchRequest(ctx, invocation.args as never)
-        break
-      case 'intents.record':
-        result = await executeIntentsRecord(ctx, invocation.args as never)
-        break
-      case 'intents.search':
-        result = await executeIntentsSearch(ctx, invocation.args as never)
-        break
-      default:
-        result = {
-          ok: false,
-          data: null,
-          safe_to_show: true,
-          code: 'UNKNOWN_TOOL',
-          message: `Tool "${invocation.toolKey}" is not registered.`,
-        }
-    }
+    result = await executeCurrentPlatformTool(ctx, tool, invocation.args)
   } catch (err) {
     console.error(
       `[ai dispatch] tool ${invocation.toolKey} crashed:`,

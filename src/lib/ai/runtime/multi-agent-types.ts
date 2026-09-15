@@ -221,6 +221,12 @@ export interface RoutingContext {
   hasHumanAssignee: boolean
   /** Account-level features / flags. */
   multiAgentEnabled: boolean
+  /** Concrete WhatsApp connection/inbox id that received the message. */
+  inboxId?: string | null
+  /** Normalized contact tag NAMES (the route editor stores free text). */
+  tags?: ReadonlyArray<string>
+  /** Conservative runtime language signal; null means unknown. */
+  language?: string | null
 }
 
 export interface RoutingSnapshot {

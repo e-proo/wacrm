@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Loader2, ShieldOff, ShieldCheck, Copy } from 'lucide-react';
+import { Loader2, ShieldOff, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,10 +25,7 @@ export function TrustedAdminsPanel() {
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [otp, setOtp] = useState('');
-  const [pendingOtpFor, setPendingOtpFor] = useState<{
-    id: string;
-    otp: string;
-  } | null>(null);
+  const [pendingOtpFor, setPendingOtpFor] = useState<{ id: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,13 +56,13 @@ export function TrustedAdminsPanel() {
       });
       const json = (await res.json()) as {
         identity?: TrustedIdentity;
-        otp?: string;
+        otpSent?: boolean;
         error?: string;
       };
-      if (!res.ok || !json.identity || !json.otp) {
+      if (!res.ok || !json.identity || json.otpSent !== true) {
         throw new Error(json.error ?? 'Registration failed');
       }
-      setPendingOtpFor({ id: json.identity.id, otp: json.otp });
+      setPendingOtpFor({ id: json.identity.id });
       setPhone('');
       setName('');
       await load();
@@ -189,21 +186,6 @@ export function TrustedAdminsPanel() {
             <p className="text-sm text-muted-foreground">
               {t('trustedAdmins.showOtpDescription')}
             </p>
-            <div className="flex items-center gap-2">
-              <code className="rounded border bg-muted px-3 py-2 font-mono text-lg tracking-widest">
-                {pendingOtpFor.otp}
-              </code>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  void navigator.clipboard.writeText(pendingOtpFor.otp);
-                }}
-              >
-                <Copy className="me-1.5 h-4 w-4" />
-                {t('trustedAdmins.copyOtp')}
-              </Button>
-            </div>
             <div className="flex items-end gap-2">
               <div className="flex-1 space-y-1">
                 <label className="text-sm font-medium">

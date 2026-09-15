@@ -40,7 +40,7 @@ export interface ToolDefinition {
   /** Closed permission levels this tool can be granted at. */
   grantPermissions: ReadonlyArray<ToolGrantPermission>
   /** The runtime category of this tool — used to group docs. */
-  category: 'services' | 'pricing' | 'rates' | 'coverage' | 'intents'
+  category: 'services' | 'pricing' | 'rates' | 'coverage' | 'intents' | 'changes'
   risk: 'read' | 'low' | 'medium' | 'high'
 }
 
@@ -391,15 +391,10 @@ const COVERAGE_GET_RATES: ToolDefinition = {
 
 const COVERAGE_PROPOSE_OFFER: ToolDefinition = {
   key: 'coverage.propose_offer',
-  version: 1,
+  version: 2,
   description:
-    "Propose creating a coverage offer from a customer's stated liquidity. Creates a change request for the trusted admin — the offer is NOT created until the admin approves with the confirmation code.",
+    "Forward this conversation's customer's stated liquidity as a coverage offer. Customer/contact identity is injected by the runtime; the offer is NOT created until an admin approves the change request.",
   argumentSchema: {
-    contact_id: {
-      type: 'string',
-      description: 'Customer contact UUID providing the liquidity.',
-      required: true,
-    },
     service_id: {
       type: 'string',
       description: 'Service UUID.',
@@ -444,6 +439,183 @@ const COVERAGE_PROPOSE_OFFER: ToolDefinition = {
   risk: 'medium',
 }
 
+const COVERAGE_PROPOSE_REQUEST: ToolDefinition = {
+  key: 'coverage.propose_request',
+  version: 1,
+  description:
+    "Forward this conversation's customer's coverage need for admin approval. The request becomes active only after the approved deterministic change is executed.",
+  argumentSchema: {
+    service_id: { type: 'string', description: 'Service UUID.', required: true },
+    requested_amount: { type: 'string', description: 'Requested amount as a decimal string.', required: true },
+    currency: { type: 'string', description: 'Configured currency code.', required: true },
+    attributes: { type: 'object', description: 'Structured coverage legs.', required: false },
+    commission_per_thousand: { type: 'string', description: 'Optional target commission per 1000.', required: false },
+    commission_currency: { type: 'string', description: 'Required when commission_per_thousand is set.', required: false },
+    deal_date: { type: 'string', description: 'Optional YYYY-MM-DD business date.', required: false },
+    expires_at: { type: 'string', description: 'Optional ISO timestamp after which the request is no longer useful.', required: false },
+  },
+  returnSchema: '{ intent, change_request: { id, code, confirmation_code, status } }',
+  grantPermissions: ['propose'],
+  category: 'coverage',
+  risk: 'medium',
+}
+
+const COVERAGE_ADMIN_LIST_OFFERS: ToolDefinition = {
+  key: 'coverage.admin_list_offers',
+  version: 1,
+  description: 'Admin-only operational view of coverage offers, including provider identity and internal cost fields.',
+  argumentSchema: {
+    status: { type: 'string', description: 'Optional exact lifecycle status.', required: false },
+    limit: { type: 'number', description: 'Default 20, max 100.', required: false },
+  },
+  returnSchema: 'Array<admin coverage offer rows>',
+  grantPermissions: ['read'], category: 'coverage', risk: 'read',
+}
+
+const COVERAGE_ADMIN_LIST_REQUESTS: ToolDefinition = {
+  key: 'coverage.admin_list_requests',
+  version: 1,
+  description: 'Admin-only operational view of customer coverage requests.',
+  argumentSchema: {
+    status: { type: 'string', description: 'Optional exact lifecycle status.', required: false },
+    limit: { type: 'number', description: 'Default 20, max 100.', required: false },
+  },
+  returnSchema: 'Array<admin coverage request rows>',
+  grantPermissions: ['read'], category: 'coverage', risk: 'read',
+}
+
+const CHANGE_REQUESTS_LIST_PENDING: ToolDefinition = {
+  key: 'change_requests.list_pending',
+  version: 1,
+  description: 'Admin-only list of pending proposed system changes awaiting a human decision.',
+  argumentSchema: {
+    limit: { type: 'number', description: 'Default 20, max 100.', required: false },
+  },
+  returnSchema: 'Array<{ id, code, target_type, intent, summary, proposed_payload, created_at, expires_at }>',
+  grantPermissions: ['read'], category: 'changes', risk: 'read',
+}
+
+const INTENTS_PROPOSE_DECISION: ToolDefinition = {
+  key: 'intents.propose_decision',
+  version: 1,
+  description: 'Admin-only proposal for resolving a generic customer intent after review.',
+  argumentSchema: {
+    intent_id: { type: 'string', description: 'Customer intent UUID.', required: true },
+    decision: { type: 'enum', description: 'Resolution.', values: ['fulfilled', 'rejected', 'matched', 'clarifying'], required: true },
+    matched_service_id: { type: 'string', description: 'Required when decision=matched.', required: false },
+    reason: { type: 'string', description: 'Optional admin-facing rationale.', required: false },
+  },
+  returnSchema: '{ change_request: { id, code, confirmation_code, status } }',
+  grantPermissions: ['propose'], category: 'intents', risk: 'medium',
+}
+
+const EXCHANGE_RATES_RECORD_TRADE_REQUEST: ToolDefinition = {
+  key: 'exchange_rates.record_trade_request',
+  version: 1,
+  description:
+    "Record this conversation's customer's request to buy or sell the base currency at the current published rate context. This NEVER changes exchange rates; it forwards the request to administration as a bound customer intent.",
+  argumentSchema: {
+    base_currency: { type: 'string', description: 'Currency being bought or sold.', required: true },
+    quote_currency: { type: 'string', description: 'Settlement/quote currency.', required: true },
+    intent: {
+      type: 'enum',
+      description: 'Customer side of the trade.',
+      values: ['customer_sells_base', 'customer_buys_base'],
+      required: true,
+    },
+    base_amount: { type: 'string', description: 'Positive amount of base currency the customer wants to buy/sell.', required: true },
+    region: { type: 'string', description: 'Optional rate-book region context.', required: false },
+    settlement: {
+      type: 'enum',
+      description: 'Optional settlement method.',
+      values: ['cash', 'bank', 'wallet', 'other'],
+      required: false,
+    },
+  },
+  returnSchema: '{ intent, rate_snapshot }',
+  grantPermissions: ['propose'],
+  category: 'rates',
+  risk: 'medium',
+}
+const EXCHANGE_RATES_ADMIN_LIST_BOOKS: ToolDefinition = {
+  key: 'exchange_rates.admin_list_books',
+  version: 1,
+  description: 'Admin-only list of exchange-rate books and their current published version ids.',
+  argumentSchema: {
+    status: { type: 'string', description: 'Optional active/archived status.', required: false },
+    limit: { type: 'number', description: 'Default 20, max 100.', required: false },
+  },
+  returnSchema: 'Array<{ id, name, region, settlement_method, current_published_version_id, status }>',
+  grantPermissions: ['read'], category: 'rates', risk: 'read',
+}
+
+const EXCHANGE_RATES_PROPOSE_PAIR_CHANGE: ToolDefinition = {
+  key: 'exchange_rates.propose_pair_change',
+  version: 1,
+  description: 'Admin-only proposal to replace one currency pair in a versioned rate book. Approval creates and atomically publishes a new version.',
+  argumentSchema: {
+    book_id: { type: 'string', description: 'Exchange-rate book UUID.', required: true },
+    base_currency: { type: 'string', description: 'Base currency code.', required: true },
+    quote_currency: { type: 'string', description: 'Quote currency code.', required: true },
+    buy_rate: { type: 'string', description: 'Positive decimal buy rate.', required: true },
+    sell_rate: { type: 'string', description: 'Positive decimal sell rate.', required: true },
+    rate_unit: { type: 'string', description: 'Optional positive rate unit.', required: false },
+    notes_public: { type: 'string', description: 'Optional public rate note.', required: false },
+  },
+  returnSchema: '{ rate_book, proposed_rate, change_request }',
+  grantPermissions: ['propose'], category: 'rates', risk: 'high',
+}
+
+const SERVICES_PROPOSE_UPDATE: ToolDefinition = {
+  key: 'services.propose_update',
+  version: 1,
+  description: 'Admin-only proposal to publish a new service revision. Internal-only fields are preserved but never exposed to or editable by the model.',
+  argumentSchema: {
+    service_id: { type: 'string', description: 'Service UUID.', required: true },
+    name: { type: 'string', description: 'Optional new service name.', required: false },
+    public_description: { type: 'string', description: 'Optional new public description.', required: false },
+    ai_guidance: { type: 'string', description: 'Optional AI guidance. Never customer-visible.', required: false },
+    field_values_patch: { type: 'object', description: 'Patch to non-internal schema fields only.', required: false },
+    pricing_rule_id: { type: 'string', description: 'Optional published pricing-rule UUID.', required: false },
+    status: { type: 'enum', description: 'Optional service lifecycle state.', values: ['draft','active','paused','archived'], required: false },
+  },
+  returnSchema: '{ service, proposed, change_request }',
+  grantPermissions: ['propose'], category: 'services', risk: 'high',
+}
+
+const PRICING_RULES_PROPOSE_SERVICE_PRICE: ToolDefinition = {
+  key: 'pricing_rules.propose_service_price',
+  version: 1,
+  description:
+    'Admin-only proposal to create a new immutable pricing rule and attach it through a new service revision after approval.',
+  argumentSchema: {
+    service_id: { type: 'string', description: 'Service UUID.', required: true },
+    name: { type: 'string', description: 'Pricing rule name.', required: true },
+    kind: {
+      type: 'enum',
+      description: 'Pricing formula kind.',
+      values: ['fixed','percentage','per_unit','fixed_plus_percentage','tiered','fx_buy_sell','manual_quote'],
+      required: true,
+    },
+    fee_currency: { type: 'string', description: 'Optional fee currency code.', required: false },
+    input_currency: { type: 'string', description: 'Optional required input currency code.', required: false },
+    minimum_fee: { type: 'string', description: 'Optional non-negative minimum fee.', required: false },
+    maximum_fee: { type: 'string', description: 'Optional non-negative maximum fee.', required: false },
+    rounding_mode: {
+      type: 'enum',
+      description: 'Optional rounding mode.',
+      values: ['proportional','ceil_started_unit','floor_complete_unit','nearest_unit'],
+      required: false,
+    },
+    formula_config: { type: 'object', description: 'Pricing-engine formula configuration.', required: true },
+  },
+  returnSchema: '{ service, proposed_pricing_rule, change_request }',
+  grantPermissions: ['propose'],
+  category: 'pricing',
+  risk: 'high',
+}
+
+
 // ------------------------------------------------------------
 // Phase 3 (later): propose_* tools
 // ------------------------------------------------------------
@@ -469,6 +641,16 @@ const REGISTRY: ReadonlyArray<ToolDefinition> = [
   COVERAGE_FIND_OFFERS,
   COVERAGE_GET_RATES,
   COVERAGE_PROPOSE_OFFER,
+  COVERAGE_PROPOSE_REQUEST,
+  COVERAGE_ADMIN_LIST_OFFERS,
+  COVERAGE_ADMIN_LIST_REQUESTS,
+  CHANGE_REQUESTS_LIST_PENDING,
+  INTENTS_PROPOSE_DECISION,
+  EXCHANGE_RATES_RECORD_TRADE_REQUEST,
+  EXCHANGE_RATES_ADMIN_LIST_BOOKS,
+  EXCHANGE_RATES_PROPOSE_PAIR_CHANGE,
+  SERVICES_PROPOSE_UPDATE,
+  PRICING_RULES_PROPOSE_SERVICE_PRICE,
   SERVICES_MATCH_REQUEST,
   INTENTS_RECORD,
   INTENTS_SEARCH,
