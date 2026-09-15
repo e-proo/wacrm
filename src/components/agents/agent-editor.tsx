@@ -70,6 +70,19 @@ interface ConnectionOption {
   status?: string;
 }
 
+interface ProviderModelOption {
+  id: string;
+  displayName?: string;
+  description?: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  capabilities?: {
+    vision?: boolean;
+    toolCalling?: boolean;
+    jsonMode?: boolean;
+  };
+}
+
 interface MemberOption {
   user_id: string;
   full_name: string;
@@ -135,7 +148,9 @@ export function AgentEditor(props: AgentEditorProps) {
   const [registry, setRegistry] = useState<RegistryTool[]>([]);
   const [grants, setGrants] = useState<Map<string, { permission: string; constraints: Record<string, unknown> }>>(new Map());
   const [connections, setConnections] = useState<ConnectionOption[]>([]);
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ProviderModelOption[]>([]);
+  const [modelCatalogState, setModelCatalogState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [modelCatalogWarning, setModelCatalogWarning] = useState<string | null>(null);
   const [members, setMembers] = useState<MemberOption[]>([]);
   const [policies, setPolicies] = useState<Map<string, BudgetPolicy>>(new Map());
   const [testCases, setTestCases] = useState<TestCaseRow[]>([]);
@@ -246,21 +261,44 @@ export function AgentEditor(props: AgentEditorProps) {
     void loadAll();
   }, [loadAll]);
 
-  // Model catalog for the selected connection (feature-flagged
-  // multi-provider path — silently absent on legacy deployments).
+  // Provider catalogs are informative but not authoritative for an already-saved
+  // draft: providers can temporarily fail or remove an older model from the list.
+  // Preserve that saved value while clearly marking it as unavailable.
   useEffect(() => {
     if (!fConn) {
       setModels([]);
+      setModelCatalogState('idle');
+      setModelCatalogWarning(null);
       return;
     }
     let cancelled = false;
-    fetch(`/api/ai/connections/${fConn}/models`, { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : { models: [] }))
-      .then((json: { models?: Array<{ id?: string; slug?: string }> }) => {
-        if (cancelled) return;
-        setModels((json.models ?? []).map((m) => m.id ?? m.slug ?? '').filter(Boolean));
+    setModelCatalogState('loading');
+    setModelCatalogWarning(null);
+    void fetch(`/api/ai/connections/${fConn}/models`, { cache: 'no-store' })
+      .then(async (res) => {
+        const json = (await res.json().catch(() => ({}))) as {
+          models?: ProviderModelOption[];
+          warning?: string;
+          error?: string;
+        };
+        if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+        return json;
       })
-      .catch(() => !cancelled && setModels([]));
+      .then((json) => {
+        if (cancelled) return;
+        const unique = new Map<string, ProviderModelOption>();
+        for (const model of json.models ?? []) {
+          if (model && typeof model.id === 'string' && model.id.trim()) unique.set(model.id, model);
+        }
+        setModels([...unique.values()]);
+        setModelCatalogWarning(json.warning ?? null);
+        setModelCatalogState('ready');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setModels([]);
+        setModelCatalogState('error');
+      });
     return () => {
       cancelled = true;
     };
@@ -286,16 +324,32 @@ export function AgentEditor(props: AgentEditorProps) {
   }
 
   async function saveRevision() {
-    setBusy('revision');
     setNote(null);
     setActionError(null);
+    setChecks(null);
+
+    const normalizedModel = fModel.trim();
+    if (!fConn) {
+      setActionError(getAgentAdminUiText(locale, 'connectionRequired'));
+      return;
+    }
+    if (!normalizedModel) {
+      setActionError(getAgentAdminUiText(locale, 'modelRequiredForSave'));
+      return;
+    }
+    if (!connections.some((connection) => connection.id === fConn)) {
+      setActionError(getAgentAdminUiText(locale, 'connectionUnavailable'));
+      return;
+    }
+
+    setBusy('revision');
     try {
       const res = await fetch(`/api/ai-agents/${agentId}/revisions/${revisionId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          model: fModel,
-          providerConnectionId: fConn || null,
+          model: normalizedModel,
+          providerConnectionId: fConn,
           systemPrompt: fPrompt || null,
           responseStyle: fStyle,
           languagePolicy: fLang,
@@ -309,6 +363,8 @@ export function AgentEditor(props: AgentEditorProps) {
       const json = (await res.json()) as { revision?: RevisionRow; error?: string; code?: string };
       if (!res.ok || !json.revision) throw new Error(localizeAgentApiError(locale, json.code, json.error));
       setRevision(json.revision);
+      setFConn(json.revision.provider_connection_id ?? '');
+      setFModel(json.revision.model ?? '');
       setActionError(null);
       setNote(t('savedRevision'));
     } catch (e) {
@@ -576,6 +632,19 @@ export function AgentEditor(props: AgentEditorProps) {
     );
   }
 
+  const selectedConnection = connections.find((connection) => connection.id === fConn);
+  const selectedModel = models.find((model) => model.id === fModel);
+  const savedModelMissingFromCatalog = Boolean(
+    fModel &&
+    revision.provider_connection_id === fConn &&
+    revision.model === fModel &&
+    modelCatalogState === 'ready' &&
+    !selectedModel,
+  );
+  const selectedConnectionInactive = Boolean(
+    selectedConnection?.status && !['active', 'verified'].includes(selectedConnection.status),
+  );
+
   const toggleTool = (tool: RegistryTool, on: boolean) => {
     setGrants((prev) => {
       const next = new Map(prev);
@@ -650,29 +719,75 @@ export function AgentEditor(props: AgentEditorProps) {
         {/* revision settings */}
         <section className="space-y-2">
           <h3 className="text-sm font-semibold">{t('revisionSettings')}</h3>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            {connections.length > 0 ? (
+          <div className="rounded-lg border bg-muted/10 p-3">
+            <p className="mb-3 text-xs text-muted-foreground">
+              {getAgentAdminUiText(locale, 'providerModelHelp')}
+            </p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <L label={t('providerConnection')}>
-                <select className="w-full rounded border bg-background px-2 py-1.5 text-sm" value={fConn} onChange={(e) => setFConn(e.target.value)}>
-                  <option value="">—</option>
-                  {connections.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                <select
+                  className="w-full rounded border bg-background px-2 py-2 text-sm"
+                  value={fConn}
+                  onChange={(e) => {
+                    const nextConnection = e.target.value;
+                    setFConn(nextConnection);
+                    setFModel(nextConnection === revision.provider_connection_id ? (revision.model ?? '') : '');
+                    setActionError(null);
+                  }}
+                >
+                  <option value="">{getAgentAdminUiText(locale, 'selectConnection')}</option>
+                  {connections.map((connection) => (
+                    <option key={connection.id} value={connection.id}>
+                      {connection.name}{connection.status ? ` — ${connection.status}` : ''}
+                    </option>
                   ))}
                 </select>
+                {connections.length === 0 ? (
+                  <p className="text-xs text-destructive">{getAgentAdminUiText(locale, 'noConnections')}</p>
+                ) : null}
+                {selectedConnectionInactive ? (
+                  <p className="text-xs text-amber-700">{getAgentAdminUiText(locale, 'connectionInactive')}</p>
+                ) : null}
               </L>
-            ) : null}
-            <L label={t('model')}>
-              <Input
-                value={fModel}
-                onChange={(e) => setFModel(e.target.value)}
-                list={models.length > 0 ? 'agent-models' : undefined}
-              />
-              {models.length > 0 ? (
-                <datalist id="agent-models">
-                  {models.map((m) => <option key={m} value={m} />)}
-                </datalist>
-              ) : null}
-            </L>
+              <L label={t('model')}>
+                <select
+                  className="w-full rounded border bg-background px-2 py-2 text-sm disabled:opacity-60"
+                  value={fModel}
+                  disabled={!fConn || modelCatalogState === 'loading'}
+                  onChange={(e) => { setFModel(e.target.value); setActionError(null); }}
+                >
+                  <option value="">
+                    {modelCatalogState === 'loading'
+                      ? getAgentAdminUiText(locale, 'loadingModels')
+                      : getAgentAdminUiText(locale, 'selectModel')}
+                  </option>
+                  {fModel && !models.some((model) => model.id === fModel) ? (
+                    <option value={fModel}>
+                      {fModel} — {getAgentAdminUiText(locale, 'savedModelLabel')}
+                    </option>
+                  ) : null}
+                  {models.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.displayName && model.displayName !== model.id
+                        ? `${model.displayName} — ${model.id}`
+                        : model.id}
+                    </option>
+                  ))}
+                </select>
+                {modelCatalogState === 'error' ? (
+                  <p className="text-xs text-destructive">{getAgentAdminUiText(locale, 'modelCatalogUnavailable')}</p>
+                ) : null}
+                {savedModelMissingFromCatalog ? (
+                  <p className="text-xs text-amber-700">{getAgentAdminUiText(locale, 'savedModelUnavailable')}</p>
+                ) : null}
+                {modelCatalogWarning ? <p className="text-xs text-amber-700">{modelCatalogWarning}</p> : null}
+                {selectedModel?.description ? (
+                  <p className="text-xs text-muted-foreground">{selectedModel.description}</p>
+                ) : null}
+              </L>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
             <L label={t('responseStyle')}>
               <select className="w-full rounded border bg-background px-2 py-1.5 text-sm" value={fStyle} onChange={(e) => setFStyle(e.target.value)}>
                 <option value="concise">{t('styleConcise')}</option>
@@ -716,7 +831,7 @@ export function AgentEditor(props: AgentEditorProps) {
               placeholder={t('systemPromptPlaceholder')}
             />
           </L>
-          <Button size="sm" variant="outline" disabled={busy === 'revision'} onClick={() => void saveRevision()}>
+          <Button type="button" size="sm" variant="outline" disabled={busy === 'revision'} onClick={() => void saveRevision()}>
             {busy === 'revision' ? <Loader2 className="me-1 h-3.5 w-3.5 animate-spin" /> : null}
             {t('saveRevision')}
           </Button>

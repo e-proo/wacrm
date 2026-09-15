@@ -51,6 +51,7 @@ export function TrustedAdminsPanel() {
   const [delivery, setDelivery] = useState<DeliveryInfo | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   async function load() {
     setError(null);
@@ -70,6 +71,7 @@ export function TrustedAdminsPanel() {
 
   async function submitRegistration(targetPhone: string, displayName: string | null, resend = false) {
     setError(null);
+    setSuccess(null);
     setBusy(resend ? 'resend' : 'register');
     try {
       const res = await fetch('/api/trusted-admins', {
@@ -117,6 +119,11 @@ export function TrustedAdminsPanel() {
 
   async function verify(id: string) {
     setError(null);
+    setSuccess(null);
+    if (!/^\d{6}$/.test(otp)) {
+      setError(getAgentAdminUiText(locale, 'otpSixDigits'));
+      return;
+    }
     setBusy(id);
     try {
       const res = await fetch(`/api/trusted-admins/${id}/verify`, {
@@ -132,6 +139,7 @@ export function TrustedAdminsPanel() {
       setPendingOtpFor(null);
       setDelivery(null);
       await load();
+      setSuccess(getAgentAdminUiText(locale, 'verificationSuccess'));
     } catch (e) {
       setError(e instanceof Error ? e.message : getAgentAdminUiText(locale, 'verificationFailed'));
     } finally {
@@ -169,6 +177,16 @@ export function TrustedAdminsPanel() {
 
   return (
     <div className="space-y-6">
+      {error ? (
+        <div role="alert" aria-live="assertive" className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span>
+        </div>
+      ) : null}
+      {success ? (
+        <div role="status" aria-live="polite" className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm">
+          {success}
+        </div>
+      ) : null}
       <Card>
         <CardHeader><CardTitle className="text-base">{t('trustedAdmins.addTitle')}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
@@ -188,15 +206,10 @@ export function TrustedAdminsPanel() {
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </div>
           </div>
-          <Button onClick={() => void register()} disabled={busy === 'register' || !phone}>
+          <Button type="button" onClick={() => void register()} disabled={busy === 'register' || !phone}>
             {busy === 'register' ? <Loader2 className="me-1.5 h-4 w-4 animate-spin" /> : null}
             {t('trustedAdmins.register')}
           </Button>
-          {error ? (
-            <div role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span>
-            </div>
-          ) : null}
         </CardContent>
       </Card>
 
@@ -215,9 +228,19 @@ export function TrustedAdminsPanel() {
             <div className="flex items-end gap-2">
               <div className="flex-1 space-y-1">
                 <label className="text-sm font-medium">{t('trustedAdmins.otpLabel')}</label>
-                <Input value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 8))} inputMode="numeric" dir="ltr" />
+                <Input
+                  value={otp}
+                  onChange={(e) => { setOtp(e.target.value.replace(/\D/g, '').slice(0, 6)); setError(null); }}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  pattern="[0-9]{6}"
+                  placeholder="000000"
+                  dir="ltr"
+                />
+                <p className="text-xs text-muted-foreground">{getAgentAdminUiText(locale, 'otpExpiresHint')}</p>
               </div>
-              <Button onClick={() => void verify(pendingOtpFor.id)} disabled={busy === pendingOtpFor.id || !otp.trim()}>
+              <Button type="button" onClick={() => void verify(pendingOtpFor.id)} disabled={busy === pendingOtpFor.id || otp.length !== 6}>
                 {busy === pendingOtpFor.id ? <Loader2 className="me-1.5 h-4 w-4 animate-spin" /> : null}
                 {t('trustedAdmins.verify')}
               </Button>
@@ -247,8 +270,24 @@ export function TrustedAdminsPanel() {
                   <Badge variant="outline" className="ms-auto">
                     {identity.status === 'active' ? t('trustedAdmins.statusActive') : identity.status === 'pending_verification' ? t('trustedAdmins.statusPending') : t('trustedAdmins.statusRevoked')}
                   </Badge>
+                  {identity.status === 'pending_verification' ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setPendingOtpFor({ id: identity.id, phone: identity.normalized_address.startsWith('+') ? identity.normalized_address : `+${identity.normalized_address}`, displayName: identity.display_name });
+                        setOtp('');
+                        setError(null);
+                        setSuccess(null);
+                      }}
+                    >
+                      <ShieldCheck className="me-1.5 h-4 w-4" />
+                      {getAgentAdminUiText(locale, 'continueVerification')}
+                    </Button>
+                  ) : null}
                   {identity.status !== 'revoked' ? (
-                    <Button size="sm" variant="outline" disabled={busy === identity.id} onClick={() => void revoke(identity.id)}>
+                    <Button type="button" size="sm" variant="outline" disabled={busy === identity.id} onClick={() => void revoke(identity.id)}>
                       {busy === identity.id ? <Loader2 className="me-1.5 h-4 w-4 animate-spin" /> : <ShieldOff className="me-1.5 h-4 w-4" />}
                       {t('trustedAdmins.revoke')}
                     </Button>

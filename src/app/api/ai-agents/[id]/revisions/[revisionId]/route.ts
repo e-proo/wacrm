@@ -68,7 +68,7 @@ async function loadDraft(
 ) {
   const { data: revision, error } = await ctx.supabase
     .from('ai_agent_revisions')
-    .select('id, status')
+    .select('id, status, provider_connection_id, model')
     .eq('account_id', ctx.accountId)
     .eq('agent_id', agentId)
     .eq('id', revisionId)
@@ -102,7 +102,7 @@ export async function PATCH(
     if (!limit.success) return rateLimitResponse(limit)
     const { id, revisionId } = await params
 
-    const { conflict } = await loadDraft(ctx, id, revisionId)
+    const { revision: draftRevision, conflict } = await loadDraft(ctx, id, revisionId)
     if (conflict) return conflict
 
     let body: UpdateBody
@@ -110,6 +110,42 @@ export async function PATCH(
       body = (await request.json()) as UpdateBody
     } catch {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+    }
+
+    const current = draftRevision as { provider_connection_id: string | null; model: string | null }
+    const effectiveConnectionId = body.providerConnectionId !== undefined
+      ? (body.providerConnectionId === '' ? null : body.providerConnectionId)
+      : current.provider_connection_id
+    const effectiveModel = body.model !== undefined
+      ? (body.model ?? '').trim().slice(0, 120)
+      : (current.model ?? '').trim()
+
+    if (!effectiveConnectionId && effectiveModel) {
+      return NextResponse.json(
+        { error: 'A provider connection is required when a model is selected.', code: 'PROVIDER_CONNECTION_REQUIRED' },
+        { status: 400 },
+      )
+    }
+    if (effectiveConnectionId && !effectiveModel) {
+      return NextResponse.json(
+        { error: 'A model is required for the selected provider connection.', code: 'MODEL_REQUIRED' },
+        { status: 400 },
+      )
+    }
+    if (effectiveConnectionId) {
+      const { data: connection, error: connectionError } = await ctx.supabase
+        .from('ai_provider_connections')
+        .select('id')
+        .eq('account_id', ctx.accountId)
+        .eq('id', effectiveConnectionId)
+        .maybeSingle()
+      if (connectionError) throw connectionError
+      if (!connection) {
+        return NextResponse.json(
+          { error: 'Provider connection not found in this account.', code: 'CONNECTION_NOT_FOUND' },
+          { status: 400 },
+        )
+      }
     }
 
     const update: Record<string, unknown> = {}
