@@ -89,6 +89,43 @@ def occurrences(text: str, needle: str, start: int = 0):
         out.append(p); p=text.find(needle,p+1)
     return out
 
+def replace_unique(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise ApplyError(f'{label}: expected exactly one match, found {count}')
+    return text.replace(old, new, 1)
+
+def adapt_patch_to_base(patch_name: str, rel: str, content: str, hunks: list[list[str]]):
+    """Bridge deliberate semantic references that target a newer call shape than 13f83ec."""
+    if patch_name == '010_routing_signals.patch' and rel == 'src/app/api/whatsapp/webhook/route.ts':
+        # Base 13f83ec uses positional processMessage(...) args, while the semantic
+        # reference was written against the later object-argument shape. Preserve
+        # the intended server-trusted inbox id without converting the whole function.
+        content = replace_unique(
+            content,
+            "          config.account_id,\n          // Audit / sender-of-record",
+            "          config.account_id,\n          config.id,\n          // Audit / sender-of-record",
+            'routing signals: processMessage call inboxId',
+        )
+        content = replace_unique(
+            content,
+            "  accountId: string,\n  // Sender-of-record for inserts",
+            "  accountId: string,\n  inboxId: string,\n  // Sender-of-record for inserts",
+            'routing signals: processMessage signature inboxId',
+        )
+        filtered=[]
+        for h in hunks:
+            old='\n'.join(line[1:] for line in h if line[:1] in (' ','-'))
+            if (
+                'await processMessage({' in old
+                or 'async function processMessage({' in old
+                or old.strip() in {'accountId,', '}: {', 'accountId: string'}
+            ):
+                continue
+            filtered.append(h)
+        hunks=filtered
+    return content, hunks
+
 def apply_semantic_patch(content: str, hunks: list[list[str]], label: str) -> str:
     cursor = 0
     last_anchor = 0
@@ -118,8 +155,6 @@ def apply_semantic_patch(content: str, hunks: list[list[str]], label: str) -> st
             if pos is None:
                 pos = candidates[0]
         else:
-            # Reference patches are grouped semantically, not always in source-file order.
-            # A unique whole-file anchor is safe even if it appears before the prior hunk.
             anywhere = occurrences(content, old, 0)
             if len(anywhere) == 1:
                 pos = anywhere[0]
@@ -176,9 +211,6 @@ def main() -> int:
 
         staged: dict[pathlib.Path,str] = {}
         patches = {p.name: p for p in (bundle/'patches').glob('*.patch')}
-        # Routing-signal additions must precede runtime-policy replacement of the
-        # same multiAgentEnabled lines. Remaining semantic references are ordered
-        # by their dependency chain.
         patch_order = [
             '001_tool_context_and_service_visibility.patch',
             '002_dispatch_tool_policy.patch',
@@ -204,6 +236,7 @@ def main() -> int:
                 target=root/rel
                 if not target.is_file(): raise ApplyError(f'{patch.name}: target missing: {rel}')
                 current=staged.get(target, target.read_text('utf-8'))
+                current, hunks = adapt_patch_to_base(patch.name, rel, current, hunks)
                 staged[target]=apply_semantic_patch(current,hunks,f'{patch.name}:{rel}')
 
         for target, text in staged.items():
