@@ -5,17 +5,17 @@
 //
 // Business context: Yemeni coverage splits into a NORTH zone
 // (old-rial markets) and a SOUTH zone (new-rial markets). Every
-// record therefore has TWO legs:
+// record declares the CUSTOMER'S two legs:
 //
-//   receive leg — where the covered money is DELIVERED
-//                 (offer: where the liquidity sits; request:
-//                 where the requester wants the money)
-//   pay leg     — where the counter-payment HAPPENS
+//   receive leg — where/how the CUSTOMER wants the money delivered
+//   pay leg     — where/how the CUSTOMER pays the counter-amount
 //
-// Each leg carries a region (from the coverage_regions registry,
-// macro: north / south / international) and a method. The SOUTH
-// currently prices cash and networks the same, but the fields are
-// separate from day one so the desk can split them later.
+// Canonical domestic classification is direction-only:
+//   PAY south + RECEIVE north => OFFER; commission returns to customer
+//   PAY north + RECEIVE south => REQUEST; customer pays commission
+//
+// The words "راجع" / "عمولة" and the selected methods do NOT flip
+// the classification. Methods only describe execution of each leg.
 //
 // 'any' means "whatever is available" — the wildcard that matches
 // every concrete method in the suggestion engine.
@@ -44,13 +44,13 @@ export interface CoverageAttributes {
   coverage_scope: CoverageScope
   /** Free-text destination country; only meaningful when scope = international. */
   coverage_country: string | null
-  /** Region id (coverage_regions) of the RECEIVE leg. */
+  /** Region id (coverage_regions) where the CUSTOMER receives. */
   receive_region_id: string | null
-  /** Method of the RECEIVE leg. */
+  /** Method by which the CUSTOMER receives. */
   receive_method: CoverageMethod
-  /** Region id (coverage_regions) of the PAY leg. */
+  /** Region id (coverage_regions) where the CUSTOMER pays. */
   pay_region_id: string | null
-  /** Method of the PAY leg. */
+  /** Method by which the CUSTOMER pays. */
   pay_method: CoverageMethod
 }
 
