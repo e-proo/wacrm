@@ -6,11 +6,16 @@ import { matchServiceRequest } from './service-matcher'
 import { recordIntent, listIntents } from '@/lib/services/intents/intents-service'
 import { readCoverageAttributes } from '@/lib/services/coverage/attributes'
 import { supabaseAdmin as adminClient } from '@/lib/ai/admin-client'
+import Decimal from 'decimal.js'
 import type {
   AccountId,
   Uuid,
   ToolGrantPermission,
+  RunPlane,
+  AgentPurpose,
 } from '@/lib/ai/runtime/multi-agent-types'
+import type { RuntimeFeaturePolicy } from '@/lib/ai/runtime/tool-policy'
+import { projectServiceFieldsForAgent } from './service-field-visibility'
 
 // ============================================================
 // Tool executors (Phase 3).
@@ -43,6 +48,21 @@ export interface ToolContext {
    * this is what makes "deny by default" real instead of a comment.
    */
   grants: Record<string, ToolGrantPermission>
+  /** Exact published tool version + constraints frozen into the revision. */
+  grantVersions: Record<string, number>
+  grantConstraints: Record<string, Record<string, unknown>>
+  /** Security context is part of authorization, never inferred from prompt text. */
+  plane: RunPlane
+  channel: 'whatsapp'
+  simulation: boolean
+  trustedAdminIdentityId: string | null
+  trustedAdminCapabilities: ReadonlyArray<string>
+  features: RuntimeFeaturePolicy
+  agentPurpose: AgentPurpose
+  /** Runtime-bound business identity. Models never choose these values. */
+  contactId: string | null
+  conversationId: string | null
+  sourceMessageId: string | null
 }
 
 export interface ToolResult<T = unknown> {
@@ -182,7 +202,7 @@ export async function executeServicesGet(
   const { data: rev, error: revErr } = await supabaseAdmin()
     .from('service_revisions')
     .select(
-      'field_values, service_pricing_rules(id, kind, fee_currency, input_currency, formula_config)',
+      'field_values, category_schema_version_id, service_pricing_rules(id, kind, fee_currency, input_currency, formula_config)',
     )
     .eq('account_id', ctx.accountId)
     .eq('service_id', (svc as { id: string }).id)
@@ -201,9 +221,18 @@ export async function executeServicesGet(
   }
   const revRow = rev as unknown as {
     field_values: Record<string, unknown> | null
+    category_schema_version_id: string
     service_pricing_rules: unknown
   } | null
   const rule = revRow?.service_pricing_rules
+  const visibleFieldValues = revRow
+    ? await projectServiceFieldsForAgent({
+        accountId: ctx.accountId,
+        schemaVersionId: revRow.category_schema_version_id,
+        plane: ctx.plane,
+        values: revRow.field_values,
+      })
+    : {}
   return {
     ok: true,
     data: {
@@ -213,7 +242,7 @@ export async function executeServicesGet(
       category_id: (svc as { category_id: string }).category_id,
       status: (svc as { status: string }).status,
       public_description: (svc as { public_description: string | null }).public_description,
-      field_values: revRow?.field_values ?? {},
+      field_values: visibleFieldValues,
       pricing_quote: rule ?? null,
     } as ServicesGetRow,
     safe_to_show: true,
@@ -382,9 +411,9 @@ export async function executeCoverageCheckAvailability(
       message: 'Could not read coverage offers.',
     }
   }
-  let total = '0'
-  let reserved = '0'
-  let fulfilled = '0'
+  let total = new Decimal(0)
+  let reserved = new Decimal(0)
+  let fulfilled = new Decimal(0)
   let offerCount = 0
   for (const row of data ?? []) {
     const r = row as {
@@ -392,27 +421,20 @@ export async function executeCoverageCheckAvailability(
       reserved_amount: string
       fulfilled_amount: string
     }
-    total = addDecimalStrings(total, r.total_amount)
-    reserved = addDecimalStrings(reserved, r.reserved_amount)
-    fulfilled = addDecimalStrings(fulfilled, r.fulfilled_amount)
+    total = total.plus(r.total_amount)
+    reserved = reserved.plus(r.reserved_amount)
+    fulfilled = fulfilled.plus(r.fulfilled_amount)
     offerCount += 1
   }
-  const headroom = addDecimalStrings(total, negDecimalStrings(reserved))
-  const headroomMinusFulfilled = addDecimalStrings(
-    headroom,
-    negDecimalStrings(fulfilled),
-  )
-  const available = compareDecimalStrings(
-    headroomMinusFulfilled,
-    args.min_amount,
-  ) >= 0
+  const headroom = Decimal.max(total.minus(reserved).minus(fulfilled), 0)
+  const available = headroom.greaterThanOrEqualTo(new Decimal(args.min_amount))
   return {
     ok: true,
     data: {
       available,
-      total_amount: total,
-      reserved_amount: reserved,
-      fulfilled_amount: fulfilled,
+      total_amount: total.toFixed(),
+      reserved_amount: reserved.toFixed(),
+      fulfilled_amount: fulfilled.toFixed(),
       currency: args.currency,
       offer_count: offerCount,
     },
@@ -565,7 +587,7 @@ export async function executeCoverageFindOffers(
     ])
     if (offersRes.error) throw offersRes.error
     if (regionsRes.error) throw regionsRes.error
-    const minAvailable = args.min_available ? Number(args.min_available) : 0
+    const minAvailable = new Decimal(args.min_available ?? '0')
     const macroRegionIds = new Set(
       ((regionsRes.data ?? []) as Array<{ id: string }>).map((r) => r.id),
     )
@@ -585,24 +607,23 @@ export async function executeCoverageFindOffers(
     const safe = rows
       .map((row) => {
         const attrs = readCoverageAttributes(row.attributes)
+        const availableAmount = Decimal.max(
+          new Decimal(row.total_amount)
+            .minus(row.reserved_amount)
+            .minus(row.fulfilled_amount),
+          0,
+        ).toFixed()
         return {
           offer_id: row.id,
           reference_code: row.reference_code,
-          available_amount: String(
-            Math.max(
-              Number(row.total_amount) -
-                Number(row.reserved_amount) -
-                Number(row.fulfilled_amount),
-              0,
-            ),
-          ),
+          available_amount: availableAmount,
           currency: row.currency,
           commission_per_thousand: row.commission_per_thousand,
           commission_currency: row.commission_currency ?? row.currency,
           attributes: attrs,
         }
       })
-      .filter((row) => Number(row.available_amount) >= minAvailable)
+      .filter((row) => new Decimal(row.available_amount).greaterThanOrEqualTo(minAvailable))
       .filter((row) =>
         args.receive_region_id
           ? row.attributes.receive_region_id === args.receive_region_id
@@ -622,7 +643,26 @@ export async function executeCoverageFindOffers(
           : true,
       )
       .slice(0, Math.min(args.limit ?? 10, 50))
-    return { ok: true, data: safe, safe_to_show: true }
+
+    if (ctx.plane === 'customer') {
+      // Customers get aggregate liquidity only. Internal offer UUIDs and
+      // reference codes stay on the admin plane.
+      const totalAvailable = safe.reduce(
+        (sum, row) => sum.plus(row.available_amount),
+        new Decimal(0),
+      )
+      return {
+        ok: true,
+        data: {
+          available: safe.length > 0,
+          total_available: totalAvailable.toFixed(),
+          currency: args.currency,
+          matching_offer_count: safe.length,
+        },
+        safe_to_show: true,
+      }
+    }
+    return { ok: true, data: safe, safe_to_show: false }
   } catch (err) {
     console.error('[tool] coverage.find_offers failed:', err)
     return {
@@ -956,17 +996,37 @@ export async function executeIntentsRecord(
     }
   }
   try {
+    // A generic customer observation is a REVIEW handoff, not an executable
+    // business mutation. Do not create the legacy service_intent/create CR
+    // here: it has no admin decision in its payload and cannot be executed.
     const result = await recordIntent({
       accountId: ctx.accountId,
-      contactId: args.contact_id,
-      conversationId: args.conversation_id ?? null,
+      contactId: ctx.plane === 'customer' && ctx.contactId ? ctx.contactId : args.contact_id,
+      conversationId:
+        ctx.plane === 'customer' ? ctx.conversationId : args.conversation_id ?? null,
       direction: args.direction,
       serviceHint: args.service_hint,
       summary: args.summary ?? null,
       attributes: args.attributes ?? {},
-      escalateToAdmin: args.escalate_to_admin ?? false,
+      escalateToAdmin: false,
       actorUserId: ctx.actorUserId,
     })
+    if (args.escalate_to_admin) {
+      const { error } = await supabaseAdmin()
+        .from('customer_intents')
+        .update({
+          status: 'forwarded_to_admin',
+          ...(ctx.sourceMessageId ? { source_message_id: ctx.sourceMessageId } : {}),
+        })
+        .eq('account_id', ctx.accountId)
+        .eq('id', result.intentId)
+      if (error) throw error
+      return {
+        ok: true,
+        data: { ...result, status: 'forwarded_to_admin', review_required: true },
+        safe_to_show: true,
+      }
+    }
     return { ok: true, data: result, safe_to_show: true }
   } catch (err) {
     const code = (err as { code?: string }).code ?? 'INTENT_RECORD_FAILED'
