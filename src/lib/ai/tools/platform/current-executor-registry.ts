@@ -3,13 +3,13 @@ import {
   executeExchangeRatesGetCurrent,
   executePricingCalculateQuote,
   executeServicesGet,
-  executeServicesSearch,
   executeServicesMatchRequest,
   executeIntentsRecord,
   executeIntentsSearch,
   type ToolContext,
   type ToolResult,
 } from '../executors'
+import { executeServicesSearchSafe } from '../service-search'
 import {
   executeCoverageAdminListOffers,
   executeCoverageAdminListRequests,
@@ -41,7 +41,7 @@ function add(key: string, version: number, executor: RuntimeExecutor): void {
   CURRENT_EXECUTORS.register({ key, version, executor })
 }
 
-add('services.search', 1, (ctx, args) => executeServicesSearch(ctx, args as never))
+add('services.search', 1, (ctx, args) => executeServicesSearchSafe(ctx, args as never))
 add('services.get', 1, (ctx, args) => executeServicesGet(ctx, args as never))
 add('services.match_request', 1, (ctx, args) => executeServicesMatchRequest(ctx, args as never))
 add('services.propose_update', 1, (ctx, args) => executeServiceProposeUpdate(ctx, args as never))
