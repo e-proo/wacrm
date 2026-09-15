@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run v2 repair with literal regex replacements and normalize one generated TS line."""
+"""Run v2 repair with literal regex replacements and normalize generated source/tests."""
 from pathlib import Path
 import re
 import runpy
@@ -24,3 +24,14 @@ good = '        : `if they don\'t cover the question, don\'t guess — say you\'
 if text.count(bad) != 1:
     raise SystemExit(f'defaults.ts: expected one generated fallback line, found {text.count(bad)}')
 p.write_text(text.replace(bad, good, 1), encoding='utf-8')
+
+# The prompt behavior intentionally expanded from a legacy textual tool catalog
+# to provider-native tools. Keep the regression test focused on the semantic
+# invariant (try an offered system tool before handoff) instead of old wording.
+p = Path('src/lib/ai/defaults.test.ts')
+text = p.read_text(encoding='utf-8')
+old = '    expect(withTools).toMatch(/call one of the System tools below/)'
+new = '    expect(withTools).toMatch(/use an offered System tool/)'
+if text.count(old) != 1:
+    raise SystemExit(f'defaults.test.ts: expected one legacy wording assertion, found {text.count(old)}')
+p.write_text(text.replace(old, new, 1), encoding='utf-8')
