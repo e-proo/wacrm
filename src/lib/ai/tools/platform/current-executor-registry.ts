@@ -52,7 +52,18 @@ add('exchange_rates.record_trade_request', 1, (ctx, args) => executeExchangeRate
 add('exchange_rates.admin_list_books', 1, (ctx, args) => executeExchangeRateAdminListBooks(ctx, args as never))
 add('exchange_rates.propose_pair_change', 1, (ctx, args) => executeExchangeRateProposePairChange(ctx, args as never))
 add('coverage.check_availability', 1, (ctx, args) => executeCoverageCheckAvailability(ctx, args as never))
-add('coverage.find_offers', 2, (ctx, args) => executeCoverageFindOffersDirectional(ctx, args as never))
+add('coverage.find_offers', 2, (ctx, args) => {
+  const hasDirectionalLegs = Boolean(
+    (args.pay_region_id || args.pay_region || args.pay_macro) &&
+      (args.receive_region_id || args.receive_region || args.receive_macro),
+  )
+  // The legacy finder applies its limit before the directional wrapper checks
+  // the anti-parallel pay leg. For a concrete two-leg request, widen the
+  // internal scan to the executor maximum so a valid offer cannot be hidden
+  // merely because unrelated receive-leg rows happened to sort first.
+  const effectiveArgs = hasDirectionalLegs ? { ...args, limit: 50 } : args
+  return executeCoverageFindOffersDirectional(ctx, effectiveArgs as never)
+})
 add('coverage.get_rates', 1, (ctx, args) => executeCoverageGetRatesDirectional(ctx, args as never))
 add('coverage.propose_offer', 2, (ctx, args) => executeCoverageDirectionalProposal(ctx, args as never, 'offer'))
 add('coverage.propose_request', 1, (ctx, args) => executeCoverageDirectionalProposal(ctx, args as never, 'request'))
