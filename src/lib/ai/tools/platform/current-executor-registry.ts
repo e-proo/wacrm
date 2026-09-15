@@ -7,14 +7,10 @@ import {
   executeServicesMatchRequest,
   executeIntentsRecord,
   executeIntentsSearch,
-  executeCoverageFindOffers,
-  executeCoverageGetRates,
   type ToolContext,
   type ToolResult,
 } from '../executors'
 import {
-  executeCoverageProposeOfferIntegrated,
-  executeCoverageProposeRequest,
   executeCoverageAdminListOffers,
   executeCoverageAdminListRequests,
   executeChangeRequestsListPending,
@@ -25,6 +21,11 @@ import {
   executeServiceProposeUpdate,
   executePricingRuleProposeServicePrice,
 } from '../business-handoff'
+import {
+  executeCoverageDirectionalProposal,
+  executeCoverageFindOffersDirectional,
+  executeCoverageGetRatesDirectional,
+} from '../coverage-directional'
 import type { ToolDefinition } from '../../runtime/tool-registry'
 import { ToolExecutorRegistry } from './execution-registry'
 import { getCurrentPlatformTool } from './current-domain-registry'
@@ -51,10 +52,10 @@ add('exchange_rates.record_trade_request', 1, (ctx, args) => executeExchangeRate
 add('exchange_rates.admin_list_books', 1, (ctx, args) => executeExchangeRateAdminListBooks(ctx, args as never))
 add('exchange_rates.propose_pair_change', 1, (ctx, args) => executeExchangeRateProposePairChange(ctx, args as never))
 add('coverage.check_availability', 1, (ctx, args) => executeCoverageCheckAvailability(ctx, args as never))
-add('coverage.find_offers', 2, (ctx, args) => executeCoverageFindOffers(ctx, args as never))
-add('coverage.get_rates', 1, (ctx, args) => executeCoverageGetRates(ctx, args as never))
-add('coverage.propose_offer', 2, (ctx, args) => executeCoverageProposeOfferIntegrated(ctx, args as never))
-add('coverage.propose_request', 1, (ctx, args) => executeCoverageProposeRequest(ctx, args as never))
+add('coverage.find_offers', 2, (ctx, args) => executeCoverageFindOffersDirectional(ctx, args as never))
+add('coverage.get_rates', 1, (ctx, args) => executeCoverageGetRatesDirectional(ctx, args as never))
+add('coverage.propose_offer', 2, (ctx, args) => executeCoverageDirectionalProposal(ctx, args as never, 'offer'))
+add('coverage.propose_request', 1, (ctx, args) => executeCoverageDirectionalProposal(ctx, args as never, 'request'))
 add('coverage.admin_list_offers', 1, (ctx, args) => executeCoverageAdminListOffers(ctx, args as never))
 add('coverage.admin_list_requests', 1, (ctx, args) => executeCoverageAdminListRequests(ctx, args as never))
 add('intents.record', 1, (ctx, args) => executeIntentsRecord(ctx, args as never))
