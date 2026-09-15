@@ -175,7 +175,31 @@ def main() -> int:
             raise ApplyError('bundle BASE_COMMIT does not match installer expectation')
 
         staged: dict[pathlib.Path,str] = {}
-        for patch in sorted((bundle/'patches').glob('*.patch')):
+        patches = {p.name: p for p in (bundle/'patches').glob('*.patch')}
+        # Routing-signal additions must precede runtime-policy replacement of the
+        # same multiAgentEnabled lines. Remaining semantic references are ordered
+        # by their dependency chain.
+        patch_order = [
+            '001_tool_context_and_service_visibility.patch',
+            '002_dispatch_tool_policy.patch',
+            '003_admin_plane_early_gate.patch',
+            '004_send_lifecycle_and_idempotency.patch',
+            '005_trusted_admin_ui.patch',
+            '006_router_and_coverage_safety.patch',
+            '007_atomic_publish_route.patch',
+            '010_routing_signals.patch',
+            '008_runtime_feature_gate.patch',
+            '009_worker_resume.patch',
+            '011_business_handoff_integration.patch',
+            '012_business_notification_idempotency.patch',
+            '013_fx_customer_trade_admin_rate_boundary.patch',
+            '014_customer_intent_notifications_ui.patch',
+            '015_manifest_driven_tool_dispatch.patch',
+        ]
+        missing_patches = [name for name in patch_order if name not in patches]
+        if missing_patches:
+            raise ApplyError('missing semantic patches: ' + ', '.join(missing_patches))
+        for patch in (patches[name] for name in patch_order):
             for rel, hunks in parse_patch(patch):
                 target=root/rel
                 if not target.is_file(): raise ApplyError(f'{patch.name}: target missing: {rel}')
