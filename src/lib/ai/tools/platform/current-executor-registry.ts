@@ -2,14 +2,13 @@ import {
   executeCoverageCheckAvailability,
   executeExchangeRatesGetCurrent,
   executePricingCalculateQuote,
-  executeServicesGet,
   executeServicesMatchRequest,
   executeIntentsRecord,
   executeIntentsSearch,
   type ToolContext,
   type ToolResult,
 } from '../executors'
-import { executeServicesSearchSafe } from '../service-search'
+import { executeServicesGetSafe, executeServicesSearchSafe } from '../service-search'
 import {
   executeCoverageAdminListOffers,
   executeCoverageAdminListRequests,
@@ -42,7 +41,7 @@ function add(key: string, version: number, executor: RuntimeExecutor): void {
 }
 
 add('services.search', 1, (ctx, args) => executeServicesSearchSafe(ctx, args as never))
-add('services.get', 1, (ctx, args) => executeServicesGet(ctx, args as never))
+add('services.get', 1, (ctx, args) => executeServicesGetSafe(ctx, args as never))
 add('services.match_request', 1, (ctx, args) => executeServicesMatchRequest(ctx, args as never))
 add('services.propose_update', 1, (ctx, args) => executeServiceProposeUpdate(ctx, args as never))
 add('pricing.calculate_quote', 1, (ctx, args) => executePricingCalculateQuote(ctx, args as never))
