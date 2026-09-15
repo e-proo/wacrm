@@ -95,12 +95,22 @@ def replace_unique(text: str, old: str, new: str, label: str) -> str:
         raise ApplyError(f'{label}: expected exactly one match, found {count}')
     return text.replace(old, new, 1)
 
+def replace_import_block(text: str, module: str, replacement: str, label: str) -> str:
+    end_marker = f"}} from '{module}'"
+    end = text.find(end_marker)
+    if end < 0:
+        raise ApplyError(f'{label}: import end not found for {module}')
+    end = text.find('\n', end)
+    if end < 0: end = len(text)
+    else: end += 1
+    start = text.rfind('import {', 0, end)
+    if start < 0:
+        raise ApplyError(f'{label}: import start not found for {module}')
+    return text[:start] + replacement.rstrip('\n') + '\n' + text[end:]
+
 def adapt_patch_to_base(patch_name: str, rel: str, content: str, hunks: list[list[str]]):
     """Bridge deliberate semantic references that target a newer call shape than 13f83ec."""
     if patch_name == '010_routing_signals.patch' and rel == 'src/app/api/whatsapp/webhook/route.ts':
-        # Base 13f83ec uses positional processMessage(...) args, while the semantic
-        # reference was written against the later object-argument shape. Preserve
-        # the intended server-trusted inbox id without converting the whole function.
         content = replace_unique(
             content,
             "          config.account_id,\n          // Audit / sender-of-record",
@@ -124,6 +134,33 @@ def adapt_patch_to_base(patch_name: str, rel: str, content: str, hunks: list[lis
                 continue
             filtered.append(h)
         hunks=filtered
+    if patch_name == '015_manifest_driven_tool_dispatch.patch' and rel == 'src/lib/ai/runtime/dispatch.ts':
+        content = replace_import_block(
+            content,
+            '../tools/executors',
+            "import type { ToolContext, ToolResult } from '../tools/executors'",
+            'manifest dispatcher: executors import',
+        )
+        content = replace_import_block(
+            content,
+            '../tools/business-handoff',
+            "import { executeCurrentPlatformTool } from '../tools/platform/current-executor-registry'",
+            'manifest dispatcher: business handoff import',
+        )
+        marker = "  const startedAt = Date.now()\n  let result: ToolResult\n  try {\n"
+        begin = content.find(marker)
+        if begin < 0:
+            raise ApplyError('manifest dispatcher: execution block start not found')
+        body_start = begin + len(marker)
+        catch = content.find('  } catch (err) {', body_start)
+        if catch < 0:
+            raise ApplyError('manifest dispatcher: catch block not found')
+        content = (
+            content[:body_start]
+            + '    result = await executeCurrentPlatformTool(ctx, tool, invocation.args)\n'
+            + content[catch:]
+        )
+        hunks = []
     return content, hunks
 
 def apply_semantic_patch(content: str, hunks: list[list[str]], label: str) -> str:
