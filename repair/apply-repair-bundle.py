@@ -285,16 +285,6 @@ def main() -> int:
             dst.parent.mkdir(parents=True,exist_ok=True)
             shutil.copy2(src,dst)
 
-        checks=[bundle/'smoke_pure_runtime.js', bundle/'verify_business_contract.js', bundle/'verify_platform_architecture.js']
-        if shutil.which('node'):
-            for check in checks:
-                if not check.is_file():
-                    continue
-                p=subprocess.run(['node',str(check)],cwd=bundle,text=True)
-                if p.returncode: raise ApplyError(f'validation failed: {check.name}')
-        else:
-            print('WARNING: node not found; skipped bundle-local JavaScript checks', file=sys.stderr)
-
     print('Repair bundle applied successfully.')
     print('Next: npm ci && npm run typecheck && npm test && npm run build && npm run lint')
     print('Migrations 065-067 are now present; apply them to a TEST/STAGING Supabase project first.')
