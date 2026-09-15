@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getToolCategoryLabel, getToolPermissionLabel, getToolUiText } from '@/lib/ai/ui/platform-i18n';
+import { getAgentAdminUiText, localizeAgentApiError, localizePublishCheck } from '@/lib/ai/ui/agent-admin-i18n';
 // ============================================================
 // Agent editor — the production control surface for one agent
 // revision (always a DRAFT; published revisions are immutable).
@@ -96,6 +97,7 @@ interface TestCaseRow {
 }
 
 interface CheckResult {
+  path?: string;
   code: string;
   message: string;
   severity: 'error' | 'warning';
@@ -139,14 +141,20 @@ export function AgentEditor(props: AgentEditorProps) {
   const [testCases, setTestCases] = useState<TestCaseRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [checks, setChecks] = useState<CheckResult[] | null>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
 
   // Save feedback appears at the top of a long card — bring it into
   // view so a "saved" or error note can never be silently missed.
   useEffect(() => {
     if (note) noteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [note]);
+
+  useEffect(() => {
+    if (actionError) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [actionError]);
 
   // identity form
   const [fName, setFName] = useState(agentName);
@@ -280,6 +288,7 @@ export function AgentEditor(props: AgentEditorProps) {
   async function saveRevision() {
     setBusy('revision');
     setNote(null);
+    setActionError(null);
     try {
       const res = await fetch(`/api/ai-agents/${agentId}/revisions/${revisionId}`, {
         method: 'PATCH',
@@ -297,12 +306,14 @@ export function AgentEditor(props: AgentEditorProps) {
           handoffHumanMemberId: fHandoff || null,
         }),
       });
-      const json = (await res.json()) as { revision?: RevisionRow; error?: string };
-      if (!res.ok || !json.revision) throw new Error(json.error ?? 'save failed');
+      const json = (await res.json()) as { revision?: RevisionRow; error?: string; code?: string };
+      if (!res.ok || !json.revision) throw new Error(localizeAgentApiError(locale, json.code, json.error));
       setRevision(json.revision);
+      setActionError(null);
       setNote(t('savedRevision'));
     } catch (e) {
-      setNote(e instanceof Error ? e.message : 'error');
+      setNote(null);
+      setActionError(e instanceof Error ? e.message : getAgentAdminUiText(locale, 'saveRevisionFailed'));
     } finally {
       setBusy(null);
     }
@@ -455,6 +466,7 @@ export function AgentEditor(props: AgentEditorProps) {
   async function runValidate() {
     setBusy('validate');
     setNote(null);
+    setActionError(null);
     setChecks(null);
     try {
       const res = await fetch(
@@ -463,7 +475,12 @@ export function AgentEditor(props: AgentEditorProps) {
       );
       const json = (await res.json()) as { ok?: boolean; checks?: CheckResult[] };
       setChecks(json.checks ?? []);
-      if (json.ok) setNote(t('validationPassed'));
+      if (json.ok) {
+        setActionError(null);
+        setNote(t('validationPassed'));
+      } else {
+        setActionError(getAgentAdminUiText(locale, 'validationBlocked'));
+      }
     } catch (e) {
       setNote(e instanceof Error ? e.message : 'error');
     } finally {
@@ -497,16 +514,26 @@ export function AgentEditor(props: AgentEditorProps) {
   async function publish() {
     setBusy('publish');
     setNote(null);
+    setActionError(null);
+    setChecks(null);
     try {
       const res = await fetch(
         `/api/ai-agents/${agentId}/revisions/${revisionId}/publish`,
         { method: 'POST' },
       );
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? 'publish failed');
+      const json = (await res.json()) as { error?: string; code?: string; ok?: boolean; checks?: CheckResult[] };
+      if (!res.ok) {
+        if (json.checks?.length) {
+          setChecks(json.checks);
+          setActionError(getAgentAdminUiText(locale, 'publishBlockedBody'));
+          return;
+        }
+        throw new Error(localizeAgentApiError(locale, json.code, json.error ?? getAgentAdminUiText(locale, 'publishFailed')));
+      }
+      setActionError(null);
       onPublished();
     } catch (e) {
-      setNote(e instanceof Error ? e.message : 'error');
+      setActionError(e instanceof Error ? e.message : getAgentAdminUiText(locale, 'publishFailed'));
     } finally {
       setBusy(null);
     }
@@ -583,7 +610,23 @@ export function AgentEditor(props: AgentEditorProps) {
         </Button>
       </CardHeader>
       <CardContent className="space-y-5">
-        {note ? <p ref={noteRef} className="text-sm">{note}</p> : null}
+        {note ? <p ref={noteRef} className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm">{note}</p> : null}
+        {actionError ? (
+          <div ref={errorRef} role="alert" className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+            <p className="font-medium text-destructive">{getAgentAdminUiText(locale, 'actionErrorTitle')}</p>
+            <p className="text-sm text-destructive">{actionError}</p>
+            {checks?.length ? (
+              <ul className="list-disc space-y-1 ps-5 text-sm">
+                {checks.map((check, index) => (
+                  <li key={`${check.code}-${index}`} className={check.severity === 'error' ? 'text-destructive' : 'text-amber-700'}>
+                    {localizePublishCheck(locale, check)}
+                    {check.path ? <span className="ms-1 font-mono text-[11px] opacity-70">({check.path})</span> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* identity */}
         <section className="space-y-2">
@@ -824,7 +867,7 @@ export function AgentEditor(props: AgentEditorProps) {
             <h3 className="text-sm font-semibold">{t('checksTitle')}</h3>
             {checks.map((c, i) => (
               <p key={i} className={`text-xs ${c.severity === 'error' ? 'text-destructive' : 'text-amber-600'}`}>
-                {c.code}: {c.message}
+                {localizePublishCheck(locale, c)}
               </p>
             ))}
           </section>

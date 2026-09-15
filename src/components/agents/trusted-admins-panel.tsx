@@ -1,12 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
-import { Loader2, ShieldOff, ShieldCheck } from 'lucide-react';
+import { useLocale, useTranslations } from 'next-intl';
+import { AlertCircle, Loader2, RotateCw, ShieldOff, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { InternationalPhoneInput } from '@/components/ui/international-phone-input';
+import {
+  formatLocalized,
+  getAgentAdminUiText,
+  localizeTrustedAdminError,
+} from '@/lib/ai/ui/agent-admin-i18n';
 
 interface TrustedIdentity {
   id: string;
@@ -19,13 +25,30 @@ interface TrustedIdentity {
   created_at: string;
 }
 
+interface PendingVerification {
+  id: string;
+  phone: string;
+  displayName: string | null;
+}
+
+interface DeliveryInfo {
+  accepted?: boolean;
+  recipient?: string;
+  messageId?: string;
+  transport?: string;
+  requiresOpenCustomerServiceWindow?: boolean;
+}
+
 export function TrustedAdminsPanel() {
   const t = useTranslations('Agents');
+  const locale = useLocale();
   const [identities, setIdentities] = useState<TrustedIdentity[] | null>(null);
   const [phone, setPhone] = useState('');
+  const [phoneResetKey, setPhoneResetKey] = useState(0);
   const [name, setName] = useState('');
   const [otp, setOtp] = useState('');
-  const [pendingOtpFor, setPendingOtpFor] = useState<{ id: string } | null>(null);
+  const [pendingOtpFor, setPendingOtpFor] = useState<PendingVerification | null>(null);
+  const [delivery, setDelivery] = useState<DeliveryInfo | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +56,7 @@ export function TrustedAdminsPanel() {
     setError(null);
     const res = await fetch('/api/trusted-admins', { cache: 'no-store' });
     if (!res.ok) {
-      setError(t('trustedAdmins.loading'));
+      setError(getAgentAdminUiText(locale, 'loadFailed'));
       return;
     }
     const json = (await res.json()) as { identities: TrustedIdentity[] };
@@ -45,32 +68,51 @@ export function TrustedAdminsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function register() {
+  async function submitRegistration(targetPhone: string, displayName: string | null, resend = false) {
     setError(null);
-    setBusy('register');
+    setBusy(resend ? 'resend' : 'register');
     try {
       const res = await fetch('/api/trusted-admins', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ phone, displayName: name || null }),
+        body: JSON.stringify({ phone: targetPhone, displayName }),
       });
       const json = (await res.json()) as {
         identity?: TrustedIdentity;
         otpSent?: boolean;
+        delivery?: DeliveryInfo;
         error?: string;
+        code?: string;
       };
       if (!res.ok || !json.identity || json.otpSent !== true) {
-        throw new Error(json.error ?? 'Registration failed');
+        throw new Error(localizeTrustedAdminError(locale, json.code, json.error));
       }
-      setPendingOtpFor({ id: json.identity.id });
-      setPhone('');
-      setName('');
+      setPendingOtpFor({ id: json.identity.id, phone: targetPhone, displayName });
+      setDelivery(json.delivery ?? { accepted: true, recipient: targetPhone.replace(/^\+/, '') });
+      if (!resend) {
+        setPhone('');
+        setName('');
+        setPhoneResetKey((value) => value + 1);
+      }
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unknown error');
+      setError(e instanceof Error ? e.message : getAgentAdminUiText(locale, 'registrationFailed'));
     } finally {
       setBusy(null);
     }
+  }
+
+  async function register() {
+    if (!phone) {
+      setError(getAgentAdminUiText(locale, 'invalidPhone'));
+      return;
+    }
+    await submitRegistration(phone, name.trim() || null, false);
+  }
+
+  async function resend() {
+    if (!pendingOtpFor) return;
+    await submitRegistration(pendingOtpFor.phone, pendingOtpFor.displayName, true);
   }
 
   async function verify(id: string) {
@@ -82,18 +124,16 @@ export function TrustedAdminsPanel() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ otp }),
       });
-      const json = (await res.json()) as {
-        identity?: TrustedIdentity;
-        error?: string;
-      };
+      const json = (await res.json()) as { identity?: TrustedIdentity; error?: string; code?: string };
       if (!res.ok || !json.identity) {
-        throw new Error(json.error ?? 'Verification failed');
+        throw new Error(localizeTrustedAdminError(locale, json.code, json.error));
       }
       setOtp('');
       setPendingOtpFor(null);
+      setDelivery(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unknown error');
+      setError(e instanceof Error ? e.message : getAgentAdminUiText(locale, 'verificationFailed'));
     } finally {
       setBusy(null);
     }
@@ -103,16 +143,14 @@ export function TrustedAdminsPanel() {
     setError(null);
     setBusy(id);
     try {
-      const res = await fetch(`/api/trusted-admins/${id}/revoke`, {
-        method: 'POST',
-      });
+      const res = await fetch(`/api/trusted-admins/${id}/revoke`, { method: 'POST' });
       if (!res.ok) {
-        const json = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(json.error ?? 'Revoke failed');
+        const json = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+        throw new Error(localizeTrustedAdminError(locale, json.code, json.error ?? getAgentAdminUiText(locale, 'revokeFailed')));
       }
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unknown error');
+      setError(e instanceof Error ? e.message : getAgentAdminUiText(locale, 'revokeFailed'));
     } finally {
       setBusy(null);
     }
@@ -127,82 +165,69 @@ export function TrustedAdminsPanel() {
     );
   }
 
+  const deliveryPhone = pendingOtpFor?.phone ?? (delivery?.recipient ? `+${delivery.recipient}` : '');
+
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            {t('trustedAdmins.addTitle')}
-          </CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle className="text-base">{t('trustedAdmins.addTitle')}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-1">
-              <label className="text-sm font-medium">
-                {t('trustedAdmins.phoneLabel')}
-              </label>
-              <Input
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+967777123456"
+              <label className="text-sm font-medium">{t('trustedAdmins.phoneLabel')}</label>
+              <InternationalPhoneInput
+                key={phoneResetKey}
+                onChange={setPhone}
+                defaultCountry="YE"
+                disabled={busy === 'register'}
               />
-              <p className="text-xs text-muted-foreground">
-                {t('trustedAdmins.phoneHint')}
-              </p>
+              <p className="text-xs text-muted-foreground">{getAgentAdminUiText(locale, 'localNumberPlaceholder')}</p>
             </div>
             <div className="space-y-1">
-              <label className="text-sm font-medium">
-                {t('trustedAdmins.nameLabel')}
-              </label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
+              <label className="text-sm font-medium">{t('trustedAdmins.nameLabel')}</label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} />
             </div>
           </div>
-          <Button
-            onClick={() => void register()}
-            disabled={busy === 'register' || !phone.trim()}
-          >
-            {busy === 'register' ? (
-              <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
-            ) : null}
+          <Button onClick={() => void register()} disabled={busy === 'register' || !phone}>
+            {busy === 'register' ? <Loader2 className="me-1.5 h-4 w-4 animate-spin" /> : null}
             {t('trustedAdmins.register')}
           </Button>
           {error ? (
-            <p className="text-sm text-destructive">{error}</p>
+            <div role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span>
+            </div>
           ) : null}
         </CardContent>
       </Card>
 
       {pendingOtpFor ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">
-              {t('trustedAdmins.showOtpTitle')}
-            </CardTitle>
-          </CardHeader>
+        <Card className="border-primary/30">
+          <CardHeader><CardTitle className="text-base">{getAgentAdminUiText(locale, 'otpAccepted')}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              {t('trustedAdmins.showOtpDescription')}
+              {formatLocalized(locale, getAgentAdminUiText(locale, 'otpAcceptedHint'), { phone: deliveryPhone })}
             </p>
+            {delivery?.messageId ? (
+              <p className="text-xs text-muted-foreground">
+                {getAgentAdminUiText(locale, 'acceptedByMeta')} · <code className="font-mono">{delivery.messageId}</code>
+              </p>
+            ) : null}
             <div className="flex items-end gap-2">
               <div className="flex-1 space-y-1">
-                <label className="text-sm font-medium">
-                  {t('trustedAdmins.otpLabel')}
-                </label>
-                <Input
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  inputMode="numeric"
-                />
+                <label className="text-sm font-medium">{t('trustedAdmins.otpLabel')}</label>
+                <Input value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 8))} inputMode="numeric" dir="ltr" />
               </div>
-              <Button
-                onClick={() => void verify(pendingOtpFor.id)}
-                disabled={busy === pendingOtpFor.id || !otp.trim()}
-              >
+              <Button onClick={() => void verify(pendingOtpFor.id)} disabled={busy === pendingOtpFor.id || !otp.trim()}>
+                {busy === pendingOtpFor.id ? <Loader2 className="me-1.5 h-4 w-4 animate-spin" /> : null}
                 {t('trustedAdmins.verify')}
               </Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+              <Button type="button" size="sm" variant="outline" onClick={() => void resend()} disabled={busy === 'resend'}>
+                {busy === 'resend' ? <Loader2 className="me-1.5 h-4 w-4 animate-spin" /> : <RotateCw className="me-1.5 h-4 w-4" />}
+                {getAgentAdminUiText(locale, 'resendCode')}
+              </Button>
+              <p className="text-xs text-muted-foreground">{getAgentAdminUiText(locale, 'resendHint')}</p>
             </div>
           </CardContent>
         </Card>
@@ -211,46 +236,23 @@ export function TrustedAdminsPanel() {
       <div className="space-y-2">
         <h3 className="text-sm font-medium">{t('trustedAdmins.title')}</h3>
         {identities.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {t('trustedAdmins.empty')}
-          </p>
+          <p className="text-sm text-muted-foreground">{t('trustedAdmins.empty')}</p>
         ) : (
           <div className="space-y-2">
-            {identities.map((id) => (
-              <Card key={id.id}>
-                <CardContent className="flex items-center gap-3 py-3">
-                  <code className="font-mono text-sm">
-                    +{id.normalized_address}
-                  </code>
-                  {id.display_name ? (
-                    <span className="text-sm text-muted-foreground">
-                      {id.display_name}
-                    </span>
-                  ) : null}
+            {identities.map((identity) => (
+              <Card key={identity.id}>
+                <CardContent className="flex flex-wrap items-center gap-3 py-3">
+                  <code dir="ltr" className="font-mono text-sm">+{identity.normalized_address}</code>
+                  {identity.display_name ? <span className="text-sm text-muted-foreground">{identity.display_name}</span> : null}
                   <Badge variant="outline" className="ms-auto">
-                    {id.status === 'active'
-                      ? t('trustedAdmins.statusActive')
-                      : id.status === 'pending_verification'
-                        ? t('trustedAdmins.statusPending')
-                        : t('trustedAdmins.statusRevoked')}
+                    {identity.status === 'active' ? t('trustedAdmins.statusActive') : identity.status === 'pending_verification' ? t('trustedAdmins.statusPending') : t('trustedAdmins.statusRevoked')}
                   </Badge>
-                  {id.status !== 'revoked' ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy === id.id}
-                      onClick={() => void revoke(id.id)}
-                    >
-                      {busy === id.id ? (
-                        <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
-                      ) : (
-                        <ShieldOff className="me-1.5 h-4 w-4" />
-                      )}
+                  {identity.status !== 'revoked' ? (
+                    <Button size="sm" variant="outline" disabled={busy === identity.id} onClick={() => void revoke(identity.id)}>
+                      {busy === identity.id ? <Loader2 className="me-1.5 h-4 w-4 animate-spin" /> : <ShieldOff className="me-1.5 h-4 w-4" />}
                       {t('trustedAdmins.revoke')}
                     </Button>
-                  ) : (
-                    <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                  )}
+                  ) : <ShieldCheck className="h-4 w-4 text-muted-foreground" />}
                 </CardContent>
               </Card>
             ))}

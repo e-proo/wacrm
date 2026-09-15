@@ -122,25 +122,25 @@ export async function PATCH(
     if (body.systemPrompt !== undefined) {
       const p = body.systemPrompt === null ? null : String(body.systemPrompt)
       if (p !== null && p.length > 8000) {
-        return NextResponse.json({ error: 'systemPrompt is too long (max 8000 chars)' }, { status: 400 })
+        return NextResponse.json({ error: 'systemPrompt is too long (max 8000 chars)', code: 'SYSTEM_PROMPT_TOO_LONG' }, { status: 400 })
       }
       update.system_prompt = p
     }
     if (body.responseStyle !== undefined) {
       if (!['concise', 'balanced', 'detailed'].includes(body.responseStyle)) {
-        return NextResponse.json({ error: 'responseStyle must be concise, balanced or detailed' }, { status: 400 })
+        return NextResponse.json({ error: 'responseStyle must be concise, balanced or detailed', code: 'INVALID_RESPONSE_STYLE' }, { status: 400 })
       }
       update.response_style = body.responseStyle
     }
     if (body.languagePolicy !== undefined) {
       if (typeof body.languagePolicy !== 'string' || !/^[a-z-]{2,12}$/.test(body.languagePolicy)) {
-        return NextResponse.json({ error: 'languagePolicy must be a short code like "auto" or "ar"' }, { status: 400 })
+        return NextResponse.json({ error: 'languagePolicy must be a short code like "auto" or "ar"', code: 'INVALID_LANGUAGE_POLICY' }, { status: 400 })
       }
       update.language_policy = body.languagePolicy
     }
     if (body.temperature !== undefined) {
       if (body.temperature !== null && (typeof body.temperature !== 'number' || body.temperature < 0 || body.temperature > 2)) {
-        return NextResponse.json({ error: 'temperature must be between 0 and 2' }, { status: 400 })
+        return NextResponse.json({ error: 'temperature must be between 0 and 2', code: 'INVALID_TEMPERATURE' }, { status: 400 })
       }
       update.temperature = body.temperature
     }
@@ -149,19 +149,19 @@ export async function PATCH(
       // 32000 — a wider value passes here only to die as an opaque
       // CHECK violation in Postgres.
       if (body.maxOutputTokens !== null && (!Number.isInteger(body.maxOutputTokens) || body.maxOutputTokens < 16 || body.maxOutputTokens > 32000)) {
-        return NextResponse.json({ error: 'maxOutputTokens must be 16-32000' }, { status: 400 })
+        return NextResponse.json({ error: 'maxOutputTokens must be 16-32000', code: 'INVALID_MAX_OUTPUT_TOKENS' }, { status: 400 })
       }
       update.max_output_tokens = body.maxOutputTokens
     }
     if (body.maxToolRounds !== undefined) {
       if (!Number.isInteger(body.maxToolRounds) || body.maxToolRounds < 0 || body.maxToolRounds > 10) {
-        return NextResponse.json({ error: 'maxToolRounds must be 0-10' }, { status: 400 })
+        return NextResponse.json({ error: 'maxToolRounds must be 0-10', code: 'INVALID_MAX_TOOL_ROUNDS' }, { status: 400 })
       }
       update.max_tool_rounds = body.maxToolRounds
     }
     if (body.maxAiRepliesPerConversation !== undefined) {
       if (!Number.isInteger(body.maxAiRepliesPerConversation) || body.maxAiRepliesPerConversation < 1 || body.maxAiRepliesPerConversation > 20) {
-        return NextResponse.json({ error: 'maxAiRepliesPerConversation must be 1-20' }, { status: 400 })
+        return NextResponse.json({ error: 'maxAiRepliesPerConversation must be 1-20', code: 'INVALID_REPLY_CAP' }, { status: 400 })
       }
       update.max_ai_replies_per_conversation = body.maxAiRepliesPerConversation
     }
@@ -170,7 +170,7 @@ export async function PATCH(
     }
 
     if (Object.keys(update).length === 0) {
-      return NextResponse.json({ error: 'No fields supplied' }, { status: 400 })
+      return NextResponse.json({ error: 'No fields supplied', code: 'NO_FIELDS_SUPPLIED' }, { status: 400 })
     }
 
     const { data, error } = await ctx.supabase

@@ -8,11 +8,19 @@ import {
 } from '@/lib/whatsapp/phone-utils'
 
 /** Deliver the one-time code to the phone being verified. Never logs/returns it. */
+export interface TrustedAdminOtpDelivery {
+  accepted: true
+  messageId: string
+  recipient: string
+  transport: 'session_text'
+  requiresOpenCustomerServiceWindow: true
+}
+
 export async function sendTrustedAdminOtp(args: {
   accountId: string
   normalizedAddress: string
   otp: string
-}): Promise<void> {
+}): Promise<TrustedAdminOtpDelivery> {
   const db = supabaseAdmin()
   const { data: config, error } = await db
     .from('whatsapp_config')
@@ -28,13 +36,19 @@ export async function sendTrustedAdminOtp(args: {
   let lastError: unknown = null
   for (const candidate of phoneVariants(phone)) {
     try {
-      await sendTextMessage({
+      const sent = await sendTextMessage({
         phoneNumberId: config.phone_number_id,
         accessToken,
         to: candidate,
         text,
       })
-      return
+      return {
+        accepted: true,
+        messageId: sent.messageId,
+        recipient: candidate,
+        transport: 'session_text',
+        requiresOpenCustomerServiceWindow: true,
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (!isRecipientNotAllowedError(message)) throw err

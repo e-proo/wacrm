@@ -11,6 +11,7 @@ const TEXT: Record<AgentAdminUiLocale, Record<string, string>> = {
     validationBlocked: 'Validation found blocking issues.',
     saveRevisionFailed: 'Could not save agent settings.',
     publishFailed: 'Could not publish the agent.',
+    actionErrorTitle: 'Action failed',
     apiErrorPrefix: 'Server response',
     country: 'Country / calling code',
     searchCountry: 'Search country or calling code…',
@@ -33,6 +34,7 @@ const TEXT: Record<AgentAdminUiLocale, Record<string, string>> = {
     validationBlocked: 'وجد الفحص مشاكل تمنع النشر.',
     saveRevisionFailed: 'تعذّر حفظ إعدادات الوكيل.',
     publishFailed: 'تعذّر نشر الوكيل.',
+    actionErrorTitle: 'تعذّر تنفيذ العملية',
     apiErrorPrefix: 'رد الخادم',
     country: 'الدولة / رمز الاتصال',
     searchCountry: 'ابحث باسم الدولة أو رمز الاتصال…',
@@ -104,6 +106,40 @@ const CHECKS: Record<AgentAdminUiLocale, Record<string, string>> = {
 export function localizePublishCheck(locale: string, check: AgentPublishCheckLike): string {
   const language = lang(locale)
   return CHECKS[language][check.code] ?? check.message ?? check.code
+}
+
+
+const AGENT_API_ERRORS: Record<AgentAdminUiLocale, Record<string, string>> = {
+  en: {
+    SYSTEM_PROMPT_TOO_LONG: 'The system instructions are too long (maximum 8,000 characters).',
+    INVALID_RESPONSE_STYLE: 'Choose a valid response style.',
+    INVALID_LANGUAGE_POLICY: 'Choose a valid reply language policy.',
+    INVALID_TEMPERATURE: 'Temperature must be between 0 and 2.',
+    INVALID_MAX_OUTPUT_TOKENS: 'Maximum output tokens must be between 16 and 32,000.',
+    INVALID_MAX_TOOL_ROUNDS: 'Tool rounds must be between 0 and 10.',
+    INVALID_REPLY_CAP: 'Maximum AI replies per conversation must be between 1 and 20.',
+    NO_FIELDS_SUPPLIED: 'No agent settings were supplied to save.',
+    REVISION_NOT_DRAFT: 'This revision is no longer a draft. Reload the agent editor.',
+  },
+  ar: {
+    SYSTEM_PROMPT_TOO_LONG: 'التعليمات الأساسية طويلة جدًا؛ الحد الأقصى 8,000 حرف.',
+    INVALID_RESPONSE_STYLE: 'اختر أسلوب رد صحيحًا.',
+    INVALID_LANGUAGE_POLICY: 'اختر سياسة لغة رد صحيحة.',
+    INVALID_TEMPERATURE: 'يجب أن تكون الحرارة بين 0 و2.',
+    INVALID_MAX_OUTPUT_TOKENS: 'يجب أن يكون حد رموز الإخراج بين 16 و32,000.',
+    INVALID_MAX_TOOL_ROUNDS: 'يجب أن يكون عدد جولات الأدوات بين 0 و10.',
+    INVALID_REPLY_CAP: 'يجب أن يكون سقف ردود الذكاء الاصطناعي لكل محادثة بين 1 و20.',
+    NO_FIELDS_SUPPLIED: 'لم تُرسل أي إعدادات للوكيل ليتم حفظها.',
+    REVISION_NOT_DRAFT: 'هذه النسخة لم تعد مسودة. حدّث محرر الوكيل.',
+  },
+}
+
+export function localizeAgentApiError(locale: string, code?: string, fallback?: string): string {
+  if (code) {
+    const translated = AGENT_API_ERRORS[lang(locale)][code]
+    if (translated) return translated
+  }
+  return fallback || getAgentAdminUiText(locale, 'actionErrorTitle')
 }
 
 const TRUSTED_ADMIN_ERRORS: Record<AgentAdminUiLocale, Record<string, string>> = {

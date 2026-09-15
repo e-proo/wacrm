@@ -69,13 +69,13 @@ export async function POST(request: Request) {
         memberId: body.memberId ?? null,
         actorUserId: ctx.userId,
       })
-      await sendTrustedAdminOtp({
+      const delivery = await sendTrustedAdminOtp({
         accountId: ctx.accountId,
         normalizedAddress: result.identity.normalizedAddress,
         otp: result.otp,
       })
-      // Deliberately do not return the OTP to the dashboard.
-      return NextResponse.json({ identity: dto(result.identity), otpSent: true }, { status: 201 })
+      // Meta accepting /messages is not the same as handset delivery.
+      return NextResponse.json({ identity: dto(result.identity), otpSent: true, delivery }, { status: 201 })
     } catch (innerErr) {
       if (innerErr instanceof TrustedAdminError) {
         return NextResponse.json(
