@@ -73,6 +73,43 @@ describe('tool registry — repaired platform contract', () => {
     expect(getRegisteredTool('execute_in_arbitrary_sql')).toBeNull()
   })
 
+  it('keeps published coverage grant versions stable while adding directional quote inputs', () => {
+    const rates = getRegisteredTool('coverage.get_rates')
+    expect(rates).not.toBeNull()
+    expect(rates?.version).toBe(1)
+    expect(rates?.grantPermissions).toEqual(['read'])
+    expect(rates?.argumentSchema).toHaveProperty('amount')
+    expect(rates?.argumentSchema).toHaveProperty('currency')
+    expect(rates?.argumentSchema).toHaveProperty('pay_region')
+    expect(rates?.argumentSchema).toHaveProperty('pay_region_id')
+    expect(rates?.argumentSchema).toHaveProperty('receive_region')
+    expect(rates?.argumentSchema).toHaveProperty('receive_region_id')
+    expect(rates?.argumentSchema.receive_method.values).toContain('networks')
+    expect(rates?.description).toContain('PAY south + RECEIVE north')
+    expect(rates?.description).toContain('PAY north + RECEIVE south')
+
+    const findOffers = getRegisteredTool('coverage.find_offers')
+    expect(findOffers).not.toBeNull()
+    expect(findOffers?.version).toBe(2)
+    expect(findOffers?.argumentSchema).toHaveProperty('pay_region_id')
+    expect(findOffers?.argumentSchema).toHaveProperty('receive_region_id')
+
+    expect(getRegisteredTool('coverage.propose_offer')?.version).toBe(2)
+    expect(getRegisteredTool('coverage.propose_request')?.version).toBe(1)
+  })
+
+  it('renderToolCatalog teaches the model the customer-leg coverage direction', () => {
+    const catalog = renderToolCatalog([
+      { tool_key: 'coverage.get_rates', permission: 'read' },
+      { tool_key: 'coverage.find_offers', permission: 'read' },
+    ])
+    expect(catalog).toContain('coverage.get_rates (read)')
+    expect(catalog).toContain('coverage.find_offers (read)')
+    expect(catalog).toContain('PAY south + RECEIVE north')
+    expect(catalog).toContain('pay_region')
+    expect(catalog).toContain('receive_region')
+  })
+
   it('renderToolCatalog surfaces exactly the granted, registered tools', () => {
     const catalog = renderToolCatalog([
       { tool_key: 'coverage.get_rates', permission: 'read' },
