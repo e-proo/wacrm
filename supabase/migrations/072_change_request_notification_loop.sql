@@ -24,8 +24,10 @@ alter table public.notifications
 -- A regular UNIQUE index is intentional: PostgreSQL already permits multiple
 -- NULL values, and PostgREST/Supabase can infer this index for
 -- upsert(..., { onConflict: 'dedupe_key' }). A partial unique index would not
--- be inferred by that ON CONFLICT target.
-create unique index if not exists notifications_dedupe_key_uidx
+-- be inferred by that ON CONFLICT target. Drop first so an accidentally-applied
+-- earlier partial version of this migration is repaired on re-run.
+drop index if exists public.notifications_dedupe_key_uidx;
+create unique index notifications_dedupe_key_uidx
   on public.notifications(dedupe_key);
 
 create index if not exists notifications_change_request_idx
