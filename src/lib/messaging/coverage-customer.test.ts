@@ -24,6 +24,7 @@ describe('renderCoverageApprovedCustomerMessage', () => {
     expect(rendered.source).toBe('system')
     expect(rendered.eventKey).toBe('coverage.offer.approved')
     expect(rendered.text).toContain('عرض التغطية')
+    expect(rendered.text).toContain('رقم العرض: COV-123')
     expect(rendered.text).toContain('100,000 SAR')
     expect(rendered.text).toContain('الدفع: حضرموت — نقدًا')
     expect(rendered.text).toContain('الاستلام: صنعاء — شبكات')
@@ -41,6 +42,7 @@ describe('renderCoverageApprovedCustomerMessage', () => {
 
     expect(rendered.eventKey).toBe('coverage.request.approved')
     expect(rendered.text).toContain('طلب التغطية')
+    expect(rendered.text).toContain('رقم الطلب: COV-123')
     expect(rendered.text).toContain('العمولة عليك: 700 SAR')
     expect(rendered.text).not.toContain('الراجع لك')
   })
