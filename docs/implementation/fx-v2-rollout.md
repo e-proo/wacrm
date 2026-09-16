@@ -1,6 +1,6 @@
 # FX V2 rollout plan
 
-Status: active implementation plan
+Status: **Phases 1-7 implemented and verified on the test branch and TEST/STAGING. Production rollout is not part of this closure.**
 
 This document is the canonical rollout map for replacing the legacy exchange-rate-book model with a simpler pair-centric FX domain.
 
@@ -230,18 +230,40 @@ Detailed implementation and acceptance evidence are recorded in `docs/implementa
 
 ## Phase 7 — Legacy FX cleanup
 
-Status: **next; destructive cleanup remains gated on zero active legacy references**.
+Status: **implemented on the test branch, applied/verified on TEST/STAGING, and covered by final repository CI**.
 
-Only after runtime/UI/tools no longer reference the old model:
+Migration: `supabase/migrations/085_fx_v2_legacy_cleanup.sql`
 
-- remove/deprecate `exchange_rate_books`;
-- remove/deprecate `exchange_rate_book_versions`;
-- remove/deprecate legacy `exchange_rates`;
-- remove/deprecate `exchange_rate_history`;
-- remove legacy book publication RPCs and book-centric runtime code;
-- remove obsolete schemas/tests and any remaining dead compatibility code for `exchange_rates.admin_list_books`.
+Acceptance smoke: `supabase/ci/fx-v2-phase-7-legacy-cleanup-smoke.sql`
 
-Before destructive cleanup, prove code references are zero and repeat migration/CI/E2E verification on TEST/STAGING.
+Completed work:
+
+- removed `exchange_rate_books`, `exchange_rate_book_versions`, legacy `exchange_rates`, and `exchange_rate_history`;
+- removed the legacy publication, validation, pair-change, and updated-at functions;
+- removed the obsolete book-centric HTTP routes, dashboard panel, services, executors, and tests;
+- migrated the currency-disable reference guard to `exchange_rate_pairs`;
+- retained the pair-centric FX V2 persistence and deterministic RPC boundary;
+- added a runtime regression contract that rejects legacy imports/routes while preserving unrelated coverage handoffs;
+- added a fail-closed migration guard for legacy rows, Change Requests, and agent grants;
+- added clean-replay CI verification for the Phase 7 postconditions plus the surviving Phase 2 and Phase 6 behavior.
+
+Repository verification at closure:
+
+- lint: passed (warnings only, no errors);
+- typecheck: passed;
+- tests: 138 files / 1417 tests passed;
+- production build: passed, 88/88 routes generated;
+- migrations workflow: clean replay and Phase 2/6/7 smokes passed.
+
+TEST/STAGING verification:
+
+- migration recorded as `20260916232809 / fx_v2_legacy_cleanup`;
+- all four legacy tables resolve to absent;
+- all four legacy functions resolve to absent;
+- `account_exchange_settings`, `exchange_rate_pairs`, `exchange_rate_versions`, and `exchange_trade_requests` remain present;
+- the Phase 7 acceptance smoke completed successfully.
+
+No Phase 7 migration or destructive cleanup was applied to production.
 
 ## Non-goals for the initial V2 rollout
 
