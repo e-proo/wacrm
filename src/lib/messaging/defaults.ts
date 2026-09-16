@@ -108,7 +108,7 @@ export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
     locale: 'ar',
     body: [
       '✅ *تم اعتماد عرض التغطية الخاص بك*',
-      '{{#if entity.reference}}المرجع: {{entity.reference}}{{/if}}',
+      '{{#if entity.reference}}رقم العرض: {{entity.reference}}{{/if}}',
       'المبلغ: {{money.amount}} {{money.currency}}',
       'الدفع: {{data.pay_region}} — {{data.pay_method}}',
       'الاستلام: {{data.receive_region}} — {{data.receive_method}}',
@@ -133,7 +133,7 @@ export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
     locale: 'ar',
     body: [
       '✅ *تم اعتماد طلب التغطية الخاص بك*',
-      '{{#if entity.reference}}المرجع: {{entity.reference}}{{/if}}',
+      '{{#if entity.reference}}رقم الطلب: {{entity.reference}}{{/if}}',
       'المبلغ: {{money.amount}} {{money.currency}}',
       'الدفع: {{data.pay_region}} — {{data.pay_method}}',
       'الاستلام: {{data.receive_region}} — {{data.receive_method}}',
