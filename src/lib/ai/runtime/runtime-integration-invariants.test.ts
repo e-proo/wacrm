@@ -103,11 +103,14 @@ describe('multi-agent runtime integration invariants', () => {
     expect(executors).toContain('sanitizeToolResultForModel')
   })
 
-  it('wires change-request creation to admin notification and admin decisions back to the customer outbox', () => {
+  it('wires change-request creation to admin notification and admin decisions back to the atomic customer outbox', () => {
     const changeRequests = readFileSync(new URL('./change-requests-service.ts', import.meta.url), 'utf8')
     const adminCommands = readFileSync(new URL('./admin-change-commands.ts', import.meta.url), 'utf8')
+    const delivery = readFileSync(new URL('./customer-notification-delivery.ts', import.meta.url), 'utf8')
     expect(changeRequests).toContain('notifyTrustedAdminsOfChangeRequest')
-    expect(adminCommands).toContain('deliverPendingCustomerIntentNotifications')
+    expect(adminCommands).toContain('deliverCustomerOutcomeNotifications')
     expect(adminCommands).toContain('executeApprovedChangeRequest')
+    expect(delivery).toContain("db.rpc('claim_customer_intent_notifications'")
+    expect(delivery).toContain('customer-intent-notification:')
   })
 })
