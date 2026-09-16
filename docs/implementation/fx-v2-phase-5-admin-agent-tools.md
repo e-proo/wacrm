@@ -1,6 +1,6 @@
 # FX V2 Phase 5 — admin agent tools and approvals
 
-Status: implemented on `test/ai-runtime-kb-tools-v2`, verified by repository CI, and migration `082_fx_v2_admin_agent_tools` applied/verified on TEST/STAGING only.
+Status: implemented on `test/ai-runtime-kb-tools-v2`; migrations `082_fx_v2_admin_agent_tools` and `083_fx_v2_admin_grant_plane_cleanup` are applied/verified on TEST/STAGING only.
 
 ## Goal
 
@@ -99,27 +99,43 @@ Proposal tools remain `propose` permissions and require the existing trusted-adm
 
 The runtime sanitizes Change Request confirmation secrets before tool results enter model context.
 
-## Grant migration
+## Grant migrations
+
+### Migration 082 — pair-centric grant upgrade
 
 Migration: `supabase/migrations/082_fx_v2_admin_agent_tools.sql`
 
-Migration 082 preserves the authority of already-published admin revisions without widening access to unrelated revisions:
+Migration 082 translates the prior FX admin grant vocabulary into the Phase 5 contracts:
 
 - existing `exchange_rates.admin_list_books@1 read` grants are renamed to `exchange_rates.admin_list_pairs@1 read`;
 - existing `exchange_rates.propose_pair_change@1 propose` grants are upgraded to v2;
-- only revisions that already had the pair read grant receive `exchange_rates.admin_list_trade_requests@1 read`;
-- only revisions that already had the rate proposal grant receive `exchange_rates.propose_trade_decision@1 propose`.
+- revisions carrying the pair read grant receive `exchange_rates.admin_list_trade_requests@1 read`;
+- revisions carrying the rate proposal grant receive `exchange_rates.propose_trade_decision@1 propose`.
 
-TEST/STAGING verification after applying migration 082:
+The first TEST/STAGING verification correctly showed 11 migrated rows for each new admin contract, but a deeper purpose-level audit found that six of those historical revisions were `customer_support` revisions carrying stale legacy admin grants. Runtime plane policy already denied those grants, so they were not executable from the customer plane, but Phase 5 does not leave stale administrative authority in frozen customer revision data.
+
+### Migration 083 — grant-plane cleanup
+
+Migration: `supabase/migrations/083_fx_v2_admin_grant_plane_cleanup.sql`
+
+Migration 083 removes all current/legacy admin-only FX grants from any revision whose owning agent purpose is not `admin_operations`, then fails the migration if such a row remains.
+
+The cleanup SQL was first exercised transactionally on TEST/STAGING with a rollback. The simulated result left only the five `admin_operations` revisions. It was then applied as migration 083.
+
+Final TEST/STAGING verification:
 
 ```text
-exchange_rates.admin_list_pairs          @1 read     11 grants
-exchange_rates.admin_list_trade_requests @1 read     11 grants
-exchange_rates.propose_pair_change       @2 propose  11 grants
-exchange_rates.propose_trade_decision    @1 propose  11 grants
+purpose: admin_operations
+exchange_rates.admin_list_pairs          @1 read      5 grants
+exchange_rates.admin_list_trade_requests @1 read      5 grants
+exchange_rates.propose_pair_change       @2 propose   5 grants
+exchange_rates.propose_trade_decision    @1 propose   5 grants
+
+customer_support admin-only FX grants:   0
+exchange_rates.admin_list_books grants:  0
 ```
 
-No `exchange_rates.admin_list_books@1` grants remain on the TEST project.
+This database cleanup is defense in depth: runtime manifest/plane/capability policy still independently fails closed if a future stale or malformed grant row appears.
 
 ## Tests and CI
 
@@ -134,18 +150,17 @@ Coverage added/updated for Phase 5 includes:
 - pending trade-request reads;
 - trade-decision Change Request payloads;
 - approved Change Request execution through `publishFxRateVersion` and `decideFxTradeRequest`;
-- stale/conflicting deterministic service errors propagating as execution conflicts.
+- stale/conflicting deterministic service errors propagating as execution conflicts;
+- clean migration replay through the Phase 5 grant migrations.
 
-Before migration 082 was applied to TEST/STAGING, the branch CI passed lint, typecheck, tests and build, and the migrations workflow replayed every migration through 082 on a clean local Supabase database successfully.
-
-After the TEST/STAGING apply, migration history and grant counts were queried directly and matched the expected state above.
+The final Phase 5 HEAD must pass lint, typecheck, tests, build, and the migrations workflow before the phase is considered closed.
 
 ## Security review note
 
-Migration 082 only remaps/inserts frozen tool-grant rows and updates a table comment; it introduces no new table, RPC, SECURITY DEFINER function, or public Data API surface.
+Migrations 082 and 083 only modify frozen tool-grant rows/table comments; they introduce no new table, RPC, SECURITY DEFINER function, or public Data API surface.
 
-A post-apply Supabase Security Advisor run still reports pre-existing project-wide findings (including legacy SECURITY DEFINER execute grants/search-path findings). Those findings are outside the Phase 5 FX grant migration and are not treated as newly introduced by 082.
+A post-apply Supabase Security Advisor run still reports pre-existing project-wide findings (including legacy SECURITY DEFINER execute grants/search-path findings). Those findings are outside the Phase 5 FX grant migrations and are not treated as newly introduced by 082/083.
 
 ## Phase 5 completion boundary
 
-Phase 5 is complete when the administrative AI surface is pair-centric, proposals remain human-approved, TEST/STAGING grants are migrated, and CI passes. Legacy Rate Book tables/RPCs/dead runtime code are intentionally **not deleted here**; destructive cleanup remains Phase 7 after all prior phases and E2E messaging acceptance are complete.
+Phase 5 is complete when the administrative AI surface is pair-centric, proposals remain human-approved, TEST/STAGING grants are restricted to administrative revisions, and final repository CI passes. Legacy Rate Book tables/RPCs/dead runtime code are intentionally **not deleted here**; destructive cleanup remains Phase 7 after all prior phases and E2E messaging acceptance are complete.
