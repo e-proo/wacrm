@@ -56,7 +56,7 @@ describe('tool grant plane inheritance policy', () => {
     for (const tool of [
       grant('coverage.propose_offer', 2, 'propose'),
       grant('coverage.propose_request', 1, 'propose'),
-      grant('exchange_rates.record_trade_request', 1, 'propose'),
+      grant('exchange_rates.record_trade_request', 2, 'propose'),
     ]) {
       expect(inheritedGrantAllowedForPurpose(tool, 'admin_operations')).toMatchObject({
         allowed: false,
