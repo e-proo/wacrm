@@ -176,7 +176,10 @@ create policy exchange_rate_versions_select
 
 -- No authenticated INSERT/UPDATE/DELETE policies on purpose. Rate
 -- publication will be performed by a deterministic service-role RPC
--- in the domain-service phase. The table itself is history.
+-- in the domain-service phase. Versions are append-only through the
+-- application boundary; no mutation path is exposed to authenticated
+-- clients. We intentionally avoid a DELETE-blocking trigger so account
+-- deletion/cascade semantics remain valid.
 
 -- The current pointer must always point to a version belonging to the
 -- same pair. This composite FK prevents accidental cross-pair pointers.
@@ -188,25 +191,6 @@ alter table public.exchange_rate_pairs
   references public.exchange_rate_versions(pair_id, id)
   on delete restrict
   deferrable initially deferred;
-
--- Defense in depth: versions are append-only even for code paths that
--- accidentally run with service-role privileges. A corrective migration
--- can explicitly drop/recreate this trigger if historical repair is ever
--- required.
-create or replace function public.reject_exchange_rate_version_mutation()
-returns trigger
-language plpgsql
-set search_path = public
-as $$
-begin
-  raise exception 'FX_RATE_VERSION_IMMUTABLE' using errcode = 'P0001';
-end;
-$$;
-
-drop trigger if exists exchange_rate_versions_immutable on public.exchange_rate_versions;
-create trigger exchange_rate_versions_immutable
-  before update or delete on public.exchange_rate_versions
-  for each row execute function public.reject_exchange_rate_version_mutation();
 
 -- ------------------------------------------------------------
 -- 4) Customer FX trade requests
