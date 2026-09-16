@@ -151,23 +151,42 @@ Detailed implementation and verification are recorded in `docs/implementation/fx
 
 ## Phase 5 — Admin agent tools and approvals
 
-Status: **next**.
+Status: **implemented on the test branch, verified by repository CI, and migration 082 applied/verified on TEST/STAGING**.
 
-Replace book-centric admin operations with pair-centric operations.
+Migration: `supabase/migrations/082_fx_v2_admin_agent_tools.sql`
 
-Expected direction:
+Admin runtime implementation: `src/lib/ai/tools/fx-v2-admin-tools.ts`
 
-- replace `exchange_rates.admin_list_books` with pair-oriented reads;
-- keep the intent of `exchange_rates.propose_pair_change`, but target `pair_id + expected lock/version + business buy/sell rates`;
-- add pending trade-request reads and propose approve/reject decisions;
-- route AI-originated writes through the existing trusted-admin/change-request approval boundary;
-- keep `rates.read` and `rates.propose` capabilities as the authorization vocabulary unless implementation proves a narrower split is needed.
+Implemented work:
 
-Approval of a customer trade request means `approved_for_contact`; it does **not** mean money was exchanged. `completed` must require a separate authoritative business action/state transition.
+- `exchange_rates.admin_list_books` is no longer a current registered/model-exposed tool;
+- `exchange_rates.admin_list_pairs@1` exposes explicit FX V2 pairs, current immutable rates and optimistic `lock_version` values;
+- `exchange_rates.propose_pair_change@2` targets `pair_id + expected_lock_version + business buy/sell rates` and creates a typed Change Request rather than writing directly;
+- approved rate proposals execute through `publishFxRateVersion` / the Phase 2 publication RPC with the Change Request id attached as the source;
+- stale rate proposals are rejected again transactionally after approval instead of overwriting a newer pair version;
+- `exchange_rates.admin_list_trade_requests@1` exposes snapshotted FX V2 trade requests for operational review;
+- `exchange_rates.propose_trade_decision@1` proposes only approve/reject decisions for `pending_admin` requests;
+- approved trade decisions execute through `decideFxTradeRequest` / the Phase 2 decision RPC with `expected_status = pending_admin`;
+- approval means `approved_for_contact`, not settlement completion;
+- admin reads remain protected by `rates.read`, while proposal tools remain protected by `rates.propose` and the trusted-admin + human Change Request approval boundary;
+- agent-tool UI labels are pair-centric and no longer present the obsolete Rate Book tool.
+
+Migration 082 preserves existing published admin authority without widening it to unrelated revisions. On TEST/STAGING the migrated grants were verified as:
+
+```text
+exchange_rates.admin_list_pairs          @1 read     11 grants
+exchange_rates.admin_list_trade_requests @1 read     11 grants
+exchange_rates.propose_pair_change       @2 propose  11 grants
+exchange_rates.propose_trade_decision    @1 propose  11 grants
+```
+
+No `exchange_rates.admin_list_books@1` grants remain on the TEST project.
+
+Detailed implementation and verification are recorded in `docs/implementation/fx-v2-phase-5-admin-agent-tools.md`.
 
 ## Phase 6 — Messaging and full E2E acceptance
 
-Status: planned.
+Status: **next**.
 
 Connect FX events to the existing Business Event -> MessageContext -> Template Resolver -> Renderer -> Transport platform.
 
@@ -196,7 +215,7 @@ Only after runtime/UI/tools no longer reference the old model:
 - remove/deprecate legacy `exchange_rates`;
 - remove/deprecate `exchange_rate_history`;
 - remove legacy book publication RPCs and book-centric runtime code;
-- remove `exchange_rates.admin_list_books` and obsolete schemas/tests.
+- remove obsolete schemas/tests and any remaining dead compatibility code for `exchange_rates.admin_list_books`.
 
 Before destructive cleanup, prove code references are zero and repeat migration/CI/E2E verification on TEST/STAGING.
 
@@ -212,4 +231,4 @@ The initial V2 deliberately does not add automatic inverse rates, cross-rate syn
 - Persist exact rate/version snapshots on customer trade requests.
 - Use optimistic concurrency for rate publication.
 - Keep rate publication and trade-state mutation deterministic and server-side.
-- Treat immutable version rows as history; publish a new version instead of editing an old one.
+- Treat immutable version rows as history; publish a new version instead of editing an old one).
