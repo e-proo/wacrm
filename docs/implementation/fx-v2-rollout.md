@@ -151,9 +151,12 @@ Detailed implementation and verification are recorded in `docs/implementation/fx
 
 ## Phase 5 — Admin agent tools and approvals
 
-Status: **implemented on the test branch, verified by repository CI, and migration 082 applied/verified on TEST/STAGING**.
+Status: **implemented on the test branch; migrations 082 and 083 applied/verified on TEST/STAGING; final repository CI required before closure**.
 
-Migration: `supabase/migrations/082_fx_v2_admin_agent_tools.sql`
+Migrations:
+
+- `supabase/migrations/082_fx_v2_admin_agent_tools.sql`
+- `supabase/migrations/083_fx_v2_admin_grant_plane_cleanup.sql`
 
 Admin runtime implementation: `src/lib/ai/tools/fx-v2-admin-tools.ts`
 
@@ -169,24 +172,27 @@ Implemented work:
 - approved trade decisions execute through `decideFxTradeRequest` / the Phase 2 decision RPC with `expected_status = pending_admin`;
 - approval means `approved_for_contact`, not settlement completion;
 - admin reads remain protected by `rates.read`, while proposal tools remain protected by `rates.propose` and the trusted-admin + human Change Request approval boundary;
-- agent-tool UI labels are pair-centric and no longer present the obsolete Rate Book tool.
+- agent-tool UI labels are pair-centric and no longer present the obsolete Rate Book tool;
+- migration 083 removes stale admin-only FX grants from non-`admin_operations` revisions as database-level defense in depth, while runtime plane/capability checks remain independently enforced.
 
-Migration 082 preserves existing published admin authority without widening it to unrelated revisions. On TEST/STAGING the migrated grants were verified as:
+Final TEST/STAGING grant state after 082 + 083:
 
 ```text
-exchange_rates.admin_list_pairs          @1 read     11 grants
-exchange_rates.admin_list_trade_requests @1 read     11 grants
-exchange_rates.propose_pair_change       @2 propose  11 grants
-exchange_rates.propose_trade_decision    @1 propose  11 grants
-```
+purpose: admin_operations
+exchange_rates.admin_list_pairs          @1 read      5 grants
+exchange_rates.admin_list_trade_requests @1 read      5 grants
+exchange_rates.propose_pair_change       @2 propose   5 grants
+exchange_rates.propose_trade_decision    @1 propose   5 grants
 
-No `exchange_rates.admin_list_books@1` grants remain on the TEST project.
+customer_support admin-only FX grants:   0
+exchange_rates.admin_list_books grants:  0
+```
 
 Detailed implementation and verification are recorded in `docs/implementation/fx-v2-phase-5-admin-agent-tools.md`.
 
 ## Phase 6 — Messaging and full E2E acceptance
 
-Status: **next**.
+Status: **next after Phase 5 final CI**.
 
 Connect FX events to the existing Business Event -> MessageContext -> Template Resolver -> Renderer -> Transport platform.
 
