@@ -141,38 +141,38 @@ const EXCHANGE_RATES_GET_CURRENT: ToolDefinition = {
   key: 'exchange_rates.get_current',
   version: 1,
   description:
-    'Read the current live exchange rate for a currency pair in a context. Returns stale-aware status.',
+    'Read the authoritative CURRENT FX V2 rate for an explicit currency pair and customer buy/sell side. Current rate questions must use this tool; conversation history and knowledge text are not authoritative rate sources.',
   argumentSchema: {
     base_currency: {
       type: 'string',
-      description: 'ISO-4217-like code (e.g. SAR).',
+      description: 'Configured base currency code (e.g. SAR).',
       required: true,
     },
     quote_currency: {
       type: 'string',
-      description: 'ISO-4217-like code (e.g. YER).',
+      description: 'Configured quote currency code (e.g. YER).',
       required: true,
     },
     intent: {
       type: 'enum',
-      description: "Customer's side of the trade.",
+      description: "Customer's side of the trade relative to the base currency.",
       values: ['customer_sells_base', 'customer_buys_base'],
       required: true,
     },
     region: {
       type: 'string',
-      description: 'Region label (e.g. Sanaa) or null for wildcard.',
+      description: 'Legacy context only; FX V2 does not select prices by region.',
       required: false,
     },
     settlement: {
       type: 'enum',
-      description: 'Settlement method or null for wildcard.',
+      description: 'Legacy context only; FX V2 does not select prices by settlement method.',
       values: ['cash', 'bank', 'wallet', 'other'],
       required: false,
     },
   },
   returnSchema:
-    "CurrentRateResult { status: 'current' | 'unavailable_stale' | 'not_found', rate, side, valid_until, meaning }",
+    "{ status: 'current' | 'not_found', pair_id?, base_currency, quote_currency, customer_side?, effective_rate?, rate_version_id?, version_number?, published_at?, meaning? }",
   grantPermissions: ['read'],
   category: 'rates',
   risk: 'read',
@@ -599,28 +599,33 @@ const INTENTS_PROPOSE_DECISION: ToolDefinition = {
 
 const EXCHANGE_RATES_RECORD_TRADE_REQUEST: ToolDefinition = {
   key: 'exchange_rates.record_trade_request',
-  version: 1,
+  version: 2,
   description:
-    "Record this conversation's customer's request to buy or sell the base currency at the current published rate context. This NEVER changes exchange rates; it forwards the request to administration as a bound customer intent.",
+    "Create this conversation customer's real FX V2 trade request against the exact rate version already quoted by exchange_rates.get_current. This NEVER changes a rate and NEVER marks settlement complete; the new request starts pending_admin.",
   argumentSchema: {
-    base_currency: { type: 'string', description: 'Currency being bought or sold.', required: true },
-    quote_currency: { type: 'string', description: 'Settlement/quote currency.', required: true },
+    base_currency: { type: 'string', description: 'Base currency being bought or sold.', required: true },
+    quote_currency: { type: 'string', description: 'Explicit quote currency.', required: true },
     intent: {
       type: 'enum',
-      description: 'Customer side of the trade.',
+      description: 'Customer side of the trade relative to base currency.',
       values: ['customer_sells_base', 'customer_buys_base'],
       required: true,
     },
-    base_amount: { type: 'string', description: 'Positive amount of base currency the customer wants to buy/sell.', required: true },
-    region: { type: 'string', description: 'Optional rate-book region context.', required: false },
+    base_amount: { type: 'string', description: 'Positive amount of base currency the customer confirmed.', required: true },
+    expected_rate_version_id: {
+      type: 'string',
+      description: 'Exact rate_version_id returned by exchange_rates.get_current and shown/quoted before confirmation. If it is no longer current, submission fails and the rate must be re-read.',
+      required: true,
+    },
+    region: { type: 'string', description: 'Optional legacy context only; does not select the FX V2 rate.', required: false },
     settlement: {
       type: 'enum',
-      description: 'Optional settlement method.',
+      description: 'Optional legacy context only; does not select the FX V2 rate.',
       values: ['cash', 'bank', 'wallet', 'other'],
       required: false,
     },
   },
-  returnSchema: '{ intent, rate_snapshot }',
+  returnSchema: '{ trade_request: { request_id, code, status, pair_id, base_currency, quote_currency, customer_side, rate_version_id, effective_rate, base_amount, quote_amount, idempotent } }',
   grantPermissions: ['propose'],
   category: 'rates',
   risk: 'medium',
