@@ -76,3 +76,9 @@ jobs:
       # are explicitly removed before commit.
       - name: Verify FX V2 Phase 2 domain behavior
         run: supabase db query --local --file supabase/ci/fx-v2-phase-2-smoke.sql
+
+      # Phase 6 proves that authoritative trade transitions emit durable,
+      # deduplicated customer lifecycle events and that customer_buy/sell keep
+      # the frozen sell/buy rate semantics used by the message renderer.
+      - name: Verify FX V2 Phase 6 messaging behavior
+        run: supabase db query --local --file supabase/ci/fx-v2-phase-6-messaging-smoke.sql
