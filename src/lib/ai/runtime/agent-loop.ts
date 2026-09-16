@@ -21,6 +21,7 @@ import {
   requiresFreshCoverageRates,
   type CoverageLegRegionAliases,
 } from './coverage-leg-wording-guard'
+import { requiresFreshFxRate } from './fx-current-rate-guard'
 import type { AiAgentRevision, RunPlane, ToolGrantPermission } from './multi-agent-types'
 
 // Native structured-tool agent loop. There is intentionally no parser for
@@ -63,6 +64,12 @@ function coverageClarification(text: string): string {
   return /[\u0600-\u06FF]/.test(text)
     ? 'للتأكد قبل التسعير: أين ستسلّم/تدفع المبلغ وبأي طريقة، وأين تريد الاستلام وبأي طريقة؟'
     : 'Before I quote this coverage request, please confirm where/how you will pay and where/how you want to receive.'
+}
+
+function fxCurrentRateUnavailable(text: string): string {
+  return /[\u0600-\u06FF]/.test(text)
+    ? 'تعذر عليّ التحقق من سعر الصرف الحالي من المصدر المباشر، لذلك لن أعطيك سعراً من المحادثة السابقة أو من معلومات غير محدثة.'
+    : 'I could not verify the current exchange rate from the live source, so I will not quote a rate from conversation history or stale information.'
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
@@ -168,6 +175,23 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     )
     let coverageRateSatisfied = !coverageRateRequired
 
+    const fxRateQuery = requiresFreshFxRate(latestCustomerText)
+    const fxRateTool = offeredTools.find((tool) => tool.key === 'exchange_rates.get_current') ?? null
+    if (fxRateQuery && !fxRateTool) {
+      console.warn('[agent loop] current FX query cannot access exchange_rates.get_current; failing closed')
+      return {
+        status: 'handoff',
+        text: fxCurrentRateUnavailable(latestCustomerText),
+        toolCalls: auditCalls,
+        handoffRequested: true,
+        inputTokens,
+        outputTokens,
+        error: 'FX_CURRENT_RATE_TOOL_UNAVAILABLE',
+      }
+    }
+    const fxRateRequired = fxRateQuery && Boolean(fxRateTool)
+    let fxRateSatisfied = !fxRateRequired
+
     const resolveCoverageLegAliases = async (
       toolKey: string,
       args: Record<string, unknown>,
@@ -202,10 +226,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
     const roleFraming =
       input.agentPurpose === 'admin_operations'
-        ? 'You are the operations assistant for a verified business administrator. Use native READ tools for current services, rates, coverage, requests, and offers whenever relevant. Never use customer-style handoff merely because live data was needed. Never claim a mutation occurred unless a change request was explicitly approved and executed.'
+        ? 'You are the operations assistant for a verified business administrator. Use native READ tools for current services, rates, coverage, requests, and offers whenever relevant. Concrete/current FX rates must come from exchange_rates.get_current, never conversation history or knowledge text. Never use customer-style handoff merely because live data was needed. Never claim a mutation occurred unless a change request was explicitly approved and executed.'
         : input.agentPurpose === 'customer_support'
-          ? 'You are the business customer-service assistant. Answer from approved knowledge and read/proposal tools. When a READ tool succeeds, answer from that authoritative result instead of handing off. Never expose internal-only fields and never claim an administrative write was performed.'
-          : 'Answer using approved knowledge and native tools. Ask a concise clarifying question when needed.'
+          ? 'You are the business customer-service assistant. Answer from approved knowledge and read/proposal tools. Concrete/current FX rates must come from exchange_rates.get_current, never conversation history or knowledge text. When a READ tool succeeds, answer from that authoritative result instead of handing off. Never expose internal-only fields and never claim an administrative write was performed.'
+          : 'Answer using approved knowledge and native tools. For a concrete/current FX rate use exchange_rates.get_current rather than history or knowledge text. Ask a concise clarifying question when needed.'
 
     const systemPrompt = buildSystemPrompt({
       userPrompt: [revision.systemPrompt ?? '', roleFraming].filter(Boolean).join('\n\n'),
@@ -267,9 +291,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
 
     for (let round = 1; round <= rounds; round++) {
-      const toolsForTurn = coverageRateRequired && !coverageRateSatisfied && coverageRateTool
-        ? [coverageRateTool]
-        : offeredTools
+      const forcedFreshTool = coverageRateRequired && !coverageRateSatisfied && coverageRateTool
+        ? coverageRateTool
+        : fxRateRequired && !fxRateSatisfied && fxRateTool
+          ? fxRateTool
+          : null
+      const toolsForTurn = forcedFreshTool ? [forcedFreshTool] : offeredTools
 
       let turn = await generateNativeAgentTurn({
         connection,
@@ -301,6 +328,33 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         if (turn.toolCalls.length === 0) {
           console.warn('[agent loop] provider refused required coverage.get_rates call')
           finalText = coverageClarification(latestCustomerText)
+          break
+        }
+      }
+
+      if (
+        fxRateRequired &&
+        !fxRateSatisfied &&
+        fxRateTool &&
+        turn.toolCalls.length === 0
+      ) {
+        console.info('[agent loop] concrete FX query attempted without exchange_rates.get_current; forcing authoritative read')
+        turn = await generateNativeAgentTurn({
+          connection,
+          model: revision.model,
+          systemPrompt:
+            systemPrompt +
+            '\n\nRuntime requirement: the latest message asks for a CURRENT exchange rate. Conversation history and retrieved knowledge are NOT authoritative for current FX prices. You MUST call exchange_rates.get_current now for the explicit pair and the customer buy/sell side. If the pair or side is unclear, do not invent it. Do not answer with a numeric rate before the tool succeeds.',
+          messages,
+          tools: [fxRateTool],
+          maxOutputTokens: revision.maxOutputTokens,
+          temperature: revision.temperature,
+        })
+        inputTokens += turn.usage?.promptTokens ?? 0
+        outputTokens += turn.usage?.completionTokens ?? 0
+        if (turn.toolCalls.length === 0) {
+          console.warn('[agent loop] provider refused required exchange_rates.get_current call')
+          finalText = fxCurrentRateUnavailable(latestCustomerText)
           break
         }
       }
@@ -411,6 +465,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         if (call.toolKey === 'coverage.get_rates' && outcome.result.ok) {
           coverageRateSatisfied = true
         }
+        if (call.toolKey === 'exchange_rates.get_current' && outcome.result.ok) {
+          fxRateSatisfied = true
+        }
         if (
           grant.permission === 'read' &&
           outcome.result.ok &&
@@ -428,6 +485,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       if (round === rounds) {
         if (coverageRateRequired && !coverageRateSatisfied) {
           finalText = coverageClarification(latestCustomerText)
+          break
+        }
+        if (fxRateRequired && !fxRateSatisfied) {
+          finalText = fxCurrentRateUnavailable(latestCustomerText)
           break
         }
         // Final turn is tool-free: provider cannot request another action after
