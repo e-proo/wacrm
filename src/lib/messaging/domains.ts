@@ -74,6 +74,7 @@ export function buildCoverageMessageContext(input: {
   receiveRegion: string
   receiveMethod: string
   commissionAmount?: string | number | null
+  commissionCurrency?: string | null
   commissionEffect?: 'customer_receives' | 'customer_pays' | null
 }): MessageContext {
   const commissionLabel =
@@ -104,6 +105,7 @@ export function buildCoverageMessageContext(input: {
     context.money = {
       ...(context.money ?? {}),
       commission: formatMessageNumber(input.commissionAmount),
+      commission_currency: input.commissionCurrency ?? input.currency,
     }
   }
   return context
