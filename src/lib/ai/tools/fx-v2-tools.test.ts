@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const getCurrentFxRate = vi.fn()
-const getFxBaseCurrency = vi.fn()
-const createFxTradeRequest = vi.fn()
+const mocks = vi.hoisted(() => ({
+  getCurrentFxRate: vi.fn(),
+  getFxBaseCurrency: vi.fn(),
+  createFxTradeRequest: vi.fn(),
+}))
 
 vi.mock('@/lib/services/fx-v2/service', async () => {
   const actual = await vi.importActual<typeof import('@/lib/services/fx-v2/service')>(
@@ -10,9 +12,9 @@ vi.mock('@/lib/services/fx-v2/service', async () => {
   )
   return {
     ...actual,
-    getCurrentFxRate,
-    getFxBaseCurrency,
-    createFxTradeRequest,
+    getCurrentFxRate: mocks.getCurrentFxRate,
+    getFxBaseCurrency: mocks.getFxBaseCurrency,
+    createFxTradeRequest: mocks.createFxTradeRequest,
   }
 })
 
@@ -90,9 +92,9 @@ function context(overrides: Partial<ToolContext> = {}): ToolContext {
 describe('FX V2 customer runtime tools', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    getCurrentFxRate.mockResolvedValue(currentRate)
-    getFxBaseCurrency.mockResolvedValue(pair.quote)
-    createFxTradeRequest.mockResolvedValue({
+    mocks.getCurrentFxRate.mockResolvedValue(currentRate)
+    mocks.getFxBaseCurrency.mockResolvedValue(pair.quote)
+    mocks.createFxTradeRequest.mockResolvedValue({
       requestId: 'trade-1',
       code: '42',
       rateVersionId: 'rate-v1',
@@ -118,7 +120,7 @@ describe('FX V2 customer runtime tools', () => {
       settlement: 'cash',
     })
 
-    expect(getCurrentFxRate).toHaveBeenCalledWith('account-1', 'SAR', 'YER')
+    expect(mocks.getCurrentFxRate).toHaveBeenCalledWith('account-1', 'SAR', 'YER')
     expect(result).toEqual({
       ok: true,
       safe_to_show: true,
@@ -146,7 +148,7 @@ describe('FX V2 customer runtime tools', () => {
       base_amount: '1000',
     })
 
-    expect(createFxTradeRequest).toHaveBeenCalledWith(
+    expect(mocks.createFxTradeRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: 'account-1',
         pairId: 'pair-1',
@@ -195,7 +197,7 @@ describe('FX V2 customer runtime tools', () => {
       expected_rate_version_id: 'rate-old',
     })
 
-    expect(createFxTradeRequest).not.toHaveBeenCalled()
+    expect(mocks.createFxTradeRequest).not.toHaveBeenCalled()
     expect(result).toMatchObject({
       ok: false,
       safe_to_show: true,
@@ -214,7 +216,7 @@ describe('FX V2 customer runtime tools', () => {
       },
     )
 
-    expect(createFxTradeRequest).not.toHaveBeenCalled()
+    expect(mocks.createFxTradeRequest).not.toHaveBeenCalled()
     expect(result).toMatchObject({
       ok: false,
       safe_to_show: false,
