@@ -67,7 +67,7 @@ describe('authorizeToolInvocation', () => {
       category: 'rates', risk: 'medium',
     }
     const rateChangeTool: ToolDefinition = {
-      key: 'exchange_rates.propose_pair_change', version: 1, description: 'test',
+      key: 'exchange_rates.propose_pair_change', version: 2, description: 'test',
       argumentSchema: {}, returnSchema: '{}', grantPermissions: ['propose'],
       category: 'rates', risk: 'high',
     }
@@ -86,7 +86,7 @@ describe('authorizeToolInvocation', () => {
 
   it('requires rates.propose for an admin exchange-rate change', () => {
     const rateChangeTool: ToolDefinition = {
-      key: 'exchange_rates.propose_pair_change', version: 1, description: 'test',
+      key: 'exchange_rates.propose_pair_change', version: 2, description: 'test',
       argumentSchema: {}, returnSchema: '{}', grantPermissions: ['propose'],
       category: 'rates', risk: 'high',
     }
@@ -100,6 +100,26 @@ describe('authorizeToolInvocation', () => {
     })).toMatchObject({ ok: false, code: 'ADMIN_CAPABILITY_DENIED' })
     expect(authorizeToolInvocation({
       tool: rateChangeTool, permission: 'propose', args: {}, constraints: {},
+      context: { ...base, trustedAdminCapabilities: ['rates.propose'] },
+    })).toEqual({ ok: true })
+  })
+
+  it('requires rates.propose for an admin FX trade decision', () => {
+    const decisionTool: ToolDefinition = {
+      key: 'exchange_rates.propose_trade_decision', version: 1, description: 'test',
+      argumentSchema: {}, returnSchema: '{}', grantPermissions: ['propose'],
+      category: 'rates', risk: 'high',
+    }
+    const base = {
+      plane: 'admin' as const, channel: 'whatsapp' as const, simulation: false,
+      agentPurpose: 'admin_operations' as const, trustedAdminIdentityId: 'admin-1', features,
+    }
+    expect(authorizeToolInvocation({
+      tool: decisionTool, permission: 'propose', args: {}, constraints: {},
+      context: { ...base, trustedAdminCapabilities: [] },
+    })).toMatchObject({ ok: false, code: 'ADMIN_CAPABILITY_DENIED' })
+    expect(authorizeToolInvocation({
+      tool: decisionTool, permission: 'propose', args: {}, constraints: {},
       context: { ...base, trustedAdminCapabilities: ['rates.propose'] },
     })).toEqual({ ok: true })
   })
@@ -123,5 +143,4 @@ describe('authorizeToolInvocation', () => {
     })
     expect(result).toMatchObject({ ok: false, code: 'TOOL_PLANE_DENIED' })
   })
-
 })
