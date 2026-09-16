@@ -62,6 +62,7 @@ export async function renderCoverageApprovedCustomerMessage(
     receiveRegion: input.receiveRegion,
     receiveMethod: coverageMethodLabel(input.receiveMethod),
     commissionAmount,
+    commissionCurrency: input.commissionCurrency ?? input.currency,
     commissionEffect,
   })
 
