@@ -151,7 +151,7 @@ Detailed implementation and verification are recorded in `docs/implementation/fx
 
 ## Phase 5 — Admin agent tools and approvals
 
-Status: **implemented on the test branch; migrations 082 and 083 applied/verified on TEST/STAGING; final repository CI required before closure**.
+Status: **implemented on the test branch, migrations 082 and 083 applied/verified on TEST/STAGING, and verified by final repository CI**.
 
 Migrations:
 
@@ -192,7 +192,7 @@ Detailed implementation and verification are recorded in `docs/implementation/fx
 
 ## Phase 6 — Messaging and full E2E acceptance
 
-Status: **next after Phase 5 final CI**.
+Status: **next**.
 
 Connect FX events to the existing Business Event -> MessageContext -> Template Resolver -> Renderer -> Transport platform.
 
