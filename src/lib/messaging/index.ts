@@ -1,4 +1,5 @@
 export * from './catalog'
+export * from './change-request-admin'
 export * from './defaults'
 export * from './domains'
 export * from './renderer'
