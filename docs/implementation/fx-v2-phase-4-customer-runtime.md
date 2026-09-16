@@ -127,11 +127,8 @@ Coverage includes:
 
 The final branch CI passed lint, typecheck, tests and build. The migrations workflow also replayed all migrations from a clean database, verified the resulting schema, and reran the Phase 2 transactional FX smoke successfully.
 
-## Deliberately left for Phase 5
+## Phase 5 follow-through
 
-Phase 4 does not migrate the admin FX tools. These remain legacy until their dedicated approval-boundary migration:
+The administrative FX surface that Phase 4 intentionally left unchanged has now been migrated in Phase 5. `exchange_rates.admin_list_books` is no longer a current registered/model-exposed tool; administration now uses pair-centric FX V2 reads, approval-bound rate proposals, pending trade-request reads, and approval-bound trade decisions.
 
-- `exchange_rates.admin_list_books`
-- `exchange_rates.propose_pair_change`
-
-Phase 5 replaces those book-centric operations with pair-centric FX V2 reads and typed admin proposals, and adds pending trade-request review/decision tools.
+See `docs/implementation/fx-v2-phase-5-admin-agent-tools.md` for the Phase 5 contract, TEST/STAGING grant migration, and verification details.
