@@ -98,6 +98,20 @@ describe('tool registry — repaired platform contract', () => {
     expect(getRegisteredTool('coverage.propose_request')?.version).toBe(1)
   })
 
+  it('requires the quoted FX V2 version when recording a customer trade request', () => {
+    const read = getRegisteredTool('exchange_rates.get_current')
+    expect(read?.version).toBe(1)
+    expect(read?.description).toContain('authoritative CURRENT FX V2 rate')
+    expect(read?.returnSchema).toContain('rate_version_id')
+
+    const record = getRegisteredTool('exchange_rates.record_trade_request')
+    expect(record?.version).toBe(2)
+    expect(record?.grantPermissions).toEqual(['propose'])
+    expect(record?.argumentSchema.expected_rate_version_id?.required).toBe(true)
+    expect(record?.returnSchema).toContain('trade_request')
+    expect(record?.returnSchema).toContain('pending_admin')
+  })
+
   it('renderToolCatalog teaches the model the customer-leg coverage direction', () => {
     const catalog = renderToolCatalog([
       { tool_key: 'coverage.get_rates', permission: 'read' },
@@ -108,6 +122,15 @@ describe('tool registry — repaired platform contract', () => {
     expect(catalog).toContain('PAY south + RECEIVE north')
     expect(catalog).toContain('pay_region')
     expect(catalog).toContain('receive_region')
+  })
+
+  it('renderToolCatalog surfaces the FX quote version requirement', () => {
+    const catalog = renderToolCatalog([
+      { tool_key: 'exchange_rates.get_current', permission: 'read' },
+      { tool_key: 'exchange_rates.record_trade_request', permission: 'propose' },
+    ])
+    expect(catalog).toContain('authoritative CURRENT FX V2 rate')
+    expect(catalog).toContain('expected_rate_version_id: string')
   })
 
   it('renderToolCatalog surfaces exactly the granted, registered tools', () => {
