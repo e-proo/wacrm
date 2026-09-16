@@ -13,8 +13,6 @@ import {
   executeCoverageAdminListRequests,
   executeChangeRequestsListPending,
   executeIntentProposeDecision,
-  executeExchangeRateAdminListBooks,
-  executeExchangeRateProposePairChange,
   executeServiceProposeUpdate,
   executePricingRuleProposeServicePrice,
 } from '../business-handoff'
@@ -22,6 +20,12 @@ import {
   executeFxV2GetCurrent,
   executeFxV2RecordTradeRequest,
 } from '../fx-v2-tools'
+import {
+  executeFxV2AdminListPairs,
+  executeFxV2AdminListTradeRequests,
+  executeFxV2ProposePairChange,
+  executeFxV2ProposeTradeDecision,
+} from '../fx-v2-admin-tools'
 import {
   executeCoverageFindOffersDirectional,
   executeCoverageGetRatesDirectional,
@@ -50,8 +54,10 @@ add('pricing.calculate_quote', 1, (ctx, args) => executePricingCalculateQuote(ct
 add('pricing_rules.propose_service_price', 1, (ctx, args) => executePricingRuleProposeServicePrice(ctx, args as never))
 add('exchange_rates.get_current', 1, (ctx, args) => executeFxV2GetCurrent(ctx, args as never))
 add('exchange_rates.record_trade_request', 2, (ctx, args) => executeFxV2RecordTradeRequest(ctx, args as never))
-add('exchange_rates.admin_list_books', 1, (ctx, args) => executeExchangeRateAdminListBooks(ctx, args as never))
-add('exchange_rates.propose_pair_change', 1, (ctx, args) => executeExchangeRateProposePairChange(ctx, args as never))
+add('exchange_rates.admin_list_pairs', 1, (ctx, args) => executeFxV2AdminListPairs(ctx, args as never))
+add('exchange_rates.propose_pair_change', 2, (ctx, args) => executeFxV2ProposePairChange(ctx, args as never))
+add('exchange_rates.admin_list_trade_requests', 1, (ctx, args) => executeFxV2AdminListTradeRequests(ctx, args as never))
+add('exchange_rates.propose_trade_decision', 1, (ctx, args) => executeFxV2ProposeTradeDecision(ctx, args as never))
 add('coverage.check_availability', 1, (ctx, args) => executeCoverageCheckAvailability(ctx, args as never))
 add('coverage.find_offers', 2, (ctx, args) => {
   const hasDirectionalLegs = Boolean(
