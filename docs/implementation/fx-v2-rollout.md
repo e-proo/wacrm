@@ -126,20 +126,32 @@ Detailed implementation is recorded in `docs/implementation/fx-v2-phase-3-dashbo
 
 ## Phase 4 — Customer AI/runtime tools
 
-Status: **next**.
+Status: **implemented on the test branch, verified by repository CI, and migration 081 applied/verified on TEST/STAGING**.
 
-Migrate customer-facing FX tools to V2 domain services.
+Migration: `supabase/migrations/081_fx_v2_customer_runtime_tools.sql`
 
-Expected contracts:
+Customer runtime implementation: `src/lib/ai/tools/fx-v2-tools.ts`
 
-- `exchange_rates.get_current` remains conceptually available but becomes pair/base-currency aware and always reads the authoritative current V2 rate.
-- `exchange_rates.record_trade_request` stops producing a generic `customer_intent`; it creates a real `exchange_trade_request` through the deterministic Phase 2 service.
+Implemented work:
 
-Concrete rate questions must not be answered from conversation history or KB content when a current DB rate is required.
+- `exchange_rates.get_current@1` now reads the authoritative current FX V2 pair/version instead of a legacy rate book;
+- customer buy/sell direction is mapped through the deterministic Phase 2 engine;
+- the read result returns the exact immutable `rate_version_id` used as a later quote token;
+- concrete/current FX questions are detected by a runtime freshness guard and cannot be answered from conversation history or KB content;
+- if the authoritative current-rate tool is unavailable or the provider refuses the required call, the runtime fails closed rather than quoting a stale number;
+- `exchange_rates.record_trade_request@2` requires the exact `expected_rate_version_id` returned by the preceding quote;
+- missing or stale quoted versions are rejected before mutation and again transactionally by the Phase 2 RPC;
+- customer identity is server-bound from contact/conversation/source-message context and cannot be chosen by the model;
+- confirmed requests create real `exchange_trade_requests` in `pending_admin`, with exact pair/rate/amount snapshots and deterministic idempotency;
+- customer FX requests no longer create generic `customer_intents`.
+
+Migration 081 upgrades existing frozen `exchange_rates.record_trade_request@1` grants to the safer v2 contract while keeping the permission `propose`. On TEST/STAGING, all 12 existing record-trade grants were verified at v2 after migration; the 20 current-rate read grants remain at v1.
+
+Detailed implementation and verification are recorded in `docs/implementation/fx-v2-phase-4-customer-runtime.md`.
 
 ## Phase 5 — Admin agent tools and approvals
 
-Status: planned.
+Status: **next**.
 
 Replace book-centric admin operations with pair-centric operations.
 
