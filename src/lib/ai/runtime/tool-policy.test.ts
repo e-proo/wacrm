@@ -62,7 +62,7 @@ describe('authorizeToolInvocation', () => {
 
   it('allows customers to forward FX buy/sell requests but not change rates', () => {
     const tradeRequestTool: ToolDefinition = {
-      key: 'exchange_rates.record_trade_request', version: 1, description: 'test',
+      key: 'exchange_rates.record_trade_request', version: 2, description: 'test',
       argumentSchema: {}, returnSchema: '{}', grantPermissions: ['propose'],
       category: 'rates', risk: 'medium',
     }
