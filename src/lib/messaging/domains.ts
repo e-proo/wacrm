@@ -136,6 +136,44 @@ export function buildExchangeRateMessageContext(input: {
   })
 }
 
+export function buildFxTradeMessageContext(input: {
+  entityId: string
+  reference: string
+  status: string
+  side: 'customer_buy' | 'customer_sell'
+  amountBasis: 'base' | 'quote'
+  requestedAmount: string | number
+  effectiveRate: string | number
+  baseAmount: string | number
+  quoteAmount: string | number
+  baseCurrency: string
+  quoteCurrency: string
+  rateVersionId: string
+}): MessageContext {
+  const requestedCurrency = input.amountBasis === 'base' ? input.baseCurrency : input.quoteCurrency
+  const sideLabel = input.side === 'customer_buy' ? `شراء ${input.baseCurrency}` : `بيع ${input.baseCurrency}`
+  return buildGenericServiceMessageContext({
+    entityType: 'fx_trade_request',
+    entityId: input.entityId,
+    reference: input.reference,
+    status: input.status,
+    amount: input.requestedAmount,
+    currency: requestedCurrency,
+    data: {
+      pair: `${input.baseCurrency}/${input.quoteCurrency}`,
+      side: input.side,
+      side_label: sideLabel,
+      amount_basis: input.amountBasis,
+      effective_rate: formatMessageNumber(input.effectiveRate),
+      base_amount: formatMessageNumber(input.baseAmount),
+      base_currency: input.baseCurrency,
+      quote_amount: formatMessageNumber(input.quoteAmount),
+      quote_currency: input.quoteCurrency,
+      rate_version_id: input.rateVersionId,
+    },
+  })
+}
+
 export function buildRemittanceMessageContext(input: {
   entityId?: string | null
   reference?: string | null
