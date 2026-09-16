@@ -1,7 +1,9 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
+import { renderCoverageApprovedCustomerMessage } from '@/lib/messaging/coverage-customer'
+import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 import { publishExchangeRateVersion } from '@/lib/services/domain-services'
 import { publishPricingRuleRaw } from '@/lib/services/pricing/rules-crud'
-import { readCoverageAttributes } from '@/lib/services/coverage/attributes'
+import { readCoverageAttributes, type CoverageAttributes } from '@/lib/services/coverage/attributes'
 import { compileFieldSchema, validateValues, type FieldDefinitionInput } from '@/lib/services/catalog/field-schema'
 
 export class ChangeExecutionError extends Error {
@@ -24,6 +26,26 @@ interface ClaimedChange {
   expected_version: number | null
   content_digest: string
   claim_token: string
+}
+
+interface CoverageNotificationPayload {
+  kind: 'offer' | 'request'
+  entity_id?: string | null
+  reference?: string | null
+  service_id?: string | null
+  amount: string
+  currency: string
+  attributes: CoverageAttributes
+  commission_per_thousand?: string | null
+  commission_currency?: string | null
+}
+
+interface CustomerNotificationDescriptor {
+  intent_id?: string
+  event_type?: string
+  message_text?: string
+  template_event?: string
+  template_payload?: CoverageNotificationPayload
 }
 
 /**
@@ -444,7 +466,18 @@ async function executeClaimedTarget(
             customer_notification: {
               intent_id: p.intent_id,
               event_type: 'approved_and_applied',
-              message_text: `تم اعتماد عرض التغطية الخاص بك برقم ${offer.reference_code}.`,
+              template_event: 'coverage.offer.approved',
+              template_payload: {
+                kind: 'offer',
+                entity_id: offer.id,
+                reference: offer.reference_code,
+                service_id: p.service_id,
+                amount: p.total_amount,
+                currency: p.currency,
+                attributes: offerAttrs,
+                commission_per_thousand: p.commission_per_thousand ?? null,
+                commission_currency: p.commission_currency ?? p.currency,
+              } satisfies CoverageNotificationPayload,
             },
           }
         : {}),
@@ -522,7 +555,18 @@ async function executeClaimedTarget(
             customer_notification: {
               intent_id: p.intent_id,
               event_type: 'approved_and_applied',
-              message_text: 'تم اعتماد طلب التغطية الخاص بك وإدراجه للمعالجة.',
+              template_event: 'coverage.request.approved',
+              template_payload: {
+                kind: 'request',
+                entity_id: request.id,
+                reference: null,
+                service_id: p.service_id,
+                amount: p.requested_amount,
+                currency: p.currency,
+                attributes: requestAttrs,
+                commission_per_thousand: p.commission_per_thousand ?? null,
+                commission_currency: p.commission_currency ?? p.currency,
+              } satisfies CoverageNotificationPayload,
             },
           }
         : {}),
@@ -535,17 +579,14 @@ async function executeClaimedTarget(
   )
 }
 
-
 async function enqueueCustomerNotification(
   db: ReturnType<typeof supabaseAdmin>,
   accountId: string,
   changeRequestId: string,
   result: Record<string, unknown>,
 ): Promise<void> {
-  const notification = result.customer_notification as
-    | { intent_id?: string; event_type?: string; message_text?: string }
-    | undefined
-  if (!notification?.intent_id || !notification.event_type || !notification.message_text) return
+  const notification = result.customer_notification as CustomerNotificationDescriptor | undefined
+  if (!notification?.intent_id || !notification.event_type) return
 
   const { data: intent, error: intentError } = await db
     .from('customer_intents')
@@ -555,6 +596,17 @@ async function enqueueCustomerNotification(
     .maybeSingle()
   if (intentError) throw intentError
   if (!intent?.conversation_id || !intent.contact_id) return
+
+  let messageText = notification.message_text ?? null
+  if (!messageText && notification.template_event && notification.template_payload) {
+    messageText = await renderStructuredCustomerNotification(
+      db,
+      accountId,
+      notification.template_event,
+      notification.template_payload,
+    )
+  }
+  if (!messageText) return
 
   const { error } = await db
     .from('customer_intent_notifications')
@@ -566,7 +618,7 @@ async function enqueueCustomerNotification(
         contact_id: intent.contact_id,
         conversation_id: intent.conversation_id,
         event_type: notification.event_type,
-        message_text: notification.message_text,
+        message_text: messageText,
         status: 'pending',
       },
       {
@@ -575,6 +627,76 @@ async function enqueueCustomerNotification(
       },
     )
   if (error) throw error
+}
+
+async function renderStructuredCustomerNotification(
+  db: ReturnType<typeof supabaseAdmin>,
+  accountId: string,
+  eventKey: string,
+  payload: CoverageNotificationPayload,
+): Promise<string> {
+  if (eventKey !== 'coverage.offer.approved' && eventKey !== 'coverage.request.approved') {
+    return ''
+  }
+
+  const regionIds = [payload.attributes.pay_region_id, payload.attributes.receive_region_id].filter(
+    (id): id is string => Boolean(id),
+  )
+  const regionNames = new Map<string, string>()
+  if (regionIds.length > 0) {
+    const { data: regions, error: regionError } = await db
+      .from('coverage_regions')
+      .select('id, name, code')
+      .eq('account_id', accountId)
+      .in('id', [...new Set(regionIds)])
+    if (regionError) throw regionError
+    for (const region of regions ?? []) {
+      regionNames.set(region.id, region.name || region.code || region.id)
+    }
+  }
+
+  const payRegion =
+    (payload.attributes.pay_region_id && regionNames.get(payload.attributes.pay_region_id)) ||
+    payload.attributes.coverage_country ||
+    'غير محدد'
+  const receiveRegion =
+    (payload.attributes.receive_region_id && regionNames.get(payload.attributes.receive_region_id)) ||
+    payload.attributes.coverage_country ||
+    'غير محدد'
+
+  const rendered = await renderCoverageApprovedCustomerMessage({
+    accountId,
+    kind: payload.kind,
+    entityId: payload.entity_id,
+    reference: payload.reference,
+    serviceId: payload.service_id,
+    amount: payload.amount,
+    currency: payload.currency,
+    payRegion,
+    payMethod: payload.attributes.pay_method,
+    receiveRegion,
+    receiveMethod: payload.attributes.receive_method,
+    commissionPerThousand: payload.commission_per_thousand,
+    commissionCurrency: payload.commission_currency,
+    store: createSupabaseTemplateOverrideStore(db),
+  })
+
+  console.info(
+    [
+      `[messaging] event=${rendered.eventKey}`,
+      `source=${rendered.source}`,
+      `template=${rendered.eventKey}`,
+      `locale=${rendered.resolvedLocale}`,
+      'channel=whatsapp',
+      rendered.revisionId ? `revision=${rendered.revisionId}` : null,
+      rendered.version != null ? `version=${rendered.version}` : null,
+      rendered.fallbackReason ? `fallback=${rendered.fallbackReason}` : null,
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join(' '),
+  )
+
+  return rendered.text
 }
 
 async function assertExpectedVersion(
