@@ -89,6 +89,32 @@ export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
     optionalVariables: ['entity.reference', 'data.customer_reason'],
   },
   {
+    key: 'service_request.matched',
+    audience: 'customer',
+    channel: 'whatsapp',
+    locale: 'ar',
+    body: [
+      '✅ تمت مراجعة طلبك وربطه بخدمة متوفرة لدينا.',
+      '{{#if entity.reference}}المرجع: {{entity.reference}}{{/if}}',
+      '{{#if service.name}}الخدمة: {{service.name}}{{/if}}',
+      '{{#if data.summary}}التفاصيل: {{data.summary}}{{/if}}',
+    ].join('\n'),
+    optionalVariables: ['entity.reference', 'service.name', 'data.summary'],
+  },
+  {
+    key: 'service_request.needs_clarification',
+    audience: 'customer',
+    channel: 'whatsapp',
+    locale: 'ar',
+    body: [
+      'نحتاج إلى معلومات إضافية قبل إكمال مراجعة طلبك.',
+      '{{#if entity.reference}}المرجع: {{entity.reference}}{{/if}}',
+      '{{#if service.name}}الخدمة: {{service.name}}{{/if}}',
+      '{{#if data.summary}}التفاصيل: {{data.summary}}{{/if}}',
+    ].join('\n'),
+    optionalVariables: ['entity.reference', 'service.name', 'data.summary'],
+  },
+  {
     key: 'service_request.completed',
     audience: 'customer',
     channel: 'whatsapp',
