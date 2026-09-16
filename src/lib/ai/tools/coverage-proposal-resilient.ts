@@ -47,7 +47,7 @@ function normalizeText(value: string): string {
     .replace(/\s+/g, ' ')
 }
 
-function normalizeMethod(value: unknown): CoverageMethod | null {
+export function normalizeCoverageProposalMethod(value: unknown): CoverageMethod | null {
   if (value === undefined || value === null || value === '') return 'any'
   if (typeof value !== 'string') return null
 
@@ -60,13 +60,14 @@ function normalizeMethod(value: unknown): CoverageMethod | null {
     networks: 'networks',
     network: 'networks',
     شبكات: 'networks',
+    شبكة: 'networks',
     شبكه: 'networks',
     remittance: 'remittance',
     remittances: 'remittance',
+    حوالة: 'remittance',
     حواله: 'remittance',
     حوالات: 'remittance',
     'bank deposit': 'bank_deposit',
-    bank_deposit: 'bank_deposit',
     'ايداع بنكي': 'bank_deposit',
     ايداع: 'bank_deposit',
     any: 'any',
@@ -197,8 +198,8 @@ export async function executeCoverageProposalResilient(
   if (!payRegion.ok) return payRegion.result
   if (!receiveRegion.ok) return receiveRegion.result
 
-  const payMethod = normalizeMethod(rawAttributes.pay_method)
-  const receiveMethod = normalizeMethod(rawAttributes.receive_method)
+  const payMethod = normalizeCoverageProposalMethod(rawAttributes.pay_method)
+  const receiveMethod = normalizeCoverageProposalMethod(rawAttributes.receive_method)
   if (!payMethod || !receiveMethod) {
     return {
       ok: false,
