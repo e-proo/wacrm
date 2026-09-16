@@ -23,11 +23,8 @@ export interface FxV2GetCurrentArgs {
 
 export interface FxV2RecordTradeRequestArgs extends FxV2GetCurrentArgs {
   base_amount: string
-  /**
-   * Rate version shown to the customer by exchange_rates.get_current.
-   * When supplied, submission is rejected if that quote is no longer current.
-   */
-  expected_rate_version_id?: string | null
+  /** Exact immutable rate version returned by exchange_rates.get_current. */
+  expected_rate_version_id: string
 }
 
 function normalizeCurrency(value: unknown): string | null {
@@ -290,6 +287,17 @@ export async function executeFxV2RecordTradeRequest(
     }
   }
 
+  const expectedRateVersionId = String(args.expected_rate_version_id ?? '').trim()
+  if (!expectedRateVersionId) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: true,
+      code: 'FX_QUOTED_RATE_VERSION_REQUIRED',
+      message: 'Read the current exchange rate and use its rate_version_id before submitting the trade request.',
+    }
+  }
+
   try {
     const resolved = await resolvePairCodes(ctx, args.base_currency, args.quote_currency)
     if (!resolved.ok) return resolved.result
@@ -305,10 +313,7 @@ export async function executeFxV2RecordTradeRequest(
       }
     }
 
-    if (
-      args.expected_rate_version_id &&
-      args.expected_rate_version_id !== current.rateVersionId
-    ) {
+    if (expectedRateVersionId !== current.rateVersionId) {
       return {
         ok: false,
         data: null,
@@ -325,6 +330,7 @@ export async function executeFxV2RecordTradeRequest(
       current.pair.id,
       side,
       amount,
+      expectedRateVersionId,
     ].join(':')
 
     const trade = await createFxTradeRequest({
@@ -334,19 +340,17 @@ export async function executeFxV2RecordTradeRequest(
       amountBasis: 'base',
       requestedAmount: amount,
       idempotencyKey,
-      expectedRateVersionId: args.expected_rate_version_id ?? current.rateVersionId,
+      expectedRateVersionId,
       contactId: bound.contactId,
       conversationId: bound.conversationId,
       metadata: {
         source: 'ai_runtime',
         tool: 'exchange_rates.record_trade_request',
         source_message_id: bound.sourceMessageId,
+        quoted_rate_version_id: expectedRateVersionId,
         ...(ctx.runId ? { run_id: ctx.runId } : {}),
         ...(ctx.agentId ? { agent_id: ctx.agentId } : {}),
         ...(ctx.revisionId ? { revision_id: ctx.revisionId } : {}),
-        ...(args.expected_rate_version_id
-          ? { quoted_rate_version_id: args.expected_rate_version_id }
-          : {}),
         ...((args.region ?? args.settlement)
           ? {
               legacy_context: {
