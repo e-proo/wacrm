@@ -42,6 +42,40 @@ BEGIN
     RAISE EXCEPTION 'public.accounts is missing — migration 017 did not apply';
   END IF;
 
+  -- FX V2 persistence + concurrency primitives (079-080).
+  IF to_regclass('public.account_exchange_settings') IS NULL
+     OR to_regclass('public.exchange_rate_pairs') IS NULL
+     OR to_regclass('public.exchange_rate_versions') IS NULL
+     OR to_regclass('public.exchange_trade_requests') IS NULL THEN
+    RAISE EXCEPTION 'FX V2 tables are missing — migrations 079-080 did not apply';
+  END IF;
+
+  IF to_regprocedure(
+    'public.publish_exchange_rate_pair_version_v2(uuid,uuid,bigint,numeric,numeric,text,uuid,text,uuid)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'publish_exchange_rate_pair_version_v2 is missing';
+  END IF;
+  IF to_regprocedure(
+    'public.create_exchange_trade_request_v2(uuid,uuid,text,text,numeric,text,uuid,uuid,uuid,jsonb)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'create_exchange_trade_request_v2 is missing';
+  END IF;
+  IF to_regprocedure(
+    'public.decide_exchange_trade_request_v2(uuid,uuid,text,text,uuid,text,uuid)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'decide_exchange_trade_request_v2 is missing';
+  END IF;
+  IF to_regprocedure(
+    'public.complete_exchange_trade_request_v2(uuid,uuid,uuid)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'complete_exchange_trade_request_v2 is missing';
+  END IF;
+  IF to_regprocedure(
+    'public.cancel_exchange_trade_request_v2(uuid,uuid,uuid)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'cancel_exchange_trade_request_v2 is missing';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
