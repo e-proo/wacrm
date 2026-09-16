@@ -1,6 +1,7 @@
 export * from './catalog'
 export * from './change-request-admin'
 export * from './change-request-admin-outcome'
+export * from './coverage-customer'
 export * from './defaults'
 export * from './domains'
 export * from './renderer'
