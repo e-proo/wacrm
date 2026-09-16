@@ -71,7 +71,7 @@ Detailed implementation and verification are recorded in `docs/implementation/fx
 
 ## Phase 2 — Deterministic FX domain services
 
-Status: **implemented on the test branch and applied/verified on TEST/STAGING**.
+Status: **implemented on the test branch, applied/verified on TEST/STAGING, and covered by automated migration CI**.
 
 Migration: `supabase/migrations/080_fx_v2_domain_rpcs.sql`
 
@@ -90,31 +90,43 @@ Implemented work:
 - transition trade requests through pending -> approved/rejected -> completed/cancelled lifecycle operations;
 - attach admin decisions to optional `change_requests` without treating approval as settlement completion;
 - append activity events for critical mutations;
-- unit-test direction and rounding and integration-smoke-test stale versions/idempotency on TEST.
+- unit-test direction and rounding;
+- integration-smoke-test stale pair locks, exact idempotent retries, approval/completion lifecycle and stale quoted versions;
+- assert the service-role-only RPC execution boundary.
+
+The automated database smoke is `supabase/ci/fx-v2-phase-2-smoke.sql`. The migrations workflow runs it after replaying every migration from scratch on a clean local Supabase database. The smoke uses a disposable fixture, removes it on success, and a failed assertion rolls back the statement.
 
 No AI tool performs these calculations independently.
 
-Detailed implementation and verification are recorded in `docs/implementation/fx-v2-phase-2-domain-services.md`.
+Detailed implementation and TEST/STAGING verification are recorded in `docs/implementation/fx-v2-phase-2-domain-services.md`.
 
 ## Phase 3 — FX dashboard
 
-Status: **next**.
+Status: **implemented on the test branch and verified by repository CI**.
 
-Add a dedicated FX area rather than hiding FX configuration inside generic settings/services.
+A dedicated `/fx` area now exposes the pair-centric domain without legacy Rate Book concepts.
 
 Primary views:
 
-- Rates: active pairs, current buy/sell values and last publication.
+- Rates: active pairs, current business buy/sell values, optimistic lock version, publication and immutable history.
 - Currencies: reuse account-scoped `currencies`.
-- FX settings: configure the FX base currency.
-- Trade requests: pending/approved/rejected/completed/cancelled.
+- FX settings: configure the FX base/default counter currency.
+- Trade requests: pending/approved/rejected/completed/cancelled queues and allowed lifecycle actions.
 - Rate history: immutable versions per pair.
 
-User-facing UI should not expose legacy concepts such as “Rate Book” or “Book Version”.
+Authorization behavior:
+
+- `viewer+` can read FX state;
+- `admin+` is required server-side for settings changes, pair creation, rate publication and trade-request transitions;
+- the `/fx` UI mirrors that boundary by hiding mutation controls from read-only viewers, including currency-management controls.
+
+Phase 3 uses the deterministic Phase 2 services and RPCs for financial writes. A stale rate editor receives the optimistic concurrency conflict instead of overwriting a newer rate.
+
+Detailed implementation is recorded in `docs/implementation/fx-v2-phase-3-dashboard.md`.
 
 ## Phase 4 — Customer AI/runtime tools
 
-Status: planned.
+Status: **next**.
 
 Migrate customer-facing FX tools to V2 domain services.
 
