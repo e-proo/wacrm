@@ -77,8 +77,8 @@ jobs:
       - name: Verify FX V2 Phase 2 domain behavior
         run: supabase db query --local --file supabase/ci/fx-v2-phase-2-smoke.sql
 
-      # Phase 6 proves that authoritative trade transitions emit durable,
-      # deduplicated customer lifecycle events and that customer_buy/sell keep
-      # the frozen sell/buy rate semantics used by the message renderer.
+      # Phase 6 closure invariant: every final verification replays migration
+      # 084 from scratch before proving durable, deduplicated customer lifecycle
+      # events and the frozen customer_buy/customer_sell rate semantics.
       - name: Verify FX V2 Phase 6 messaging behavior
         run: supabase db query --local --file supabase/ci/fx-v2-phase-6-messaging-smoke.sql
