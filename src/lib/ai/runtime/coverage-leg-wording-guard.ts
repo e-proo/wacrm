@@ -188,6 +188,26 @@ export function coverageRegionIdsFromArgs(args: Record<string, unknown>): {
 }
 
 /**
+ * A concrete coverage question must be re-grounded against the current board.
+ * Conversation history is not authoritative for rates, commission, or a new
+ * pay/receive direction. Generic explanatory questions are left alone.
+ */
+export function requiresFreshCoverageRates(latestCustomerText: string): boolean {
+  const text = normalize(latestCustomerText)
+  if (!text.includes('تغطيه') && !text.includes('coverage')) return false
+
+  const concreteSignals = [
+    'نقد', 'كاش', 'شبكات', 'شبكه', 'حواله', 'ايداع',
+    'نسبه', 'عموله', 'راجع', 'ريال', 'سعودي', 'sar',
+    'الف', 'مليون', 'rate', 'commission',
+    ...NORMALIZED_PAY_MARKERS,
+    ...NORMALIZED_RECEIVE_MARKERS,
+  ]
+
+  return /\d/.test(text) || concreteSignals.some((signal) => text.includes(signal))
+}
+
+/**
  * Fail closed only when the latest customer wording gives explicit, high-
  * confidence evidence that the model swapped the coverage pay/receive legs.
  * Region aliases are server-resolved names/codes for model-supplied UUIDs.
