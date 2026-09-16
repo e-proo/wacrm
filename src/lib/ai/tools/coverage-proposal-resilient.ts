@@ -17,13 +17,20 @@ const CANONICAL_ATTRIBUTE_KEYS = new Set([
   'pay_method',
 ])
 
-const REGION_ALIAS_KEYS = new Set([
+// Compatibility-only aliases accepted at the model boundary. They are never
+// persisted directly; the strict directional executor receives canonical
+// attributes only and re-derives north/south direction from the region rows.
+const ATTRIBUTE_ALIAS_KEYS = new Set([
   'pay_region',
   'pay_region_name',
   'pay_location',
+  'pay_macro',
   'receive_region',
   'receive_region_name',
   'receive_location',
+  'receive_macro',
+  'pay',
+  'receive',
 ])
 
 interface RegionRow {
@@ -146,6 +153,10 @@ async function resolveRegionId(
   return { ok: true, id: candidates[0].id }
 }
 
+function nestedLeg(attributes: Record<string, unknown>, key: 'pay' | 'receive') {
+  return isRecord(attributes[key]) ? attributes[key] : {}
+}
+
 /**
  * Proposal-boundary compatibility layer.
  *
@@ -162,7 +173,7 @@ export async function executeCoverageProposalResilient(
 ): Promise<ToolResult<unknown>> {
   const rawAttributes = isRecord(rawArgs.attributes) ? rawArgs.attributes : {}
   const unknownKeys = Object.keys(rawAttributes).filter(
-    (key) => !CANONICAL_ATTRIBUTE_KEYS.has(key) && !REGION_ALIAS_KEYS.has(key),
+    (key) => !CANONICAL_ATTRIBUTE_KEYS.has(key) && !ATTRIBUTE_ALIAS_KEYS.has(key),
   )
   if (unknownKeys.length > 0) {
     return {
@@ -180,16 +191,26 @@ export async function executeCoverageProposalResilient(
     }
   }
 
+  const pay = nestedLeg(rawAttributes, 'pay')
+  const receive = nestedLeg(rawAttributes, 'receive')
   const payRegionRaw =
     rawAttributes.pay_region_id ??
     rawAttributes.pay_region ??
     rawAttributes.pay_region_name ??
-    rawAttributes.pay_location
+    rawAttributes.pay_location ??
+    pay.region_id ??
+    pay.region ??
+    pay.region_name ??
+    pay.name
   const receiveRegionRaw =
     rawAttributes.receive_region_id ??
     rawAttributes.receive_region ??
     rawAttributes.receive_region_name ??
-    rawAttributes.receive_location
+    rawAttributes.receive_location ??
+    receive.region_id ??
+    receive.region ??
+    receive.region_name ??
+    receive.name
 
   const [payRegion, receiveRegion] = await Promise.all([
     resolveRegionId(ctx, payRegionRaw, 'pay'),
@@ -198,8 +219,12 @@ export async function executeCoverageProposalResilient(
   if (!payRegion.ok) return payRegion.result
   if (!receiveRegion.ok) return receiveRegion.result
 
-  const payMethod = normalizeCoverageProposalMethod(rawAttributes.pay_method)
-  const receiveMethod = normalizeCoverageProposalMethod(rawAttributes.receive_method)
+  const payMethod = normalizeCoverageProposalMethod(
+    rawAttributes.pay_method ?? pay.method ?? pay.pay_method,
+  )
+  const receiveMethod = normalizeCoverageProposalMethod(
+    rawAttributes.receive_method ?? receive.method ?? receive.receive_method,
+  )
   if (!payMethod || !receiveMethod) {
     return {
       ok: false,
@@ -232,14 +257,18 @@ export async function executeCoverageProposalResilient(
     receive_method: receiveMethod,
   }
 
-  if (
+  const canonicalized =
+    rawAttributes.pay !== undefined ||
+    rawAttributes.receive !== undefined ||
+    rawAttributes.pay_macro !== undefined ||
+    rawAttributes.receive_macro !== undefined ||
     rawAttributes.pay_region !== undefined ||
     rawAttributes.receive_region !== undefined ||
     (typeof rawAttributes.pay_region_id === 'string' && !UUID_RE.test(rawAttributes.pay_region_id)) ||
     (typeof rawAttributes.receive_region_id === 'string' && !UUID_RE.test(rawAttributes.receive_region_id)) ||
     rawAttributes.pay_method !== payMethod ||
     rawAttributes.receive_method !== receiveMethod
-  ) {
+  if (canonicalized) {
     console.info('[tool] coverage proposal canonicalized model-supplied coverage legs')
   }
 
