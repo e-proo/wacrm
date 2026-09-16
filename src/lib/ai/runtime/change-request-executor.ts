@@ -1,7 +1,6 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { renderCoverageApprovedCustomerMessage } from '@/lib/messaging/coverage-customer'
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
-import { publishExchangeRateVersion } from '@/lib/services/domain-services'
 import { publishPricingRuleRaw } from '@/lib/services/pricing/rules-crud'
 import {
   decideFxTradeRequest,
@@ -368,71 +367,6 @@ async function executeClaimedTarget(
       }
       throw err
     }
-  }
-
-  if (row.target_type === 'rate_book_version' && row.intent === 'create' && !row.target_id) {
-    const p = row.proposed_payload as {
-      book_id?: string
-      expected_current_version_id?: string | null
-      base_currency?: string
-      quote_currency?: string
-      buy_rate?: string
-      sell_rate?: string
-      rate_unit?: string
-      notes_public?: string
-    }
-    if (!p.book_id || !p.base_currency || !p.quote_currency || !p.buy_rate || !p.sell_rate) {
-      throw new ChangeExecutionError(
-        'RATE_CHANGE_PAYLOAD_INCOMPLETE',
-        'book_id, base_currency, quote_currency, buy_rate and sell_rate are required.',
-      )
-    }
-    const { data: versionId, error } = await supabaseAdmin().rpc(
-      'apply_exchange_rate_pair_change',
-      {
-        p_account_id: input.accountId,
-        p_change_request_id: row.id,
-        p_book_id: p.book_id,
-        p_expected_current_version_id: p.expected_current_version_id ?? null,
-        p_base_currency: p.base_currency,
-        p_quote_currency: p.quote_currency,
-        p_buy_rate: p.buy_rate,
-        p_sell_rate: p.sell_rate,
-        p_rate_unit: p.rate_unit ?? null,
-        p_notes_public: p.notes_public ?? null,
-        p_actor_user_id: input.actorUserId,
-      },
-    )
-    if (error || !versionId) {
-      const message = error?.message ?? 'Exchange-rate change failed.'
-      if (message.includes('EXCHANGE_CURRENT_VERSION_CHANGED')) {
-        throw new ChangeExecutionError(
-          'EXCHANGE_CURRENT_VERSION_CHANGED',
-          'The live rate book changed after this proposal; review and approve a fresh proposal.',
-        )
-      }
-      throw error ?? new ChangeExecutionError('RATE_CHANGE_FAILED', message)
-    }
-    return {
-      target_type: row.target_type,
-      target_id: versionId as string,
-      operation: 'create_and_publish_pair_change',
-      book_id: p.book_id,
-      pair: `${p.base_currency}/${p.quote_currency}`,
-      version_id: versionId as string,
-    }
-  }
-
-  if (row.target_type === 'rate_book_version' && row.intent === 'publish' && row.target_id) {
-    const bookId = typeof row.proposed_payload.book_id === 'string' ? row.proposed_payload.book_id : null
-    if (!bookId) throw new ChangeExecutionError('BOOK_ID_REQUIRED', 'book_id is required for rate publication.')
-    const published = await publishExchangeRateVersion({
-      accountId: input.accountId,
-      bookId,
-      versionId: row.target_id,
-      actorUserId: input.actorUserId,
-    })
-    return { target_type: row.target_type, target_id: row.target_id, operation: 'publish', ...published }
   }
 
   if (row.target_type === 'service_intent' && ['create', 'update'].includes(row.intent) && row.target_id) {
