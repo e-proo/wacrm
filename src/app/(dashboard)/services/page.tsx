@@ -1,21 +1,21 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   FolderTree,
   ListChecks,
-  Banknote,
   Briefcase,
   Coins,
   Activity,
   Globe,
   Handshake,
+  CircleDollarSign,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ServicesCategoriesPanel } from '@/components/services/categories-panel';
 import { ServicesListPanel } from '@/components/services/services-list-panel';
-import { ExchangeRateBooksPanel } from '@/components/services/exchange-rate-books-panel';
 import { PricingRulesPanel } from '@/components/services/pricing-rules-panel';
 import { ActivityFeedPanel } from '@/components/services/activity-feed-panel';
 import { CurrenciesPanel } from '@/components/services/currencies-panel';
@@ -25,7 +25,6 @@ type Tab =
   | 'categories'
   | 'services'
   | 'currencies'
-  | 'fx'
   | 'rules'
   | 'coverage'
   | 'activity';
@@ -36,13 +35,24 @@ export default function ServicesPage() {
 
   return (
     <div>
-      <div className="flex items-center gap-2">
-        <Briefcase className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">
-          {t('title')}
-        </h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <Briefcase className="h-6 w-6 text-primary" />
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+              {t('title')}
+            </h1>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">{t('description')}</p>
+        </div>
+        <Link
+          href="/fx"
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          <CircleDollarSign className="h-4 w-4 text-primary" />
+          FX
+        </Link>
       </div>
-      <p className="mt-1 text-sm text-muted-foreground">{t('description')}</p>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mt-6">
         <TabsList>
@@ -57,9 +67,6 @@ export default function ServicesPage() {
           </TabsTrigger>
           <TabsTrigger value="rules">
             <Coins className="me-1.5 h-4 w-4" /> {t('tabRules')}
-          </TabsTrigger>
-          <TabsTrigger value="fx">
-            <Banknote className="me-1.5 h-4 w-4" /> {t('tabFx')}
           </TabsTrigger>
           <TabsTrigger value="coverage">
             <Handshake className="me-1.5 h-4 w-4" /> {t('tabCoverage')}
@@ -83,10 +90,6 @@ export default function ServicesPage() {
 
         <TabsContent value="rules" className="mt-4">
           <PricingRulesPanel />
-        </TabsContent>
-
-        <TabsContent value="fx" className="mt-4">
-          <ExchangeRateBooksPanel />
         </TabsContent>
 
         <TabsContent value="coverage" className="mt-4">
