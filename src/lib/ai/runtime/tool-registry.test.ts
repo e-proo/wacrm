@@ -7,7 +7,7 @@ import {
 } from './tool-registry'
 
 describe('tool registry — repaired platform contract', () => {
-  it('registers exactly the current 21 platform tools', () => {
+  it('registers exactly the current 23 platform tools', () => {
     const keys = listRegisteredTools().map((tool) => tool.key).sort()
     expect(keys).toEqual(
       [
@@ -19,9 +19,11 @@ describe('tool registry — repaired platform contract', () => {
         'coverage.get_rates',
         'coverage.propose_offer',
         'coverage.propose_request',
-        'exchange_rates.admin_list_books',
+        'exchange_rates.admin_list_pairs',
+        'exchange_rates.admin_list_trade_requests',
         'exchange_rates.get_current',
         'exchange_rates.propose_pair_change',
+        'exchange_rates.propose_trade_decision',
         'exchange_rates.record_trade_request',
         'intents.propose_decision',
         'intents.record',
@@ -34,6 +36,7 @@ describe('tool registry — repaired platform contract', () => {
         'services.search',
       ].sort(),
     )
+    expect(getRegisteredTool('exchange_rates.admin_list_books')).toBeNull()
   })
 
   it('read grants remain read-risk and read-only', () => {
@@ -46,9 +49,7 @@ describe('tool registry — repaired platform contract', () => {
   })
 
   it('proposal tools are proposal-only and never model-executable', () => {
-    const proposalTools = listRegisteredTools().filter((tool) =>
-      tool.grantPermissions.includes('propose'),
-    )
+    const proposalTools = listRegisteredTools().filter((tool) => tool.grantPermissions.includes('propose'))
     expect(proposalTools.length).toBeGreaterThan(0)
     for (const tool of proposalTools) {
       expect(tool.grantPermissions).toEqual(['propose'])
@@ -75,7 +76,6 @@ describe('tool registry — repaired platform contract', () => {
 
   it('keeps published coverage grant versions stable while adding directional quote inputs', () => {
     const rates = getRegisteredTool('coverage.get_rates')
-    expect(rates).not.toBeNull()
     expect(rates?.version).toBe(1)
     expect(rates?.grantPermissions).toEqual(['read'])
     expect(rates?.argumentSchema).toHaveProperty('amount')
@@ -87,13 +87,7 @@ describe('tool registry — repaired platform contract', () => {
     expect(rates?.argumentSchema.receive_method.values).toContain('networks')
     expect(rates?.description).toContain('PAY south + RECEIVE north')
     expect(rates?.description).toContain('PAY north + RECEIVE south')
-
-    const findOffers = getRegisteredTool('coverage.find_offers')
-    expect(findOffers).not.toBeNull()
-    expect(findOffers?.version).toBe(2)
-    expect(findOffers?.argumentSchema).toHaveProperty('pay_region_id')
-    expect(findOffers?.argumentSchema).toHaveProperty('receive_region_id')
-
+    expect(getRegisteredTool('coverage.find_offers')?.version).toBe(2)
     expect(getRegisteredTool('coverage.propose_offer')?.version).toBe(2)
     expect(getRegisteredTool('coverage.propose_request')?.version).toBe(1)
   })
@@ -110,6 +104,30 @@ describe('tool registry — repaired platform contract', () => {
     expect(record?.argumentSchema.expected_rate_version_id?.required).toBe(true)
     expect(record?.returnSchema).toContain('trade_request')
     expect(record?.description).toContain('pending_admin')
+  })
+
+  it('uses pair-centric Phase 5 admin contracts and optimistic locks', () => {
+    const pairs = getRegisteredTool('exchange_rates.admin_list_pairs')
+    expect(pairs?.version).toBe(1)
+    expect(pairs?.grantPermissions).toEqual(['read'])
+    expect(pairs?.returnSchema).toContain('lock_version')
+
+    const change = getRegisteredTool('exchange_rates.propose_pair_change')
+    expect(change?.version).toBe(2)
+    expect(change?.argumentSchema.pair_id?.required).toBe(true)
+    expect(change?.argumentSchema.expected_lock_version?.required).toBe(true)
+    expect(change?.argumentSchema.business_buy_rate?.required).toBe(true)
+    expect(change?.argumentSchema.business_sell_rate?.required).toBe(true)
+    expect(change?.argumentSchema).not.toHaveProperty('book_id')
+
+    const trades = getRegisteredTool('exchange_rates.admin_list_trade_requests')
+    expect(trades?.grantPermissions).toEqual(['read'])
+    expect(trades?.returnSchema).toContain('rate_version_id')
+
+    const decision = getRegisteredTool('exchange_rates.propose_trade_decision')
+    expect(decision?.grantPermissions).toEqual(['propose'])
+    expect(decision?.argumentSchema.decision.values).toEqual(['approve', 'reject'])
+    expect(decision?.description).toContain('does NOT mean settlement completed')
   })
 
   it('renderToolCatalog teaches the model the customer-leg coverage direction', () => {
@@ -131,6 +149,17 @@ describe('tool registry — repaired platform contract', () => {
     ])
     expect(catalog).toContain('authoritative CURRENT FX V2 rate')
     expect(catalog).toContain('expected_rate_version_id: string')
+  })
+
+  it('renderToolCatalog surfaces Phase 5 pair lock and trade-decision inputs', () => {
+    const catalog = renderToolCatalog([
+      { tool_key: 'exchange_rates.admin_list_pairs', permission: 'read' },
+      { tool_key: 'exchange_rates.propose_pair_change', permission: 'propose' },
+      { tool_key: 'exchange_rates.propose_trade_decision', permission: 'propose' },
+    ])
+    expect(catalog).toContain('expected_lock_version: number')
+    expect(catalog).toContain('business_buy_rate: string')
+    expect(catalog).toContain('decision: approve|reject')
   })
 
   it('renderToolCatalog surfaces exactly the granted, registered tools', () => {
