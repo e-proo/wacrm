@@ -69,3 +69,10 @@ jobs:
       # just the absence of an error.
       - name: Verify the resulting schema
         run: supabase db query --local --file supabase/ci/verify-schema.sql
+
+      # Exercise the Phase 2 financial invariants against the database
+      # created above. The smoke file is one transactional DO statement:
+      # failed assertions roll back automatically and successful fixtures
+      # are explicitly removed before commit.
+      - name: Verify FX V2 Phase 2 domain behavior
+        run: supabase db query --local --file supabase/ci/fx-v2-phase-2-smoke.sql
