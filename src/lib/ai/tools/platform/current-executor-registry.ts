@@ -1,6 +1,5 @@
 import {
   executeCoverageCheckAvailability,
-  executeExchangeRatesGetCurrent,
   executePricingCalculateQuote,
   executeServicesMatchRequest,
   executeIntentsRecord,
@@ -14,12 +13,15 @@ import {
   executeCoverageAdminListRequests,
   executeChangeRequestsListPending,
   executeIntentProposeDecision,
-  executeExchangeRateRecordTradeRequest,
   executeExchangeRateAdminListBooks,
   executeExchangeRateProposePairChange,
   executeServiceProposeUpdate,
   executePricingRuleProposeServicePrice,
 } from '../business-handoff'
+import {
+  executeFxV2GetCurrent,
+  executeFxV2RecordTradeRequest,
+} from '../fx-v2-tools'
 import {
   executeCoverageFindOffersDirectional,
   executeCoverageGetRatesDirectional,
@@ -46,8 +48,8 @@ add('services.match_request', 1, (ctx, args) => executeServicesMatchRequest(ctx,
 add('services.propose_update', 1, (ctx, args) => executeServiceProposeUpdate(ctx, args as never))
 add('pricing.calculate_quote', 1, (ctx, args) => executePricingCalculateQuote(ctx, args as never))
 add('pricing_rules.propose_service_price', 1, (ctx, args) => executePricingRuleProposeServicePrice(ctx, args as never))
-add('exchange_rates.get_current', 1, (ctx, args) => executeExchangeRatesGetCurrent(ctx, args as never))
-add('exchange_rates.record_trade_request', 1, (ctx, args) => executeExchangeRateRecordTradeRequest(ctx, args as never))
+add('exchange_rates.get_current', 1, (ctx, args) => executeFxV2GetCurrent(ctx, args as never))
+add('exchange_rates.record_trade_request', 1, (ctx, args) => executeFxV2RecordTradeRequest(ctx, args as never))
 add('exchange_rates.admin_list_books', 1, (ctx, args) => executeExchangeRateAdminListBooks(ctx, args as never))
 add('exchange_rates.propose_pair_change', 1, (ctx, args) => executeExchangeRateProposePairChange(ctx, args as never))
 add('coverage.check_availability', 1, (ctx, args) => executeCoverageCheckAvailability(ctx, args as never))
