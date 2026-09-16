@@ -21,10 +21,10 @@ import {
   executePricingRuleProposeServicePrice,
 } from '../business-handoff'
 import {
-  executeCoverageDirectionalProposal,
   executeCoverageFindOffersDirectional,
   executeCoverageGetRatesDirectional,
 } from '../coverage-directional'
+import { executeCoverageProposalResilient } from '../coverage-proposal-resilient'
 import type { ToolDefinition } from '../../runtime/tool-registry'
 import { ToolExecutorRegistry } from './execution-registry'
 import { getCurrentPlatformTool } from './current-domain-registry'
@@ -64,8 +64,8 @@ add('coverage.find_offers', 2, (ctx, args) => {
   return executeCoverageFindOffersDirectional(ctx, effectiveArgs as never)
 })
 add('coverage.get_rates', 1, (ctx, args) => executeCoverageGetRatesDirectional(ctx, args as never))
-add('coverage.propose_offer', 2, (ctx, args) => executeCoverageDirectionalProposal(ctx, args as never, 'offer'))
-add('coverage.propose_request', 1, (ctx, args) => executeCoverageDirectionalProposal(ctx, args as never, 'request'))
+add('coverage.propose_offer', 2, (ctx, args) => executeCoverageProposalResilient(ctx, args, 'offer'))
+add('coverage.propose_request', 1, (ctx, args) => executeCoverageProposalResilient(ctx, args, 'request'))
 add('coverage.admin_list_offers', 1, (ctx, args) => executeCoverageAdminListOffers(ctx, args as never))
 add('coverage.admin_list_requests', 1, (ctx, args) => executeCoverageAdminListRequests(ctx, args as never))
 add('intents.record', 1, (ctx, args) => executeIntentsRecord(ctx, args as never))
