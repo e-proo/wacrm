@@ -3,6 +3,11 @@ import { renderCoverageApprovedCustomerMessage } from '@/lib/messaging/coverage-
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 import { publishExchangeRateVersion } from '@/lib/services/domain-services'
 import { publishPricingRuleRaw } from '@/lib/services/pricing/rules-crud'
+import {
+  decideFxTradeRequest,
+  FxServiceError,
+  publishFxRateVersion,
+} from '@/lib/services/fx-v2/service'
 import { readCoverageAttributes, type CoverageAttributes } from '@/lib/services/coverage/attributes'
 import { compileFieldSchema, validateValues, type FieldDefinitionInput } from '@/lib/services/catalog/field-schema'
 
@@ -48,13 +53,6 @@ interface CustomerNotificationDescriptor {
   template_payload?: CoverageNotificationPayload
 }
 
-/**
- * Claim/CAS makes execution single-owner. Target-specific operations still use
- * their existing domain services; migration 065 adds replay protection for
- * create-style coverage offers. A future migration can move each remaining
- * target mutation into its own all-in-one SQL transaction without changing
- * this caller contract.
- */
 export async function executeApprovedChangeRequest(input: {
   accountId: string
   changeRequestId: string
@@ -127,9 +125,6 @@ export async function executeApprovedChangeRequest(input: {
     try {
       await enqueueCustomerNotification(db, input.accountId, row.id, result)
     } catch (notifyErr) {
-      // Notification delivery is a separate durable side effect. Never mark
-      // the already-applied business mutation failed because outbox insertion
-      // had a transient problem.
       console.error('[change request] could not enqueue customer notification:', notifyErr)
     }
     return { ...result, status: 'executed' }
@@ -285,6 +280,96 @@ async function executeClaimedTarget(
     }
   }
 
+  if (row.target_type === 'fx_rate_pair' && row.intent === 'update' && row.target_id) {
+    const p = row.proposed_payload as {
+      expected_lock_version?: number
+      business_buy_rate?: string
+      business_sell_rate?: string
+      notes_internal?: string | null
+    }
+    if (
+      !Number.isSafeInteger(p.expected_lock_version) ||
+      Number(p.expected_lock_version) < 0 ||
+      !p.business_buy_rate ||
+      !p.business_sell_rate
+    ) {
+      throw new ChangeExecutionError(
+        'FX_RATE_CHANGE_PAYLOAD_INCOMPLETE',
+        'Approved FX rate proposal is missing lock version or buy/sell rates.',
+      )
+    }
+    try {
+      const published = await publishFxRateVersion({
+        accountId: input.accountId,
+        pairId: row.target_id,
+        expectedLockVersion: Number(p.expected_lock_version),
+        businessBuyRate: p.business_buy_rate,
+        businessSellRate: p.business_sell_rate,
+        source: 'admin_agent',
+        sourceChangeRequestId: row.id,
+        notesInternal: p.notes_internal ?? null,
+        actorUserId: input.actorUserId,
+      })
+      return {
+        target_type: row.target_type,
+        target_id: row.target_id,
+        operation: 'publish_fx_v2_rate_version',
+        version_id: published.versionId,
+        version_number: published.versionNumber,
+        lock_version: published.lockVersion,
+        idempotent: published.idempotent,
+      }
+    } catch (err) {
+      if (err instanceof FxServiceError) {
+        throw new ChangeExecutionError(err.code, err.message, err.status)
+      }
+      throw err
+    }
+  }
+
+  if (row.target_type === 'fx_trade_request' && row.intent === 'update' && row.target_id) {
+    const p = row.proposed_payload as {
+      expected_status?: string
+      decision?: string
+      note?: string | null
+      rate_version_id?: string
+    }
+    if (
+      p.expected_status !== 'pending_admin' ||
+      (p.decision !== 'approve' && p.decision !== 'reject')
+    ) {
+      throw new ChangeExecutionError(
+        'FX_TRADE_DECISION_PAYLOAD_INCOMPLETE',
+        'Approved FX trade decision must target pending_admin and choose approve or reject.',
+      )
+    }
+    try {
+      const decided = await decideFxTradeRequest({
+        accountId: input.accountId,
+        requestId: row.target_id,
+        expectedStatus: 'pending_admin',
+        decision: p.decision,
+        changeRequestId: row.id,
+        note: p.note ?? null,
+        actorUserId: input.actorUserId,
+      })
+      return {
+        target_type: row.target_type,
+        target_id: row.target_id,
+        operation: 'decide_fx_v2_trade_request',
+        decision: p.decision,
+        rate_version_id: p.rate_version_id ?? null,
+        request_status: decided.status,
+        idempotent: decided.idempotent,
+      }
+    } catch (err) {
+      if (err instanceof FxServiceError) {
+        throw new ChangeExecutionError(err.code, err.message, err.status)
+      }
+      throw err
+    }
+  }
+
   if (row.target_type === 'rate_book_version' && row.intent === 'create' && !row.target_id) {
     const p = row.proposed_payload as {
       book_id?: string
@@ -435,9 +520,7 @@ async function executeClaimedTarget(
           total_amount: p.total_amount,
           currency: p.currency,
           attributes: offerAttrs,
-          ...(p.commission_per_thousand
-            ? { commission_per_thousand: p.commission_per_thousand }
-            : {}),
+          ...(p.commission_per_thousand ? { commission_per_thousand: p.commission_per_thousand } : {}),
           ...(p.commission_currency ? { commission_currency: p.commission_currency } : {}),
           ...(p.deal_date ? { deal_date: p.deal_date } : {}),
           source_change_request_id: row.id,
@@ -523,9 +606,7 @@ async function executeClaimedTarget(
           requested_amount: p.requested_amount,
           currency: p.currency,
           attributes: requestAttrs,
-          ...(p.commission_per_thousand
-            ? { commission_per_thousand: p.commission_per_thousand }
-            : {}),
+          ...(p.commission_per_thousand ? { commission_per_thousand: p.commission_per_thousand } : {}),
           ...(p.commission_currency ? { commission_currency: p.commission_currency } : {}),
           ...(p.deal_date ? { deal_date: p.deal_date } : {}),
           ...(p.expires_at ? { expires_at: p.expires_at } : {}),
@@ -718,7 +799,6 @@ async function assertExpectedVersion(
   }
   const table = versionedTables[row.target_type]
   if (!table) {
-    // Never silently ignore an optimistic lock the proposal claimed to need.
     throw new ChangeExecutionError(
       'EXPECTED_VERSION_UNSUPPORTED',
       `Target ${row.target_type} does not expose a runtime version check.`,
