@@ -231,4 +231,4 @@ The initial V2 deliberately does not add automatic inverse rates, cross-rate syn
 - Persist exact rate/version snapshots on customer trade requests.
 - Use optimistic concurrency for rate publication.
 - Keep rate publication and trade-state mutation deterministic and server-side.
-- Treat immutable version rows as history; publish a new version instead of editing an old one).
+- Treat immutable version rows as history; publish a new version instead of editing an old one.
