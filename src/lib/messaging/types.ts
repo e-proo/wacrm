@@ -36,6 +36,7 @@ export interface MessageContext {
     currency?: string
     fee?: string
     commission?: string
+    commission_currency?: string
   }
   data: Record<string, MessageValue>
 }
