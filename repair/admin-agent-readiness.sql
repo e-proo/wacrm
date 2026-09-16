@@ -56,8 +56,10 @@ order by a.account_id, a.id, g.tool_key;
 -- coverage.admin_list_offers@1 (read)
 -- coverage.admin_list_requests@1 (read)
 -- change_requests.list_pending@1 (read)
--- Existing published revisions are immutable: fix a mismatch through a NEW
--- draft revision, then publish it. Do not mutate the published revision.
+-- Existing published revisions are immutable. Cross-plane/stale grants may
+-- remain in old published history, but the runtime no longer offers them to the
+-- model. Future publishes are rejected by the builder when a grant conflicts
+-- with the agent plane.
 
 -- 3) Trusted WhatsApp admin identities + capabilities.
 select
@@ -81,10 +83,23 @@ order by account_id, status, created_at desc;
 --   coverage.read
 --   change_requests.read
 --   change_requests.approve
--- Additional proposal capabilities remain opt-in and should only be granted if
--- that administrator is intended to use the corresponding admin proposal tools.
 
--- 4) One-row-per-account coverage/admin readiness summary.
+-- 4) Runtime policy. Admin traffic cannot execute if admin_plane_enabled=false.
+select
+  account_id,
+  multi_agent_enabled,
+  admin_plane_enabled,
+  native_tools_enabled,
+  proposal_tools_enabled,
+  recovery_worker_enabled,
+  kill_switch,
+  max_runs_per_minute,
+  daily_input_token_budget,
+  daily_output_token_budget
+from public.ai_runtime_policies
+order by account_id;
+
+-- 5) One-row-per-account coverage/admin readiness summary.
 with active_admin_route as (
   select distinct on (r.account_id)
     r.account_id,
@@ -140,6 +155,15 @@ with active_admin_route as (
   from public.trusted_admin_identities
   where channel = 'whatsapp'
   group by account_id
+), runtime_health as (
+  select
+    account_id,
+    multi_agent_enabled,
+    admin_plane_enabled,
+    native_tools_enabled,
+    proposal_tools_enabled,
+    kill_switch
+  from public.ai_runtime_policies
 )
 select
   route.account_id,
@@ -153,6 +177,11 @@ select
   coalesce(grants.required_grants, 5) as required_grants,
   coalesce(ids.active_identities, 0) as active_trusted_admin_identities,
   coalesce(ids.coverage_approval_ready_identities, 0) as coverage_approval_ready_identities,
+  coalesce(runtime.multi_agent_enabled, false) as multi_agent_enabled,
+  coalesce(runtime.admin_plane_enabled, false) as admin_plane_enabled,
+  coalesce(runtime.native_tools_enabled, false) as native_tools_enabled,
+  coalesce(runtime.proposal_tools_enabled, false) as proposal_tools_enabled,
+  coalesce(runtime.kill_switch, false) as kill_switch,
   (
     route.purpose = 'admin_operations'
     and route.agent_status = 'active'
@@ -160,8 +189,14 @@ select
     and coalesce(route.max_tool_rounds, 0) > 0
     and coalesce(grants.matching_grants, 0) = coalesce(grants.required_grants, 5)
     and coalesce(ids.coverage_approval_ready_identities, 0) > 0
+    and coalesce(runtime.multi_agent_enabled, false)
+    and coalesce(runtime.admin_plane_enabled, false)
+    and coalesce(runtime.native_tools_enabled, false)
+    and coalesce(runtime.proposal_tools_enabled, false)
+    and not coalesce(runtime.kill_switch, false)
   ) as coverage_admin_ready
 from active_admin_route route
 left join grant_health grants using (account_id)
 left join identity_health ids using (account_id)
+left join runtime_health runtime using (account_id)
 order by route.account_id;
