@@ -76,6 +76,27 @@ BEGIN
     RAISE EXCEPTION 'cancel_exchange_trade_request_v2 is missing';
   END IF;
 
+  -- FX V2 customer lifecycle outbox (084).
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'customer_intent_notifications'
+      AND column_name = 'fx_trade_request_id'
+  ) THEN
+    RAISE EXCEPTION 'FX V2 customer outbox source column is missing — migration 084 did not apply';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'exchange_trade_requests_customer_lifecycle_event'
+      AND tgrelid = 'public.exchange_trade_requests'::regclass
+      AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'FX V2 customer lifecycle trigger is missing — migration 084 did not apply';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
