@@ -14,6 +14,7 @@ import { mergeConsecutive } from '../providers/shared'
 import { loadAccountRuntimePolicy } from './runtime-policy'
 import { reserveRuntimeBudget, releaseRuntimeBudget, RuntimeBudgetError } from './runtime-budget'
 import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
+import { guardCoverageLegWording } from './coverage-leg-wording-guard'
 import type { AiAgentRevision, RunPlane, ToolGrantPermission } from './multi-agent-types'
 
 // Native structured-tool agent loop. There is intentionally no parser for
@@ -72,6 +73,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     // chat config here: a revision-specific provider must still run when the
     // legacy account-global chat config is absent or disabled.
     const embeddings = await loadEmbeddingsKey(db, accountId)
+    const latestCustomerText = latestUserMessage(input.messages)
     const knowledgeExcerpts = await retrieveKnowledgeV2(
       db,
       {
@@ -86,7 +88,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         embeddingsApiKey: embeddings.key,
         embeddingSetup: embeddings.embedSetup,
       },
-      latestUserMessage(input.messages),
+      latestCustomerText,
       5,
     )
     const knowledge = renderKnowledgeForPrompt(knowledgeExcerpts)
@@ -267,6 +269,28 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           messages.push({
             role: 'tool', callId: call.id, toolKey: call.toolKey,
             content: JSON.stringify({ ok: false, code: 'INVALID_TOOL_ARGUMENTS', message: checked.error }),
+          })
+          continue
+        }
+
+        const coverageLegGuard = guardCoverageLegWording(
+          call.toolKey,
+          checked.value,
+          latestCustomerText,
+        )
+        if (!coverageLegGuard.ok) {
+          auditCalls.push({ toolKey: call.toolKey, round, ok: false })
+          console.info(
+            `[agent loop] tool=${call.toolKey} round=${round} ok=false code=${coverageLegGuard.code} safe=true`,
+          )
+          messages.push({
+            role: 'tool', callId: call.id, toolKey: call.toolKey,
+            content: JSON.stringify({
+              ok: false,
+              code: coverageLegGuard.code,
+              safe_to_show: true,
+              message: coverageLegGuard.message,
+            }),
           })
           continue
         }
