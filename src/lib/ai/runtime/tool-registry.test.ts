@@ -109,7 +109,7 @@ describe('tool registry — repaired platform contract', () => {
     expect(record?.grantPermissions).toEqual(['propose'])
     expect(record?.argumentSchema.expected_rate_version_id?.required).toBe(true)
     expect(record?.returnSchema).toContain('trade_request')
-    expect(record?.returnSchema).toContain('pending_admin')
+    expect(record?.description).toContain('pending_admin')
   })
 
   it('renderToolCatalog teaches the model the customer-leg coverage direction', () => {
