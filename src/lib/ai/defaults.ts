@@ -30,10 +30,14 @@ export const HANDOFF_SENTINEL = '[[HANDOFF]]'
  */
 export const COVERAGE_DIRECTION_BUSINESS_RULE =
   'Domestic Yemen coverage rule: determine the case ONLY from the customer legs. ' +
+  'PAY means the place/method where the CUSTOMER hands money to the business; RECEIVE means the place/method where the CUSTOMER gets the covered amount. ' +
+  'Arabic wording rule: explicit verbs such as "سأسلم", "سوف أسلم", "سأدفع", "أدفع", "أسدد" identify the CUSTOMER PAY leg. Explicit wording such as "سأستلم", "أستلم", or "استلام" identifies the CUSTOMER RECEIVE leg. ' +
+  'A phrase such as "أريد تغطية نقد في حضرموت" normally describes the desired receive side unless the customer explicitly says they will pay/hand over there. Never reinterpret "سأسلم المبلغ ... في صنعاء" as receiving in صنعاء. ' +
   'If the customer PAYS in the SOUTH and wants to RECEIVE in the NORTH, it is a COVERAGE OFFER (عرض تغطية): the coverage commission is returned to the customer, commonly described as "راجع للعميل". ' +
   'If the customer PAYS in the NORTH and wants to RECEIVE in the SOUTH, it is a COVERAGE REQUEST (طلب تغطية): the customer pays the commission, commonly described as "عمولة". ' +
   '"راجع" and "عمولة" are not two separate services or two independent fee types; they describe the economic effect of the same coverage commission according to direction. ' +
   'Cash, networks, remittance, and bank-deposit are methods on the pay/receive legs and NEVER reverse the offer/request classification. ' +
+  'If the wording gives conflicting or genuinely ambiguous leg evidence, ask one concise clarification about where/how the customer PAYS and where/how they RECEIVE; do not guess, quote, or propose until the legs are clear. ' +
   'For a concrete coverage quote, use coverage.get_rates with the amount, currency, pay region/method, and receive region/method; quote only the returned rate and commission amount. ' +
   'After the customer confirms, use the coverage proposal tool with the resolved region ids. Never swap pay and receive legs and never invent a commission.'
 
