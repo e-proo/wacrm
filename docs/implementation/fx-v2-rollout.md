@@ -192,27 +192,45 @@ Detailed implementation and verification are recorded in `docs/implementation/fx
 
 ## Phase 6 — Messaging and full E2E acceptance
 
-Status: **next**.
+Status: **implemented on the test branch, migration 084 applied/verified on TEST/STAGING, and covered by final repository CI**.
 
-Connect FX events to the existing Business Event -> MessageContext -> Template Resolver -> Renderer -> Transport platform.
+Migration: `supabase/migrations/084_fx_v2_customer_lifecycle_outbox.sql`
 
-At minimum cover:
+Messaging implementation:
 
-- trade request received/pending;
-- approved for contact;
-- rejected;
-- completed, only when an authoritative completed state exists.
+- `src/lib/messaging/domains.ts`
+- `src/lib/messaging/fx-v2-customer.ts`
+- `src/lib/ai/runtime/worker.ts`
 
-Templates must display the snapshotted pair, side, amount and effective rate deterministically. The LLM must not rewrite transactional rate facts.
+Implemented work:
 
-E2E acceptance must cover both customer directions:
+- FX V2 emits durable customer events for `pending`, `approved_for_contact`, `rejected`, and authoritative `completed` states;
+- events are inserted transactionally with the authoritative `exchange_trade_requests` mutation, eliminating a mutation/outbox split-brain window;
+- the existing customer notification outbox is extended instead of introducing a parallel messaging system;
+- intent notifications and FX notifications are source-separated so the legacy intent claim path cannot steal FX rows;
+- FX delivery reloads the frozen trade snapshot and pair currencies immediately before deterministic rendering;
+- templates must retain trade reference, pair, side, requested amount/currency, effective rate, base amount/currency and quote amount/currency;
+- invalid account overrides fall back to reviewed system copy rather than dropping financial truth;
+- the LLM and KB never calculate or rewrite transactional FX facts;
+- `approved_for_contact` explicitly remains distinct from `completed`;
+- a completed customer event can be emitted only after the deterministic completion RPC places the authoritative request in `completed`;
+- outbox dedupe guarantees one event per `(account, trade request, event)` across idempotent mutation retries;
+- the existing transport idempotency/reconciliation boundary is reused.
 
-- customer buys base currency -> business sell rate;
-- customer sells base currency -> business buy rate.
+E2E acceptance covers both directions:
+
+- customer buys BASE -> `business_sell_rate`;
+- customer sells BASE -> `business_buy_rate`.
+
+`supabase/ci/fx-v2-phase-6-messaging-smoke.sql` verifies frozen amounts/rates, pending/approval/rejection/completion event sequencing, no premature completion event, event dedupe and isolation from the legacy intent claim path. The Migrations workflow executes this smoke after a clean migration replay.
+
+Migration 084 was applied to TEST/STAGING as `20260916213821 / fx_v2_customer_lifecycle_outbox`. Direct post-apply TEST/STAGING verification confirmed the FX outbox column, source-entity constraint, dedupe index, lifecycle trigger and enqueue function. The intent claim RPC remains non-executable by `anon` and `authenticated` and executable by `service_role` only.
+
+Detailed implementation and acceptance evidence are recorded in `docs/implementation/fx-v2-phase-6-messaging-e2e.md`.
 
 ## Phase 7 — Legacy FX cleanup
 
-Status: deferred until all previous phases are accepted.
+Status: **next; destructive cleanup remains gated on zero active legacy references**.
 
 Only after runtime/UI/tools no longer reference the old model:
 
