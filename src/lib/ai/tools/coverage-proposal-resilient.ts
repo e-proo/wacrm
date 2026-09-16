@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
+import { resolveCanonicalCoverageService } from '@/lib/ai/coverage-service-resolution'
 import type { ToolContext, ToolResult } from './executors'
 import { executeCoverageDirectionalProposal } from './coverage-directional'
 import type { CoverageMethod } from '@/lib/services/coverage/attributes'
@@ -257,7 +258,19 @@ export async function executeCoverageProposalResilient(
     receive_method: receiveMethod,
   }
 
+  const service = await resolveCanonicalCoverageService(ctx.accountId, rawArgs.service_id)
+  if (!service) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: true,
+      code: 'COVERAGE_SERVICE_NOT_RESOLVED',
+      message: 'The active coverage service could not be resolved for this account.',
+    }
+  }
+
   const canonicalized =
+    service.canonicalized ||
     rawAttributes.pay !== undefined ||
     rawAttributes.receive !== undefined ||
     rawAttributes.pay_macro !== undefined ||
@@ -269,12 +282,14 @@ export async function executeCoverageProposalResilient(
     rawAttributes.pay_method !== payMethod ||
     rawAttributes.receive_method !== receiveMethod
   if (canonicalized) {
-    console.info('[tool] coverage proposal canonicalized model-supplied coverage legs')
+    console.info(
+      `[tool] coverage proposal canonicalized model inputs service_source=${service.source}`,
+    )
   }
 
   return executeCoverageDirectionalProposal(
     ctx,
-    { ...rawArgs, attributes: canonicalAttributes } as never,
+    { ...rawArgs, service_id: service.id, attributes: canonicalAttributes } as never,
     invokedAs,
   )
 }
