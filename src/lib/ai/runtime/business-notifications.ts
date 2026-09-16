@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { engineSendText } from '@/lib/automations/meta-send'
-import { findExistingContact } from '@/lib/contacts/dedupe'
+import { renderPendingChangeRequestAdminMessage } from '@/lib/messaging/change-request-admin'
+import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 import { sendTextMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
@@ -31,7 +32,6 @@ interface TrustedIdentityRow {
 }
 
 interface WhatsappRuntimeConfig {
-  user_id: string
   phone_number_id: string
   access_token: string
 }
@@ -39,10 +39,10 @@ interface WhatsappRuntimeConfig {
 /**
  * Notify verified administrators that a human decision is waiting.
  *
- * The durable CRM notification deliberately excludes the one-time PIN. The
- * plaintext PIN is never persisted outside the create_change_request_v2 RPC
- * response; when present, it is delivered directly to a verified WhatsApp
- * identity and then discarded by the caller/model boundary.
+ * The durable dashboard notification deliberately excludes the one-time PIN.
+ * The PIN is supplied to the messaging renderer only as a transient secret and
+ * the secret-bearing WhatsApp body is sent through the direct Meta transport,
+ * never through engineSendText / the persisted CRM messages table.
  */
 export async function notifyTrustedAdminsOfChangeRequest(
   input: AdminChangeNotificationInput,
@@ -80,7 +80,8 @@ export async function notifyTrustedAdminsOfChangeRequest(
       : null
 
   // Durable dashboard/realtime notification for linked human members. This is
-  // the fallback that survives a WhatsApp-window/provider failure.
+  // the fallback that survives a WhatsApp-window/provider failure. It never
+  // contains the plaintext approval code.
   const linkedMemberIds = [
     ...new Set(
       eligible
@@ -107,8 +108,6 @@ export async function notifyTrustedAdminsOfChangeRequest(
       .upsert(rows, { onConflict: 'dedupe_key', ignoreDuplicates: true })
       .select('id')
     if (notificationError) {
-      // Migration 072 may not have landed yet during a rolling deploy. Never
-      // make the business proposal fail because its secondary notification did.
       console.error(
         `[change request notification] CHG-${input.requestCode} in-app notification failed:`,
         notificationError,
@@ -118,8 +117,9 @@ export async function notifyTrustedAdminsOfChangeRequest(
     }
   }
 
-  // An idempotent replay intentionally receives no plaintext PIN from the DB.
-  // Do not fabricate/recover one and do not send a second approval message.
+  // An idempotent create-change replay intentionally receives no plaintext PIN
+  // from the database. Never fabricate/recover one and never resend the approval
+  // WhatsApp body without that one-time secret.
   if (!input.confirmationCode) {
     console.info(
       `[change request notification] CHG-${input.requestCode} replay: no approval PIN re-sent`,
@@ -129,10 +129,10 @@ export async function notifyTrustedAdminsOfChangeRequest(
 
   const { data: config, error: configError } = await db
     .from('whatsapp_config')
-    .select('user_id, phone_number_id, access_token')
+    .select('phone_number_id, access_token')
     .eq('account_id', input.accountId)
     .maybeSingle()
-  if (configError || !config?.user_id || !config.phone_number_id || !config.access_token) {
+  if (configError || !config?.phone_number_id || !config.access_token) {
     console.error(
       `[change request notification] CHG-${input.requestCode} WhatsApp config unavailable:`,
       configError?.message ?? 'missing WhatsApp configuration',
@@ -141,66 +141,42 @@ export async function notifyTrustedAdminsOfChangeRequest(
   }
   const whatsappConfig = config as WhatsappRuntimeConfig
 
-  const approveCommand = `اعتماد CHG-${input.requestCode} ${input.confirmationCode}`
-  const rejectCommand = `رفض CHG-${input.requestCode}`
-  const text = [
-    '🔔 طلب موافقة جديد',
-    `المرجع: CHG-${input.requestCode}`,
-    input.summary ? `الملخص: ${input.summary}` : null,
-    `النوع: ${input.targetType}`,
-    '',
-    `للاعتماد: ${approveCommand}`,
-    `للرفض: ${rejectCommand}`,
-  ]
-    .filter((line): line is string => line !== null)
-    .join('\n')
+  const rendered = await renderPendingChangeRequestAdminMessage({
+    accountId: input.accountId,
+    changeRequestId: input.changeRequestId,
+    requestCode: input.requestCode,
+    confirmationCode: input.confirmationCode,
+    summary: input.summary,
+    targetType: input.targetType,
+    proposedPayload: input.proposedPayload,
+    store: createSupabaseTemplateOverrideStore(db),
+  })
 
+  console.info(
+    [
+      '[messaging] event=change_request.pending',
+      `source=${rendered.source}`,
+      `template=${rendered.resolvedEventKey}`,
+      `locale=${rendered.resolvedLocale}`,
+      'channel=whatsapp',
+      rendered.revisionId ? `revision=${rendered.revisionId}` : null,
+      rendered.version != null ? `version=${rendered.version}` : null,
+      rendered.fallbackReason ? `fallback=${rendered.fallbackReason}` : null,
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join(' '),
+  )
+
+  // Security boundary: the rendered text contains the one-time PIN. Always use
+  // direct Meta transport here so the plaintext secret is not persisted in the
+  // CRM messages table. Durable in-app metadata above remains PIN-free.
   let whatsappSent = 0
   for (const identity of eligible) {
     try {
-      const contact = await findExistingContact(
-        db,
-        input.accountId,
-        identity.normalized_address,
-      )
-
-      if (contact) {
-        const { data: conversation, error: conversationError } = await db
-          .from('conversations')
-          .select('id')
-          .eq('account_id', input.accountId)
-          .eq('contact_id', contact.id)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-        if (conversationError) throw conversationError
-
-        if (conversation?.id) {
-          await engineSendText({
-            accountId: input.accountId,
-            userId: whatsappConfig.user_id,
-            conversationId: conversation.id,
-            contactId: contact.id,
-            text,
-            engineIdempotencyKey: `change-request-admin:${input.changeRequestId}:${identity.id}`,
-          })
-          whatsappSent += 1
-          console.info(
-            `[change request notification] CHG-${input.requestCode} sent to trusted admin ${identity.id.slice(0, 8)} via CRM conversation`,
-          )
-          continue
-        }
-      }
-
-      // Trusted-admin OTP delivery already supports a verified admin who has
-      // never opened a CRM conversation. Use the same direct Meta transport for
-      // the first approval alert so the business loop does not depend on prior
-      // inbound history. The plaintext PIN exists only on first CR creation, so
-      // an idempotent replay cannot blindly resend this direct message.
       await sendDirectTrustedAdminText({
         config: whatsappConfig,
         normalizedAddress: identity.normalized_address,
-        text,
+        text: rendered.text,
       })
       whatsappSent += 1
       console.info(
@@ -208,7 +184,7 @@ export async function notifyTrustedAdminsOfChangeRequest(
       )
     } catch (sendError) {
       // A free-form WhatsApp send can be unavailable outside Meta's customer
-      // service window. The pending CR + in-app notification remain durable.
+      // service window. The pending CR + PIN-free in-app notification remain.
       console.error(
         `[change request notification] CHG-${input.requestCode} WhatsApp alert failed for ${identity.id.slice(0, 8)}:`,
         sendError,
