@@ -13,6 +13,7 @@ import { generateNativeAgentTurn, type NativeAgentMessage } from './native-agent
 import { mergeConsecutive } from '../providers/shared'
 import { loadAccountRuntimePolicy } from './runtime-policy'
 import { reserveRuntimeBudget, releaseRuntimeBudget, RuntimeBudgetError } from './runtime-budget'
+import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import type { AiAgentRevision, RunPlane, ToolGrantPermission } from './multi-agent-types'
 
 // Native structured-tool agent loop. There is intentionally no parser for
@@ -118,13 +119,34 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
 
     const maxRounds = Math.max(Number.isFinite(revision.maxToolRounds) ? revision.maxToolRounds : 0, 0)
-    const offeredTools = maxRounds > 0
+    const offeredTools = maxRounds > 0 && policy.nativeToolsEnabled
       ? Object.entries(grants).flatMap(([key, grant]) => {
           const tool = getRegisteredTool(key)
-          // Version mismatch is fail-closed and the stale tool is not offered.
-          return tool && tool.version === grant.toolVersion ? [tool] : []
+          const manifest = getCurrentPlatformTool(key, grant.toolVersion)
+          // Offer only tools that can actually pass the deterministic runtime
+          // authorization boundary. Stale/cross-plane grants remain frozen for
+          // audit history but are invisible to the model instead of causing a
+          // predictable TOOL_PLANE_DENIED / ADMIN_CAPABILITY_DENIED round.
+          if (!tool || tool.version !== grant.toolVersion || !manifest) return []
+          if (manifest.permission !== grant.permission) return []
+          if (!manifest.allowedPlanes.includes(input.plane)) return []
+          if (grant.permission === 'propose' && !policy.proposalToolsEnabled) return []
+          if (
+            input.plane === 'admin' &&
+            manifest.requiredCapabilities.some(
+              (capability) => !input.trustedAdminCapabilities.includes(capability),
+            )
+          ) return []
+          return [tool]
         })
       : []
+
+    if (input.plane === 'admin') {
+      const hiddenCount = Object.keys(grants).length - offeredTools.length
+      console.info(
+        `[agent loop] admin tool readiness offered=${offeredTools.length} hidden=${hiddenCount} capabilities=${input.trustedAdminCapabilities.length}`,
+      )
+    }
 
     const roleFraming =
       input.agentPurpose === 'admin_operations'
