@@ -146,6 +146,7 @@ describe('FX V2 customer runtime tools', () => {
       quote_currency: 'YER',
       intent: 'customer_buys_base',
       base_amount: '1000',
+      expected_rate_version_id: 'rate-v1',
     })
 
     expect(mocks.createFxTradeRequest).toHaveBeenCalledWith(
@@ -158,11 +159,12 @@ describe('FX V2 customer runtime tools', () => {
         expectedRateVersionId: 'rate-v1',
         contactId: 'contact-1',
         conversationId: 'conversation-1',
-        idempotencyKey: expect.stringContaining('message-1:pair-1:customer_buy:1000'),
+        idempotencyKey: expect.stringContaining('message-1:pair-1:customer_buy:1000:rate-v1'),
         metadata: expect.objectContaining({
           source: 'ai_runtime',
           tool: 'exchange_rates.record_trade_request',
           source_message_id: 'message-1',
+          quoted_rate_version_id: 'rate-v1',
         }),
       }),
     )
@@ -185,6 +187,26 @@ describe('FX V2 customer runtime tools', () => {
           idempotent: false,
         },
       },
+    })
+  })
+
+  it('requires a rate version from the preceding current-rate quote', async () => {
+    const result = await executeFxV2RecordTradeRequest(
+      context(),
+      {
+        base_currency: 'SAR',
+        quote_currency: 'YER',
+        intent: 'customer_buys_base',
+        base_amount: '1000',
+      } as never,
+    )
+
+    expect(mocks.getCurrentFxRate).not.toHaveBeenCalled()
+    expect(mocks.createFxTradeRequest).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      ok: false,
+      safe_to_show: true,
+      code: 'FX_QUOTED_RATE_VERSION_REQUIRED',
     })
   })
 
@@ -213,6 +235,7 @@ describe('FX V2 customer runtime tools', () => {
         quote_currency: 'YER',
         intent: 'customer_buys_base',
         base_amount: '1000',
+        expected_rate_version_id: 'rate-v1',
       },
     )
 
