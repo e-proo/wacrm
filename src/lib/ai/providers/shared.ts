@@ -85,6 +85,12 @@ export function normalizeUsage(raw: {
 
 /** Map a fetch rejection (timeout / DNS / offline) to a typed AiError. */
 export function toNetworkError(err: unknown): AiError {
+  // Preserve errors already classified by the outbound/provider layer.
+  // In particular, endpoint_blocked must not be relabelled as a generic
+  // network error because operators need to know that the request never
+  // reached the upstream provider.
+  if (err instanceof AiError) return err
+
   if (err instanceof DOMException && err.name === 'TimeoutError') {
     return new AiError('The AI provider took too long to respond.', {
       code: 'timeout',
