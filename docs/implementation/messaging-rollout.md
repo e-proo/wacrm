@@ -4,6 +4,23 @@
 
 Move WACRM operational messaging from scattered hard-coded strings to the generic Messaging & Business Events Platform without changing business decisions, approval semantics, execution ownership, or transport safety.
 
+## Current status — 2026-09-16
+
+Work is active only on branch `test/ai-runtime-kb-tools-v2` and TEST/STAGING. Production must remain untouched until a separate explicit promotion decision.
+
+Current implementation status:
+
+- Phase 0 — foundation: ✅ implemented
+- Phase 1 — trusted-admin pending approval: ✅ implemented
+- Phase 2 — trusted-admin approval/rejection outcomes: ✅ implemented
+- Phase 3 — coverage customer outcomes: ✅ implemented in runtime; final TEST end-to-end delivery recheck remains after the atomic outbox-claim fix
+- Phase 4 — exchange-rate / currency-trade messaging: ⏸ deferred because the service/runtime itself is not ready
+- Phase 5 — remittance messaging: ⏸ deferred because the service/runtime itself is not ready
+- Phase 6 — generic service lifecycle: 🟡 generic renderer and `service_intent` delivery integration implemented; broader adoption waits for real services to become ready
+- Phase 7 — admin template editor: ⏳ future work, intentionally not started
+
+A separate continuation checkpoint is maintained at `docs/implementation/messaging-checkpoint-2026-09-16.md`.
+
 ## Deployment principle
 
 Do not perform a big-bang replacement. Migrate one message family at a time and compare output/state in TEST/STAGING before enabling the next family.
@@ -17,15 +34,18 @@ Delivered:
 - account/system template resolver
 - domain context builders
 - versioned template schema
-- documentation and tests
+- immutable account revisions with explicit publication pointer
+- validation for required/optional/secret variables
+- system-template fallback
+- tests and implementation documentation
 
 Migration: `077_message_template_platform.sql`.
 
-The foundation itself did not alter existing operational messaging paths.
+System defaults remain reviewed/versioned in code. Account-specific copy is stored only as immutable revisions/publications.
 
-## Phase 1 — Trusted-admin pending approval ✅ implemented on TEST branch
+## Phase 1 — Trusted-admin pending approval ✅ implemented
 
-`change_request.pending` now renders through the Messaging Platform.
+`change_request.pending` renders through the Messaging Platform.
 
 Preserved invariants:
 
@@ -36,106 +56,147 @@ Preserved invariants:
 - the template must contain both `{{entity.reference}}` and the declared `{{secret.confirmation_code}}` placeholder
 - template resolution logs source/revision/version only; secret values are never logged
 
-Security hardening added during this phase:
+Security hardening:
 
-- the secret-bearing approval WhatsApp body no longer uses `engineSendText`
+- the secret-bearing approval WhatsApp body does not use `engineSendText`
 - it is sent only through the direct trusted-admin Meta transport
 - therefore the plaintext approval PIN is not persisted into the CRM `messages` table
 - the durable dashboard notification remains available without the PIN if direct WhatsApp delivery fails
 
-This intentionally replaces the previous persisted-message idempotency mechanism for this one secret-bearing message. Replay safety is instead anchored at `create_change_request_v2`: an idempotent replay does not return the historical PIN, so the notifier cannot blindly resend it.
+Replay safety is anchored at `create_change_request_v2`: an idempotent replay does not return the historical PIN, so the notifier cannot blindly resend it.
 
-Required tests implemented:
+## Phase 2 — Admin outcome messages ✅ implemented
 
-- system template renders the one-time PIN and reference
-- valid account override renders successfully
-- override that omits the PIN placeholder falls back to system copy
-- unavailable override store falls back to system copy
-- trusted-admin secret-bearing path does not call `engineSendText`
-- durable in-app block does not reference the confirmation code
-
-Rollback:
-
-- restore the previous hard-coded formatter/direct caller; no database rollback is required
-- unpublishing an account override immediately restores the system template
-
-## Phase 2 — Admin outcome messages
-
-Migrate:
+Implemented events:
 
 - `change_request.approved`
 - `change_request.rejected`
-- safe failure messages where appropriate
 
-Keep command parsing deterministic. Templates must never decide whether a change request is approved/rejected/executed.
+The command parser, authorization checks, approval/rejection RPCs, deterministic executor, and customer delivery status remain authoritative. Templates only control presentation after the business decision.
 
-## Phase 3 — Coverage customer outcomes
+Detailed contract: `docs/implementation/messaging-phase-2-admin-outcomes.md`.
 
-Migrate:
+## Phase 3 — Coverage customer outcomes ✅ implemented; TEST delivery recheck pending
+
+Implemented events:
 
 - `coverage.offer.approved`
 - `coverage.request.approved`
-- rejected/clarification messages through generic lifecycle fallback or specialized copy
 
-Verify:
+Coverage execution emits structured message data. Templates do not classify direction or calculate business truth.
 
-- SOUTH -> NORTH uses offer semantics and customer-receives commission label
-- NORTH -> SOUTH uses request semantics and customer-pays commission label
-- methods do not change direction classification
-- authoritative amount/rate snapshot remains the source of numbers
+Verified semantic contract:
 
-## Phase 4 — Exchange rates
+- SOUTH -> NORTH = offer; customer receives commission (`راجع للعميل` / `الراجع لك`)
+- NORTH -> SOUTH = request; customer pays commission (`عمولة` / `العمولة عليك`)
+- payment/receive methods do not change direction classification
+- authoritative approved amount/rate data remains the source of numbers
 
-Migrate quote/trade messaging.
+Detailed contract: `docs/implementation/messaging-phase-3-coverage-customer-outcomes.md`.
 
-Rules:
+### Customer outbox delivery hardening
+
+During TEST approval of `CHG-5`, the coverage template rendered correctly but the immediate delivery worker reported:
+
+```text
+customer notifications claimed=0 sent=0 reconcile=0 failed=0
+```
+
+The notification row itself remained `pending` with zero attempts. This was not evidence of a WhatsApp message-window/limit failure: no transport attempt had occurred.
+
+Root cause was an app/database clock-skew race. The previous claim path compared outbox `available_at` against application time. A row created with the PostgreSQL clock could briefly appear to the application as not yet due.
+
+Migration `078_customer_notification_atomic_claim.sql` fixes this by moving eligibility and claim into PostgreSQL:
+
+- eligibility uses `pg_catalog.now()` from the same database clock
+- `FOR UPDATE SKIP LOCKED` prevents concurrent workers claiming the same row
+- the row moves `pending -> sending` atomically
+- attempts/claim token are updated atomically
+- RPC execute permission is restricted to `service_role`
+
+The runtime now uses this atomic claim for customer outcome delivery.
+
+**Acceptance still required:** rerun the TEST end-to-end customer delivery after syncing the latest branch and confirm a due outcome is claimed and delivered exactly once.
+
+## Phase 4 — Exchange rates / currency trade ⏸ deferred
+
+Do not continue template/runtime integration for exchange-rate or currency-trade outcomes yet.
+
+Reason: the underlying service/runtime is not considered ready. Template support must follow authoritative service behavior, not lead it or invent a transactional lifecycle.
+
+When the service becomes ready, resume with rules:
 
 - published rate service is authoritative
 - template/KB never stores the current price
-- buy/sell labels are presentation only; side/rate are supplied by domain logic
-- rate timestamps/source metadata may be added to context when needed
+- buy/sell labels are presentation only; side/rate come from domain logic
+- timestamps/source metadata may be added to normalized context when needed
+- define events only after the real transactional lifecycle is known
 
-## Phase 5 — Remittances
+## Phase 5 — Remittances ⏸ deferred
 
-Introduce remittance lifecycle events such as:
+Do not implement remittance lifecycle integration yet.
 
-- `remittance.pending`
-- `remittance.approved`
-- `remittance.completed`
-- `remittance.rejected`
+Reason: the remittance service/runtime is not ready. Events such as `remittance.pending`, `remittance.approved`, `remittance.completed`, and `remittance.rejected` remain design placeholders only until the authoritative remittance lifecycle exists.
 
-Do not emit `completed` while provider delivery/settlement is ambiguous.
+Never emit `remittance.completed` while provider delivery/settlement is ambiguous.
 
-## Phase 6 — Generic service adoption
+## Phase 6 — Generic service adoption 🟡 partially implemented
 
-New services should start on generic lifecycle templates:
+Generic customer lifecycle templates now include:
 
 ```text
-service_request.pending
 service_request.approved
 service_request.rejected
+service_request.matched
+service_request.needs_clarification
 service_request.completed
 ```
 
-Add specialized templates only when business presentation needs domain-specific fields.
+The renderer is reusable across future services.
 
-## Phase 7 — Admin template editor
+For current `service_intent` outcome delivery, the delivery layer loads authoritative `change_request` state and re-renders supported decisions through the generic service templates immediately before transport. Existing legacy `message_text` remains only as a migration fallback for unsupported/unknown cases.
 
-Build UI only after runtime correctness is proven.
+Current decision mapping:
 
-Editor capabilities:
+```text
+fulfilled   -> service_request.approved
+rejected    -> service_request.rejected
+matched     -> service_request.matched
+clarifying  -> service_request.needs_clarification
+```
 
-- list system defaults (read-only)
+`service_request.completed` exists as a generic template contract but must only be emitted by a future service that has a real authoritative completed state.
+
+New services should adopt these generic lifecycle events first, adding specialized templates only when the domain needs additional presentation fields.
+
+## Phase 7 — Admin template editor ⏳ future
+
+Build UI only after runtime correctness is proven for the currently supported message families.
+
+Future editor capabilities:
+
+- list system defaults read-only
 - list account revisions
-- create new revision
+- create a new immutable revision
 - preview with safe sample context
 - validate required/optional/secret variables
 - publish revision
-- rollback by publishing older revision
+- rollback by publishing an older revision
 - unpublish account override to restore system default
 - audit who published and when
 
 Never expose secret values in preview fixtures.
+
+## Deferred WhatsApp delivery-policy UX
+
+The following is intentionally **not part of the current template phase**:
+
+- making the WhatsApp customer-service window/eligibility clearer in the conversation UI
+- showing transport/window state beside a customer conversation
+- a manual retry/resume button or similar operator action
+- policies for template-message fallback outside the customer-service window
+
+This should be designed as a separate delivery-policy/operations phase after the current messaging-template acceptance is complete.
 
 ## Runtime integration API
 
@@ -158,15 +219,11 @@ const text = renderMessageTemplate({
 })
 ```
 
-Transport remains separate. Normal non-secret operational messages can continue to use `engineSendText` and its idempotency reservation. Secret-bearing trusted-admin approval messages use the direct verified-admin transport so the secret is not persisted.
-
-## Feature flag recommendation
-
-A broad flag is not required for Phase 1 because the security-critical renderer has a reviewed system fallback and the migration is isolated to one message family. If later migrations introduce multiple editable customer-facing families at once, an account/runtime flag such as `message_templates_enabled` can be introduced for staged rollout.
+Transport remains separate. Normal non-secret operational messages can use `engineSendText` and its idempotency reservation. Secret-bearing trusted-admin approval messages use the direct verified-admin transport so the secret is not persisted.
 
 ## Observability
 
-Structured render logs use metadata only:
+Structured render logs contain metadata only:
 
 ```text
 [messaging] event=change_request.pending source=system template=change_request.pending locale=ar channel=whatsapp
@@ -180,6 +237,8 @@ Monitor:
 - missing required variables
 - unsafe approval-template fallback reasons
 - render length failures
+- customer outbox pending/sending/sent/reconciliation states
+- claim counts and duplicate claims
 - transport send failures
 - retry/reconciliation counts
 - override usage rate
@@ -196,10 +255,25 @@ Runtime behavior:
 4. never omit the approval reference or one-time PIN from the trusted-admin approval body
 5. never transform a business failure into a success message
 6. never persist transient secret values into template storage, durable notifications, or normal CRM message history
+7. claim due customer-outbox rows atomically with the database clock
+8. do not introduce domain events for services whose authoritative runtime is not ready
+
+## Current acceptance gate before moving on
+
+Before starting exchange rates, remittances, the template editor, or WhatsApp-window UI:
+
+1. sync the latest `test/ai-runtime-kb-tools-v2` branch
+2. run one TEST coverage approval end-to-end after migration `078`
+3. verify the customer outbox row is claimed exactly once and reaches `sent`, or capture a real transport error if WhatsApp rejects it
+4. verify admin outcome rendering remains correct
+5. run/confirm CI and migration replay on the resulting branch head
+6. record the TEST result in the continuation checkpoint
+
+After these pass, the current template phase can be considered accepted for the services that are actually ready today.
 
 ## Production promotion gate
 
-Do not promote the platform migration to production until:
+Do not promote the platform to production until:
 
 - all CI checks pass
 - full migration replay passes
@@ -210,5 +284,4 @@ Do not promote the platform migration to production until:
 - retry/reconciliation paths verified
 - rollback to system defaults demonstrated
 - no current prices or secret values are stored in template content
-
-Production schema/data changes require an explicit production deployment decision after TEST/STAGING acceptance.
+- production deployment is explicitly approved as a separate decision
