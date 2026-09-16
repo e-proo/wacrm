@@ -49,7 +49,7 @@ add('services.propose_update', 1, (ctx, args) => executeServiceProposeUpdate(ctx
 add('pricing.calculate_quote', 1, (ctx, args) => executePricingCalculateQuote(ctx, args as never))
 add('pricing_rules.propose_service_price', 1, (ctx, args) => executePricingRuleProposeServicePrice(ctx, args as never))
 add('exchange_rates.get_current', 1, (ctx, args) => executeFxV2GetCurrent(ctx, args as never))
-add('exchange_rates.record_trade_request', 1, (ctx, args) => executeFxV2RecordTradeRequest(ctx, args as never))
+add('exchange_rates.record_trade_request', 2, (ctx, args) => executeFxV2RecordTradeRequest(ctx, args as never))
 add('exchange_rates.admin_list_books', 1, (ctx, args) => executeExchangeRateAdminListBooks(ctx, args as never))
 add('exchange_rates.propose_pair_change', 1, (ctx, args) => executeExchangeRateProposePairChange(ctx, args as never))
 add('coverage.check_availability', 1, (ctx, args) => executeCoverageCheckAvailability(ctx, args as never))
@@ -58,10 +58,6 @@ add('coverage.find_offers', 2, (ctx, args) => {
     (args.pay_region_id || args.pay_region || args.pay_macro) &&
       (args.receive_region_id || args.receive_region || args.receive_macro),
   )
-  // The legacy finder applies its limit before the directional wrapper checks
-  // the anti-parallel pay leg. For a concrete two-leg request, widen the
-  // internal scan to the executor maximum so a valid offer cannot be hidden
-  // merely because unrelated receive-leg rows happened to sort first.
   const effectiveArgs = hasDirectionalLegs ? { ...args, limit: 50 } : args
   return executeCoverageFindOffersDirectional(ctx, effectiveArgs as never)
 })
@@ -94,20 +90,11 @@ function stripModelSecrets(value: unknown): unknown {
   return clean
 }
 
-/**
- * Final model-boundary projection. Approval credentials are transport secrets
- * for a verified human administrator, never model context — even when a
- * domain executor accidentally includes them in a proposal DTO.
- */
 export function sanitizeToolResultForModel(result: RuntimeResult): RuntimeResult {
   if (result.data == null) return result
   return { ...result, data: stripModelSecrets(result.data) }
 }
 
-/**
- * Dispatch after schema/grant/policy validation. Exact version is mandatory;
- * registered manifests and registered executors must move together.
- */
 export async function executeCurrentPlatformTool(
   ctx: ToolContext,
   tool: ToolDefinition,
