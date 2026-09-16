@@ -254,7 +254,21 @@ async function defaultResolver(hostname: string): Promise<{ addresses: string[] 
   ])
   const v4 = a.status === 'fulfilled' ? (a.value as string[]) : []
   const v6 = aaaa.status === 'fulfilled' ? (aaaa.value as string[]) : []
-  return { addresses: [...v4, ...v6] }
+  const direct = [...new Set([...v4, ...v6])]
+  if (direct.length > 0) return { addresses: direct }
+
+  // On Windows/VPN setups a long-lived Node/c-ares resolver can temporarily
+  // disagree with the resolver used by the OS socket stack. `fetch` ultimately
+  // connects through that OS path, so when resolve4/resolve6 both return no
+  // answers, query the system resolver as a fallback. Every returned address
+  // still goes through the exact same private/loopback/metadata classification
+  // in resolveTarget; this improves availability without weakening SSRF policy.
+  try {
+    const lookedUp = await dns.lookup(hostname, { all: true })
+    return { addresses: [...new Set(lookedUp.map((entry) => entry.address))] }
+  } catch {
+    return { addresses: [] }
+  }
 }
 
 // ------------------------------------------------------------
