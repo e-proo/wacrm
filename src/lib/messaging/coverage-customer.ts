@@ -107,7 +107,9 @@ export async function renderCoverageApprovedCustomerMessage(
       }
     }
 
-    const reference = input.reference ? `\nالمرجع: ${input.reference}` : ''
+    const reference = input.reference
+      ? `\n${input.kind === 'offer' ? 'رقم العرض' : 'رقم الطلب'}: ${input.reference}`
+      : ''
     const commission =
       commissionAmount != null
         ? `\n${input.kind === 'offer' ? 'الراجع لك' : 'العمولة عليك'}: ${formatMessageNumber(commissionAmount)} ${input.commissionCurrency ?? input.currency}`
