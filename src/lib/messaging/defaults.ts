@@ -1,5 +1,28 @@
 import type { MessageTemplateDefinition } from './types'
 
+const FX_TRADE_REQUIRED_VARIABLES = [
+  'entity.reference',
+  'data.pair',
+  'data.side_label',
+  'money.amount',
+  'money.currency',
+  'data.effective_rate',
+  'data.base_amount',
+  'data.base_currency',
+  'data.quote_amount',
+  'data.quote_currency',
+] as const
+
+const FX_TRADE_DETAIL_LINES = [
+  'المرجع: {{entity.reference}}',
+  'الزوج: {{data.pair}}',
+  'العملية: {{data.side_label}}',
+  'المبلغ المطلوب: {{money.amount}} {{money.currency}}',
+  'السعر الفعلي: {{data.effective_rate}} {{data.quote_currency}} لكل {{data.base_currency}}',
+  'المبلغ الأساسي: {{data.base_amount}} {{data.base_currency}}',
+  'المبلغ المقابل: {{data.quote_amount}} {{data.quote_currency}}',
+] as const
+
 export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
   {
     key: 'change_request.pending',
@@ -192,6 +215,42 @@ export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
     ].join('\n'),
     requiredVariables: ['data.base_currency', 'data.quote_currency', 'data.buy_rate', 'data.sell_rate'],
     optionalVariables: ['data.market_label', 'data.rate_unit_label'],
+  },
+  {
+    key: 'exchange_rate.trade.pending',
+    audience: 'customer',
+    channel: 'whatsapp',
+    locale: 'ar',
+    body: ['🕓 تم استلام طلب الصرف وهو بانتظار مراجعة الإدارة.', ...FX_TRADE_DETAIL_LINES].join('\n'),
+    requiredVariables: FX_TRADE_REQUIRED_VARIABLES,
+  },
+  {
+    key: 'exchange_rate.trade.approved_for_contact',
+    audience: 'customer',
+    channel: 'whatsapp',
+    locale: 'ar',
+    body: [
+      '✅ تم اعتماد طلب الصرف للتواصل معك ومتابعة التنفيذ.',
+      'تنبيه: الطلب لم يُسجل كمكتمل بعد.',
+      ...FX_TRADE_DETAIL_LINES,
+    ].join('\n'),
+    requiredVariables: FX_TRADE_REQUIRED_VARIABLES,
+  },
+  {
+    key: 'exchange_rate.trade.rejected',
+    audience: 'customer',
+    channel: 'whatsapp',
+    locale: 'ar',
+    body: ['⛔ تمت مراجعة طلب الصرف ولم يتم اعتماده.', ...FX_TRADE_DETAIL_LINES].join('\n'),
+    requiredVariables: FX_TRADE_REQUIRED_VARIABLES,
+  },
+  {
+    key: 'exchange_rate.trade.completed',
+    audience: 'customer',
+    channel: 'whatsapp',
+    locale: 'ar',
+    body: ['✅ تم إتمام عملية الصرف وتسجيلها كمكتملة.', ...FX_TRADE_DETAIL_LINES].join('\n'),
+    requiredVariables: FX_TRADE_REQUIRED_VARIABLES,
   },
   {
     key: 'exchange_rate.trade.approved',
