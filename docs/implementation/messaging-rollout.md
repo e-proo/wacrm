@@ -2,15 +2,15 @@
 
 ## Objective
 
-Move WACRM operational messaging from scattered hard-coded strings to the generic Messaging & Business Events Platform without changing business decisions, approval semantics, execution ownership, or transport idempotency.
+Move WACRM operational messaging from scattered hard-coded strings to the generic Messaging & Business Events Platform without changing business decisions, approval semantics, execution ownership, or transport safety.
 
 ## Deployment principle
 
 Do not perform a big-bang replacement. Migrate one message family at a time and compare output/state in TEST/STAGING before enabling the next family.
 
-## Phase 0 — Foundation
+## Phase 0 — Foundation ✅ implemented
 
-Deliver:
+Delivered:
 
 - generic message contracts
 - safe deterministic renderer
@@ -19,35 +19,45 @@ Deliver:
 - versioned template schema
 - documentation and tests
 
-No existing production-path message must change in this phase.
+Migration: `077_message_template_platform.sql`.
 
-Exit criteria:
+The foundation itself did not alter existing operational messaging paths.
 
-- lint/typecheck/tests/build pass
-- migration replay passes from a clean database
-- migration is applied to TEST/STAGING only
-- RLS and RPC privileges verified
+## Phase 1 — Trusted-admin pending approval ✅ implemented on TEST branch
 
-## Phase 1 — Trusted-admin pending approval
+`change_request.pending` now renders through the Messaging Platform.
 
-Replace the hard-coded `change_request.pending` WhatsApp body with the renderer while preserving:
+Preserved invariants:
 
-- one-time PIN transient boundary
-- trusted identity capability check
-- existing WhatsApp idempotency key
-- in-app durable notification behavior
-- no PIN persistence
+- trusted identity capability check remains authoritative
+- idempotent create-change replay receives no historical plaintext PIN and does not resend the approval body
+- durable in-app notification remains PIN-free
+- malformed/unavailable account override falls back to the reviewed system template
+- the template must contain both `{{entity.reference}}` and the declared `{{secret.confirmation_code}}` placeholder
+- template resolution logs source/revision/version only; secret values are never logged
 
-Required tests:
+Security hardening added during this phase:
 
-- first creation sends PIN
-- idempotent replay does not resend PIN
-- account override can alter copy but cannot access undeclared secrets
-- missing override falls back to system copy
+- the secret-bearing approval WhatsApp body no longer uses `engineSendText`
+- it is sent only through the direct trusted-admin Meta transport
+- therefore the plaintext approval PIN is not persisted into the CRM `messages` table
+- the durable dashboard notification remains available without the PIN if direct WhatsApp delivery fails
+
+This intentionally replaces the previous persisted-message idempotency mechanism for this one secret-bearing message. Replay safety is instead anchored at `create_change_request_v2`: an idempotent replay does not return the historical PIN, so the notifier cannot blindly resend it.
+
+Required tests implemented:
+
+- system template renders the one-time PIN and reference
+- valid account override renders successfully
+- override that omits the PIN placeholder falls back to system copy
+- unavailable override store falls back to system copy
+- trusted-admin secret-bearing path does not call `engineSendText`
+- durable in-app block does not reference the confirmation code
 
 Rollback:
 
-- switch caller back to legacy formatter; no database rollback required
+- restore the previous hard-coded formatter/direct caller; no database rollback is required
+- unpublishing an account override immediately restores the system template
 
 ## Phase 2 — Admin outcome messages
 
@@ -148,45 +158,27 @@ const text = renderMessageTemplate({
 })
 ```
 
-Transport remains separate:
-
-```ts
-await engineSendText({
-  ...transportContext,
-  text,
-  engineIdempotencyKey,
-})
-```
+Transport remains separate. Normal non-secret operational messages can continue to use `engineSendText` and its idempotency reservation. Secret-bearing trusted-admin approval messages use the direct verified-admin transport so the secret is not persisted.
 
 ## Feature flag recommendation
 
-Before broad runtime migration introduce an account/runtime policy flag such as:
-
-```text
-message_templates_enabled
-```
-
-During rollout:
-
-- false -> legacy hard-coded formatter
-- true -> new resolver/renderer
-
-Once all migrated paths are stable and rollback confidence is high, remove the temporary dual-path flag.
+A broad flag is not required for Phase 1 because the security-critical renderer has a reviewed system fallback and the migration is isolated to one message family. If later migrations introduce multiple editable customer-facing families at once, an account/runtime flag such as `message_templates_enabled` can be introduced for staged rollout.
 
 ## Observability
 
-Add structured logs around rendering:
+Structured render logs use metadata only:
 
 ```text
-[messaging] event=coverage.offer.approved source=system template=coverage.offer.approved locale=ar channel=whatsapp
+[messaging] event=change_request.pending source=system template=change_request.pending locale=ar channel=whatsapp
 ```
 
-For account overrides include revision/version, but never log secret values.
+For account overrides include revision/version. Never log rendered secret values.
 
 Monitor:
 
 - template resolution failures
 - missing required variables
+- unsafe approval-template fallback reasons
 - render length failures
 - transport send failures
 - retry/reconciliation counts
@@ -194,17 +186,16 @@ Monitor:
 
 ## Failure policy
 
-Transactional messaging should fail closed on malformed templates.
+Transactional messaging fails closed on malformed templates except where an explicitly reviewed system fallback is safer than dropping a security-critical notification.
 
-Recommended runtime behavior:
+Runtime behavior:
 
 1. try account override
-2. if override cannot be resolved, resolver naturally uses system default
-3. if a published override resolves but fails render validation, log the revision and use the matching system default only if policy explicitly allows safe fallback
-4. never silently omit a security-critical value such as an approval reference
+2. if none exists, use system default
+3. if a published security-critical approval override is malformed or the override store is unavailable, use the reviewed system `change_request.pending` template
+4. never omit the approval reference or one-time PIN from the trusted-admin approval body
 5. never transform a business failure into a success message
-
-For security-critical admin approval messages, a malformed customized template should fall back to the reviewed system template rather than losing the approval notification.
+6. never persist transient secret values into template storage, durable notifications, or normal CRM message history
 
 ## Production promotion gate
 
@@ -213,11 +204,11 @@ Do not promote the platform migration to production until:
 - all CI checks pass
 - full migration replay passes
 - TEST/STAGING RLS and grants verified
-- approval PIN remains transient
+- approval PIN remains transient end-to-end
 - customer/admin messages verified end-to-end
 - duplicate-send/idempotency behavior verified
 - retry/reconciliation paths verified
 - rollback to system defaults demonstrated
-- no current prices or secrets are stored in template content
+- no current prices or secret values are stored in template content
 
 Production schema/data changes require an explicit production deployment decision after TEST/STAGING acceptance.
