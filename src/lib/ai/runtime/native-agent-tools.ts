@@ -154,7 +154,10 @@ async function generateOpenAi(input: NativeAgentGenerateInput): Promise<NativeAg
             type: 'function',
             function: { name: t.name, description: t.description, parameters: t.schema, strict: true },
           })),
-          tool_choice: tools.length ? 'auto' : undefined,
+          // Some OpenAI-compatible providers keep trying to call a function
+          // after a tool-result turn even when the next request supplies an
+          // empty tool list. Be explicit: final/recovery turns are text-only.
+          tool_choice: tools.length ? 'auto' : 'none',
           max_completion_tokens: input.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
           ...(input.temperature != null ? { temperature: input.temperature } : {}),
         }),
@@ -169,13 +172,38 @@ async function generateOpenAi(input: NativeAgentGenerateInput): Promise<NativeAg
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
   } | null
   const msg = data?.choices?.[0]?.message
+  const text = typeof msg?.content === 'string' ? msg.content.trim() : ''
+  const rawCalls = msg?.tool_calls ?? []
+
+  // A tool call is never executable when this turn intentionally offered no
+  // tools. Do not reinterpret it against stale names from earlier rounds.
+  // If the provider also supplied text, keep the text and discard the
+  // protocol violation; otherwise fail closed with a precise provider error.
+  if (input.tools.length === 0 && rawCalls.length > 0) {
+    console.warn('[agent native] provider returned a tool call during a tool-free OpenAI turn')
+    if (text) {
+      return {
+        text,
+        toolCalls: [],
+        usage: normalizeUsage({
+          prompt: data?.usage?.prompt_tokens,
+          completion: data?.usage?.completion_tokens,
+          total: data?.usage?.total_tokens,
+        }),
+      }
+    }
+    throw new AiError('Provider returned a native tool during a tool-free turn.', {
+      code: 'tool_call_not_allowed',
+      status: 502,
+    })
+  }
+
   const calls: NativeToolCall[] = []
-  for (const raw of msg?.tool_calls ?? []) {
+  for (const raw of rawCalls) {
     const key = raw.function?.name ? map.get(raw.function.name) : undefined
     if (!key || !raw.id) throw new AiError('Provider returned an unknown native tool.', { code: 'unknown_tool_call', status: 502 })
     calls.push({ id: raw.id, toolKey: key, args: parseArgs(raw.function?.arguments, key) })
   }
-  const text = typeof msg?.content === 'string' ? msg.content.trim() : ''
   if (!text && calls.length === 0) throw new AiError('OpenAI returned an empty response.', { code: 'empty_response' })
   return {
     text,
