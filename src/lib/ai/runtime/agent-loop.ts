@@ -14,7 +14,13 @@ import { mergeConsecutive } from '../providers/shared'
 import { loadAccountRuntimePolicy } from './runtime-policy'
 import { reserveRuntimeBudget, releaseRuntimeBudget, RuntimeBudgetError } from './runtime-budget'
 import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
-import { guardCoverageLegWording } from './coverage-leg-wording-guard'
+import {
+  coverageRegionIdsFromArgs,
+  guardCoverageLegWording,
+  isCoverageLegGuardedTool,
+  requiresFreshCoverageRates,
+  type CoverageLegRegionAliases,
+} from './coverage-leg-wording-guard'
 import type { AiAgentRevision, RunPlane, ToolGrantPermission } from './multi-agent-types'
 
 // Native structured-tool agent loop. There is intentionally no parser for
@@ -51,6 +57,12 @@ interface RuntimeGrant {
   permission: ToolGrantPermission
   toolVersion: number
   constraints: Record<string, unknown>
+}
+
+function coverageClarification(text: string): string {
+  return /[\u0600-\u06FF]/.test(text)
+    ? 'للتأكد قبل التسعير: أين ستسلّم/تدفع المبلغ وبأي طريقة، وأين تريد الاستلام وبأي طريقة؟'
+    : 'Before I quote this coverage request, please confirm where/how you will pay and where/how you want to receive.'
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
@@ -150,6 +162,44 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       )
     }
 
+    const coverageRateTool = offeredTools.find((tool) => tool.key === 'coverage.get_rates') ?? null
+    const coverageRateRequired = Boolean(
+      coverageRateTool && requiresFreshCoverageRates(latestCustomerText),
+    )
+    let coverageRateSatisfied = !coverageRateRequired
+
+    const resolveCoverageLegAliases = async (
+      toolKey: string,
+      args: Record<string, unknown>,
+    ): Promise<CoverageLegRegionAliases> => {
+      if (!isCoverageLegGuardedTool(toolKey)) return {}
+      const { payRegionId, receiveRegionId } = coverageRegionIdsFromArgs(args)
+      const ids = [...new Set([payRegionId, receiveRegionId].filter((id): id is string => Boolean(id)))]
+      if (ids.length === 0) return {}
+
+      const { data, error } = await db
+        .from('coverage_regions')
+        .select('id, name, code')
+        .eq('account_id', accountId)
+        .in('id', ids)
+      if (error) {
+        console.warn('[agent loop] could not resolve coverage region aliases for wording guard')
+        return {}
+      }
+
+      const rows = (data ?? []) as Array<{ id: string; name: string | null; code: string | null }>
+      const byId = new Map(rows.map((row) => [row.id, row]))
+      const aliasesFor = (id: string | null): string[] => {
+        if (!id) return []
+        const row = byId.get(id)
+        return row ? [row.name, row.code].filter((value): value is string => Boolean(value)) : []
+      }
+      return {
+        pay: aliasesFor(payRegionId),
+        receive: aliasesFor(receiveRegionId),
+      }
+    }
+
     const roleFraming =
       input.agentPurpose === 'admin_operations'
         ? 'You are the operations assistant for a verified business administrator. Use native READ tools for current services, rates, coverage, requests, and offers whenever relevant. Never use customer-style handoff merely because live data was needed. Never claim a mutation occurred unless a change request was explicitly approved and executed.'
@@ -217,17 +267,43 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
 
     for (let round = 1; round <= rounds; round++) {
-      const turn = await generateNativeAgentTurn({
+      const toolsForTurn = coverageRateRequired && !coverageRateSatisfied && coverageRateTool
+        ? [coverageRateTool]
+        : offeredTools
+
+      let turn = await generateNativeAgentTurn({
         connection,
         model: revision.model,
         systemPrompt,
         messages,
-        tools: offeredTools,
+        tools: toolsForTurn,
         maxOutputTokens: revision.maxOutputTokens,
         temperature: revision.temperature,
       })
       inputTokens += turn.usage?.promptTokens ?? 0
       outputTokens += turn.usage?.completionTokens ?? 0
+
+      if (coverageRateRequired && !coverageRateSatisfied && coverageRateTool && turn.toolCalls.length === 0) {
+        console.info('[agent loop] concrete coverage query attempted without coverage.get_rates; forcing authoritative read')
+        turn = await generateNativeAgentTurn({
+          connection,
+          model: revision.model,
+          systemPrompt:
+            systemPrompt +
+            '\n\nRuntime requirement: the latest message is a NEW concrete coverage quote/direction request. Conversation history is NOT authoritative for a new coverage rate or commission. You MUST call coverage.get_rates now using the customer pay and receive legs from the latest message. Do not answer with a rate, commission, direction, or availability before that tool succeeds.',
+          messages,
+          tools: [coverageRateTool],
+          maxOutputTokens: revision.maxOutputTokens,
+          temperature: revision.temperature,
+        })
+        inputTokens += turn.usage?.promptTokens ?? 0
+        outputTokens += turn.usage?.completionTokens ?? 0
+        if (turn.toolCalls.length === 0) {
+          console.warn('[agent loop] provider refused required coverage.get_rates call')
+          finalText = coverageClarification(latestCustomerText)
+          break
+        }
+      }
 
       const parsed = parseGeneration(turn.text, turn.usage)
       if (parsed.handoff) {
@@ -273,10 +349,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           continue
         }
 
+        const coverageLegAliases = await resolveCoverageLegAliases(call.toolKey, checked.value)
         const coverageLegGuard = guardCoverageLegWording(
           call.toolKey,
           checked.value,
           latestCustomerText,
+          coverageLegAliases,
         )
         if (!coverageLegGuard.ok) {
           auditCalls.push({ toolKey: call.toolKey, round, ok: false })
@@ -330,6 +408,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         console.info(
           `[agent loop] tool=${call.toolKey} round=${round} ok=${outcome.result.ok} code=${outcome.result.code ?? 'OK'} safe=${outcome.result.safe_to_show}`,
         )
+        if (call.toolKey === 'coverage.get_rates' && outcome.result.ok) {
+          coverageRateSatisfied = true
+        }
         if (
           grant.permission === 'read' &&
           outcome.result.ok &&
@@ -345,6 +426,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }
 
       if (round === rounds) {
+        if (coverageRateRequired && !coverageRateSatisfied) {
+          finalText = coverageClarification(latestCustomerText)
+          break
+        }
         // Final turn is tool-free: provider cannot request another action after
         // the configured tool-round budget is exhausted.
         const last = await generateNativeAgentTurn({
