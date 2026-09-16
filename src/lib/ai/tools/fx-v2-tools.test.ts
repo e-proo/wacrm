@@ -75,9 +75,9 @@ function context(overrides: Partial<ToolContext> = {}): ToolContext {
     trustedAdminIdentityId: null,
     trustedAdminCapabilities: [],
     features: {
+      killSwitch: false,
       nativeToolsEnabled: true,
       proposalToolsEnabled: true,
-      adminPlaneEnabled: true,
     },
     agentPurpose: 'customer_support',
     contactId: 'contact-1',
