@@ -187,7 +187,8 @@ function targetTypeLabel(targetType: string): string {
   const labels: Record<string, string> = {
     coverage_offer: 'عرض تغطية',
     coverage_request: 'طلب تغطية',
-    rate_book_version: 'تحديث أسعار صرف',
+    fx_rate_pair: 'تحديث زوج أسعار صرف',
+    fx_trade_request: 'قرار طلب صرف عملة',
     exchange_rate_trade: 'طلب صرف عملة',
     service_intent: 'طلب خدمة',
     service: 'خدمة',

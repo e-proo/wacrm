@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 describe('FX V2 approved change execution contract', () => {
@@ -16,6 +16,14 @@ describe('FX V2 approved change execution contract', () => {
   )
   const executorRegistry = readFileSync(
     new URL('../tools/platform/current-executor-registry.ts', import.meta.url),
+    'utf8',
+  )
+  const legacyExecutors = readFileSync(
+    new URL('../tools/executors.ts', import.meta.url),
+    'utf8',
+  )
+  const currencyCrud = readFileSync(
+    new URL('../../services/currencies/crud.ts', import.meta.url),
     'utf8',
   )
 
@@ -51,6 +59,23 @@ describe('FX V2 approved change execution contract', () => {
     expect(domainServices).not.toContain('getCurrentExchangeRate')
     expect(domainServices).not.toContain('publishExchangeRateVersion')
     expect(domainServices).not.toContain('exchange_rate_books')
+    expect(legacyExecutors).not.toContain('getCurrentExchangeRate')
+    expect(currencyCrud).not.toContain(".from('exchange_rate_books')")
+    expect(currencyCrud).not.toContain(".from('exchange_rates')")
+  })
+
+  it('removes the obsolete legacy FX HTTP and dashboard surface', () => {
+    expect(existsSync(new URL('../../../app/api/exchange-rate-books/route.ts', import.meta.url))).toBe(false)
+    expect(existsSync(new URL('../../../app/api/exchange-rate-books/[id]/publish/route.ts', import.meta.url))).toBe(false)
+    expect(existsSync(new URL('../../../app/api/exchange-rate-books/[id]/versions/route.ts', import.meta.url))).toBe(false)
+    expect(existsSync(new URL('../../../app/api/exchange-rate-history/route.ts', import.meta.url))).toBe(false)
+    expect(existsSync(new URL('../../../app/api/exchange-rates/current/route.ts', import.meta.url))).toBe(false)
+    expect(existsSync(new URL('../../../components/services/exchange-rate-books-panel.tsx', import.meta.url))).toBe(false)
+  })
+
+  it('keeps non-FX customer coverage handoffs intact', () => {
+    expect(businessHandoff).toContain('executeCoverageProposeOfferIntegrated')
+    expect(businessHandoff).toContain('executeCoverageProposeRequest')
   })
 
   it('registers only pair-centric FX V2 executors', () => {

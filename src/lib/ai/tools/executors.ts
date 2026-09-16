@@ -1,7 +1,6 @@
 // Server-only by convention.
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { previewServiceQuote } from '@/lib/services/domain-services'
-import { getCurrentExchangeRate } from '@/lib/services/domain-services'
 import { matchServiceRequest } from './service-matcher'
 import { recordIntent, listIntents } from '@/lib/services/intents/intents-service'
 import { readCoverageAttributes } from '@/lib/services/coverage/attributes'
@@ -296,64 +295,6 @@ export async function executePricingCalculateQuote(
       safe_to_show: safe,
       code,
       message,
-    }
-  }
-}
-
-// ------------------------------------------------------------
-// exchange_rates.get_current
-// ------------------------------------------------------------
-export interface ExchangeRatesGetCurrentArgs {
-  base_currency: string
-  quote_currency: string
-  intent: 'customer_sells_base' | 'customer_buys_base'
-  region?: string | null
-  settlement?: 'cash' | 'bank' | 'wallet' | 'other' | null
-}
-
-export async function executeExchangeRatesGetCurrent(
-  ctx: ToolContext,
-  args: ExchangeRatesGetCurrentArgs,
-): Promise<ToolResult<unknown>> {
-  if (!args.base_currency || !args.quote_currency) {
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: true,
-      code: 'INVALID_INPUT',
-      message: 'base_currency and quote_currency are required.',
-    }
-  }
-  if (
-    args.intent !== 'customer_sells_base' &&
-    args.intent !== 'customer_buys_base'
-  ) {
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: true,
-      code: 'INVALID_INTENT',
-      message: 'intent must be customer_sells_base or customer_buys_base.',
-    }
-  }
-  try {
-    const result = await getCurrentExchangeRate({
-      accountId: ctx.accountId,
-      baseCurrency: args.base_currency,
-      quoteCurrency: args.quote_currency,
-      intent: args.intent,
-      region: args.region ?? null,
-      channel: 'whatsapp',
-      settlementMethod: args.settlement ?? null,
-    })
-    return { ok: true, data: result, safe_to_show: true }
-  } catch (err) {
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: false,
-      code: 'RATE_READ_FAILED',
-      message: 'Could not read the current exchange rate.',
     }
   }
 }
