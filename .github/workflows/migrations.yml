@@ -82,3 +82,9 @@ jobs:
       # events and the frozen customer_buy/customer_sell rate semantics.
       - name: Verify FX V2 Phase 6 messaging behavior
         run: supabase db query --local --file supabase/ci/fx-v2-phase-6-messaging-smoke.sql
+
+      # Phase 7 closure invariant: migration 085 must remove the legacy
+      # rate-book persistence/RPC surface without removing any FX V2 object.
+      # Phase 2 and Phase 6 smokes above then prove the surviving V2 behavior.
+      - name: Verify FX V2 Phase 7 legacy cleanup
+        run: supabase db query --local --file supabase/ci/fx-v2-phase-7-legacy-cleanup-smoke.sql
