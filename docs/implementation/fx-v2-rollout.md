@@ -71,29 +71,34 @@ Detailed implementation and verification are recorded in `docs/implementation/fx
 
 ## Phase 2 — Deterministic FX domain services
 
-Status: **next**.
+Status: **implemented on the test branch and applied/verified on TEST/STAGING**.
 
-Build server-side domain primitives on top of Phase 1, without exposing model reasoning as the source of financial truth.
+Migration: `supabase/migrations/080_fx_v2_domain_rpcs.sql`
 
-Required work:
+Application layer: `src/lib/services/fx-v2/`
 
-- resolve/configure the account FX base currency;
-- list and resolve explicit currency pairs;
+Implemented work:
+
+- configure/read the account FX base currency;
+- list, create/reactivate and resolve explicit currency pairs;
 - fetch the authoritative current rate and immutable version;
 - atomically publish a new rate version with optimistic concurrency;
 - map `customer_buy/customer_sell` to the correct business buy/sell rate;
-- quote from either `base` or `quote` amount basis;
+- quote from either `base` or `quote` amount basis with deterministic decimal rounding;
 - create an idempotent `exchange_trade_request` with exact rate/version snapshots;
-- transition trade requests through deterministic lifecycle operations;
-- connect admin decisions to `change_requests` without treating approval as completed settlement;
-- append audit/activity events;
-- add unit/integration tests for direction, rounding, stale expected versions and idempotency.
+- reject submission when the quoted expected rate version is no longer current;
+- transition trade requests through pending -> approved/rejected -> completed/cancelled lifecycle operations;
+- attach admin decisions to optional `change_requests` without treating approval as settlement completion;
+- append activity events for critical mutations;
+- unit-test direction and rounding and integration-smoke-test stale versions/idempotency on TEST.
 
-No AI tool should perform these calculations independently.
+No AI tool performs these calculations independently.
+
+Detailed implementation and verification are recorded in `docs/implementation/fx-v2-phase-2-domain-services.md`.
 
 ## Phase 3 — FX dashboard
 
-Status: planned.
+Status: **next**.
 
 Add a dedicated FX area rather than hiding FX configuration inside generic settings/services.
 
