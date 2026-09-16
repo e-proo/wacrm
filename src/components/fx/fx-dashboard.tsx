@@ -482,7 +482,32 @@ export function FxDashboard() {
           ))}
         </TabsContent>
 
-        <TabsContent value="currencies" className="mt-5"><CurrenciesPanel /></TabsContent>
+        <TabsContent value="currencies" className="mt-5">
+          {overview.canManage ? (
+            <CurrenciesPanel />
+          ) : (
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
+              {overview.currencies.map((currency) => (
+                <Card key={currency.id}>
+                  <CardContent className="space-y-2 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-lg font-bold">{currency.code}</span>
+                      <Badge variant={currency.status === 'active' ? 'default' : 'secondary'}>
+                        {currency.status === 'active' ? t.active : t.disabled}
+                      </Badge>
+                    </div>
+                    <div className="text-sm">{currency.displayName}</div>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      {currency.symbol ? <span>{currency.symbol}</span> : null}
+                      <span>{currency.decimalDigits}</span>
+                      <span>{currency.kind}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
 
         <TabsContent value="settings" className="mt-5">
           <Card>
