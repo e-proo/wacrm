@@ -5,7 +5,7 @@ import {
   rejectChangeRequest,
 } from './change-requests-service'
 import { executeApprovedChangeRequest } from './change-request-executor'
-import { deliverPendingCustomerIntentNotifications } from './business-notifications'
+import { deliverCustomerOutcomeNotifications } from './customer-notification-delivery'
 import { supabaseAdmin } from '../admin-client'
 import { renderChangeRequestAdminOutcomeMessage } from '@/lib/messaging/change-request-admin-outcome'
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
@@ -14,7 +14,7 @@ export type AdminChangeCommandResult =
   | { handled: false }
   | { handled: true; reply: string }
 
-type DeliveryResult = Awaited<ReturnType<typeof deliverPendingCustomerIntentNotifications>>
+type DeliveryResult = Awaited<ReturnType<typeof deliverCustomerOutcomeNotifications>>
 
 interface ChangeRequestAdminContextRow {
   target_type: string
@@ -135,7 +135,7 @@ async function deliverCustomerOutcomeBestEffort(
   requestCode: number,
 ): Promise<DeliveryResult | null> {
   try {
-    const delivery = await deliverPendingCustomerIntentNotifications({
+    const delivery = await deliverCustomerOutcomeNotifications({
       accountId,
       changeRequestId,
     })
