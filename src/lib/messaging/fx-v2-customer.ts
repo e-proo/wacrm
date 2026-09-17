@@ -38,9 +38,11 @@ export interface RenderedFxTradeCustomerMessage {
   fallbackReason?: string
 }
 
+// Domain status remains `approved_for_contact`, while the presentation/event
+// contract uses the stable business event `exchange_rate.trade.approved`.
 const EVENT_BY_OUTCOME: Record<FxTradeCustomerOutcome, string> = {
   pending_admin: 'exchange_rate.trade.pending',
-  approved_for_contact: 'exchange_rate.trade.approved_for_contact',
+  approved_for_contact: 'exchange_rate.trade.approved',
   rejected: 'exchange_rate.trade.rejected',
   completed: 'exchange_rate.trade.completed',
 }
@@ -152,7 +154,7 @@ function emergencyMessage(input: FxTradeCustomerMessageInput): string {
     input.outcome === 'pending_admin'
       ? '🕓 تم استلام طلب الصرف وهو بانتظار المراجعة.'
       : input.outcome === 'approved_for_contact'
-        ? '✅ تم اعتماد طلب الصرف للتواصل معك ومتابعة التنفيذ. لم يتم تسجيل العملية كمكتملة بعد.'
+        ? '✅ تم قبول طلب الصرف. ستتواصل معك الإدارة في أقرب وقت لمتابعة التنفيذ. لم يتم تسجيل العملية كمكتملة بعد.'
         : input.outcome === 'rejected'
           ? '⛔ تمت مراجعة طلب الصرف ولم يتم اعتماده.'
           : '✅ تم إتمام عملية الصرف.'
