@@ -217,7 +217,7 @@ export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
     optionalVariables: ['data.market_label', 'data.rate_unit_label'],
   },
   {
-    key: 'exchange_rate.trade.pending',
+    key: 'exchange_rate.trade.requested',
     audience: 'customer',
     channel: 'whatsapp',
     locale: 'ar',
@@ -225,7 +225,7 @@ export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
     requiredVariables: FX_TRADE_REQUIRED_VARIABLES,
   },
   {
-    key: 'exchange_rate.trade.approved_for_contact',
+    key: 'exchange_rate.trade.approved',
     audience: 'customer',
     channel: 'whatsapp',
     locale: 'ar',
@@ -251,21 +251,6 @@ export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
     locale: 'ar',
     body: ['✅ تم إتمام عملية الصرف وتسجيلها كمكتملة.', ...FX_TRADE_DETAIL_LINES].join('\n'),
     requiredVariables: FX_TRADE_REQUIRED_VARIABLES,
-  },
-  {
-    key: 'exchange_rate.trade.approved',
-    audience: 'customer',
-    channel: 'whatsapp',
-    locale: 'ar',
-    body: [
-      '✅ تم اعتماد طلب صرف العملة.',
-      '{{#if entity.reference}}المرجع: {{entity.reference}}{{/if}}',
-      'المبلغ: {{money.amount}} {{money.currency}}',
-      '{{#if data.side_label}}العملية: {{data.side_label}}{{/if}}',
-      '{{#if data.rate}}السعر المعتمد: {{data.rate}}{{/if}}',
-    ].join('\n'),
-    requiredVariables: ['money.amount', 'money.currency'],
-    optionalVariables: ['entity.reference', 'data.side_label', 'data.rate'],
   },
   {
     key: 'remittance.completed',

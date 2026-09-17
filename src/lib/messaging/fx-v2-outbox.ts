@@ -7,10 +7,9 @@ import { createSupabaseTemplateOverrideStore } from './supabase-store'
 
 export function fxOutcomeForBusinessEvent(eventType: string): FxTradeCustomerOutcome | null {
   switch (eventType) {
-    case 'exchange_rate.trade.pending':
+    case 'exchange_rate.trade.requested':
       return 'pending_admin'
     case 'exchange_rate.trade.approved':
-    case 'exchange_rate.trade.approved_for_contact':
       return 'approved_for_contact'
     case 'exchange_rate.trade.rejected':
       return 'rejected'

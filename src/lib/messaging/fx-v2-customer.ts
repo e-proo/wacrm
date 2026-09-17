@@ -38,12 +38,11 @@ export interface RenderedFxTradeCustomerMessage {
   fallbackReason?: string
 }
 
-// The durable business event can be canonicalized independently from the
-// internal domain status. Keep the existing template key during the rolling
-// migration so published account overrides continue to resolve safely.
+// Internal workflow statuses are deliberately separate from the durable
+// business-event contract consumed by messaging and other integrations.
 const EVENT_BY_OUTCOME: Record<FxTradeCustomerOutcome, string> = {
-  pending_admin: 'exchange_rate.trade.pending',
-  approved_for_contact: 'exchange_rate.trade.approved_for_contact',
+  pending_admin: 'exchange_rate.trade.requested',
+  approved_for_contact: 'exchange_rate.trade.approved',
   rejected: 'exchange_rate.trade.rejected',
   completed: 'exchange_rate.trade.completed',
 }

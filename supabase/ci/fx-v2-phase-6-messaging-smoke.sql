@@ -1,9 +1,9 @@
 -- FX V2 Phase 6 messaging/outbox acceptance smoke.
 --
 -- Verifies that authoritative trade lifecycle transitions atomically create
--- exactly one durable customer event, that the legacy intent-only claim path
--- cannot steal FX rows, and that both customer directions preserve the frozen
--- Phase 2 rate semantics used later by the deterministic renderer.
+-- exactly one durable canonical customer event, that the legacy intent-only
+-- claim path cannot steal FX rows, and that both customer directions preserve
+-- the frozen Phase 2 rate semantics used later by the deterministic renderer.
 do $$
 declare
   v_user_id uuid := gen_random_uuid();
@@ -114,9 +114,19 @@ begin
   from public.customer_intent_notifications
   where account_id = v_account_id
     and fx_trade_request_id = v_buy_id
-    and event_type = 'exchange_rate.trade.pending';
+    and event_type = 'exchange_rate.trade.requested';
   if v_count <> 1 then
-    raise exception 'FX_PHASE6_PENDING_EVENT_MISSING_OR_DUPLICATED: %', v_count;
+    raise exception 'FX_PHASE6_REQUESTED_EVENT_MISSING_OR_DUPLICATED: %', v_count;
+  end if;
+
+  if exists (
+    select 1
+    from public.customer_intent_notifications
+    where account_id = v_account_id
+      and fx_trade_request_id = v_buy_id
+      and event_type = 'exchange_rate.trade.pending'
+  ) then
+    raise exception 'FX_PHASE6_LEGACY_PENDING_EVENT_EMITTED';
   end if;
 
   -- Exact mutation retry must not duplicate the lifecycle event.
@@ -142,9 +152,9 @@ begin
   from public.customer_intent_notifications
   where account_id = v_account_id
     and fx_trade_request_id = v_buy_id
-    and event_type = 'exchange_rate.trade.pending';
+    and event_type = 'exchange_rate.trade.requested';
   if v_count <> 1 then
-    raise exception 'FX_PHASE6_PENDING_EVENT_RETRY_DUPLICATED: %', v_count;
+    raise exception 'FX_PHASE6_REQUESTED_EVENT_RETRY_DUPLICATED: %', v_count;
   end if;
 
   select public.decide_exchange_trade_request_v2(
@@ -165,9 +175,19 @@ begin
   from public.customer_intent_notifications
   where account_id = v_account_id
     and fx_trade_request_id = v_buy_id
-    and event_type = 'exchange_rate.trade.approved_for_contact';
+    and event_type = 'exchange_rate.trade.approved';
   if v_count <> 1 then
     raise exception 'FX_PHASE6_APPROVAL_EVENT_MISSING: %', v_count;
+  end if;
+
+  if exists (
+    select 1
+    from public.customer_intent_notifications
+    where account_id = v_account_id
+      and fx_trade_request_id = v_buy_id
+      and event_type = 'exchange_rate.trade.approved_for_contact'
+  ) then
+    raise exception 'FX_PHASE6_LEGACY_APPROVAL_EVENT_EMITTED';
   end if;
 
   if exists (

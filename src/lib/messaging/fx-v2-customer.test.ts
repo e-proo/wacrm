@@ -25,7 +25,7 @@ describe('renderFxTradeCustomerMessage', () => {
     })
 
     expect(rendered.source).toBe('system')
-    expect(rendered.eventKey).toBe('exchange_rate.trade.pending')
+    expect(rendered.eventKey).toBe('exchange_rate.trade.requested')
     expect(rendered.text).toContain('الزوج: SAR/YER')
     expect(rendered.text).toContain('العملية: شراء SAR')
     expect(rendered.text).toContain('المبلغ المطلوب: 1,000 SAR')
@@ -49,7 +49,7 @@ describe('renderFxTradeCustomerMessage', () => {
     expect(rendered.text).toContain('المبلغ المقابل: 425,000 YER')
   })
 
-  it('keeps approved_for_contact distinct from completed', async () => {
+  it('maps approved_for_contact status to approved without marking the trade completed', async () => {
     const approved = await renderFxTradeCustomerMessage({
       ...base,
       outcome: 'approved_for_contact',
@@ -63,7 +63,8 @@ describe('renderFxTradeCustomerMessage', () => {
       effectiveRate: '428',
     })
 
-    expect(approved.eventKey).toBe('exchange_rate.trade.approved_for_contact')
+    expect(approved.eventKey).toBe('exchange_rate.trade.approved')
+    expect(approved.source).toBe('system')
     expect(approved.text).toContain('لم يُسجل كمكتمل بعد')
     expect(approved.text).not.toContain('تسجيلها كمكتملة')
     expect(completed.eventKey).toBe('exchange_rate.trade.completed')
@@ -73,7 +74,7 @@ describe('renderFxTradeCustomerMessage', () => {
   it('falls back to the system template when an override omits a financial fact', async () => {
     const store: TemplateOverrideStore = {
       async getPublishedTemplate(input) {
-        if (input.key !== 'exchange_rate.trade.pending') return null
+        if (input.key !== 'exchange_rate.trade.requested') return null
         return {
           revisionId: 'unsafe-fx-template',
           version: 9,
