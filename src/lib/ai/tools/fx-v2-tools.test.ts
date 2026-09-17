@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentFxRate: vi.fn(),
   getFxBaseCurrency: vi.fn(),
   createFxTradeRequest: vi.fn(),
+  createChangeRequest: vi.fn(),
 }))
 
 vi.mock('@/lib/services/fx-v2/service', async () => {
@@ -17,6 +18,10 @@ vi.mock('@/lib/services/fx-v2/service', async () => {
     createFxTradeRequest: mocks.createFxTradeRequest,
   }
 })
+
+vi.mock('@/lib/ai/runtime/change-requests-service', () => ({
+  createChangeRequest: mocks.createChangeRequest,
+}))
 
 import {
   executeFxV2GetCurrent,
@@ -104,6 +109,13 @@ describe('FX V2 customer runtime tools', () => {
       status: 'pending_admin',
       idempotent: false,
     })
+    mocks.createChangeRequest.mockResolvedValue({
+      id: 'change-1',
+      code: 73,
+      confirmationCode: '4821',
+      status: 'pending',
+      contentDigest: 'digest-1',
+    })
   })
 
   it('maps customer buy/sell semantics to the deterministic FX side', () => {
@@ -140,7 +152,7 @@ describe('FX V2 customer runtime tools', () => {
     })
   })
 
-  it('creates a real pending FX V2 trade request bound to the customer conversation', async () => {
+  it('creates a pending FX trade and immediately opens the trusted-admin review gate', async () => {
     const result = await executeFxV2RecordTradeRequest(context(), {
       base_currency: 'SAR',
       quote_currency: 'YER',
@@ -168,6 +180,32 @@ describe('FX V2 customer runtime tools', () => {
         }),
       }),
     )
+    expect(mocks.createChangeRequest).toHaveBeenCalledWith({
+      accountId: 'account-1',
+      targetType: 'fx_trade_request',
+      targetId: 'trade-1',
+      intent: 'update',
+      proposedPayload: {
+        expected_status: 'pending_admin',
+        decision: 'approve',
+        note: null,
+        rate_version_id: 'rate-v1',
+        contact_id: 'contact-1',
+        conversation_id: 'conversation-1',
+        requested_amount: '1000.00',
+        currency: 'SAR',
+        base_currency: 'SAR',
+        quote_currency: 'YER',
+        customer_side: 'customer_buys_base',
+        effective_rate: '428.00000000',
+        base_amount: '1000.00',
+        quote_amount: '428000.00',
+        trade_code: '42',
+      },
+      idempotencyKey: 'fx-trade-review:trade-1:pending_admin',
+      summary: 'طلب شراء عملة FX-42: 1000.00 SAR مقابل 428000.00 YER بسعر 428.00000000',
+      actorUserId: null,
+    })
     expect(result).toEqual({
       ok: true,
       safe_to_show: true,
@@ -186,6 +224,42 @@ describe('FX V2 customer runtime tools', () => {
           quote_amount: '428000.00',
           idempotent: false,
         },
+        admin_review: {
+          status: 'pending',
+          forwarded_to_admin: true,
+        },
+      },
+    })
+  })
+
+  it('does not create a fresh admin review when an idempotent trade is already decided', async () => {
+    mocks.createFxTradeRequest.mockResolvedValueOnce({
+      requestId: 'trade-1',
+      code: '42',
+      rateVersionId: 'rate-v1',
+      effectiveRate: '428.00000000',
+      baseAmount: '1000.00',
+      quoteAmount: '428000.00',
+      status: 'approved_for_contact',
+      idempotent: true,
+    })
+
+    const result = await executeFxV2RecordTradeRequest(context(), {
+      base_currency: 'SAR',
+      quote_currency: 'YER',
+      intent: 'customer_buys_base',
+      base_amount: '1000',
+      expected_rate_version_id: 'rate-v1',
+    })
+
+    expect(mocks.createChangeRequest).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        trade_request: {
+          status: 'approved_for_contact',
+          idempotent: true,
+        },
       },
     })
   })
@@ -203,6 +277,7 @@ describe('FX V2 customer runtime tools', () => {
 
     expect(mocks.getCurrentFxRate).not.toHaveBeenCalled()
     expect(mocks.createFxTradeRequest).not.toHaveBeenCalled()
+    expect(mocks.createChangeRequest).not.toHaveBeenCalled()
     expect(result).toMatchObject({
       ok: false,
       safe_to_show: true,
@@ -220,6 +295,7 @@ describe('FX V2 customer runtime tools', () => {
     })
 
     expect(mocks.createFxTradeRequest).not.toHaveBeenCalled()
+    expect(mocks.createChangeRequest).not.toHaveBeenCalled()
     expect(result).toMatchObject({
       ok: false,
       safe_to_show: true,
@@ -240,6 +316,7 @@ describe('FX V2 customer runtime tools', () => {
     )
 
     expect(mocks.createFxTradeRequest).not.toHaveBeenCalled()
+    expect(mocks.createChangeRequest).not.toHaveBeenCalled()
     expect(result).toMatchObject({
       ok: false,
       safe_to_show: false,
