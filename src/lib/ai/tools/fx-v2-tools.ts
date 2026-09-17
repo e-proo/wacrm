@@ -1,3 +1,4 @@
+import { createChangeRequest } from '@/lib/ai/runtime/change-requests-service'
 import {
   createFxTradeRequest,
   FxServiceError,
@@ -255,9 +256,11 @@ function customerBinding(ctx: ToolContext):
 }
 
 /**
- * Creates the authoritative FX V2 trade request directly. No customer_intent
- * and no rate-book change request is created. The exact immutable rate version
- * and calculated amounts are snapshotted by the Phase 2 RPC.
+ * Creates the authoritative FX V2 trade request directly. The immutable rate
+ * snapshot remains the financial source of truth, while a standard change
+ * request supplies the same trusted-admin notification/approval gate used by
+ * coverage handoffs. The trade is never recreated by the approval executor;
+ * approval only moves the existing pending_admin request forward.
  */
 export async function executeFxV2RecordTradeRequest(
   ctx: ToolContext,
@@ -362,6 +365,41 @@ export async function executeFxV2RecordTradeRequest(
       },
     })
 
+    let review: { status: string } | null = null
+    if (trade.status === 'pending_admin') {
+      const actionAr = args.intent === 'customer_sells_base' ? 'بيع' : 'شراء'
+      const change = await createChangeRequest({
+        accountId: ctx.accountId,
+        targetType: 'fx_trade_request',
+        targetId: trade.requestId,
+        intent: 'update',
+        proposedPayload: {
+          expected_status: 'pending_admin',
+          decision: 'approve',
+          note: null,
+          rate_version_id: trade.rateVersionId,
+          contact_id: bound.contactId,
+          conversation_id: bound.conversationId,
+          requested_amount: trade.baseAmount,
+          currency: current.pair.base.code,
+          base_currency: current.pair.base.code,
+          quote_currency: current.pair.quote.code,
+          customer_side: args.intent,
+          effective_rate: trade.effectiveRate,
+          base_amount: trade.baseAmount,
+          quote_amount: trade.quoteAmount,
+          trade_code: trade.code,
+        },
+        idempotencyKey: `fx-trade-review:${trade.requestId}:pending_admin`,
+        summary: `طلب ${actionAr} عملة FX-${trade.code}: ${trade.baseAmount} ${current.pair.base.code} مقابل ${trade.quoteAmount} ${current.pair.quote.code} بسعر ${trade.effectiveRate}`,
+        actorUserId: ctx.actorUserId,
+      })
+      review = { status: change.status }
+      console.info(
+        `[tool] FX V2 trade ${trade.requestId} pending admin via CHG-${change.code}`,
+      )
+    }
+
     return {
       ok: true,
       data: {
@@ -379,6 +417,14 @@ export async function executeFxV2RecordTradeRequest(
           quote_amount: trade.quoteAmount,
           idempotent: trade.idempotent,
         },
+        ...(review
+          ? {
+              admin_review: {
+                status: review.status,
+                forwarded_to_admin: true,
+              },
+            }
+          : {}),
       },
       safe_to_show: true,
     }
