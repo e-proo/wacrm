@@ -6,6 +6,119 @@ import type { AdapterContext } from './contract'
 // Bits shared by the protocol adapters.
 // ============================================================
 
+export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'max'
+type ReasoningCapabilityState = 'supported' | 'unsupported'
+
+/**
+ * Runtime-only capability memory. The key contains no secret material: only
+ * endpoint origin + model id. A process restart simply returns the capability
+ * to unknown and lets negotiation happen again.
+ */
+const reasoningCapabilityCache = new Map<string, ReasoningCapabilityState>()
+
+function configuredReasoningEffort(): ReasoningEffort | null {
+  const raw = (process.env.AI_REASONING_EFFORT ?? 'auto').trim().toLowerCase()
+  if (raw === '' || raw === 'auto') return 'low'
+  if (raw === 'off' || raw === 'disabled') return null
+  if (raw === 'none' || raw === 'low' || raw === 'medium' || raw === 'high' || raw === 'max') {
+    return raw
+  }
+  // Fail safe for a malformed deployment setting: omit the optional field.
+  return null
+}
+
+function maybeAddReasoningEffort(
+  url: string,
+  init: RequestInit & { signal?: AbortSignal },
+): {
+  init: RequestInit & { signal?: AbortSignal }
+  originalInit: RequestInit & { signal?: AbortSignal }
+  cacheKey: string | null
+  injected: boolean
+} {
+  const originalInit = init
+  const effort = configuredReasoningEffort()
+  if (!effort || String(init.method ?? 'GET').toUpperCase() !== 'POST' || typeof init.body !== 'string') {
+    return { init, originalInit, cacheKey: null, injected: false }
+  }
+
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(url)
+  } catch {
+    return { init, originalInit, cacheKey: null, injected: false }
+  }
+  if (!parsedUrl.pathname.endsWith('/chat/completions')) {
+    return { init, originalInit, cacheKey: null, injected: false }
+  }
+
+  let body: Record<string, unknown>
+  try {
+    const parsed = JSON.parse(init.body) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { init, originalInit, cacheKey: null, injected: false }
+    }
+    body = parsed as Record<string, unknown>
+  } catch {
+    return { init, originalInit, cacheKey: null, injected: false }
+  }
+
+  // Respect any caller that intentionally supplied a provider-specific value.
+  if (Object.prototype.hasOwnProperty.call(body, 'reasoning_effort')) {
+    return { init, originalInit, cacheKey: null, injected: false }
+  }
+
+  const model = typeof body.model === 'string' ? body.model : ''
+  if (!model) return { init, originalInit, cacheKey: null, injected: false }
+  const cacheKey = `${parsedUrl.origin}:${model}`
+  if (reasoningCapabilityCache.get(cacheKey) === 'unsupported') {
+    return { init, originalInit, cacheKey, injected: false }
+  }
+
+  return {
+    originalInit,
+    cacheKey,
+    injected: true,
+    init: {
+      ...init,
+      body: JSON.stringify({ ...body, reasoning_effort: effort }),
+    },
+  }
+}
+
+function isReasoningCompatibilityError(res: Response, bodyText: string): boolean {
+  if (res.status !== 400) return false
+  const text = bodyText.toLowerCase()
+  if (!text.includes('reasoning_effort')) return false
+  return [
+    'not supported',
+    'unsupported',
+    'unknown',
+    'unrecognized',
+    'not allowed',
+    'not permitted',
+    'invalid parameter',
+    'invalid_request',
+    'extra_forbidden',
+    'function tools',
+  ].some((needle) => text.includes(needle))
+}
+
+function ensureNoCustomRedirect(custom: boolean, res: Response): Response {
+  if (custom && res.status >= 300 && res.status < 400) {
+    throw new AiError(
+      'The endpoint responded with a redirect, which the outbound policy does not allow.',
+      { code: 'endpoint_blocked', status: 502 },
+    )
+  }
+  return res
+}
+
+/** Test-only reset; harmless in production and keeps capability tests isolated. */
+export function resetReasoningCapabilityCacheForTests(): void {
+  reasoningCapabilityCache.clear()
+}
+
 /**
  * The single outbound gate every adapter provider call must use.
  *
@@ -18,6 +131,12 @@ import type { AdapterContext } from './contract'
  *    TEST-NET blocked unless the deployment opts into private
  *    endpoints). 3xx replies are refused (`redirect: 'manual'`) —
  *    a gateway must not bounce us to an unvalidated target.
+ *
+ * OpenAI-compatible chat/completions requests also negotiate the optional
+ * `reasoning_effort` capability. In auto mode we optimistically request
+ * `low` for CRM latency. If a provider/model explicitly rejects that field,
+ * the exact request is retried once without it and the unsupported result is
+ * cached for this process. No model ids or providers are hard-coded.
  *
  * Residual (documented in the Phase 05 report): the policy's DNS
  * view can race with the OS resolver (TOCTOU). Mitigated by:
@@ -49,13 +168,26 @@ export async function providerFetch(
       )
     }
   }
-  const res = await fetch(url, custom ? { ...init, redirect: 'manual' } : init)
-  if (custom && res.status >= 300 && res.status < 400) {
-    throw new AiError(
-      'The endpoint responded with a redirect, which the outbound policy does not allow.',
-      { code: 'endpoint_blocked', status: 502 },
-    )
+
+  const negotiated = maybeAddReasoningEffort(url, init)
+  const requestInit = custom ? { ...negotiated.init, redirect: 'manual' as const } : negotiated.init
+  let res = ensureNoCustomRedirect(custom, await fetch(url, requestInit))
+
+  if (negotiated.injected && negotiated.cacheKey) {
+    if (res.ok) {
+      reasoningCapabilityCache.set(negotiated.cacheKey, 'supported')
+    } else if (res.status === 400) {
+      const errorText = await res.clone().text().catch(() => '')
+      if (isReasoningCompatibilityError(res, errorText)) {
+        reasoningCapabilityCache.set(negotiated.cacheKey, 'unsupported')
+        const retryInit = custom
+          ? { ...negotiated.originalInit, redirect: 'manual' as const }
+          : negotiated.originalInit
+        res = ensureNoCustomRedirect(custom, await fetch(url, retryInit))
+      }
+    }
   }
+
   return res
 }
 
@@ -85,6 +217,12 @@ export function normalizeUsage(raw: {
 
 /** Map a fetch rejection (timeout / DNS / offline) to a typed AiError. */
 export function toNetworkError(err: unknown): AiError {
+  // Preserve errors already classified by the outbound/provider layer.
+  // In particular, endpoint_blocked must not be relabelled as a generic
+  // network error because operators need to know that the request never
+  // reached the upstream provider.
+  if (err instanceof AiError) return err
+
   if (err instanceof DOMException && err.name === 'TimeoutError') {
     return new AiError('The AI provider took too long to respond.', {
       code: 'timeout',

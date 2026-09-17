@@ -2,8 +2,8 @@
 // POST /api/ai-agents/[id]/revisions — fork the PUBLISHED
 //      revision into a new editable DRAFT (idempotent: returns
 //      the existing draft when there is one). Copies settings,
-//      tool grants and knowledge assignments so the draft starts
-//      as a faithful working copy.
+//      compatible tool grants and knowledge assignments so old
+//      cross-plane grants never contaminate a new draft.
 //
 // Admin+ only. Published/superseded revisions stay immutable —
 // all editing happens on the draft, then publish swaps the
@@ -11,12 +11,54 @@
 // ============================================================
 
 import { NextResponse } from 'next/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import {
   checkRateLimit,
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
+import {
+  inheritedGrantAllowedForPurpose,
+  type AgentPurpose,
+  type InheritedToolGrant,
+} from '@/lib/ai/runtime/tool-grant-plane-policy'
+
+async function removeIncompatibleDraftGrants(
+  db: SupabaseClient,
+  input: {
+    accountId: string
+    revisionId: string
+    purpose: AgentPurpose
+  },
+): Promise<number> {
+  const { data, error } = await db
+    .from('ai_agent_tool_grants')
+    .select('id, tool_key, tool_version, permission')
+    .eq('account_id', input.accountId)
+    .eq('agent_revision_id', input.revisionId)
+  if (error) throw error
+
+  const incompatibleIds = (data ?? [])
+    .filter((row) =>
+      !inheritedGrantAllowedForPurpose(
+        row as InheritedToolGrant,
+        input.purpose,
+      ).allowed,
+    )
+    .map((row) => (row as { id: string }).id)
+
+  if (incompatibleIds.length === 0) return 0
+
+  const { error: deleteError } = await db
+    .from('ai_agent_tool_grants')
+    .delete()
+    .eq('account_id', input.accountId)
+    .eq('agent_revision_id', input.revisionId)
+    .in('id', incompatibleIds)
+  if (deleteError) throw deleteError
+  return incompatibleIds.length
+}
 
 export async function POST(
   _request: Request,
@@ -34,7 +76,7 @@ export async function POST(
 
     const { data: agent, error: agentErr } = await db
       .from('ai_agents')
-      .select('id, status, published_revision_id')
+      .select('id, status, purpose, published_revision_id')
       .eq('account_id', ctx.accountId)
       .eq('id', id)
       .maybeSingle()
@@ -48,8 +90,11 @@ export async function POST(
         { status: 409 },
       )
     }
+    const purpose = (agent as { purpose: AgentPurpose }).purpose
 
-    // Idempotent: an existing draft wins — never fork twice.
+    // Idempotent: an existing draft wins — never fork twice. Old drafts may
+    // predate plane validation, so sanitize inherited legacy grants before
+    // returning them to the editor.
     const { data: existingDraft, error: draftErr } = await db
       .from('ai_agent_revisions')
       .select('id')
@@ -61,9 +106,16 @@ export async function POST(
       .maybeSingle()
     if (draftErr) throw draftErr
     if (existingDraft) {
+      const revisionId = (existingDraft as { id: string }).id
+      const removedIncompatibleGrants = await removeIncompatibleDraftGrants(db, {
+        accountId: ctx.accountId,
+        revisionId,
+        purpose,
+      })
       return NextResponse.json({
-        revisionId: (existingDraft as { id: string }).id,
+        revisionId,
         reused: true,
+        removedIncompatibleGrants,
       })
     }
 
@@ -146,11 +198,11 @@ export async function POST(
     }
     const revisionId = (created as { id: string }).id
 
-    // Copy grants + knowledge assignments from the published
-    // revision so the working draft mirrors what agents answer
-    // with today. Failures here are non-fatal (logged): the
-    // draft is already usable and can be re-granted in the UI.
+    // Copy grants + knowledge assignments from the published revision. Legacy
+    // published rows stay immutable, but only grants compatible with this
+    // agent purpose/plane are inherited by the new editable draft.
     let copiedGrants = 0
+    let droppedIncompatibleGrants = 0
     if (publishedId) {
       const { data: grantRows, error: gReadErr } = await db
         .from('ai_agent_tool_grants')
@@ -159,16 +211,26 @@ export async function POST(
         .eq('agent_revision_id', publishedId)
       if (gReadErr) console.error('[revisions fork] grant read failed:', gReadErr)
       if (grantRows && grantRows.length > 0) {
-        const { error: gInsErr } = await db.from('ai_agent_tool_grants').insert(
-          (grantRows as Array<Record<string, unknown>>).map((g) => ({
-            ...g,
-            account_id: ctx.accountId,
-            agent_revision_id: revisionId,
-            granted_by: ctx.userId,
-          })),
+        const compatibleGrants = (grantRows as Array<Record<string, unknown>>).filter(
+          (grant) =>
+            inheritedGrantAllowedForPurpose(
+              grant as unknown as InheritedToolGrant,
+              purpose,
+            ).allowed,
         )
-        if (gInsErr) console.error('[revisions fork] grant copy failed:', gInsErr)
-        else copiedGrants = grantRows.length
+        droppedIncompatibleGrants = grantRows.length - compatibleGrants.length
+        if (compatibleGrants.length > 0) {
+          const { error: gInsErr } = await db.from('ai_agent_tool_grants').insert(
+            compatibleGrants.map((g) => ({
+              ...g,
+              account_id: ctx.accountId,
+              agent_revision_id: revisionId,
+              granted_by: ctx.userId,
+            })),
+          )
+          if (gInsErr) console.error('[revisions fork] grant copy failed:', gInsErr)
+          else copiedGrants = compatibleGrants.length
+        }
       }
 
       const { data: assignRows, error: aReadErr } = await db
@@ -191,7 +253,11 @@ export async function POST(
       }
     }
 
-    return NextResponse.json({ revisionId, copiedGrants })
+    return NextResponse.json({
+      revisionId,
+      copiedGrants,
+      droppedIncompatibleGrants,
+    })
   } catch (err) {
     return toErrorResponse(err)
   }

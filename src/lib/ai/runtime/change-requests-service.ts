@@ -1,27 +1,5 @@
-// Server-only by convention.
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-
-// ============================================================
-// Change-request service (Phase 3).
-//
-// Thin glue around the SQL RPCs in migration 054. The agent
-// uses these to:
-//   • draft a new change request (createChangeRequest),
-//   • confirm an admin's approval (approveChangeRequest),
-//   • cancel a pending one (cancelChangeRequest),
-//   • reject one (rejectChangeRequest),
-//   • list / read existing requests for UI surfacing.
-//
-// Execution of the change happens INSIDE the SQL RPCs as the
-// engine grows (Phase 3 ships the approval primitive; Phase 4
-// wires the dispatch into an `execute_change_request` RPC per
-// target_type). For now `status='approved'` is the final state —
-// the UI lets a human drive the actual apply from a button.
-//
-// All IDs/keys returned by this service are SAFE to surface
-// back to admins (no secrets). The confirmation code is short
-// enough to type back over WhatsApp.
-// ============================================================
+import { notifyTrustedAdminsOfChangeRequest } from './business-notifications'
 
 export interface ChangeRequestRow {
   id: string
@@ -34,13 +12,16 @@ export interface ChangeRequestRow {
   expected_version: number | null
   idempotency_key: string
   status: string
-  confirmation_code: string
+  content_digest: string | null
   summary: string | null
   expires_at: string
   created_by: string | null
   created_at: string
   approved_by: string | null
   approved_at: string | null
+  approved_identity_id: string | null
+  approved_message_id: string | null
+  approved_run_id: string | null
   rejected_by: string | null
   rejected_at: string | null
   executed_at: string | null
@@ -52,7 +33,7 @@ export interface CreateChangeRequestInput {
   accountId: string
   targetType: string
   targetId: string | null
-  intent: 'create' | 'update' | 'publish' | 'cancel' | 'archive'
+  intent: 'create' | 'create_and_attach' | 'update' | 'publish' | 'cancel' | 'archive'
   proposedPayload: Record<string, unknown>
   expectedVersion?: number | null
   idempotencyKey: string
@@ -63,14 +44,16 @@ export interface CreateChangeRequestInput {
 export interface CreateChangeRequestResult {
   id: string
   code: number
-  confirmationCode: string
+  /** One-time PIN. Null for an idempotent replay of an existing request. */
+  confirmationCode: string | null
   status: string
+  contentDigest: string
 }
 
 export async function createChangeRequest(
   input: CreateChangeRequestInput,
 ): Promise<CreateChangeRequestResult> {
-  const { data, error } = await supabaseAdmin().rpc('create_change_request', {
+  const { data, error } = await supabaseAdmin().rpc('create_change_request_v2', {
     p_account_id: input.accountId,
     p_target_type: input.targetType,
     p_target_id: input.targetId,
@@ -93,27 +76,51 @@ export async function createChangeRequest(
   const row = (data as Array<{
     id: string
     code: number
-    confirmation_code: string
+    confirmation_code: string | null
     status: string
+    content_digest: string
   }>)[0]
-  if (!row) {
-    throw new ChangeRequestError('CHANGE_REQUEST_CREATE_FAILED', 'No row returned.', 500)
+  if (!row) throw new ChangeRequestError('CHANGE_REQUEST_CREATE_FAILED', 'No row returned.', 500)
+
+  try {
+    const notification = await notifyTrustedAdminsOfChangeRequest({
+      accountId: input.accountId,
+      changeRequestId: row.id,
+      requestCode: row.code,
+      confirmationCode: row.confirmation_code,
+      summary: input.summary ?? null,
+      targetType: input.targetType,
+      proposedPayload: input.proposedPayload,
+    })
+    console.info(
+      `[change request] CHG-${row.code} admin notification eligible=${notification.eligible} whatsapp=${notification.whatsappSent} in_app=${notification.inAppCreated}`,
+    )
+  } catch (notifyError) {
+    // The change request is the durable authority. A secondary notification
+    // failure must never roll back or duplicate the proposal itself.
+    console.error(`[change request] CHG-${row.code} admin notification failed:`, notifyError)
   }
+
   return {
     id: row.id,
     code: row.code,
     confirmationCode: row.confirmation_code,
     status: row.status,
+    contentDigest: row.content_digest,
   }
 }
 
+/** Dashboard approval: authenticated admin + one-time PIN + digest check. */
 export async function approveChangeRequest(input: {
   accountId: string
   changeRequestId: string
   confirmationCode: string
   actorUserId: string | null
 }): Promise<{ status: string }> {
-  const { data, error } = await supabaseAdmin().rpc('approve_change_request', {
+  if (!input.actorUserId) {
+    throw new ChangeRequestError('CHANGE_REQUEST_APPROVER_REQUIRED', 'Authenticated approver is required.', 401)
+  }
+  const { data, error } = await supabaseAdmin().rpc('approve_change_request_dashboard_v2', {
     p_account_id: input.accountId,
     p_change_request_id: input.changeRequestId,
     p_confirmation_code: input.confirmationCode,
@@ -129,6 +136,35 @@ export async function approveChangeRequest(input: {
   return { status: data as string }
 }
 
+/** WhatsApp approval: verified identity capability + one-time PIN + message binding. */
+export async function approveChangeRequestFromTrustedAdmin(input: {
+  accountId: string
+  requestCode: number
+  confirmationCode: string
+  identityId: string
+  inboundMessageId: string | null
+  runId?: string | null
+}): Promise<{ id: string; status: string }> {
+  const { data, error } = await supabaseAdmin().rpc('approve_change_request_by_code_v2', {
+    p_account_id: input.accountId,
+    p_request_code: input.requestCode,
+    p_confirmation_code: input.confirmationCode,
+    p_identity_id: input.identityId,
+    p_message_id: input.inboundMessageId,
+    p_run_id: input.runId ?? null,
+  })
+  if (error) {
+    throw new ChangeRequestError(
+      mapRpcError((error as { message?: string }).message ?? ''),
+      (error as { message?: string }).message ?? 'Approval failed',
+      409,
+    )
+  }
+  const row = (data as Array<{ id: string; status: string }>)[0]
+  if (!row) throw new ChangeRequestError('CHANGE_REQUEST_FAILED', 'Approval returned no request.', 500)
+  return row
+}
+
 export async function rejectChangeRequest(input: {
   accountId: string
   changeRequestId: string
@@ -142,13 +178,59 @@ export async function rejectChangeRequest(input: {
     p_reason: input.reason ?? null,
   })
   if (error) {
-    throw new ChangeRequestError(
-      mapRpcError((error as { message?: string }).message ?? ''),
-      (error as { message?: string }).message ?? 'Reject failed',
-      409,
-    )
+    throw new ChangeRequestError(mapRpcError(error.message ?? ''), error.message ?? 'Reject failed', 409)
+  }
+  try {
+    await enqueueCustomerIntentRejection(input.accountId, input.changeRequestId)
+  } catch (notifyErr) {
+    // Rejection itself is authoritative; notification is a durable follow-up
+    // and must not roll the human decision back.
+    console.error('[change request] could not enqueue rejection notification:', notifyErr)
   }
   return { status: data as string }
+}
+
+async function enqueueCustomerIntentRejection(
+  accountId: string,
+  changeRequestId: string,
+): Promise<void> {
+  const db = supabaseAdmin()
+  const { data: intent, error } = await db
+    .from('customer_intents')
+    .select('id, contact_id, conversation_id')
+    .eq('account_id', accountId)
+    .eq('change_request_id', changeRequestId)
+    .maybeSingle()
+  if (error) throw error
+  if (!intent) return
+
+  const { error: intentUpdateError } = await db
+    .from('customer_intents')
+    .update({ status: 'rejected', updated_at: new Date().toISOString() })
+    .eq('account_id', accountId)
+    .eq('id', intent.id)
+  if (intentUpdateError) throw intentUpdateError
+
+  if (!intent.conversation_id || !intent.contact_id) return
+  const { error: insertError } = await db
+    .from('customer_intent_notifications')
+    .upsert(
+      {
+        account_id: accountId,
+        intent_id: intent.id,
+        change_request_id: changeRequestId,
+        contact_id: intent.contact_id,
+        conversation_id: intent.conversation_id,
+        event_type: 'rejected',
+        message_text: 'تمت مراجعة طلبك من الإدارة ولم يتم اعتماده.',
+        status: 'pending',
+      },
+      {
+        onConflict: 'account_id,intent_id,change_request_id,event_type',
+        ignoreDuplicates: true,
+      },
+    )
+  if (insertError) throw insertError
 }
 
 export async function cancelChangeRequest(input: {
@@ -162,11 +244,7 @@ export async function cancelChangeRequest(input: {
     p_actor_user_id: input.actorUserId,
   })
   if (error) {
-    throw new ChangeRequestError(
-      mapRpcError((error as { message?: string }).message ?? ''),
-      (error as { message?: string }).message ?? 'Cancel failed',
-      409,
-    )
+    throw new ChangeRequestError(mapRpcError(error.message ?? ''), error.message ?? 'Cancel failed', 409)
   }
   return { status: data as string }
 }
@@ -178,8 +256,9 @@ export async function listChangeRequests(
   const limit = Math.min(opts.limit ?? 100, 500)
   let q = supabaseAdmin()
     .from('change_requests')
+    // Never select confirmation_code or confirmation_code_hash.
     .select(
-      'id, account_id, code, target_type, target_id, intent, proposed_payload, expected_version, idempotency_key, status, confirmation_code, summary, expires_at, created_by, created_at, approved_by, approved_at, rejected_by, rejected_at, executed_at, execution_result, error_code',
+      'id, account_id, code, target_type, target_id, intent, proposed_payload, expected_version, idempotency_key, status, content_digest, summary, expires_at, created_by, created_at, approved_by, approved_at, approved_identity_id, approved_message_id, approved_run_id, rejected_by, rejected_at, executed_at, execution_result, error_code',
     )
     .eq('account_id', accountId)
     .order('code', { ascending: false })
@@ -202,10 +281,16 @@ export class ChangeRequestError extends Error {
 }
 
 function mapRpcError(msg: string): string {
-  if (msg.includes('CHANGE_REQUEST_NOT_FOUND')) return 'CHANGE_REQUEST_NOT_FOUND'
-  if (msg.includes('CHANGE_REQUEST_EXPIRED')) return 'CHANGE_REQUEST_EXPIRED'
-  if (msg.includes('CHANGE_REQUEST_BAD_CODE')) return 'CHANGE_REQUEST_BAD_CODE'
-  if (msg.includes('CHANGE_REQUEST_NOT_PENDING'))
-    return 'CHANGE_REQUEST_NOT_PENDING'
-  return 'CHANGE_REQUEST_FAILED'
+  const known = [
+    'CHANGE_REQUEST_NOT_FOUND',
+    'CHANGE_REQUEST_EXPIRED',
+    'CHANGE_REQUEST_BAD_CODE',
+    'CHANGE_REQUEST_NOT_PENDING',
+    'CHANGE_REQUEST_TOO_MANY_ATTEMPTS',
+    'CHANGE_REQUEST_CONTENT_CHANGED',
+    'CHANGE_REQUEST_APPROVER_FORBIDDEN',
+    'TRUSTED_ADMIN_REQUIRED',
+    'APPROVER_CAPABILITY_REQUIRED',
+  ]
+  return known.find((code) => msg.includes(code)) ?? 'CHANGE_REQUEST_FAILED'
 }

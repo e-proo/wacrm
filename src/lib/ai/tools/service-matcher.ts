@@ -1,6 +1,5 @@
 // Server-only by convention.
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import type { FieldDefinitionInput } from '@/lib/services/catalog/field-schema'
 
 // ============================================================
 // Service request matcher.
@@ -91,11 +90,42 @@ interface FieldDefRow {
   required: boolean
 }
 
+interface ServiceMatchRow {
+  id: string
+  name: string
+  code: string
+  category_id: string
+  service_revisions:
+    | { category_schema_version_id: string }
+    | { category_schema_version_id: string }[]
+    | null
+}
+
 export interface MatchRequestInput {
   accountId: string
   serviceHint?: string
   attributes: Record<string, unknown>
   limit?: number
+}
+
+// `services` has both a legacy category FK and the account-scoped composite
+// category FK. The matcher does not use category fields, so do not embed
+// service_categories at all: an unqualified embed becomes PGRST201 as soon as
+// PostgREST sees both relationships. The current-revision relationship is
+// intentionally pinned by FK name because that is the revision snapshot the
+// matcher must inspect.
+export const SERVICE_MATCH_SELECT =
+  'id, name, code, category_id, status, service_revisions!services_current_revision_fk(category_schema_version_id)'
+
+function mergeServiceRows(groups: Array<ServiceMatchRow[]>, limit: number): ServiceMatchRow[] {
+  const byId = new Map<string, ServiceMatchRow>()
+  for (const group of groups) {
+    for (const row of group) {
+      if (!byId.has(row.id)) byId.set(row.id, row)
+      if (byId.size >= limit) return [...byId.values()]
+    }
+  }
+  return [...byId.values()]
 }
 
 /**
@@ -110,30 +140,40 @@ export async function matchServiceRequest(
   }
   const db = supabaseAdmin()
   const limit = Math.min(input.limit ?? 10, 50)
+  const scanLimit = limit * 3
 
-  let q = db
-    .from('services')
-    .select(
-      'id, name, code, category_id, status, service_categories(name), service_revisions!services_current_revision_fk(category_schema_version_id)',
-    )
-    .eq('account_id', input.accountId)
-    .eq('status', 'active')
-    .limit(limit * 3)
+  const baseQuery = () =>
+    db
+      .from('services')
+      .select(SERVICE_MATCH_SELECT)
+      .eq('account_id', input.accountId)
+      .eq('status', 'active')
+      .limit(scanLimit)
+
+  let rows: ServiceMatchRow[]
   if (input.serviceHint?.trim()) {
     const term = `%${input.serviceHint.trim()}%`
-    q = q.or(`name.ilike.${term},code.ilike.${term}`)
+    // Avoid PostgREST's `.or()` filter grammar for model-provided text. A
+    // comma/parenthesis in the hint can otherwise turn a harmless search into
+    // a parser error. Independent ilike filters are URL-encoded safely.
+    const [byName, byCode] = await Promise.all([
+      baseQuery().ilike('name', term),
+      baseQuery().ilike('code', term),
+    ])
+    if (byName.error) throw byName.error
+    if (byCode.error) throw byCode.error
+    rows = mergeServiceRows(
+      [
+        (byName.data ?? []) as unknown as ServiceMatchRow[],
+        (byCode.data ?? []) as unknown as ServiceMatchRow[],
+      ],
+      scanLimit,
+    )
+  } else {
+    const { data, error } = await baseQuery()
+    if (error) throw error
+    rows = (data ?? []) as unknown as ServiceMatchRow[]
   }
-  const { data: services, error } = await q
-  if (error) throw error
-
-  const rows = (services ?? []) as Array<{
-    id: string
-    name: string
-    code: string
-    category_id: string
-    service_categories: { name: string } | { name: string }[] | null
-    service_revisions: { category_schema_version_id: string } | { category_schema_version_id: string }[] | null
-  }>
 
   const candidates: Array<{
     row: { id: string; name: string; code: string; category_id: string }
@@ -160,11 +200,10 @@ export async function matchServiceRequest(
       .select('schema_version_id, field_key, required')
       .in('schema_version_id', [...schemaVersionIds])
     if (defsErr) throw defsErr
-    for (const def of defs ?? []) {
-      const r = def as { schema_version_id: string; field_key: string; required: boolean }
-      const list = defsByVersion.get(r.schema_version_id) ?? []
-      list.push({ field_key: r.field_key, required: r.required })
-      defsByVersion.set(r.schema_version_id, list)
+    for (const def of (defs ?? []) as FieldDefRow[]) {
+      const list = defsByVersion.get(def.schema_version_id) ?? []
+      list.push({ field_key: def.field_key, required: def.required })
+      defsByVersion.set(def.schema_version_id, list)
     }
   }
 

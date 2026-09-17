@@ -186,35 +186,47 @@ function pickRule(
   routes: ReadonlyArray<AiAgentRoute>,
   agents: ReadonlyArray<{ agent: AiAgent; revision: AiAgentRevision | null }>,
 ): RoutingDecision | null {
-  const candidates = routes
-    .filter((r) => r.isActive && r.routeKind !== 'admin' && r.channel === ctx.channel)
+  const rules = routes
+    .filter((r) => r.isActive && r.routeKind === 'rule' && r.channel === ctx.channel)
     .slice()
     .sort((a, b) => b.priority - a.priority)
 
-  for (const route of candidates) {
-    if (route.routeKind === 'rule') {
-      if (!matchesConditions(ctx, route.conditions)) continue
-    } else if (route.routeKind === 'default') {
-      // Defaults match anything in their channel — we evaluate them
-      // last via the candidates order so higher-priority rules
-      // already had their shot.
-    } else {
-      continue
-    }
-
+  let softMatch: RoutingDecision | null = null
+  for (const route of rules) {
+    if (!matchesConditions(ctx, route.conditions)) continue
     const target = findActiveAgent(agents, route.agentId)
     if (!target || !target.revision) continue
+    const decision: RoutingDecision = {
+      action: 'route',
+      plane: 'customer',
+      agentId: target.agent.id,
+      revisionId: target.revision.id,
+      providerConnectionId: target.revision.providerConnectionId,
+      reason: `rule:${route.name}`,
+      routeId: route.id,
+    }
+    // stop_processing is now meaningful: a hard match wins immediately;
+    // a soft match remains a candidate while lower-priority rules may refine
+    // the decision. A default never outranks a matching rule.
+    if (route.stopProcessing) return decision
+    if (!softMatch) softMatch = decision
+  }
+  if (softMatch) return softMatch
 
+  const defaults = routes
+    .filter((r) => r.isActive && r.routeKind === 'default' && r.channel === ctx.channel)
+    .slice()
+    .sort((a, b) => b.priority - a.priority)
+  for (const route of defaults) {
+    const target = findActiveAgent(agents, route.agentId)
+    if (!target || !target.revision) continue
     return {
       action: 'route',
       plane: 'customer',
       agentId: target.agent.id,
       revisionId: target.revision.id,
       providerConnectionId: target.revision.providerConnectionId,
-      reason:
-        route.routeKind === 'default'
-          ? 'default_route'
-          : `rule:${route.name}`,
+      reason: 'default_route',
       routeId: route.id,
     }
   }
@@ -232,18 +244,30 @@ export function matchesConditions(
   conditions: AiAgentRoute['conditions'],
 ): boolean {
   if (conditions.inbox_id) {
-    // The webhook doesn't pass inbox here; reserved for future
-    // expansion. When undefined we treat it as a non-match.
-    return false
+    if (!ctx.inboxId || ctx.inboxId !== conditions.inbox_id) return false
   }
   if (conditions.tags && conditions.tags.length > 0) {
-    // The conversation's tags aren't on the RoutingContext yet;
-    // reserved for future expansion.
-    return false
+    const actual = new Set(
+      (ctx.tags ?? []).map((tag) => tag.trim().toLocaleLowerCase()),
+    )
+    // Conditions combine with AND semantics. This is deliberately
+    // restrictive: a route that asks for multiple tags must see them all.
+    if (
+      !conditions.tags.every((tag) =>
+        actual.has(tag.trim().toLocaleLowerCase()),
+      )
+    ) {
+      return false
+    }
   }
   if (conditions.language) {
-    // Same — needs locale detection we don't ship in Phase 1.
-    return false
+    if (
+      !ctx.language ||
+      ctx.language.toLocaleLowerCase() !==
+        conditions.language.trim().toLocaleLowerCase()
+    ) {
+      return false
+    }
   }
   if (conditions.business_hours) {
     if (!isWithinBusinessHours(conditions.business_hours, new Date())) {

@@ -48,7 +48,8 @@ const VALID_TARGET_TYPES = new Set([
   'service',
   'service_revision',
   'pricing_rule',
-  'rate_book_version',
+  'fx_rate_pair',
+  'fx_trade_request',
   'coverage_offer',
   'coverage_request',
 ])
