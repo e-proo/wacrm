@@ -38,11 +38,12 @@ export interface RenderedFxTradeCustomerMessage {
   fallbackReason?: string
 }
 
-// Domain status remains `approved_for_contact`, while the presentation/event
-// contract uses the stable business event `exchange_rate.trade.approved`.
+// The durable business event can be canonicalized independently from the
+// internal domain status. Keep the existing template key during the rolling
+// migration so published account overrides continue to resolve safely.
 const EVENT_BY_OUTCOME: Record<FxTradeCustomerOutcome, string> = {
   pending_admin: 'exchange_rate.trade.pending',
-  approved_for_contact: 'exchange_rate.trade.approved',
+  approved_for_contact: 'exchange_rate.trade.approved_for_contact',
   rejected: 'exchange_rate.trade.rejected',
   completed: 'exchange_rate.trade.completed',
 }
