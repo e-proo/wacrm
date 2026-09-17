@@ -4,6 +4,7 @@ import {
   renderServiceRequestCustomerMessage,
   type ServiceRequestCustomerOutcome,
 } from '@/lib/messaging/service-request-customer'
+import { renderFxTradeBusinessEventText } from '@/lib/messaging/fx-v2-outbox'
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 
 interface ClaimedCustomerNotificationRow {
@@ -13,6 +14,10 @@ interface ClaimedCustomerNotificationRow {
   message_text: string
   attempts: number
   claim_token: string
+  intent_id: string | null
+  fx_trade_request_id: string | null
+  event_type: string
+  change_request_id: string | null
 }
 
 interface ChangeRequestDeliveryContext {
@@ -23,13 +28,15 @@ interface ChangeRequestDeliveryContext {
 }
 
 /**
- * Deliver due customer outcome notifications using an atomic PostgreSQL claim.
- * Eligibility is evaluated with the database clock, avoiding app/DB clock skew,
- * and SKIP LOCKED prevents concurrent workers from claiming the same row.
+ * Deliver due customer business-event notifications using the same durable
+ * outbox for service intents, coverage outcomes, and FX V2 trade lifecycle
+ * events. Eligibility is evaluated with the database clock and SKIP LOCKED
+ * prevents concurrent senders from claiming the same event.
  *
- * Generic `service_intent` outcomes are re-rendered from authoritative change
- * state immediately before transport. The legacy outbox text remains only as a
- * migration fallback; it is no longer the presentation source for this domain.
+ * Customer-facing text is rendered from authoritative business state at
+ * delivery time. FX rows therefore never expose the internal SQL outbox marker
+ * and use the same MessageContext -> resolver -> renderer -> transport path as
+ * the coverage/service notification loop.
  */
 export async function deliverCustomerOutcomeNotifications(input: {
   accountId: string
@@ -54,7 +61,7 @@ export async function deliverCustomerOutcomeNotifications(input: {
     ? await loadChangeRequestDeliveryContext(input.accountId, input.changeRequestId)
     : null
 
-  const { data, error } = await db.rpc('claim_customer_intent_notifications', {
+  const { data, error } = await db.rpc('claim_customer_business_notifications', {
     p_account_id: input.accountId,
     p_change_request_id: input.changeRequestId ?? null,
     p_limit: limit,
@@ -81,10 +88,13 @@ export async function deliverCustomerOutcomeNotifications(input: {
       continue
     }
 
+    // Keep the historical key prefix so already-reserved service-intent sends
+    // remain idempotent across this migration to the unified business outbox.
     const engineKey = `customer-intent-notification:${row.id}`
     try {
       const text = await resolveCustomerOutcomeText({
         accountId: input.accountId,
+        row,
         fallbackText: row.message_text,
         deliveryContext,
       })
@@ -104,13 +114,16 @@ export async function deliverCustomerOutcomeNotifications(input: {
           local_message_id: sent.local_message_id,
           sent_at: new Date().toISOString(),
           last_error: null,
+          claim_token: null,
         })
         .eq('id', row.id)
         .eq('claim_token', row.claim_token)
       if (sentUpdateError) throw sentUpdateError
 
       sentCount += 1
-      console.info(`[customer notification] sent ${row.id.slice(0, 8)}`)
+      console.info(
+        `[customer business event] sent ${row.event_type} notification=${row.id.slice(0, 8)} source=${row.fx_trade_request_id ? 'fx_trade_request' : 'customer_intent'}`,
+      )
     } catch (sendError) {
       const message = sendError instanceof Error ? sendError.message : String(sendError)
       const { data: localReservation } = await db
@@ -129,12 +142,13 @@ export async function deliverCustomerOutcomeNotifications(input: {
           status: requiresReconciliation ? 'requires_reconciliation' : 'failed',
           local_message_id: localReservation?.id ?? null,
           last_error: message.slice(0, 1000),
+          claim_token: null,
         })
         .eq('id', row.id)
         .eq('claim_token', row.claim_token)
 
       console.error(
-        `[customer notification] ${row.id.slice(0, 8)} ${requiresReconciliation ? 'requires reconciliation' : 'failed'}:`,
+        `[customer business event] ${row.event_type} ${row.id.slice(0, 8)} ${requiresReconciliation ? 'requires reconciliation' : 'failed'}:`,
         sendError,
       )
     }
@@ -171,9 +185,18 @@ async function loadChangeRequestDeliveryContext(
 
 async function resolveCustomerOutcomeText(input: {
   accountId: string
+  row: ClaimedCustomerNotificationRow
   fallbackText: string
   deliveryContext: ChangeRequestDeliveryContext | null
 }): Promise<string> {
+  if (input.row.fx_trade_request_id) {
+    return renderFxTradeBusinessEventText({
+      accountId: input.accountId,
+      tradeRequestId: input.row.fx_trade_request_id,
+      eventType: input.row.event_type,
+    })
+  }
+
   const ctx = input.deliveryContext
   if (!ctx || ctx.target_type !== 'service_intent') return input.fallbackText
 
