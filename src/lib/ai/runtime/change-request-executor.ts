@@ -2,11 +2,8 @@ import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { renderCoverageApprovedCustomerMessage } from '@/lib/messaging/coverage-customer'
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 import { publishPricingRuleRaw } from '@/lib/services/pricing/rules-crud'
-import {
-  decideFxTradeRequest,
-  FxServiceError,
-  publishFxRateVersion,
-} from '@/lib/services/fx-v2/service'
+import { tryExecuteCurrentChangeAction } from '@/lib/services/platform/composition'
+import { DomainChangeExecutionError } from '@/lib/services/platform/change-executor-registry'
 import { readCoverageAttributes, type CoverageAttributes } from '@/lib/services/coverage/attributes'
 import { compileFieldSchema, validateValues, type FieldDefinitionInput } from '@/lib/services/catalog/field-schema'
 
@@ -144,6 +141,32 @@ async function executeClaimedTarget(
   input: { accountId: string; changeRequestId: string; actorUserId: string | null },
   row: ClaimedChange,
 ): Promise<Record<string, unknown>> {
+  try {
+    const platformAttempt = await tryExecuteCurrentChangeAction(
+      {
+        accountId: input.accountId,
+        changeRequestId: row.id,
+        actorUserId: input.actorUserId,
+      },
+      {
+        id: row.id,
+        targetType: row.target_type,
+        targetId: row.target_id,
+        intent: row.intent,
+        proposedPayload: row.proposed_payload,
+        expectedVersion: row.expected_version,
+        contentDigest: row.content_digest,
+        claimToken: row.claim_token,
+      },
+    )
+    if (platformAttempt.matched) return platformAttempt.result
+  } catch (error) {
+    if (error instanceof DomainChangeExecutionError) {
+      throw new ChangeExecutionError(error.code, error.message, error.status)
+    }
+    throw error
+  }
+
   if (row.target_type === 'pricing_rule' && row.intent === 'create_and_attach' && !row.target_id) {
     const p = row.proposed_payload as {
       service_id?: string
@@ -276,96 +299,6 @@ async function executeClaimedTarget(
       target_id: row.target_id,
       operation: 'publish_new_revision',
       revision_id: revisionId as string,
-    }
-  }
-
-  if (row.target_type === 'fx_rate_pair' && row.intent === 'update' && row.target_id) {
-    const p = row.proposed_payload as {
-      expected_lock_version?: number
-      business_buy_rate?: string
-      business_sell_rate?: string
-      notes_internal?: string | null
-    }
-    if (
-      !Number.isSafeInteger(p.expected_lock_version) ||
-      Number(p.expected_lock_version) < 0 ||
-      !p.business_buy_rate ||
-      !p.business_sell_rate
-    ) {
-      throw new ChangeExecutionError(
-        'FX_RATE_CHANGE_PAYLOAD_INCOMPLETE',
-        'Approved FX rate proposal is missing lock version or buy/sell rates.',
-      )
-    }
-    try {
-      const published = await publishFxRateVersion({
-        accountId: input.accountId,
-        pairId: row.target_id,
-        expectedLockVersion: Number(p.expected_lock_version),
-        businessBuyRate: p.business_buy_rate,
-        businessSellRate: p.business_sell_rate,
-        source: 'admin_agent',
-        sourceChangeRequestId: row.id,
-        notesInternal: p.notes_internal ?? null,
-        actorUserId: input.actorUserId,
-      })
-      return {
-        target_type: row.target_type,
-        target_id: row.target_id,
-        operation: 'publish_fx_v2_rate_version',
-        version_id: published.versionId,
-        version_number: published.versionNumber,
-        lock_version: published.lockVersion,
-        idempotent: published.idempotent,
-      }
-    } catch (err) {
-      if (err instanceof FxServiceError) {
-        throw new ChangeExecutionError(err.code, err.message, err.status)
-      }
-      throw err
-    }
-  }
-
-  if (row.target_type === 'fx_trade_request' && row.intent === 'update' && row.target_id) {
-    const p = row.proposed_payload as {
-      expected_status?: string
-      decision?: string
-      note?: string | null
-      rate_version_id?: string
-    }
-    if (
-      p.expected_status !== 'pending_admin' ||
-      (p.decision !== 'approve' && p.decision !== 'reject')
-    ) {
-      throw new ChangeExecutionError(
-        'FX_TRADE_DECISION_PAYLOAD_INCOMPLETE',
-        'Approved FX trade decision must target pending_admin and choose approve or reject.',
-      )
-    }
-    try {
-      const decided = await decideFxTradeRequest({
-        accountId: input.accountId,
-        requestId: row.target_id,
-        expectedStatus: 'pending_admin',
-        decision: p.decision,
-        changeRequestId: row.id,
-        note: p.note ?? null,
-        actorUserId: input.actorUserId,
-      })
-      return {
-        target_type: row.target_type,
-        target_id: row.target_id,
-        operation: 'decide_fx_v2_trade_request',
-        decision: p.decision,
-        rate_version_id: p.rate_version_id ?? null,
-        request_status: decided.status,
-        idempotent: decided.idempotent,
-      }
-    } catch (err) {
-      if (err instanceof FxServiceError) {
-        throw new ChangeExecutionError(err.code, err.message, err.status)
-      }
-      throw err
     }
   }
 
