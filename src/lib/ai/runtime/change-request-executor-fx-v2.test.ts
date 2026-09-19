@@ -6,6 +6,14 @@ describe('FX V2 approved change execution contract', () => {
     new URL('./change-request-executor.ts', import.meta.url),
     'utf8',
   )
+  const fxChangeExecutors = readFileSync(
+    new URL('../../services/fx-v2/change-executors.ts', import.meta.url),
+    'utf8',
+  )
+  const servicePlatformComposition = readFileSync(
+    new URL('../../services/platform/composition.ts', import.meta.url),
+    'utf8',
+  )
   const businessHandoff = readFileSync(
     new URL('../tools/business-handoff.ts', import.meta.url),
     'utf8',
@@ -27,28 +35,39 @@ describe('FX V2 approved change execution contract', () => {
     'utf8',
   )
 
-  it('publishes approved pair changes through the deterministic FX V2 service', () => {
-    expect(source).toContain("row.target_type === 'fx_rate_pair'")
-    expect(source).toContain('publishFxRateVersion({')
-    expect(source).toContain("source: 'admin_agent'")
-    expect(source).toContain('sourceChangeRequestId: row.id')
-    expect(source).toContain('expectedLockVersion: Number(p.expected_lock_version)')
-    expect(source).toContain("operation: 'publish_fx_v2_rate_version'")
+  it('delegates approved FX changes through the service-platform registry', () => {
+    expect(source).toContain('tryExecuteCurrentChangeAction')
+    expect(source).not.toContain("row.target_type === 'fx_rate_pair'")
+    expect(source).not.toContain("row.target_type === 'fx_trade_request'")
+    expect(servicePlatformComposition).toContain('FX_V2_DOMAIN')
+    expect(servicePlatformComposition).toContain('FX_V2_RUNTIME')
+    expect(servicePlatformComposition).toContain('CURRENT_CHANGE_EXECUTOR_REGISTRY')
+  })
+
+  it('publishes approved pair changes through the deterministic FX V2 domain executor', () => {
+    expect(fxChangeExecutors).toContain('publishFxRateVersion({')
+    expect(fxChangeExecutors).toContain("source: 'admin_agent'")
+    expect(fxChangeExecutors).toContain('sourceChangeRequestId: change.id')
+    expect(fxChangeExecutors).toContain(
+      'expectedLockVersion: Number(payload.expected_lock_version)',
+    )
+    expect(fxChangeExecutors).toContain("operation: 'publish_fx_v2_rate_version'")
   })
 
   it('executes approved trade decisions from pending_admin only', () => {
-    expect(source).toContain("row.target_type === 'fx_trade_request'")
-    expect(source).toContain("p.expected_status !== 'pending_admin'")
-    expect(source).toContain('decideFxTradeRequest({')
-    expect(source).toContain("expectedStatus: 'pending_admin'")
-    expect(source).toContain('changeRequestId: row.id')
-    expect(source).toContain("operation: 'decide_fx_v2_trade_request'")
+    expect(fxChangeExecutors).toContain("payload.expected_status !== 'pending_admin'")
+    expect(fxChangeExecutors).toContain('decideFxTradeRequest({')
+    expect(fxChangeExecutors).toContain("expectedStatus: 'pending_admin'")
+    expect(fxChangeExecutors).toContain('changeRequestId: change.id')
+    expect(fxChangeExecutors).toContain("operation: 'decide_fx_v2_trade_request'")
   })
 
   it('contains no executable legacy rate-book change paths', () => {
     expect(source).not.toContain("row.target_type === 'rate_book_version'")
     expect(source).not.toContain('apply_exchange_rate_pair_change')
     expect(source).not.toContain('publishExchangeRateVersion')
+    expect(fxChangeExecutors).not.toContain('apply_exchange_rate_pair_change')
+    expect(fxChangeExecutors).not.toContain('publishExchangeRateVersion')
   })
 
   it('contains no legacy FX handoff/domain service implementation', () => {
@@ -78,7 +97,7 @@ describe('FX V2 approved change execution contract', () => {
     expect(businessHandoff).toContain('executeCoverageProposeRequest')
   })
 
-  it('registers only pair-centric FX V2 executors', () => {
+  it('registers only pair-centric FX V2 model tool executors', () => {
     expect(executorRegistry).toContain("add('exchange_rates.get_current', 1")
     expect(executorRegistry).toContain("add('exchange_rates.record_trade_request', 2")
     expect(executorRegistry).toContain("add('exchange_rates.admin_list_pairs', 1")
