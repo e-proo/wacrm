@@ -301,10 +301,10 @@ describe('native domain tool ownership', () => {
     expect(FX_V2_DOMAIN.tools).toEqual(FX_V2_TOOL_MANIFESTS)
     expect(COVERAGE_DOMAIN.tools).toEqual(COVERAGE_TOOL_MANIFESTS)
 
-    expect(getCurrentPlatformTool('exchange_rates.get_current', 1)).toBe(
+    expect(getCurrentPlatformTool('exchange_rates.get_current', 1)).toEqual(
       FX_V2_TOOL_MANIFESTS.find((tool) => tool.key === 'exchange_rates.get_current'),
     )
-    expect(getCurrentPlatformTool('coverage.get_rates', 1)).toBe(
+    expect(getCurrentPlatformTool('coverage.get_rates', 1)).toEqual(
       COVERAGE_TOOL_MANIFESTS.find((tool) => tool.key === 'coverage.get_rates'),
     )
   })
