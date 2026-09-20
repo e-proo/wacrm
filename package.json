@@ -38,7 +38,8 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:fx-cutover-live": "vitest run src/lib/services/fx-v2/cutover.live.test.ts"
+    "test:fx-cutover-live": "vitest run src/lib/services/fx-v2/cutover.live.test.ts",
+    "test:fx-cutover-control-live": "vitest run src/lib/services/fx-v2/cutover-control.live.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
