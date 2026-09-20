@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderCoverageApprovedCustomerMessage } from '@/lib/messaging/coverage-customer'
+import { renderServiceRequestCustomerMessage } from '@/lib/messaging/service-request-customer'
 import { renderFxTradeCustomerMessage } from '@/lib/messaging/fx-v2-customer'
 import { renderBusinessEventProjection } from './business-event-message-renderer'
 import {
@@ -8,6 +9,7 @@ import {
 } from './event-projector-registry'
 import { buildCoverageApprovedBusinessEventProjection } from '@/lib/services/coverage/message-projectors'
 import { buildFxTradeBusinessEventProjection } from '@/lib/services/fx-v2/message-projectors'
+import { buildGenericServiceRequestProjection } from './generic-message-projectors'
 
 describe('EventProjectorRegistry', () => {
   const input: BusinessEventProjectionInput = {
@@ -181,5 +183,63 @@ describe('domain message projectors', () => {
     })
 
     expect(projected.text).toBe(legacyRenderer.text)
+  })
+
+  it('projects generic service requests from the embedded snapshot with legacy rendering parity', async () => {
+    const matched = buildGenericServiceRequestProjection({
+      accountId: 'acc-1',
+      eventType: 'service_request.matched',
+      eventVersion: 1,
+      subjectType: 'service_intent',
+      subjectId: 'intent-1',
+      audience: 'customer',
+      channel: 'whatsapp',
+      correlationId: 'cr-1',
+      causationId: 'intent-1',
+      payload: {
+        decision: 'matched',
+        service_id: 'service-1',
+        service_name: 'خدمة تجريبية',
+      },
+    })
+    const projectedMatched = await renderBusinessEventProjection({
+      accountId: 'acc-1',
+      projection: matched,
+    })
+    const legacyMatched = await renderServiceRequestCustomerMessage({
+      accountId: 'acc-1',
+      outcome: 'matched',
+      entityId: 'intent-1',
+      serviceId: 'service-1',
+      serviceName: 'خدمة تجريبية',
+    })
+    expect(projectedMatched.text).toBe(legacyMatched.text)
+
+    const rejected = buildGenericServiceRequestProjection({
+      accountId: 'acc-1',
+      eventType: 'service_request.rejected',
+      eventVersion: 1,
+      subjectType: 'service_intent',
+      subjectId: 'intent-2',
+      audience: 'customer',
+      channel: 'whatsapp',
+      correlationId: 'cr-2',
+      causationId: 'intent-2',
+      payload: {
+        decision: 'rejected',
+        customer_reason: 'البيانات غير مكتملة',
+      },
+    })
+    const projectedRejected = await renderBusinessEventProjection({
+      accountId: 'acc-1',
+      projection: rejected,
+    })
+    const legacyRejected = await renderServiceRequestCustomerMessage({
+      accountId: 'acc-1',
+      outcome: 'rejected',
+      entityId: 'intent-2',
+      customerReason: 'البيانات غير مكتملة',
+    })
+    expect(projectedRejected.text).toBe(legacyRejected.text)
   })
 })

@@ -21,6 +21,14 @@ const shadowEvidence = readFileSync(
   new URL('../../../../supabase/migrations/094_business_event_shadow_projection_evidence.sql', import.meta.url),
   'utf8',
 )
+const serviceRequestSnapshots = readFileSync(
+  new URL('../../../../supabase/migrations/095_service_request_business_event_snapshots.sql', import.meta.url),
+  'utf8',
+)
+const shadowRecheck = readFileSync(
+  new URL('../../../../supabase/migrations/096_business_event_shadow_recheck.sql', import.meta.url),
+  'utf8',
+)
 const activeDelivery = readFileSync(
   new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
   'utf8',
@@ -138,5 +146,24 @@ describe('Phase G shadow cutover evidence', () => {
   it('keeps the active delivery worker on the legacy claim until an explicit cutover', () => {
     expect(activeDelivery).toContain("db.rpc('claim_customer_business_notifications'")
     expect(activeDelivery).not.toContain("db.rpc('claim_business_event_outbox'")
+  })
+})
+
+
+describe('generic service-request shadow preparation', () => {
+  it('stores self-contained generic service request facts at event creation time', () => {
+    expect(serviceRequestSnapshots).toContain("'service_id', v_service_id")
+    expect(serviceRequestSnapshots).toContain("'service_name', v_service_name")
+    expect(serviceRequestSnapshots).toContain("'customer_reason', v_customer_reason")
+    expect(serviceRequestSnapshots).toContain('from public.services as s')
+    expect(serviceRequestSnapshots).toContain("beo.event_type like 'service_request.%'")
+  })
+
+  it('provides a service-role-only recheck path without activating delivery', () => {
+    expect(shadowRecheck).toContain('requeue_business_event_shadow_projection')
+    expect(shadowRecheck).toContain("shadow_projection_status = 'pending'")
+    expect(shadowRecheck).toContain("delivery_mode = 'shadow'")
+    expect(shadowRecheck).toContain('to service_role')
+    expect(shadowRecheck).not.toContain("delivery_mode = 'active'")
   })
 })

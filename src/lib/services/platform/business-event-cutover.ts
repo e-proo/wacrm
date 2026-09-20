@@ -113,3 +113,31 @@ export async function inspectBusinessEventCutoverReadiness(input: {
     activeRows: activeRows ?? 0,
   })
 }
+
+
+export async function requeueShadowBusinessEventProjection(input: {
+  accountId: string
+  eventTypes?: readonly string[]
+  statuses?: readonly Exclude<
+    ShadowProjectionStatus,
+    'pending' | 'checking' | 'matched_legacy'
+  >[]
+}): Promise<number> {
+  const db = supabaseAdmin()
+  const { data, error } = await db.rpc(
+    'requeue_business_event_shadow_projection',
+    {
+      p_account_id: input.accountId,
+      p_event_types:
+        input.eventTypes && input.eventTypes.length > 0
+          ? [...input.eventTypes]
+          : null,
+      p_statuses:
+        input.statuses && input.statuses.length > 0
+          ? [...input.statuses]
+          : undefined,
+    },
+  )
+  if (error) throw error
+  return typeof data === 'number' ? data : Number(data ?? 0)
+}

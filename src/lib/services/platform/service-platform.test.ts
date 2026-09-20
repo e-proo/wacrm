@@ -439,3 +439,20 @@ describe('messaging purity', () => {
     expect(executor).toContain('commission_amount')
   })
 })
+
+
+describe('platform-generic service request projectors', () => {
+  it('registers generic service_request events without inventing a business domain', () => {
+    for (const eventType of [
+      'service_request.approved',
+      'service_request.rejected',
+      'service_request.matched',
+      'service_request.needs_clarification',
+      'service_request.completed',
+    ]) {
+      expect(CURRENT_EVENT_PROJECTOR_REGISTRY.has(eventType, 1), eventType).toBe(true)
+    }
+
+    expect(CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain('platform')).toBeNull()
+  })
+})
