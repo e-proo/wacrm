@@ -13,7 +13,7 @@ interface CoverageNotificationPayload {
   amount: string
   currency: string
   attributes: CoverageAttributes
-  commission_per_thousand?: string | null
+  commission_amount?: string | null
   commission_currency?: string | null
 }
 
@@ -71,7 +71,7 @@ const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (conte
       },
       { onConflict: 'source_change_request_id' },
     )
-    .select('id, reference_code')
+    .select('id, reference_code, commission_amount, commission_currency')
     .single()
 
   if (offerError) throw offerError
@@ -104,8 +104,9 @@ const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (conte
               amount: payload.total_amount,
               currency: payload.currency,
               attributes: offerAttrs,
-              commission_per_thousand: payload.commission_per_thousand ?? null,
-              commission_currency: payload.commission_currency ?? payload.currency,
+              commission_amount:
+                offer.commission_amount == null ? null : String(offer.commission_amount),
+              commission_currency: offer.commission_currency ?? payload.currency,
             } satisfies CoverageNotificationPayload,
           },
         }
@@ -180,7 +181,7 @@ const createRequestExecutor: ChangeExecutorRegistration['executor'] = async (con
       },
       { onConflict: 'source_change_request_id' },
     )
-    .select('id, requested_amount, currency, status')
+    .select('id, requested_amount, currency, status, commission_amount, commission_currency')
     .single()
 
   if (requestError) throw requestError
@@ -213,8 +214,9 @@ const createRequestExecutor: ChangeExecutorRegistration['executor'] = async (con
               amount: payload.requested_amount,
               currency: payload.currency,
               attributes: requestAttrs,
-              commission_per_thousand: payload.commission_per_thousand ?? null,
-              commission_currency: payload.commission_currency ?? payload.currency,
+              commission_amount:
+                request.commission_amount == null ? null : String(request.commission_amount),
+              commission_currency: request.commission_currency ?? payload.currency,
             } satisfies CoverageNotificationPayload,
           },
         }

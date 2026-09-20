@@ -13,7 +13,7 @@ const base = {
   payMethod: 'cash',
   receiveRegion: 'صنعاء',
   receiveMethod: 'networks',
-  commissionPerThousand: '7',
+  commissionAmount: '700',
   commissionCurrency: 'SAR',
 } as const
 
@@ -113,5 +113,16 @@ describe('renderCoverageApprovedCustomerMessage', () => {
 
     expect(rendered.text).toContain('الراجع لك: 701.2345 SAR')
     expect(rendered.text).not.toContain('الراجع لك: 700 SAR')
+  })
+
+  it('omits commission instead of calculating business facts inside messaging', async () => {
+    const rendered = await renderCoverageApprovedCustomerMessage({
+      ...base,
+      kind: 'offer',
+      commissionAmount: null,
+    })
+
+    expect(rendered.text).not.toContain('الراجع لك:')
+    expect(rendered.text).not.toContain('العمولة عليك:')
   })
 })

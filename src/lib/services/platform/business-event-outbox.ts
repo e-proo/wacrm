@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { renderFxTradeBusinessEventText } from '@/lib/messaging/fx-v2-outbox'
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 import type { MessageAudience, MessageChannel } from '@/lib/messaging/types'
 import { renderBusinessEventProjection } from './business-event-message-renderer'
 import { CURRENT_EVENT_PROJECTOR_REGISTRY } from './composition'
+import type { ShadowProjectionStatus } from './business-event-cutover'
 
 export interface ShadowBusinessEventRow {
   id: string
@@ -25,11 +27,10 @@ export interface ShadowBusinessEventRow {
 }
 
 /**
- * Claims shadow rows for parity inspection only.
+ * Claims shadow rows for rendering/parity verification only.
  *
- * This helper never sends WhatsApp and never promotes delivery_mode. The SQL
- * RPC only stamps shadow_checked_at so concurrent inspectors cannot compare the
- * same event twice.
+ * The SQL RPC moves rows into a durable "checking" state. It never promotes
+ * delivery_mode and never sends a message.
  */
 export async function claimShadowBusinessEvents(input: {
   accountId: string
@@ -48,25 +49,34 @@ export async function claimShadowBusinessEvents(input: {
 }
 
 export interface ShadowBusinessEventParity {
-  claimed: number
+  inspected: number
   linkedToLegacy: number
   nativeOnly: number
   customerEventsWithoutLegacyLink: number
 }
 
 /**
- * Summarizes strangler parity without changing the active notification worker.
+ * Read-only structural parity summary.
  *
- * Native-only lifecycle events (for example coverage.match.reserved) are
- * expected. Customer/WhatsApp rows without a legacy link are highlighted for
- * review because those are the events where an accidental cutover could create
- * a behavioral gap.
+ * Rendering parity is handled separately by inspectShadowBusinessEventRendering
+ * and persisted as cutover evidence. This function deliberately does not claim
+ * rows, so a dashboard/readiness check cannot consume pending verification work.
  */
 export async function inspectShadowBusinessEventParity(input: {
   accountId: string
   limit?: number
 }): Promise<ShadowBusinessEventParity> {
-  const rows = await claimShadowBusinessEvents(input)
+  const limit = Math.min(Math.max(input.limit ?? 200, 1), 1000)
+  const { data, error } = await supabaseAdmin()
+    .from('business_event_outbox')
+    .select('legacy_notification_id, audience, channel')
+    .eq('account_id', input.accountId)
+    .eq('delivery_mode', 'shadow')
+    .order('created_at', { ascending: true })
+    .limit(limit)
+  if (error) throw error
+
+  const rows = data ?? []
   let linkedToLegacy = 0
   let nativeOnly = 0
   let customerEventsWithoutLegacyLink = 0
@@ -82,13 +92,12 @@ export async function inspectShadowBusinessEventParity(input: {
   }
 
   return {
-    claimed: rows.length,
+    inspected: rows.length,
     linkedToLegacy,
     nativeOnly,
     customerEventsWithoutLegacyLink,
   }
 }
-
 
 export interface ShadowBusinessEventRenderingParity {
   claimed: number
@@ -96,8 +105,8 @@ export interface ShadowBusinessEventRenderingParity {
   matchedLegacy: number
   mismatchedLegacy: number
   nativeOnly: number
+  notDeliverable: number
   unsupportedProjector: number
-  unsupportedSurface: number
   comparisonMissing: number
   failed: number
 }
@@ -105,7 +114,10 @@ export interface ShadowBusinessEventRenderingParity {
 /**
  * Renders claimed shadow events through the new Event Projector platform and,
  * when a strangler link exists, compares the text with the still-active legacy
- * path. This function NEVER sends a message and never calls a transport.
+ * path. Results are persisted as hashes/status only; message text is not copied
+ * into readiness evidence.
+ *
+ * This function NEVER sends a message and never calls a transport.
  */
 export async function inspectShadowBusinessEventRendering(input: {
   accountId: string
@@ -121,8 +133,8 @@ export async function inspectShadowBusinessEventRendering(input: {
     matchedLegacy: 0,
     mismatchedLegacy: 0,
     nativeOnly: 0,
+    notDeliverable: 0,
     unsupportedProjector: 0,
-    unsupportedSurface: 0,
     comparisonMissing: 0,
     failed: 0,
   }
@@ -130,13 +142,25 @@ export async function inspectShadowBusinessEventRendering(input: {
   for (const row of rows) {
     const audience = asMessageAudience(row.audience)
     const channel = asMessageChannel(row.channel)
+
     if (!audience || !channel) {
-      result.unsupportedSurface += 1
+      result.notDeliverable += 1
+      await persistShadowProjectionEvidence({
+        accountId: input.accountId,
+        eventId: row.id,
+        status: 'not_deliverable',
+      })
       continue
     }
 
     if (!CURRENT_EVENT_PROJECTOR_REGISTRY.has(row.event_type, row.event_version)) {
       result.unsupportedProjector += 1
+      await persistShadowProjectionEvidence({
+        accountId: input.accountId,
+        eventId: row.id,
+        status: 'unsupported_projector',
+        error: 'EVENT_PROJECTOR_NOT_REGISTERED',
+      })
       continue
     }
 
@@ -162,6 +186,12 @@ export async function inspectShadowBusinessEventRendering(input: {
 
       if (!row.legacy_notification_id) {
         result.nativeOnly += 1
+        await persistShadowProjectionEvidence({
+          accountId: input.accountId,
+          eventId: row.id,
+          status: 'native_only',
+          renderedText: rendered.text,
+        })
         continue
       }
 
@@ -174,6 +204,13 @@ export async function inspectShadowBusinessEventRendering(input: {
       if (legacyError) throw legacyError
       if (!legacy) {
         result.comparisonMissing += 1
+        await persistShadowProjectionEvidence({
+          accountId: input.accountId,
+          eventId: row.id,
+          status: 'comparison_missing',
+          renderedText: rendered.text,
+          error: 'LEGACY_NOTIFICATION_NOT_FOUND',
+        })
         continue
       }
 
@@ -185,10 +222,41 @@ export async function inspectShadowBusinessEventRendering(input: {
           })
         : legacy.message_text
 
-      if (rendered.text === legacyText) result.matchedLegacy += 1
-      else result.mismatchedLegacy += 1
+      if (rendered.text === legacyText) {
+        result.matchedLegacy += 1
+        await persistShadowProjectionEvidence({
+          accountId: input.accountId,
+          eventId: row.id,
+          status: 'matched_legacy',
+          renderedText: rendered.text,
+          legacyText,
+        })
+      } else {
+        result.mismatchedLegacy += 1
+        await persistShadowProjectionEvidence({
+          accountId: input.accountId,
+          eventId: row.id,
+          status: 'mismatched_legacy',
+          renderedText: rendered.text,
+          legacyText,
+        })
+      }
     } catch (error) {
       result.failed += 1
+      const message = error instanceof Error ? error.message : String(error)
+      try {
+        await persistShadowProjectionEvidence({
+          accountId: input.accountId,
+          eventId: row.id,
+          status: 'failed',
+          error: message,
+        })
+      } catch (persistError) {
+        console.error(
+          `[business event shadow] failed to persist verification failure event=${row.event_type}@${row.event_version} id=${row.id.slice(0, 8)}:`,
+          persistError,
+        )
+      }
       console.error(
         `[business event shadow] projection failed event=${row.event_type}@${row.event_version} id=${row.id.slice(0, 8)}:`,
         error,
@@ -197,6 +265,34 @@ export async function inspectShadowBusinessEventRendering(input: {
   }
 
   return result
+}
+
+async function persistShadowProjectionEvidence(input: {
+  accountId: string
+  eventId: string
+  status: Exclude<ShadowProjectionStatus, 'pending' | 'checking'>
+  renderedText?: string
+  legacyText?: string
+  error?: string
+}): Promise<void> {
+  const { error } = await supabaseAdmin()
+    .from('business_event_outbox')
+    .update({
+      shadow_projection_status: input.status,
+      shadow_projection_checked_at: new Date().toISOString(),
+      shadow_projection_error: input.error?.slice(0, 1000) ?? null,
+      shadow_render_hash: input.renderedText ? sha256(input.renderedText) : null,
+      shadow_legacy_hash: input.legacyText ? sha256(input.legacyText) : null,
+    })
+    .eq('account_id', input.accountId)
+    .eq('id', input.eventId)
+    .eq('delivery_mode', 'shadow')
+    .eq('shadow_projection_status', 'checking')
+  if (error) throw error
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
 }
 
 function asMessageAudience(value: string | null): MessageAudience | null {

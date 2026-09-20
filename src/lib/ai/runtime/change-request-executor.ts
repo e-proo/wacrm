@@ -37,7 +37,7 @@ interface CoverageNotificationPayload {
   amount: string
   currency: string
   attributes: CoverageAttributes
-  commission_per_thousand?: string | null
+  commission_amount?: string | null
   commission_currency?: string | null
 }
 
@@ -457,7 +457,7 @@ async function renderStructuredCustomerNotification(
     payMethod: payload.attributes.pay_method,
     receiveRegion,
     receiveMethod: payload.attributes.receive_method,
-    commissionPerThousand: payload.commission_per_thousand,
+    commissionAmount: payload.commission_amount,
     commissionCurrency: payload.commission_currency,
     store: createSupabaseTemplateOverrideStore(db),
   })

@@ -104,7 +104,7 @@ describe('domain message projectors', () => {
         },
         pay_region_label: 'حضرموت',
         receive_region_label: 'صنعاء',
-        commission_per_thousand: '7',
+        commission_per_thousand: '9999',
         commission_amount: '701.2345',
         commission_currency: 'SAR',
       },
@@ -130,7 +130,6 @@ describe('domain message projectors', () => {
       payMethod: 'cash',
       receiveRegion: 'صنعاء',
       receiveMethod: 'networks',
-      commissionPerThousand: '7',
       commissionAmount: '701.2345',
       commissionCurrency: 'SAR',
     })

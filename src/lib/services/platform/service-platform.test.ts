@@ -414,3 +414,28 @@ describe('domain-owned event projectors', () => {
     expect(CURRENT_EVENT_PROJECTOR_REGISTRY.has('coverage.offer.cancelled', 1)).toBe(false)
   })
 })
+
+
+describe('messaging purity', () => {
+  it('keeps Coverage commission arithmetic out of the messaging layer', () => {
+    const renderer = readFileSync(
+      new URL('../../messaging/coverage-customer.ts', import.meta.url),
+      'utf8',
+    )
+    const projector = readFileSync(
+      new URL('../coverage/message-projectors.ts', import.meta.url),
+      'utf8',
+    )
+    const executor = readFileSync(
+      new URL('../coverage/change-executors.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(renderer).not.toContain('calculateCommission')
+    expect(renderer).not.toContain('commissionPerThousand')
+    expect(renderer).not.toContain('/ 1000')
+    expect(projector).toContain('commission_amount')
+    expect(projector).not.toContain('commission_per_thousand /')
+    expect(executor).toContain('commission_amount')
+  })
+})

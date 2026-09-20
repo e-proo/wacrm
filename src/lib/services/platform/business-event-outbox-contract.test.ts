@@ -17,6 +17,10 @@ const coverageSnapshotLabels = readFileSync(
   new URL('../../../../supabase/migrations/093_coverage_business_event_snapshot_labels.sql', import.meta.url),
   'utf8',
 )
+const shadowEvidence = readFileSync(
+  new URL('../../../../supabase/migrations/094_business_event_shadow_projection_evidence.sql', import.meta.url),
+  'utf8',
+)
 const activeDelivery = readFileSync(
   new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
   'utf8',
@@ -109,5 +113,30 @@ describe('Phase F Coverage event snapshot projection prerequisites', () => {
     expect(shadowRuntime).toContain('inspectShadowBusinessEventRendering')
     expect(shadowRuntime).toContain('CURRENT_EVENT_PROJECTOR_REGISTRY')
     expect(shadowRuntime).not.toContain('engineSendText')
+  })
+})
+
+
+describe('Phase G shadow cutover evidence', () => {
+  it('persists cutover evidence without promoting any row to active delivery', () => {
+    expect(shadowEvidence).toContain('shadow_projection_status')
+    expect(shadowEvidence).toContain("'matched_legacy'")
+    expect(shadowEvidence).toContain("'mismatched_legacy'")
+    expect(shadowEvidence).toContain('shadow_render_hash')
+    expect(shadowEvidence).toContain('shadow_legacy_hash')
+    expect(shadowEvidence).toContain("shadow_projection_status = 'checking'")
+    expect(shadowEvidence).not.toContain("set delivery_mode = 'active'")
+  })
+
+  it('reclaims stale shadow checks without changing the RPC return contract', () => {
+    expect(shadowEvidence).toContain("interval '15 minutes'")
+    expect(shadowEvidence).toContain('for update skip locked')
+    expect(shadowEvidence).toContain('shadow_projection_attempts + 1')
+    expect(shadowEvidence).toContain('shadow_checked_at timestamptz')
+  })
+
+  it('keeps the active delivery worker on the legacy claim until an explicit cutover', () => {
+    expect(activeDelivery).toContain("db.rpc('claim_customer_business_notifications'")
+    expect(activeDelivery).not.toContain("db.rpc('claim_business_event_outbox'")
   })
 })

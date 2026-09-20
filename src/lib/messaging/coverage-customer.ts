@@ -19,7 +19,6 @@ export interface CoverageApprovedCustomerMessageInput {
   payMethod: string
   receiveRegion: string
   receiveMethod: string
-  commissionPerThousand?: string | number | null
   commissionAmount?: string | number | null
   commissionCurrency?: string | null
   locale?: string | null
@@ -48,10 +47,7 @@ export async function renderCoverageApprovedCustomerMessage(
   input: CoverageApprovedCustomerMessageInput,
 ): Promise<RenderedCoverageCustomerMessage> {
   const eventKey = input.kind === 'offer' ? 'coverage.offer.approved' : 'coverage.request.approved'
-  const commissionAmount =
-    input.commissionAmount != null
-      ? input.commissionAmount
-      : calculateCommission(input.amount, input.commissionPerThousand)
+  const commissionAmount = input.commissionAmount ?? null
   const commissionEffect = input.kind === 'offer' ? 'customer_receives' : 'customer_pays'
   const context = buildCoverageMessageContext({
     entityType: input.kind === 'offer' ? 'coverage_offer' : 'coverage_request',
@@ -142,17 +138,6 @@ function assertCoverageCustomerTemplate(template: MessageTemplateDefinition): vo
   for (const required of ['{{money.amount}}', '{{money.currency}}']) {
     if (!template.body.includes(required)) throw new Error('COVERAGE_TEMPLATE_AMOUNT_REQUIRED')
   }
-}
-
-function calculateCommission(
-  amount: string | number,
-  perThousand: string | number | null | undefined,
-): number | null {
-  if (perThousand == null || perThousand === '') return null
-  const numericAmount = Number(amount)
-  const numericRate = Number(perThousand)
-  if (!Number.isFinite(numericAmount) || !Number.isFinite(numericRate)) return null
-  return (numericAmount * numericRate) / 1000
 }
 
 function safeReason(error: unknown): string {

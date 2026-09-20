@@ -1,3 +1,4 @@
+export * from './business-event-cutover'
 export * from './event-projector-registry'
 export * from './business-event-message-renderer'
 export * from './business-event-outbox'
