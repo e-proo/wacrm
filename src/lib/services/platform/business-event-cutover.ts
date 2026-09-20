@@ -141,3 +141,25 @@ export async function requeueShadowBusinessEventProjection(input: {
   if (error) throw error
   return typeof data === 'number' ? data : Number(data ?? 0)
 }
+
+
+export async function requeueStaleShadowBusinessEventProjection(input: {
+  accountId: string
+  eventTypes: readonly string[]
+  staleAfterSeconds?: number
+}): Promise<number> {
+  if (input.eventTypes.length === 0) {
+    throw new Error('SHADOW_EVENT_TYPES_REQUIRED')
+  }
+
+  const { data, error } = await supabaseAdmin().rpc(
+    'requeue_stale_business_event_shadow_projection',
+    {
+      p_account_id: input.accountId,
+      p_event_types: [...input.eventTypes],
+      p_stale_after_seconds: input.staleAfterSeconds ?? 30,
+    },
+  )
+  if (error) throw error
+  return typeof data === 'number' ? data : Number(data ?? 0)
+}

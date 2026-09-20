@@ -3,7 +3,10 @@ import {
   inspectShadowBusinessEventRendering,
   type ShadowBusinessEventRenderingParity,
 } from '@/lib/services/platform/business-event-outbox'
-import { requeueShadowBusinessEventProjection } from '@/lib/services/platform/business-event-cutover'
+import {
+  requeueShadowBusinessEventProjection,
+  requeueStaleShadowBusinessEventProjection,
+} from '@/lib/services/platform/business-event-cutover'
 
 export const FX_BUSINESS_EVENT_ROUTE_KEY = 'fx_trade_customer_whatsapp' as const
 
@@ -34,6 +37,7 @@ export interface FxBusinessEventCutoverReadiness {
 export interface FxBusinessEventShadowPreparationResult {
   backfilledRows: number
   supersededLegacyRows: number
+  recoveredStaleRows: number
   requeuedRows: number
   rendering: ShadowBusinessEventRenderingParity
   readiness: FxBusinessEventCutoverReadiness
@@ -175,6 +179,11 @@ export async function prepareFxBusinessEventShadowVerification(input: {
   const backfilledRows = await backfillFxBusinessEventShadowHistory(input)
   const supersededLegacyRows =
     await reconcileSupersededFxLegacyNotifications(input)
+  const recoveredStaleRows = await requeueStaleShadowBusinessEventProjection({
+    accountId: input.accountId,
+    eventTypes: FX_BUSINESS_EVENT_TYPES,
+    staleAfterSeconds: 30,
+  })
   const requeuedRows = await requeueShadowBusinessEventProjection({
     accountId: input.accountId,
     eventTypes: FX_BUSINESS_EVENT_TYPES,
@@ -195,6 +204,7 @@ export async function prepareFxBusinessEventShadowVerification(input: {
   return {
     backfilledRows,
     supersededLegacyRows,
+    recoveredStaleRows,
     requeuedRows,
     rendering,
     readiness,

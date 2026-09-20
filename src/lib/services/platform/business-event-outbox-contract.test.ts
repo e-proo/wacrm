@@ -45,6 +45,10 @@ const fxReadinessDiagnostics = readFileSync(
   new URL('../../../../supabase/migrations/099_fx_cutover_readiness_diagnostics.sql', import.meta.url),
   'utf8',
 )
+const shadowStaleRecovery = readFileSync(
+  new URL('../../../../supabase/migrations/100_business_event_shadow_stale_recovery.sql', import.meta.url),
+  'utf8',
+)
 const activeDelivery = readFileSync(
   new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
   'utf8',
@@ -271,5 +275,18 @@ describe('FX cutover readiness diagnostics', () => {
     expect(fxReadinessDiagnostics).toContain('v_blockers = 0')
     expect(fxReadinessDiagnostics).toContain('v_legacy_nonterminal = 0')
     expect(fxReadinessDiagnostics).toContain('v_active_nonterminal = 0')
+  })
+})
+
+
+describe('shadow verification stale-claim recovery', () => {
+  it('recovers only stale checking rows without touching delivery mode or attempts', () => {
+    expect(shadowStaleRecovery).toContain("shadow_projection_status = 'checking'")
+    expect(shadowStaleRecovery).toContain("shadow_projection_status = 'pending'")
+    expect(shadowStaleRecovery).toContain("delivery_mode = 'shadow'")
+    expect(shadowStaleRecovery).toContain('shadow_projection_claimed_at')
+    expect(shadowStaleRecovery).toContain('p_stale_after_seconds < 15')
+    expect(shadowStaleRecovery).not.toContain('shadow_projection_attempts = 0')
+    expect(shadowStaleRecovery).not.toContain("delivery_mode = 'active'")
   })
 })

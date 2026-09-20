@@ -29,6 +29,15 @@ liveDescribe('FX cutover live TEST verification', () => {
     expect(result.readiness.mode).toBe('legacy')
     expect(result.readiness.activeNonterminal).toBe(0)
     expect(result.readiness.requiredEventTypes).toBe(FX_BUSINESS_EVENT_TYPES.length)
+    expect(result.readiness.matchedEventTypes).toBe(FX_BUSINESS_EVENT_TYPES.length)
+    expect(result.readiness.matchedEventTypeKeys).toEqual(
+      expect.arrayContaining([...FX_BUSINESS_EVENT_TYPES]),
+    )
+    expect(result.readiness.missingEventTypes).toEqual([])
+    expect(result.readiness.blockers).toBe(0)
+    expect(result.readiness.legacyNonterminal).toBe(0)
+    expect(result.readiness.activeNonterminal).toBe(0)
+    expect(result.readiness.ready).toBe(true)
     expect(result.rendering.failed).toBe(0)
     expect(result.rendering.unsupportedProjector).toBe(0)
     expect(result.rendering.mismatchedLegacy).toBe(0)
@@ -38,6 +47,7 @@ liveDescribe('FX cutover live TEST verification', () => {
         {
           backfilledRows: result.backfilledRows,
           supersededLegacyRows: result.supersededLegacyRows,
+          recoveredStaleRows: result.recoveredStaleRows,
           requeuedRows: result.requeuedRows,
           rendering: result.rendering,
           readiness: result.readiness,
@@ -46,5 +56,5 @@ liveDescribe('FX cutover live TEST verification', () => {
         2,
       ),
     )
-  })
+  }, 60_000)
 })
