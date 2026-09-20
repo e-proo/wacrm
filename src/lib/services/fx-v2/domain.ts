@@ -1,17 +1,10 @@
-import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
-import type { PlatformToolManifest } from '@/lib/ai/tools/platform/contracts'
 import { SYSTEM_MESSAGE_TEMPLATES } from '@/lib/messaging/defaults'
 import {
   defineBusinessDomain,
   defineBusinessDomainRuntime,
 } from '@/lib/services/platform/domain-contracts'
 import { FX_V2_CHANGE_EXECUTORS } from './change-executors'
-
-function requireCurrentTool(key: string, version: number): PlatformToolManifest {
-  const tool = getCurrentPlatformTool(key, version)
-  if (!tool) throw new Error('FX V2 domain is missing current tool contract ' + key + '@' + version)
-  return tool
-}
+import { FX_V2_TOOL_MANIFESTS } from './tool-manifests'
 
 const FX_TEMPLATE_KEYS = new Set([
   'exchange_rate.quote.completed',
@@ -33,14 +26,7 @@ export const FX_V2_DOMAIN = defineBusinessDomain({
   description:
     'Authoritative FX V2 domain: current-rate reads, trade proposals, admin proposals, deterministic approved writes, and canonical trade events.',
   capabilities: ['rates.read', 'rates.trade_request', 'rates.propose'],
-  tools: [
-    requireCurrentTool('exchange_rates.get_current', 1),
-    requireCurrentTool('exchange_rates.record_trade_request', 2),
-    requireCurrentTool('exchange_rates.admin_list_pairs', 1),
-    requireCurrentTool('exchange_rates.propose_pair_change', 2),
-    requireCurrentTool('exchange_rates.admin_list_trade_requests', 1),
-    requireCurrentTool('exchange_rates.propose_trade_decision', 1),
-  ],
+  tools: FX_V2_TOOL_MANIFESTS,
   changeActions: [
     {
       key: 'exchange_rates.pair.publish',

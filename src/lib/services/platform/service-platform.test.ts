@@ -1,8 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { PlatformToolManifest } from '@/lib/ai/tools/platform/contracts'
+import { getRegisteredTool } from '@/lib/ai/runtime/tool-registry'
+import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
 import { COVERAGE_DOMAIN } from '@/lib/services/coverage/domain'
+import { COVERAGE_TOOL_MANIFESTS } from '@/lib/services/coverage/tool-manifests'
 import { FX_V2_DOMAIN } from '@/lib/services/fx-v2/domain'
+import { FX_V2_TOOL_MANIFESTS } from '@/lib/services/fx-v2/tool-manifests'
 import {
   CURRENT_BUSINESS_DOMAIN_REGISTRY,
   CURRENT_CHANGE_EXECUTOR_REGISTRY,
@@ -286,5 +290,47 @@ describe('Coverage second-domain migration', () => {
     expect(source).toContain('tryExecuteCurrentChangeAction')
     expect(source).not.toContain("row.target_type === 'coverage_offer'")
     expect(source).not.toContain("row.target_type === 'coverage_request'")
+  })
+})
+
+
+describe('native domain tool ownership', () => {
+  const nativeManifests = [...FX_V2_TOOL_MANIFESTS, ...COVERAGE_TOOL_MANIFESTS]
+
+  it('makes the business domains own their native platform manifests', () => {
+    expect(FX_V2_DOMAIN.tools).toEqual(FX_V2_TOOL_MANIFESTS)
+    expect(COVERAGE_DOMAIN.tools).toEqual(COVERAGE_TOOL_MANIFESTS)
+
+    expect(getCurrentPlatformTool('exchange_rates.get_current', 1)).toBe(
+      FX_V2_TOOL_MANIFESTS.find((tool) => tool.key === 'exchange_rates.get_current'),
+    )
+    expect(getCurrentPlatformTool('coverage.get_rates', 1)).toBe(
+      COVERAGE_TOOL_MANIFESTS.find((tool) => tool.key === 'coverage.get_rates'),
+    )
+  })
+
+  it('keeps native manifests compatible with the provider-facing legacy schemas during cutover', () => {
+    for (const manifest of nativeManifests) {
+      const legacy = getRegisteredTool(manifest.key)
+      expect(legacy, manifest.key).not.toBeNull()
+      expect(legacy?.version, manifest.key).toBe(manifest.version)
+      expect(manifest.description, manifest.key).toBe(legacy?.description)
+      expect(manifest.inputSchema, manifest.key).toEqual(legacy?.argumentSchema)
+      expect(manifest.outputSchema, manifest.key).toEqual({
+        description: legacy?.returnSchema,
+      })
+    }
+  })
+
+  it('removes FX and Coverage semantic specs from the legacy bridge registry', () => {
+    const registrySource = readFileSync(
+      new URL('../../ai/tools/platform/current-domain-registry.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(registrySource).toContain('FX_V2_TOOL_MANIFESTS')
+    expect(registrySource).toContain('COVERAGE_TOOL_MANIFESTS')
+    expect(registrySource).not.toContain("key: 'exchange_rates.")
+    expect(registrySource).not.toContain("key: 'coverage.")
   })
 })

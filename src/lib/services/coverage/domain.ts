@@ -1,19 +1,10 @@
-import type { PlatformToolManifest } from '@/lib/ai/tools/platform/contracts'
-import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
 import { SYSTEM_MESSAGE_TEMPLATES } from '@/lib/messaging/defaults'
 import {
   defineBusinessDomain,
   defineBusinessDomainRuntime,
 } from '@/lib/services/platform/domain-contracts'
 import { COVERAGE_CHANGE_EXECUTORS } from './change-executors'
-
-function requireCurrentTool(key: string, version: number): PlatformToolManifest {
-  const tool = getCurrentPlatformTool(key, version)
-  if (!tool) {
-    throw new Error('Coverage domain is missing current tool contract ' + key + '@' + version)
-  }
-  return tool
-}
+import { COVERAGE_TOOL_MANIFESTS } from './tool-manifests'
 
 const COVERAGE_TEMPLATE_KEYS = new Set([
   'coverage.offer.approved',
@@ -34,15 +25,7 @@ export const COVERAGE_DOMAIN = defineBusinessDomain({
   description:
     'Coverage marketplace domain: directional reads, customer proposals, admin operational reads, and deterministic approved offer/request creation.',
   capabilities: ['coverage.read', 'coverage.propose'],
-  tools: [
-    requireCurrentTool('coverage.check_availability', 1),
-    requireCurrentTool('coverage.find_offers', 2),
-    requireCurrentTool('coverage.get_rates', 1),
-    requireCurrentTool('coverage.propose_offer', 2),
-    requireCurrentTool('coverage.propose_request', 1),
-    requireCurrentTool('coverage.admin_list_offers', 1),
-    requireCurrentTool('coverage.admin_list_requests', 1),
-  ],
+  tools: COVERAGE_TOOL_MANIFESTS,
   changeActions: [
     {
       key: 'coverage.offer.create',

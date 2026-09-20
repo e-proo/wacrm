@@ -1,7 +1,18 @@
+import { COVERAGE_TOOL_MANIFESTS } from '@/lib/services/coverage/tool-manifests'
+import { FX_V2_TOOL_MANIFESTS } from '@/lib/services/fx-v2/tool-manifests'
+import { STANDARD_PLATFORM_TOOL_ERRORS } from '@/lib/services/platform/tool-contract-defaults'
 import { getRegisteredTool } from '../../runtime/tool-registry'
+import type {
+  PlatformToolManifest,
+  PlatformToolPlane,
+  PlatformToolPermission,
+  PlatformToolRisk,
+} from './contracts'
 import { DomainRegistry, defineDomain } from './domain-registry'
-import { platformManifestFromLegacy, type LegacyToolPlatformMetadata } from './legacy-bridge'
-import type { PlatformToolManifest, PlatformToolPlane, PlatformToolPermission, PlatformToolRisk } from './contracts'
+import {
+  platformManifestFromLegacy,
+  type LegacyToolPlatformMetadata,
+} from './legacy-bridge'
 
 type CurrentToolSpec = {
   key: string
@@ -19,156 +30,163 @@ type CurrentToolSpec = {
   approval?: boolean
 }
 
-const SPECS: readonly CurrentToolSpec[] = [
+/**
+ * Transitional legacy specs only.
+ *
+ * FX V2 and Coverage are intentionally absent: their native PlatformToolManifest
+ * objects now live with the owning business domains.
+ */
+const LEGACY_SPECS: readonly CurrentToolSpec[] = [
   {
-    key: 'services.search', version: 1, domain: 'services', title: 'Search services', permission: 'read', risk: 'read',
-    planes: ['customer', 'admin'], capability: 'services.read', purpose: 'Find active catalog services relevant to a request.',
+    key: 'services.search',
+    version: 1,
+    domain: 'services',
+    title: 'Search services',
+    permission: 'read',
+    risk: 'read',
+    planes: ['customer', 'admin'],
+    capability: 'services.read',
+    purpose: 'Find active catalog services relevant to a request.',
     use: ['The user needs to discover which configured service may fit their need.'],
     avoid: ['Do not use it to create, edit, price, or activate a service.'],
   },
   {
-    key: 'services.get', version: 1, domain: 'services', title: 'Read service', permission: 'read', risk: 'read',
-    planes: ['customer', 'admin'], capability: 'services.read', purpose: 'Read one configured service using model-safe fields.',
+    key: 'services.get',
+    version: 1,
+    domain: 'services',
+    title: 'Read service',
+    permission: 'read',
+    risk: 'read',
+    planes: ['customer', 'admin'],
+    capability: 'services.read',
+    purpose: 'Read one configured service using model-safe fields.',
     use: ['A service id/code is known and its current public/AI-safe details are needed.'],
     avoid: ['Do not infer internal fields or use the result as authority to mutate the catalog.'],
   },
   {
-    key: 'services.match_request', version: 1, domain: 'services', title: 'Match service request', permission: 'read', risk: 'read',
-    planes: ['customer', 'admin'], capability: 'services.read', purpose: 'Classify a request against configured service schemas.',
+    key: 'services.match_request',
+    version: 1,
+    domain: 'services',
+    title: 'Match service request',
+    permission: 'read',
+    risk: 'read',
+    planes: ['customer', 'admin'],
+    capability: 'services.read',
+    purpose: 'Classify a request against configured service schemas.',
     use: ['The conversation describes a service need but the exact configured service is not yet known.'],
     avoid: ['Do not promise a service when the match is none or required fields are missing.'],
   },
   {
-    key: 'services.propose_update', version: 1, domain: 'services', title: 'Propose service update', permission: 'propose', risk: 'high',
-    planes: ['admin'], capability: 'services.propose', purpose: 'Create a typed, reviewable proposal for a service revision.',
+    key: 'services.propose_update',
+    version: 1,
+    domain: 'services',
+    title: 'Propose service update',
+    permission: 'propose',
+    risk: 'high',
+    planes: ['admin'],
+    capability: 'services.propose',
+    purpose: 'Create a typed, reviewable proposal for a service revision.',
     use: ['A trusted administrator explicitly asks to change allowed service data.'],
-    avoid: ['Never use for a customer request or to edit internal-only fields outside the typed schema.'], approval: true,
+    avoid: ['Never use for a customer request or to edit internal-only fields outside the typed schema.'],
+    approval: true,
   },
   {
-    key: 'pricing.calculate_quote', version: 1, domain: 'pricing', title: 'Calculate quote', permission: 'read', risk: 'read',
-    planes: ['customer', 'admin'], capability: 'pricing.read', purpose: 'Calculate a quote from the currently published pricing rule.',
+    key: 'pricing.calculate_quote',
+    version: 1,
+    domain: 'pricing',
+    title: 'Calculate quote',
+    permission: 'read',
+    risk: 'read',
+    planes: ['customer', 'admin'],
+    capability: 'pricing.read',
+    purpose: 'Calculate a quote from the currently published pricing rule.',
     use: ['The service, amount, currency, and required pricing attributes are known.'],
-    avoid: ['Do not invent missing inputs or use it to modify a pricing rule.'], constraints: ['service_ids', 'currencies'],
+    avoid: ['Do not invent missing inputs or use it to modify a pricing rule.'],
+    constraints: ['service_ids', 'currencies'],
   },
   {
-    key: 'pricing_rules.propose_service_price', version: 1, domain: 'pricing_rules', title: 'Propose service price', permission: 'propose', risk: 'high',
-    planes: ['admin'], capability: 'pricing.propose', purpose: 'Create a typed proposal for a new immutable pricing rule/service revision.',
+    key: 'pricing_rules.propose_service_price',
+    version: 1,
+    domain: 'pricing_rules',
+    title: 'Propose service price',
+    permission: 'propose',
+    risk: 'high',
+    planes: ['admin'],
+    capability: 'pricing.propose',
+    purpose: 'Create a typed proposal for a new immutable pricing rule/service revision.',
     use: ['A trusted administrator explicitly supplies a pricing change.'],
-    avoid: ['Never expose it to customers and never directly overwrite the live pricing row.'], approval: true,
+    avoid: ['Never expose it to customers and never directly overwrite the live pricing row.'],
+    approval: true,
   },
   {
-    key: 'exchange_rates.get_current', version: 1, domain: 'exchange_rates', title: 'Read current FX V2 rate', permission: 'read', risk: 'read',
-    planes: ['customer', 'admin'], capability: 'rates.read', purpose: 'Read the authoritative current FX V2 rate/version for an explicit pair and customer buy/sell side.',
-    use: ['MUST be used whenever a customer or admin asks for a concrete/current exchange rate. The returned rate_version_id is the quote token for a later trade request.'],
-    avoid: ['Never answer a concrete current rate from conversation history or knowledge text. Never swap the customer buy/sell side and never use region/settlement to choose an FX V2 price.'], constraints: ['currencies'],
+    key: 'intents.record',
+    version: 1,
+    domain: 'intents',
+    title: 'Record customer intent',
+    permission: 'propose',
+    risk: 'low',
+    planes: ['customer', 'admin'],
+    capability: 'intents.propose',
+    purpose: 'Persist a structured need/offer the configured services cannot yet resolve.',
+    use: ['A business need/offer should be remembered or forwarded for review.'],
+    avoid: ['Do not treat a generic intent as an approved authoritative mutation.'],
   },
   {
-    key: 'exchange_rates.record_trade_request', version: 2, domain: 'exchange_rates', title: 'Create customer FX V2 trade request', permission: 'propose', risk: 'medium',
-    planes: ['customer'], capability: 'rates.trade_request', purpose: 'Create the current customer’s real pending FX V2 trade request against the exact immutable rate version they were quoted.',
-    use: ['Use only after exchange_rates.get_current returned the pair rate and the customer confirmed the amount/side. Pass that exact rate_version_id as expected_rate_version_id.'],
-    avoid: ['Never change an exchange rate, never invent/substitute a rate version, never use it without server-bound customer identity, and never describe pending_admin as completed settlement.'], constraints: ['currencies'],
+    key: 'intents.search',
+    version: 1,
+    domain: 'intents',
+    title: 'Search customer intents',
+    permission: 'read',
+    risk: 'read',
+    planes: ['admin'],
+    capability: 'intents.read',
+    purpose: 'Inspect the structured admin inbox of customer needs/offers.',
+    use: ['Administration asks what customer requests/offers are waiting or recorded.'],
+    avoid: ['Do not expose the administrative intent queue to customer plane.'],
   },
   {
-    key: 'exchange_rates.admin_list_pairs', version: 1, domain: 'exchange_rates', title: 'List FX V2 pairs', permission: 'read', risk: 'read',
-    planes: ['admin'], capability: 'rates.read', purpose: 'Inspect explicit FX V2 pairs, current immutable rate versions and optimistic lock versions.',
-    use: ['A trusted administrator asks for current pair configuration or needs a fresh pair lock before proposing a rate change.'],
-    avoid: ['Do not read legacy Rate Books and do not use a stale lock_version for a later proposal.'],
+    key: 'intents.propose_decision',
+    version: 1,
+    domain: 'intents',
+    title: 'Propose intent decision',
+    permission: 'propose',
+    risk: 'medium',
+    planes: ['admin'],
+    capability: 'intents.propose',
+    purpose: 'Create a typed proposal to resolve/match/reject/clarify a customer intent.',
+    use: ['A trusted administrator has reviewed an intent and instructs a decision.'],
+    avoid: ['Do not resolve a customer intent without the explicit admin decision.'],
   },
   {
-    key: 'exchange_rates.propose_pair_change', version: 2, domain: 'exchange_rates', title: 'Propose FX V2 rate change', permission: 'propose', risk: 'high',
-    planes: ['admin'], capability: 'rates.propose', purpose: 'Create an approval-bound proposal to publish a new immutable FX V2 rate version for one pair.',
-    use: ['First read the pair with exchange_rates.admin_list_pairs, then pass pair_id, exact expected_lock_version, business buy rate and business sell rate.'],
-    avoid: ['Never bypass human approval; never guess pair_id/lock_version; never mutate an existing immutable rate version.'], constraints: ['currencies'], approval: true,
-  },
-  {
-    key: 'exchange_rates.admin_list_trade_requests', version: 1, domain: 'exchange_rates', title: 'List FX V2 trade requests', permission: 'read', risk: 'read',
-    planes: ['admin'], capability: 'rates.read', purpose: 'Inspect customer FX V2 trade requests and their snapshotted rate/amount facts.',
-    use: ['A trusted administrator needs pending or historical FX trade requests.'],
-    avoid: ['Do not treat a pending request as approved or completed.'],
-  },
-  {
-    key: 'exchange_rates.propose_trade_decision', version: 1, domain: 'exchange_rates', title: 'Propose FX trade decision', permission: 'propose', risk: 'high',
-    planes: ['admin'], capability: 'rates.propose', purpose: 'Create an approval-bound proposal to approve a pending FX request for contact or reject it.',
-    use: ['After reading a pending_admin trade request, a trusted administrator explicitly instructs approve or reject.'],
-    avoid: ['Never decide without explicit administrator intent; approval means approved_for_contact only and never settlement completed.'], approval: true,
-  },
-  {
-    key: 'coverage.check_availability', version: 1, domain: 'coverage', title: 'Check coverage availability', permission: 'read', risk: 'read',
-    planes: ['customer', 'admin'], capability: 'coverage.read', purpose: 'Read aggregate coverage headroom without exposing provider internals.',
-    use: ['The service/currency/required amount are known and availability needs checking.'],
-    avoid: ['Do not reveal provider identity/internal cost to customer plane.'], constraints: ['service_ids', 'currencies'],
-  },
-  {
-    key: 'coverage.find_offers', version: 2, domain: 'coverage', title: 'Find coverage offers', permission: 'read', risk: 'read',
-    planes: ['customer', 'admin'], capability: 'coverage.read',
-    purpose: 'Search canonical coverage supply using the CUSTOMER pay and receive legs. PAY is where/how the customer hands money to the business; RECEIVE is where/how the customer gets the covered amount.',
-    use: ['Use when both customer legs are understood. A north-pay to south-receive request matches anti-parallel south-pay to north-receive offers. If wording conflicts, clarify before searching.'],
-    avoid: ['Never swap the legs because of word order. Never expose provider identity/internal cost on customer plane.'], constraints: ['service_ids', 'currencies'],
-  },
-  {
-    key: 'coverage.get_rates', version: 1, domain: 'coverage', title: 'Resolve coverage direction and quote commission', permission: 'read', risk: 'read',
-    planes: ['customer', 'admin'], capability: 'coverage.read',
-    purpose: 'Resolve customer pay/receive regions, classify the canonical north/south coverage direction, read the published rate, and calculate commission.',
-    use: ['Use first for a concrete coverage question. South-pay to north-receive is an offer with commission returned; north-pay to south-receive is a request with commission paid by customer.'],
-    avoid: ['Never swap pay/receive from word order or from the words راجع/عمولة. Do not invent a missing unpublished rate.'],
-  },
-  {
-    key: 'coverage.propose_offer', version: 2, domain: 'coverage', title: 'Forward canonical coverage offer', permission: 'propose', risk: 'medium',
-    planes: ['customer'], capability: 'coverage.propose', purpose: 'Create a typed approval proposal for the canonical domestic south-pay to north-receive coverage direction.',
-    use: ['The customer pays in the south and receives in the north and has confirmed the offer.'],
-    avoid: ['Never swap customer pay/receive legs or trust a model-supplied commission over the published board.'], constraints: ['service_ids', 'currencies'],
-  },
-  {
-    key: 'coverage.propose_request', version: 1, domain: 'coverage', title: 'Forward canonical coverage request', permission: 'propose', risk: 'medium',
-    planes: ['customer'], capability: 'coverage.propose', purpose: 'Create a typed approval proposal for the canonical domestic north-pay to south-receive coverage direction.',
-    use: ['The customer pays in the north and receives in the south and has confirmed the request.'],
-    avoid: ['Never swap customer pay/receive legs or trust a model-supplied commission over the published board.'], constraints: ['service_ids', 'currencies'],
-  },
-  {
-    key: 'coverage.admin_list_offers', version: 1, domain: 'coverage', title: 'List coverage offers for admin', permission: 'read', risk: 'read',
-    planes: ['admin'], capability: 'coverage.read', purpose: 'Give trusted administration the operational offer view.',
-    use: ['Administration asks for available offers, providers, or operational offer status.'], avoid: ['Never expose this internal DTO on the customer plane.'],
-  },
-  {
-    key: 'coverage.admin_list_requests', version: 1, domain: 'coverage', title: 'List coverage requests for admin', permission: 'read', risk: 'read',
-    planes: ['admin'], capability: 'coverage.read', purpose: 'Give trusted administration the operational request view.',
-    use: ['Administration asks for incoming or current coverage requests.'], avoid: ['Never expose this internal DTO on the customer plane.'],
-  },
-  {
-    key: 'intents.record', version: 1, domain: 'intents', title: 'Record customer intent', permission: 'propose', risk: 'low',
-    planes: ['customer', 'admin'], capability: 'intents.propose', purpose: 'Persist a structured need/offer the configured services cannot yet resolve.',
-    use: ['A business need/offer should be remembered or forwarded for review.'], avoid: ['Do not treat a generic intent as an approved authoritative mutation.'],
-  },
-  {
-    key: 'intents.search', version: 1, domain: 'intents', title: 'Search customer intents', permission: 'read', risk: 'read',
-    planes: ['admin'], capability: 'intents.read', purpose: 'Inspect the structured admin inbox of customer needs/offers.',
-    use: ['Administration asks what customer requests/offers are waiting or recorded.'], avoid: ['Do not expose the administrative intent queue to customer plane.'],
-  },
-  {
-    key: 'intents.propose_decision', version: 1, domain: 'intents', title: 'Propose intent decision', permission: 'propose', risk: 'medium',
-    planes: ['admin'], capability: 'intents.propose', purpose: 'Create a typed proposal to resolve/match/reject/clarify a customer intent.',
-    use: ['A trusted administrator has reviewed an intent and instructs a decision.'], avoid: ['Do not resolve a customer intent without the explicit admin decision.'],
-  },
-  {
-    key: 'change_requests.list_pending', version: 1, domain: 'change_requests', title: 'List pending changes', permission: 'read', risk: 'read',
-    planes: ['admin'], capability: 'change_requests.read', purpose: 'Inspect pending typed proposals awaiting a human decision.',
-    use: ['A trusted administrator asks what changes await approval.'], avoid: ['Do not interpret listing a proposal as approving it.'],
+    key: 'change_requests.list_pending',
+    version: 1,
+    domain: 'change_requests',
+    title: 'List pending changes',
+    permission: 'read',
+    risk: 'read',
+    planes: ['admin'],
+    capability: 'change_requests.read',
+    purpose: 'Inspect pending typed proposals awaiting a human decision.',
+    use: ['A trusted administrator asks what changes await approval.'],
+    avoid: ['Do not interpret listing a proposal as approving it.'],
   },
 ]
 
-const commonErrors = [
-  { code: 'INVALID_INPUT', safeToShow: true, meaning: 'Arguments failed the tool schema or business validation.' },
-  { code: 'FORBIDDEN', safeToShow: false, meaning: 'Runtime plane/capability/grant policy denied the invocation.' },
-  { code: 'NOT_FOUND', safeToShow: true, meaning: 'The requested account-scoped resource was not found.' },
-  { code: 'INTERNAL_ERROR', safeToShow: false, meaning: 'The operation failed without exposing internal details.' },
-] as const
-
-function build(spec: CurrentToolSpec): PlatformToolManifest {
+function buildLegacy(spec: CurrentToolSpec): PlatformToolManifest {
   const legacy = getRegisteredTool(spec.key)
   if (!legacy || legacy.version !== spec.version) {
-    throw new Error(`Platform contract is missing matching legacy tool ${spec.key}@${spec.version}`)
+    throw new Error(
+      `Platform contract is missing matching legacy tool ${spec.key}@${spec.version}`,
+    )
   }
-  const sideEffect = spec.permission === 'read' ? 'none' : spec.permission === 'propose' ? 'proposal' : 'authoritative_write'
+
+  const sideEffect =
+    spec.permission === 'read'
+      ? 'none'
+      : spec.permission === 'propose'
+        ? 'proposal'
+        : 'authoritative_write'
+
   const metadata: LegacyToolPlatformMetadata = {
     domain: spec.domain,
     title: spec.title,
@@ -187,32 +205,66 @@ function build(spec: CurrentToolSpec): PlatformToolManifest {
     modelExposed: spec.permission !== 'execute',
     serverOnly: spec.permission === 'execute',
     examples: [],
-    errorContract: commonErrors,
+    errorContract: STANDARD_PLATFORM_TOOL_ERRORS,
   }
+
   return platformManifestFromLegacy(legacy, metadata)
 }
 
-const manifests = SPECS.map(build)
-const byDomain = new Map<string, PlatformToolManifest[]>()
-for (const tool of manifests) {
-  const list = byDomain.get(tool.domain) ?? []
+const legacyByDomain = new Map<string, PlatformToolManifest[]>()
+for (const tool of LEGACY_SPECS.map(buildLegacy)) {
+  const list = legacyByDomain.get(tool.domain) ?? []
   list.push(tool)
-  byDomain.set(tool.domain, list)
+  legacyByDomain.set(tool.domain, list)
 }
 
 export const CURRENT_PLATFORM_REGISTRY = new DomainRegistry()
-for (const [domain, tools] of byDomain) {
-  CURRENT_PLATFORM_REGISTRY.register(defineDomain({
-    key: domain,
-    version: 1,
-    title: domain.replaceAll('_', ' '),
-    description: `WACRM ${domain} tool domain.`,
-    capabilities: [...new Set(tools.flatMap((tool) => tool.requiredCapabilities))],
-    tools,
-  }))
+
+for (const [domain, tools] of legacyByDomain) {
+  CURRENT_PLATFORM_REGISTRY.register(
+    defineDomain({
+      key: domain,
+      version: 1,
+      title: domain.replaceAll('_', ' '),
+      description: `WACRM ${domain} transitional tool domain.`,
+      capabilities: [...new Set(tools.flatMap((tool) => tool.requiredCapabilities))],
+      tools,
+    }),
+  )
 }
 
-export function getCurrentPlatformTool(key: string, version?: number): PlatformToolManifest | null {
+const NATIVE_DOMAINS = [
+  {
+    key: 'exchange_rates',
+    version: 1,
+    title: 'Exchange Rates V2',
+    description: 'Native FX V2 tool contracts owned by the exchange-rates domain.',
+    tools: FX_V2_TOOL_MANIFESTS,
+  },
+  {
+    key: 'coverage',
+    version: 1,
+    title: 'Coverage',
+    description: 'Native Coverage tool contracts owned by the coverage domain.',
+    tools: COVERAGE_TOOL_MANIFESTS,
+  },
+] as const
+
+for (const domain of NATIVE_DOMAINS) {
+  CURRENT_PLATFORM_REGISTRY.register(
+    defineDomain({
+      ...domain,
+      capabilities: [
+        ...new Set(domain.tools.flatMap((tool) => tool.requiredCapabilities)),
+      ],
+    }),
+  )
+}
+
+export function getCurrentPlatformTool(
+  key: string,
+  version?: number,
+): PlatformToolManifest | null {
   if (version != null) return CURRENT_PLATFORM_REGISTRY.getTool(key, version)
   const matches = CURRENT_PLATFORM_REGISTRY.listTools().filter((tool) => tool.key === key)
   return matches.sort((a, b) => b.version - a.version)[0] ?? null
