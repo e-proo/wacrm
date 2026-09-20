@@ -29,6 +29,14 @@ const shadowRecheck = readFileSync(
   new URL('../../../../supabase/migrations/096_business_event_shadow_recheck.sql', import.meta.url),
   'utf8',
 )
+const fxControlledCutover = readFileSync(
+  new URL('../../../../supabase/migrations/097_fx_business_event_controlled_cutover.sql', import.meta.url),
+  'utf8',
+)
+const genericActiveDelivery = readFileSync(
+  new URL('./business-event-delivery.ts', import.meta.url),
+  'utf8',
+)
 const activeDelivery = readFileSync(
   new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
   'utf8',
@@ -143,9 +151,11 @@ describe('Phase G shadow cutover evidence', () => {
     expect(shadowEvidence).toContain('shadow_checked_at timestamptz')
   })
 
-  it('keeps the active delivery worker on the legacy claim until an explicit cutover', () => {
+  it('keeps legacy fallback while adding a generic active delivery path behind explicit routing', () => {
+    expect(activeDelivery).toContain('deliverActiveBusinessEventNotifications')
     expect(activeDelivery).toContain("db.rpc('claim_customer_business_notifications'")
-    expect(activeDelivery).not.toContain("db.rpc('claim_business_event_outbox'")
+    expect(genericActiveDelivery).toContain("db.rpc('claim_business_event_delivery'")
+    expect(genericActiveDelivery).toContain('CURRENT_EVENT_PROJECTOR_REGISTRY')
   })
 })
 
@@ -165,5 +175,39 @@ describe('generic service-request shadow preparation', () => {
     expect(shadowRecheck).toContain("delivery_mode = 'shadow'")
     expect(shadowRecheck).toContain('to service_role')
     expect(shadowRecheck).not.toContain("delivery_mode = 'active'")
+  })
+})
+
+
+describe('controlled FX cutover preparation', () => {
+  it('defaults to legacy routing and requires explicit readiness-gated activation', () => {
+    expect(fxControlledCutover).toContain("mode text not null default 'legacy'")
+    expect(fxControlledCutover).toContain('inspect_fx_business_event_cutover_readiness')
+    expect(fxControlledCutover).toContain('FX_BUSINESS_EVENT_CUTOVER_NOT_READY')
+    expect(fxControlledCutover).toContain("'matched_legacy'")
+    expect(fxControlledCutover).toContain("'required_event_types', 4")
+  })
+
+  it('routes only future FX events to active and preserves historical shadow evidence', () => {
+    expect(fxControlledCutover).toContain('enqueue_fx_trade_business_event()')
+    expect(fxControlledCutover).toContain("v_delivery_mode text := 'shadow'")
+    expect(fxControlledCutover).toContain("v_route_mode = 'active'")
+    expect(fxControlledCutover).toContain('beo.created_at >= pg_catalog.transaction_timestamp()')
+    expect(fxControlledCutover).toContain('Activation changes routing for FUTURE FX events only')
+  })
+
+  it('prevents legacy/new FX claim competition and keeps a reversible fallback', () => {
+    expect(fxControlledCutover).toContain("c.route_key = 'fx_trade_customer_whatsapp'")
+    expect(fxControlledCutover).toContain("c.mode = 'active'")
+    expect(fxControlledCutover).toContain('FX_BUSINESS_EVENT_ROLLBACK_IN_FLIGHT')
+    expect(fxControlledCutover).toContain("set delivery_mode = 'shadow'")
+    expect(fxControlledCutover).toContain('synced_legacy_sent')
+  })
+
+  it('keeps the generic active worker free from domain-specific routing branches', () => {
+    expect(genericActiveDelivery).not.toContain('exchange_rate')
+    expect(genericActiveDelivery).not.toContain('fx_trade_request')
+    expect(genericActiveDelivery).not.toContain('coverage')
+    expect(genericActiveDelivery).not.toContain('service_intent')
   })
 })

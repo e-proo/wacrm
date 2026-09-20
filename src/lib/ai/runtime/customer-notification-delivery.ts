@@ -6,6 +6,7 @@ import {
 } from '@/lib/messaging/service-request-customer'
 import { renderFxTradeBusinessEventText } from '@/lib/messaging/fx-v2-outbox'
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
+import { deliverActiveBusinessEventNotifications } from '@/lib/services/platform/business-event-delivery'
 
 interface ClaimedCustomerNotificationRow {
   id: string
@@ -57,6 +58,13 @@ export async function deliverCustomerOutcomeNotifications(input: {
     throw configError ?? new Error('WHATSAPP_CONFIG_OWNER_MISSING')
   }
 
+  const activeDelivery = await deliverActiveBusinessEventNotifications({
+    accountId: input.accountId,
+    userId: config.user_id,
+    correlationId: input.changeRequestId ?? null,
+    limit,
+  })
+
   const deliveryContext = input.changeRequestId
     ? await loadChangeRequestDeliveryContext(input.accountId, input.changeRequestId)
     : null
@@ -70,12 +78,12 @@ export async function deliverCustomerOutcomeNotifications(input: {
 
   const rows = (data ?? []) as ClaimedCustomerNotificationRow[]
   if (rows.length === 0) {
-    return { claimed: 0, sent: 0, reconciliation: 0, failed: 0 }
+    return activeDelivery
   }
 
-  let sentCount = 0
-  let reconciliationCount = 0
-  let failedCount = 0
+  let sentCount = activeDelivery.sent
+  let reconciliationCount = activeDelivery.reconciliation
+  let failedCount = activeDelivery.failed
 
   for (const row of rows) {
     if (!row.conversation_id) {
@@ -155,7 +163,7 @@ export async function deliverCustomerOutcomeNotifications(input: {
   }
 
   return {
-    claimed: rows.length,
+    claimed: activeDelivery.claimed + rows.length,
     sent: sentCount,
     reconciliation: reconciliationCount,
     failed: failedCount,
