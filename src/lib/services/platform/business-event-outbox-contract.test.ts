@@ -9,6 +9,10 @@ const grantHardening = readFileSync(
   new URL('../../../../supabase/migrations/091_business_event_outbox_grant_hardening.sql', import.meta.url),
   'utf8',
 )
+const advisorCleanup = readFileSync(
+  new URL('../../../../supabase/migrations/092_business_event_outbox_advisor_cleanup.sql', import.meta.url),
+  'utf8',
+)
 const activeDelivery = readFileSync(
   new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
   'utf8',
@@ -74,6 +78,10 @@ describe('Phase E general business outbox contract', () => {
       'grant select, insert, update, delete',
     )
     expect(grantHardening).not.toContain('grant truncate')
+    expect(advisorCleanup).toContain('business_event_outbox_contact_idx')
+    expect(advisorCleanup).toContain('business_event_outbox_conversation_idx')
+    expect(advisorCleanup).toContain('business_event_outbox_local_message_idx')
+    expect(advisorCleanup).toContain('to service_role')
     expect(migration).toContain('alter table public.business_event_outbox enable row level security')
   })
 })
