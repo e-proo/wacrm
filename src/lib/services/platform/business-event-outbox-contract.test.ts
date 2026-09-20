@@ -33,6 +33,10 @@ const fxControlledCutover = readFileSync(
   new URL('../../../../supabase/migrations/097_fx_business_event_controlled_cutover.sql', import.meta.url),
   'utf8',
 )
+const fxShadowEvidencePreparation = readFileSync(
+  new URL('../../../../supabase/migrations/098_fx_shadow_evidence_preparation.sql', import.meta.url),
+  'utf8',
+)
 const genericActiveDelivery = readFileSync(
   new URL('./business-event-delivery.ts', import.meta.url),
   'utf8',
@@ -209,5 +213,45 @@ describe('controlled FX cutover preparation', () => {
     expect(genericActiveDelivery).not.toContain('fx_trade_request')
     expect(genericActiveDelivery).not.toContain('coverage')
     expect(genericActiveDelivery).not.toContain('service_intent')
+  })
+})
+
+
+describe('real FX shadow evidence preparation', () => {
+  it('backfills historical canonical FX notifications into shadow only', () => {
+    expect(fxShadowEvidencePreparation).toContain(
+      'backfill_fx_business_event_shadow_history',
+    )
+    expect(fxShadowEvidencePreparation).toContain(
+      "'backfilled_from_legacy', true",
+    )
+    expect(fxShadowEvidencePreparation).toContain("'shadow'")
+    expect(fxShadowEvidencePreparation).not.toContain(
+      "set delivery_mode = 'active'",
+    )
+  })
+
+  it('uses a truthful terminal superseded state instead of pretending an old notification was sent', () => {
+    expect(fxShadowEvidencePreparation).toContain("'superseded'")
+    expect(fxShadowEvidencePreparation).toContain(
+      'SUPERSEDED_BY_LATER_FX_EVENT',
+    )
+    expect(fxShadowEvidencePreparation).toContain(
+      "'customer-intent-notification:' || older.id::text",
+    )
+    expect(fxShadowEvidencePreparation).toContain(
+      "newer.status = 'sent'",
+    )
+  })
+
+  it('supports FX-only shadow claims without consuming another domain queue', () => {
+    expect(fxShadowEvidencePreparation).toContain(
+      'claim_business_event_outbox_shadow_for_event_types',
+    )
+    expect(fxShadowEvidencePreparation).toContain(
+      'beo.event_type = any(p_event_types)',
+    )
+    expect(fxShadowEvidencePreparation).toContain('for update skip locked')
+    expect(fxShadowEvidencePreparation).toContain('to service_role')
   })
 })

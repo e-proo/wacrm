@@ -141,7 +141,7 @@ describe('domain message projectors', () => {
     expect(projected.text).not.toContain('الراجع لك: 700 SAR')
   })
 
-  it('projects FX from immutable subject facts with rendering parity', async () => {
+  it('projects all canonical FX lifecycle events from immutable facts with legacy rendering parity', async () => {
     const facts = {
       id: 'trade-1',
       code: '42',
@@ -155,34 +155,44 @@ describe('domain message projectors', () => {
       baseCurrency: 'SAR',
       quoteCurrency: 'YER',
     }
-    const projection = buildFxTradeBusinessEventProjection({
-      eventType: 'exchange_rate.trade.requested',
-      subjectType: 'fx_trade_request',
-      subjectId: 'trade-1',
-      facts,
-    })
+    const cases = [
+      ['exchange_rate.trade.requested', 'pending_admin'],
+      ['exchange_rate.trade.approved', 'approved_for_contact'],
+      ['exchange_rate.trade.rejected', 'rejected'],
+      ['exchange_rate.trade.completed', 'completed'],
+    ] as const
 
-    const projected = await renderBusinessEventProjection({
-      accountId: 'acc-1',
-      projection,
-    })
-    const legacyRenderer = await renderFxTradeCustomerMessage({
-      accountId: 'acc-1',
-      outcome: 'pending_admin',
-      requestId: facts.id,
-      reference: 'FX-42',
-      side: facts.side,
-      amountBasis: facts.amountBasis,
-      requestedAmount: facts.requestedAmount,
-      effectiveRate: facts.effectiveRate,
-      baseAmount: facts.baseAmount,
-      quoteAmount: facts.quoteAmount,
-      baseCurrency: facts.baseCurrency,
-      quoteCurrency: facts.quoteCurrency,
-      rateVersionId: facts.rateVersionId,
-    })
+    for (const [eventType, outcome] of cases) {
+      const projection = buildFxTradeBusinessEventProjection({
+        eventType,
+        subjectType: 'fx_trade_request',
+        subjectId: 'trade-1',
+        facts,
+      })
 
-    expect(projected.text).toBe(legacyRenderer.text)
+      const projected = await renderBusinessEventProjection({
+        accountId: 'acc-1',
+        projection,
+      })
+      const legacyRenderer = await renderFxTradeCustomerMessage({
+        accountId: 'acc-1',
+        outcome,
+        requestId: facts.id,
+        reference: 'FX-42',
+        side: facts.side,
+        amountBasis: facts.amountBasis,
+        requestedAmount: facts.requestedAmount,
+        effectiveRate: facts.effectiveRate,
+        baseAmount: facts.baseAmount,
+        quoteAmount: facts.quoteAmount,
+        baseCurrency: facts.baseCurrency,
+        quoteCurrency: facts.quoteCurrency,
+        rateVersionId: facts.rateVersionId,
+      })
+
+      expect(projected.eventKey).toBe(eventType)
+      expect(projected.text).toBe(legacyRenderer.text)
+    }
   })
 
   it('projects generic service requests from the embedded snapshot with legacy rendering parity', async () => {

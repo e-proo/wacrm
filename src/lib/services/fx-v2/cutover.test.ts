@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   FX_BUSINESS_EVENT_ROUTE_KEY,
   FX_BUSINESS_EVENT_TYPES,
@@ -16,5 +17,13 @@ describe('FX controlled business-event cutover contract', () => {
       'exchange_rate.trade.rejected',
       'exchange_rate.trade.completed',
     ])
+  })
+
+  it('preparation remains scoped to canonical FX event types', () => {
+    const source = readFileSync(new URL('./cutover.ts', import.meta.url), 'utf8')
+    expect(source).toContain('prepareFxBusinessEventShadowVerification')
+    expect(source).toContain('eventTypes: FX_BUSINESS_EVENT_TYPES')
+    expect(source).toContain('backfillFxBusinessEventShadowHistory')
+    expect(source).toContain('reconcileSupersededFxLegacyNotifications')
   })
 })

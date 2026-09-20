@@ -34,16 +34,25 @@ export interface ShadowBusinessEventRow {
  */
 export async function claimShadowBusinessEvents(input: {
   accountId: string
+  eventTypes?: readonly string[]
   limit?: number
 }): Promise<readonly ShadowBusinessEventRow[]> {
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200)
-  const { data, error } = await supabaseAdmin().rpc(
-    'claim_business_event_outbox_shadow',
-    {
-      p_account_id: input.accountId,
-      p_limit: limit,
-    },
-  )
+  const eventTypes =
+    input.eventTypes && input.eventTypes.length > 0 ? [...input.eventTypes] : null
+  const { data, error } = eventTypes
+    ? await supabaseAdmin().rpc(
+        'claim_business_event_outbox_shadow_for_event_types',
+        {
+          p_account_id: input.accountId,
+          p_event_types: eventTypes,
+          p_limit: limit,
+        },
+      )
+    : await supabaseAdmin().rpc('claim_business_event_outbox_shadow', {
+        p_account_id: input.accountId,
+        p_limit: limit,
+      })
   if (error) throw error
   return (data ?? []) as ShadowBusinessEventRow[]
 }
@@ -121,6 +130,7 @@ export interface ShadowBusinessEventRenderingParity {
  */
 export async function inspectShadowBusinessEventRendering(input: {
   accountId: string
+  eventTypes?: readonly string[]
   limit?: number
 }): Promise<ShadowBusinessEventRenderingParity> {
   const rows = await claimShadowBusinessEvents(input)

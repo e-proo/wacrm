@@ -1,4 +1,9 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
+import {
+  inspectShadowBusinessEventRendering,
+  type ShadowBusinessEventRenderingParity,
+} from '@/lib/services/platform/business-event-outbox'
+import { requeueShadowBusinessEventProjection } from '@/lib/services/platform/business-event-cutover'
 
 export const FX_BUSINESS_EVENT_ROUTE_KEY = 'fx_trade_customer_whatsapp' as const
 
@@ -21,6 +26,14 @@ export interface FxBusinessEventCutoverReadiness {
   blockers: number
   legacyNonterminal: number
   activeNonterminal: number
+}
+
+export interface FxBusinessEventShadowPreparationResult {
+  backfilledRows: number
+  supersededLegacyRows: number
+  requeuedRows: number
+  rendering: ShadowBusinessEventRenderingParity
+  readiness: FxBusinessEventCutoverReadiness
 }
 
 export interface FxBusinessEventModeChange {
@@ -113,4 +126,71 @@ function integerValue(value: unknown): number {
     throw new Error('FX_BUSINESS_EVENT_CUTOVER_COUNT_INVALID')
   }
   return n
+}
+
+
+export async function backfillFxBusinessEventShadowHistory(input: {
+  accountId: string
+}): Promise<number> {
+  const { data, error } = await supabaseAdmin().rpc(
+    'backfill_fx_business_event_shadow_history',
+    {
+      p_account_id: input.accountId,
+    },
+  )
+  if (error) throw error
+  return integerValue(asRecord(data).affected_rows)
+}
+
+export async function reconcileSupersededFxLegacyNotifications(input: {
+  accountId: string
+}): Promise<number> {
+  const { data, error } = await supabaseAdmin().rpc(
+    'reconcile_superseded_fx_customer_notifications',
+    {
+      p_account_id: input.accountId,
+    },
+  )
+  if (error) throw error
+  return integerValue(asRecord(data).superseded_rows)
+}
+
+/**
+ * Prepares real account-scoped FX evidence without activating delivery.
+ *
+ * Historical legacy rows are mirrored into shadow, obsolete pending lifecycle
+ * notifications are terminally reconciled, prior failed shadow checks are
+ * requeued, and ONLY canonical FX event types are rendered for parity.
+ */
+export async function prepareFxBusinessEventShadowVerification(input: {
+  accountId: string
+  limit?: number
+}): Promise<FxBusinessEventShadowPreparationResult> {
+  const backfilledRows = await backfillFxBusinessEventShadowHistory(input)
+  const supersededLegacyRows =
+    await reconcileSupersededFxLegacyNotifications(input)
+  const requeuedRows = await requeueShadowBusinessEventProjection({
+    accountId: input.accountId,
+    eventTypes: FX_BUSINESS_EVENT_TYPES,
+    statuses: [
+      'mismatched_legacy',
+      'unsupported_projector',
+      'comparison_missing',
+      'failed',
+    ],
+  })
+  const rendering = await inspectShadowBusinessEventRendering({
+    accountId: input.accountId,
+    eventTypes: FX_BUSINESS_EVENT_TYPES,
+    limit: input.limit,
+  })
+  const readiness = await inspectFxBusinessEventCutoverReadiness(input)
+
+  return {
+    backfilledRows,
+    supersededLegacyRows,
+    requeuedRows,
+    rendering,
+    readiness,
+  }
 }
