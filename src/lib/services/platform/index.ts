@@ -1,3 +1,4 @@
+export * from './business-event-outbox'
 export * from './business-event-contracts'
 export * from './change-action-contracts'
 export * from './change-executor-registry'
