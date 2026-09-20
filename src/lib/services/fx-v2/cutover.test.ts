@@ -27,3 +27,16 @@ describe('FX controlled business-event cutover contract', () => {
     expect(source).toContain('reconcileSupersededFxLegacyNotifications')
   })
 })
+
+
+describe('FX readiness diagnostics', () => {
+  it('exposes missing/pending event diagnostics in the public readiness contract', () => {
+    const source = readFileSync(new URL('./cutover.ts', import.meta.url), 'utf8')
+    expect(source).toContain('matchedEventTypeKeys')
+    expect(source).toContain('missingEventTypes')
+    expect(source).toContain('pendingEventTypes')
+    expect(source).toContain('matched_event_type_keys')
+    expect(source).toContain('missing_event_types')
+    expect(source).toContain('pending_event_types')
+  })
+})

@@ -22,6 +22,9 @@ export interface FxBusinessEventCutoverReadiness {
   ready: boolean
   requiredEventTypes: number
   matchedEventTypes: number
+  matchedEventTypeKeys: readonly string[]
+  missingEventTypes: readonly string[]
+  pendingEventTypes: readonly string[]
   evidenceRows: number
   blockers: number
   legacyNonterminal: number
@@ -86,6 +89,9 @@ function parseReadiness(value: unknown): FxBusinessEventCutoverReadiness {
     ready: row.ready === true,
     requiredEventTypes: integerValue(row.required_event_types),
     matchedEventTypes: integerValue(row.matched_event_types),
+    matchedEventTypeKeys: stringArrayValue(row.matched_event_type_keys),
+    missingEventTypes: stringArrayValue(row.missing_event_types),
+    pendingEventTypes: stringArrayValue(row.pending_event_types),
     evidenceRows: integerValue(row.evidence_rows),
     blockers: integerValue(row.blockers),
     legacyNonterminal: integerValue(row.legacy_nonterminal),
@@ -193,4 +199,14 @@ export async function prepareFxBusinessEventShadowVerification(input: {
     rendering,
     readiness,
   }
+}
+
+
+function stringArrayValue(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return []
+  const items = value.filter((item): item is string => typeof item === 'string')
+  if (items.length !== value.length) {
+    throw new Error('FX_BUSINESS_EVENT_CUTOVER_EVENT_TYPES_INVALID')
+  }
+  return items
 }

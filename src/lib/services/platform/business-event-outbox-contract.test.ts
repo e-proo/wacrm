@@ -41,6 +41,10 @@ const genericActiveDelivery = readFileSync(
   new URL('./business-event-delivery.ts', import.meta.url),
   'utf8',
 )
+const fxReadinessDiagnostics = readFileSync(
+  new URL('../../../../supabase/migrations/099_fx_cutover_readiness_diagnostics.sql', import.meta.url),
+  'utf8',
+)
 const activeDelivery = readFileSync(
   new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
   'utf8',
@@ -253,5 +257,19 @@ describe('real FX shadow evidence preparation', () => {
     )
     expect(fxShadowEvidencePreparation).toContain('for update skip locked')
     expect(fxShadowEvidencePreparation).toContain('to service_role')
+  })
+})
+
+
+describe('FX cutover readiness diagnostics', () => {
+  it('reports missing FX evidence without weakening the 4-of-4 readiness gate', () => {
+    expect(fxReadinessDiagnostics).toContain("'required_event_types', 4")
+    expect(fxReadinessDiagnostics).toContain("'matched_event_type_keys'")
+    expect(fxReadinessDiagnostics).toContain("'missing_event_types'")
+    expect(fxReadinessDiagnostics).toContain("'pending_event_types'")
+    expect(fxReadinessDiagnostics).toContain('v_matched_event_types = 4')
+    expect(fxReadinessDiagnostics).toContain('v_blockers = 0')
+    expect(fxReadinessDiagnostics).toContain('v_legacy_nonterminal = 0')
+    expect(fxReadinessDiagnostics).toContain('v_active_nonterminal = 0')
   })
 })
