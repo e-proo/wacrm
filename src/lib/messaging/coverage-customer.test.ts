@@ -103,4 +103,15 @@ describe('renderCoverageApprovedCustomerMessage', () => {
     expect(rendered.fallbackReason).toBe('COVERAGE_TEMPLATE_SECRETS_FORBIDDEN')
     expect(rendered.text).toContain('تم اعتماد عرض التغطية')
   })
+
+  it('uses an authoritative commission amount when the domain snapshot supplies one', async () => {
+    const rendered = await renderCoverageApprovedCustomerMessage({
+      ...base,
+      kind: 'offer',
+      commissionAmount: '701.2345',
+    })
+
+    expect(rendered.text).toContain('الراجع لك: 701.2345 SAR')
+    expect(rendered.text).not.toContain('الراجع لك: 700 SAR')
+  })
 })

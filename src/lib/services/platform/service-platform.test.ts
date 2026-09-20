@@ -10,6 +10,7 @@ import { FX_V2_TOOL_MANIFESTS } from '@/lib/services/fx-v2/tool-manifests'
 import {
   CURRENT_BUSINESS_DOMAIN_REGISTRY,
   CURRENT_CHANGE_EXECUTOR_REGISTRY,
+  CURRENT_EVENT_PROJECTOR_REGISTRY,
 } from './composition'
 import { ChangeExecutorRegistry } from './change-executor-registry'
 import { defineBusinessDomain } from './domain-contracts'
@@ -376,5 +377,40 @@ describe('Coverage business-event registration', () => {
     expect(
       CURRENT_BUSINESS_DOMAIN_REGISTRY.getEvent('coverage.match.released', 1)?.subjectTypes,
     ).toEqual(['coverage_match'])
+  })
+})
+
+
+describe('domain-owned event projectors', () => {
+  it('registers exact-version FX and customer Coverage projectors through domain runtimes', () => {
+    expect(FX_V2_RUNTIME.eventProjectors.map(({ eventType }) => eventType)).toEqual([
+      'exchange_rate.trade.requested',
+      'exchange_rate.trade.approved',
+      'exchange_rate.trade.rejected',
+      'exchange_rate.trade.completed',
+    ])
+    expect(COVERAGE_RUNTIME.eventProjectors.map(({ eventType }) => eventType)).toEqual([
+      'coverage.offer.approved',
+      'coverage.request.approved',
+    ])
+
+    for (const registration of [
+      ...FX_V2_RUNTIME.eventProjectors,
+      ...COVERAGE_RUNTIME.eventProjectors,
+    ]) {
+      expect(
+        CURRENT_EVENT_PROJECTOR_REGISTRY.has(
+          registration.eventType,
+          registration.eventVersion,
+        ),
+        registration.eventType,
+      ).toBe(true)
+    }
+  })
+
+  it('does not invent projectors for Coverage lifecycle events without customer templates', () => {
+    expect(CURRENT_EVENT_PROJECTOR_REGISTRY.has('coverage.match.reserved', 1)).toBe(false)
+    expect(CURRENT_EVENT_PROJECTOR_REGISTRY.has('coverage.match.released', 1)).toBe(false)
+    expect(CURRENT_EVENT_PROJECTOR_REGISTRY.has('coverage.offer.cancelled', 1)).toBe(false)
   })
 })

@@ -1,9 +1,10 @@
-import { supabaseAdmin } from '@/lib/ai/admin-client'
 import {
   renderFxTradeCustomerMessage,
   type FxTradeCustomerOutcome,
 } from './fx-v2-customer'
 import { createSupabaseTemplateOverrideStore } from './supabase-store'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
+import { loadFxTradeMessageFacts } from '@/lib/services/fx-v2/message-facts'
 
 export function fxOutcomeForBusinessEvent(eventType: string): FxTradeCustomerOutcome | null {
   switch (eventType) {
@@ -21,9 +22,9 @@ export function fxOutcomeForBusinessEvent(eventType: string): FxTradeCustomerOut
 }
 
 /**
- * Renders an FX V2 outbox event from authoritative immutable trade facts.
- * The outbox row stores only the stable business-event key; customer-facing
- * text is resolved at delivery time through the shared messaging platform.
+ * Legacy active renderer retained during Phase F shadow verification.
+ * Business facts are loaded through the same domain-owned immutable fact loader
+ * used by the new Event Projector, preventing two competing FX read models.
  */
 export async function renderFxTradeBusinessEventText(input: {
   accountId: string
@@ -35,58 +36,26 @@ export async function renderFxTradeBusinessEventText(input: {
     throw new Error(`FX_TRADE_NOTIFICATION_EVENT_UNSUPPORTED:${input.eventType}`)
   }
 
+  const facts = await loadFxTradeMessageFacts({
+    accountId: input.accountId,
+    tradeRequestId: input.tradeRequestId,
+  })
   const db = supabaseAdmin()
-  const { data: trade, error: tradeError } = await db
-    .from('exchange_trade_requests')
-    .select(
-      'id, code, pair_id, side, amount_basis, requested_amount, effective_rate, base_amount, quote_amount, rate_version_id',
-    )
-    .eq('account_id', input.accountId)
-    .eq('id', input.tradeRequestId)
-    .maybeSingle()
-  if (tradeError) throw tradeError
-  if (!trade) throw new Error('FX_TRADE_NOTIFICATION_REQUEST_NOT_FOUND')
-
-  const { data: pair, error: pairError } = await db
-    .from('exchange_rate_pairs')
-    .select('base_currency_id, quote_currency_id')
-    .eq('account_id', input.accountId)
-    .eq('id', trade.pair_id)
-    .maybeSingle()
-  if (pairError) throw pairError
-  if (!pair) throw new Error('FX_TRADE_NOTIFICATION_PAIR_NOT_FOUND')
-
-  const currencyIds = [pair.base_currency_id, pair.quote_currency_id]
-  const { data: currencies, error: currencyError } = await db
-    .from('currencies')
-    .select('id, code')
-    .eq('account_id', input.accountId)
-    .in('id', currencyIds)
-  if (currencyError) throw currencyError
-
-  const codes = new Map(
-    (currencies ?? []).map((currency) => [currency.id, currency.code] as const),
-  )
-  const baseCurrency = codes.get(pair.base_currency_id)
-  const quoteCurrency = codes.get(pair.quote_currency_id)
-  if (!baseCurrency || !quoteCurrency) {
-    throw new Error('FX_TRADE_NOTIFICATION_CURRENCY_NOT_FOUND')
-  }
 
   const rendered = await renderFxTradeCustomerMessage({
     accountId: input.accountId,
     outcome,
-    requestId: trade.id,
-    reference: `FX-${trade.code}`,
-    side: trade.side as 'customer_buy' | 'customer_sell',
-    amountBasis: trade.amount_basis as 'base' | 'quote',
-    requestedAmount: String(trade.requested_amount),
-    effectiveRate: String(trade.effective_rate),
-    baseAmount: String(trade.base_amount),
-    quoteAmount: String(trade.quote_amount),
-    baseCurrency,
-    quoteCurrency,
-    rateVersionId: String(trade.rate_version_id),
+    requestId: facts.id,
+    reference: `FX-${facts.code}`,
+    side: facts.side,
+    amountBasis: facts.amountBasis,
+    requestedAmount: facts.requestedAmount,
+    effectiveRate: facts.effectiveRate,
+    baseAmount: facts.baseAmount,
+    quoteAmount: facts.quoteAmount,
+    baseCurrency: facts.baseCurrency,
+    quoteCurrency: facts.quoteCurrency,
+    rateVersionId: facts.rateVersionId,
     store: createSupabaseTemplateOverrideStore(db),
   })
 
@@ -97,7 +66,7 @@ export async function renderFxTradeBusinessEventText(input: {
       `template=${rendered.eventKey}`,
       `locale=${rendered.resolvedLocale}`,
       'channel=whatsapp',
-      `entity=${trade.id}`,
+      `entity=${facts.id}`,
       rendered.revisionId ? `revision=${rendered.revisionId}` : null,
       rendered.version != null ? `version=${rendered.version}` : null,
       rendered.fallbackReason ? `fallback=${rendered.fallbackReason}` : null,

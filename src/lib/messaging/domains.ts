@@ -200,3 +200,15 @@ export function buildRemittanceMessageContext(input: {
     },
   })
 }
+
+
+export function coverageMethodLabel(method: string): string {
+  const labels: Record<string, string> = {
+    cash: 'نقدًا',
+    networks: 'شبكات',
+    remittance: 'حوالة',
+    bank_deposit: 'إيداع بنكي',
+    any: 'أي طريقة متاحة',
+  }
+  return labels[method] ?? method
+}

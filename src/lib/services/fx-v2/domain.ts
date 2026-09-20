@@ -4,6 +4,7 @@ import {
   defineBusinessDomainRuntime,
 } from '@/lib/services/platform/domain-contracts'
 import { FX_V2_MODEL_TOOL_EXECUTORS } from './ai-tool-runtime'
+import { FX_V2_EVENT_PROJECTORS } from './message-projectors'
 import { FX_V2_CHANGE_EXECUTORS } from './change-executors'
 import { FX_V2_TOOL_MANIFESTS } from './tool-manifests'
 
@@ -100,5 +101,5 @@ export const FX_V2_RUNTIME = defineBusinessDomainRuntime({
   version: 1,
   toolExecutors: FX_V2_MODEL_TOOL_EXECUTORS,
   changeExecutors: FX_V2_CHANGE_EXECUTORS,
-  eventProjectors: [],
+  eventProjectors: FX_V2_EVENT_PROJECTORS,
 })

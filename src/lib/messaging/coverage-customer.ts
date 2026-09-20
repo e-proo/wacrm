@@ -1,4 +1,4 @@
-import { buildCoverageMessageContext, formatMessageNumber } from './domains'
+import { buildCoverageMessageContext, coverageMethodLabel, formatMessageNumber } from './domains'
 import { findSystemMessageTemplate } from './defaults'
 import { renderMessageTemplate } from './renderer'
 import { resolveMessageTemplate } from './resolver'
@@ -20,6 +20,7 @@ export interface CoverageApprovedCustomerMessageInput {
   receiveRegion: string
   receiveMethod: string
   commissionPerThousand?: string | number | null
+  commissionAmount?: string | number | null
   commissionCurrency?: string | null
   locale?: string | null
   store?: TemplateOverrideStore | null
@@ -47,7 +48,10 @@ export async function renderCoverageApprovedCustomerMessage(
   input: CoverageApprovedCustomerMessageInput,
 ): Promise<RenderedCoverageCustomerMessage> {
   const eventKey = input.kind === 'offer' ? 'coverage.offer.approved' : 'coverage.request.approved'
-  const commissionAmount = calculateCommission(input.amount, input.commissionPerThousand)
+  const commissionAmount =
+    input.commissionAmount != null
+      ? input.commissionAmount
+      : calculateCommission(input.amount, input.commissionPerThousand)
   const commissionEffect = input.kind === 'offer' ? 'customer_receives' : 'customer_pays'
   const context = buildCoverageMessageContext({
     entityType: input.kind === 'offer' ? 'coverage_offer' : 'coverage_request',
@@ -149,17 +153,6 @@ function calculateCommission(
   const numericRate = Number(perThousand)
   if (!Number.isFinite(numericAmount) || !Number.isFinite(numericRate)) return null
   return (numericAmount * numericRate) / 1000
-}
-
-function coverageMethodLabel(method: string): string {
-  const labels: Record<string, string> = {
-    cash: 'نقدًا',
-    networks: 'شبكات',
-    remittance: 'حوالة',
-    bank_deposit: 'إيداع بنكي',
-    any: 'أي طريقة متاحة',
-  }
-  return labels[method] ?? method
 }
 
 function safeReason(error: unknown): string {

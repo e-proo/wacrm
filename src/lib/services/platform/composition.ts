@@ -1,6 +1,7 @@
 import { COVERAGE_DOMAIN, COVERAGE_RUNTIME } from '@/lib/services/coverage/domain'
 import { FX_V2_DOMAIN, FX_V2_RUNTIME } from '@/lib/services/fx-v2/domain'
 import { ChangeExecutorRegistry } from './change-executor-registry'
+import { EventProjectorRegistry } from './event-projector-registry'
 import type {
   ChangeExecutionContext,
   ClaimedChangeExecution,
@@ -25,6 +26,7 @@ for (const domain of CURRENT_BUSINESS_DOMAIN_MODULES) {
 }
 
 export const CURRENT_CHANGE_EXECUTOR_REGISTRY = new ChangeExecutorRegistry()
+export const CURRENT_EVENT_PROJECTOR_REGISTRY = new EventProjectorRegistry()
 
 for (const runtime of CURRENT_BUSINESS_DOMAIN_RUNTIMES) {
   const domain = CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain(runtime.key)
@@ -38,6 +40,32 @@ for (const runtime of CURRENT_BUSINESS_DOMAIN_RUNTIMES) {
         ', runtime=' +
         runtime.version,
     )
+  }
+
+  for (const registration of runtime.eventProjectors) {
+    const event = CURRENT_BUSINESS_DOMAIN_REGISTRY.getEvent(
+      registration.eventType,
+      registration.eventVersion,
+    )
+    if (!event) {
+      throw new Error(
+        'Cannot register event projector without event contract: ' +
+          registration.eventType +
+          '@' +
+          registration.eventVersion,
+      )
+    }
+    if (event.domain !== runtime.key) {
+      throw new Error(
+        'Event projector domain mismatch: ' +
+          registration.eventType +
+          ' belongs to ' +
+          event.domain +
+          ', runtime is ' +
+          runtime.key,
+      )
+    }
+    CURRENT_EVENT_PROJECTOR_REGISTRY.register(registration)
   }
 
   for (const registration of runtime.changeExecutors) {

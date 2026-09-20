@@ -13,6 +13,10 @@ const advisorCleanup = readFileSync(
   new URL('../../../../supabase/migrations/092_business_event_outbox_advisor_cleanup.sql', import.meta.url),
   'utf8',
 )
+const coverageSnapshotLabels = readFileSync(
+  new URL('../../../../supabase/migrations/093_coverage_business_event_snapshot_labels.sql', import.meta.url),
+  'utf8',
+)
 const activeDelivery = readFileSync(
   new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
   'utf8',
@@ -83,5 +87,27 @@ describe('Phase E general business outbox contract', () => {
     expect(advisorCleanup).toContain('business_event_outbox_local_message_idx')
     expect(advisorCleanup).toContain('to service_role')
     expect(migration).toContain('alter table public.business_event_outbox enable row level security')
+  })
+})
+
+
+describe('Phase F Coverage event snapshot projection prerequisites', () => {
+  it('freezes Coverage region labels in future embedded-event snapshots', () => {
+    expect(coverageSnapshotLabels).toContain("'pay_region_label', v_pay_region_label")
+    expect(coverageSnapshotLabels).toContain(
+      "'receive_region_label', v_receive_region_label",
+    )
+    expect(coverageSnapshotLabels).toContain('from public.coverage_regions as cr')
+    expect(coverageSnapshotLabels).not.toContain('update public.business_event_outbox')
+  })
+
+  it('keeps the new shadow rendering path transport-free', () => {
+    const shadowRuntime = readFileSync(
+      new URL('./business-event-outbox.ts', import.meta.url),
+      'utf8',
+    )
+    expect(shadowRuntime).toContain('inspectShadowBusinessEventRendering')
+    expect(shadowRuntime).toContain('CURRENT_EVENT_PROJECTOR_REGISTRY')
+    expect(shadowRuntime).not.toContain('engineSendText')
   })
 })

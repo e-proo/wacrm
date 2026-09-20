@@ -1,3 +1,5 @@
+export * from './event-projector-registry'
+export * from './business-event-message-renderer'
 export * from './business-event-outbox'
 export * from './business-event-contracts'
 export * from './change-action-contracts'
