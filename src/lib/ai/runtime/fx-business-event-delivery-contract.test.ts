@@ -6,6 +6,10 @@ const deliverySource = readFileSync(
   new URL('./customer-notification-delivery.ts', import.meta.url),
   'utf8',
 )
+const workerSource = readFileSync(
+  new URL('./worker.ts', import.meta.url),
+  'utf8',
+)
 const unifiedClaimMigrationSource = readFileSync(
   new URL('../../../../supabase/migrations/088_unified_customer_business_event_claim.sql', import.meta.url),
   'utf8',
@@ -52,5 +56,23 @@ describe('FX V2 unified customer business-event delivery', () => {
     expect(canonicalEventMigrationSource).not.toContain(
       "then 'exchange_rate.trade.approved_for_contact'",
     )
+  })
+})
+
+
+describe('background notification worker cutover safety', () => {
+  it('delegates all claiming and sending to the route-aware unified delivery boundary', () => {
+    expect(workerSource).toContain('deliverCustomerOutcomeNotifications')
+    expect(workerSource).toContain("from('business_event_outbox')")
+    expect(workerSource).toContain("from('customer_intent_notifications')")
+    expect(workerSource).not.toContain("status: 'sending'")
+    expect(workerSource).not.toContain('engineSendText({')
+    expect(workerSource).not.toContain('renderFxTradeCustomerMessage')
+    expect(workerSource).not.toContain('randomUUID')
+  })
+
+  it('shares one batch budget between active and legacy claims', () => {
+    expect(deliverySource).toContain('const remaining = limit - activeDelivery.claimed')
+    expect(deliverySource).toContain('p_limit: remaining')
   })
 })

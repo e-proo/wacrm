@@ -65,6 +65,11 @@ export async function deliverCustomerOutcomeNotifications(input: {
     limit,
   })
 
+  const remaining = limit - activeDelivery.claimed
+  if (remaining <= 0) {
+    return activeDelivery
+  }
+
   const deliveryContext = input.changeRequestId
     ? await loadChangeRequestDeliveryContext(input.accountId, input.changeRequestId)
     : null
@@ -72,7 +77,7 @@ export async function deliverCustomerOutcomeNotifications(input: {
   const { data, error } = await db.rpc('claim_customer_business_notifications', {
     p_account_id: input.accountId,
     p_change_request_id: input.changeRequestId ?? null,
-    p_limit: limit,
+    p_limit: remaining,
   })
   if (error) throw error
 
