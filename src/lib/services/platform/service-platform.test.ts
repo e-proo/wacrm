@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest'
 import type { PlatformToolManifest } from '@/lib/ai/tools/platform/contracts'
 import { getRegisteredTool } from '@/lib/ai/runtime/tool-registry'
 import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
-import { COVERAGE_DOMAIN } from '@/lib/services/coverage/domain'
+import { COVERAGE_DOMAIN, COVERAGE_RUNTIME } from '@/lib/services/coverage/domain'
 import { COVERAGE_TOOL_MANIFESTS } from '@/lib/services/coverage/tool-manifests'
-import { FX_V2_DOMAIN } from '@/lib/services/fx-v2/domain'
+import { FX_V2_DOMAIN, FX_V2_RUNTIME } from '@/lib/services/fx-v2/domain'
 import { FX_V2_TOOL_MANIFESTS } from '@/lib/services/fx-v2/tool-manifests'
 import {
   CURRENT_BUSINESS_DOMAIN_REGISTRY,
@@ -332,5 +332,31 @@ describe('native domain tool ownership', () => {
     expect(registrySource).toContain('COVERAGE_TOOL_MANIFESTS')
     expect(registrySource).not.toContain("key: 'exchange_rates.")
     expect(registrySource).not.toContain("key: 'coverage.")
+  })
+})
+
+
+describe('domain-owned model tool executors', () => {
+  it('binds every native FX and Coverage manifest to an exact-version domain runtime executor', () => {
+    expect(
+      FX_V2_RUNTIME.toolExecutors.map(({ key, version }) => key + '@' + version),
+    ).toEqual(FX_V2_TOOL_MANIFESTS.map(({ key, version }) => key + '@' + version))
+
+    expect(
+      COVERAGE_RUNTIME.toolExecutors.map(({ key, version }) => key + '@' + version),
+    ).toEqual(COVERAGE_TOOL_MANIFESTS.map(({ key, version }) => key + '@' + version))
+  })
+
+  it('keeps native tool names and implementation imports out of the central executor registry', () => {
+    const source = readFileSync(
+      new URL('../../ai/tools/platform/current-executor-registry.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain('CURRENT_BUSINESS_DOMAIN_RUNTIMES')
+    expect(source).not.toContain("add('exchange_rates.")
+    expect(source).not.toContain("add('coverage.")
+    expect(source).not.toContain('executeFxV2')
+    expect(source).not.toContain('executeCoverage')
   })
 })

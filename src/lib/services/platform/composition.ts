@@ -7,24 +7,26 @@ import type {
   ChangeExecutionResult,
 } from './change-executor-registry'
 import { BusinessDomainRegistry } from './domain-registry'
-import type { BusinessDomainManifest, BusinessDomainRuntime } from './domain-contracts'
+import type { BusinessDomainManifest } from './domain-contracts'
 
-const DOMAIN_MODULES: readonly BusinessDomainManifest[] = [
+export const CURRENT_BUSINESS_DOMAIN_MODULES: readonly BusinessDomainManifest[] = [
   FX_V2_DOMAIN,
   COVERAGE_DOMAIN,
 ]
 
-const DOMAIN_RUNTIMES: readonly BusinessDomainRuntime<never, never>[] = [
+export const CURRENT_BUSINESS_DOMAIN_RUNTIMES = [
   FX_V2_RUNTIME,
   COVERAGE_RUNTIME,
-]
+] as const
 
 export const CURRENT_BUSINESS_DOMAIN_REGISTRY = new BusinessDomainRegistry()
-for (const domain of DOMAIN_MODULES) CURRENT_BUSINESS_DOMAIN_REGISTRY.register(domain)
+for (const domain of CURRENT_BUSINESS_DOMAIN_MODULES) {
+  CURRENT_BUSINESS_DOMAIN_REGISTRY.register(domain)
+}
 
 export const CURRENT_CHANGE_EXECUTOR_REGISTRY = new ChangeExecutorRegistry()
 
-for (const runtime of DOMAIN_RUNTIMES) {
+for (const runtime of CURRENT_BUSINESS_DOMAIN_RUNTIMES) {
   const domain = CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain(runtime.key)
   if (!domain) throw new Error('Runtime has no registered domain manifest: ' + runtime.key)
   if (domain.version !== runtime.version) {

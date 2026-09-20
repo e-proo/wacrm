@@ -25,12 +25,20 @@ export interface DomainRuntimeBinding<THandler> {
   handler: THandler
 }
 
-export interface BusinessDomainRuntime<TToolHandler = never, TEventProjector = never> {
+/**
+ * Runtime bindings intentionally stay generic. AI tool executor registrations,
+ * deterministic change executors and future event projectors have different
+ * call signatures, while the business domain remains their owner.
+ */
+export interface BusinessDomainRuntime<
+  TToolExecutorRegistration = never,
+  TEventProjectorRegistration = never,
+> {
   key: string
   version: number
-  toolExecutors: readonly DomainRuntimeBinding<TToolHandler>[]
+  toolExecutors: readonly TToolExecutorRegistration[]
   changeExecutors: readonly ChangeExecutorRegistration[]
-  eventProjectors: readonly DomainRuntimeBinding<TEventProjector>[]
+  eventProjectors: readonly TEventProjectorRegistration[]
 }
 
 export interface BusinessDomainContractIssue {
@@ -164,11 +172,11 @@ export function defineBusinessDomain<T extends BusinessDomainManifest>(domain: T
 }
 
 export function defineBusinessDomainRuntime<
-  TToolHandler = never,
-  TEventProjector = never,
+  TToolExecutorRegistration = never,
+  TEventProjectorRegistration = never,
 >(
-  runtime: BusinessDomainRuntime<TToolHandler, TEventProjector>,
-): BusinessDomainRuntime<TToolHandler, TEventProjector> {
+  runtime: BusinessDomainRuntime<TToolExecutorRegistration, TEventProjectorRegistration>,
+): BusinessDomainRuntime<TToolExecutorRegistration, TEventProjectorRegistration> {
   if (!DOMAIN_RE.test(runtime.key)) throw new Error('Invalid runtime domain key: ' + runtime.key)
   if (!Number.isInteger(runtime.version) || runtime.version < 1) {
     throw new Error('Invalid runtime domain version: ' + runtime.key)

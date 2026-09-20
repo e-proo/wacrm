@@ -26,6 +26,10 @@ describe('FX V2 approved change execution contract', () => {
     new URL('../tools/platform/current-executor-registry.ts', import.meta.url),
     'utf8',
   )
+  const fxToolRuntime = readFileSync(
+    new URL('../../services/fx-v2/ai-tool-runtime.ts', import.meta.url),
+    'utf8',
+  )
   const legacyExecutors = readFileSync(
     new URL('../tools/executors.ts', import.meta.url),
     'utf8',
@@ -97,13 +101,15 @@ describe('FX V2 approved change execution contract', () => {
     expect(businessHandoff).toContain('executeCoverageProposeRequest')
   })
 
-  it('registers only pair-centric FX V2 model tool executors', () => {
-    expect(executorRegistry).toContain("add('exchange_rates.get_current', 1")
-    expect(executorRegistry).toContain("add('exchange_rates.record_trade_request', 2")
-    expect(executorRegistry).toContain("add('exchange_rates.admin_list_pairs', 1")
-    expect(executorRegistry).toContain("add('exchange_rates.propose_pair_change', 2")
-    expect(executorRegistry).not.toContain('admin_list_books')
-    expect(executorRegistry).not.toContain("record_trade_request', 1")
-    expect(executorRegistry).not.toContain("propose_pair_change', 1")
+  it('registers only pair-centric FX V2 model tool executors through the FX domain runtime', () => {
+    expect(fxToolRuntime).toContain("key: 'exchange_rates.get_current'")
+    expect(fxToolRuntime).toContain("key: 'exchange_rates.record_trade_request'")
+    expect(fxToolRuntime).toContain('version: 2')
+    expect(fxToolRuntime).toContain("key: 'exchange_rates.admin_list_pairs'")
+    expect(fxToolRuntime).toContain("key: 'exchange_rates.propose_pair_change'")
+    expect(fxToolRuntime).not.toContain('admin_list_books')
+    expect(executorRegistry).toContain('CURRENT_BUSINESS_DOMAIN_RUNTIMES')
+    expect(executorRegistry).not.toContain("add('exchange_rates.")
+    expect(executorRegistry).not.toContain('executeFxV2')
   })
 })

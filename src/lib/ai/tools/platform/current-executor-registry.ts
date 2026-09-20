@@ -1,5 +1,4 @@
 import {
-  executeCoverageCheckAvailability,
   executePricingCalculateQuote,
   executeServicesMatchRequest,
   executeIntentsRecord,
@@ -9,34 +8,19 @@ import {
 } from '../executors'
 import { executeServicesGetSafe, executeServicesSearchSafe } from '../service-search'
 import {
-  executeCoverageAdminListOffers,
-  executeCoverageAdminListRequests,
   executeChangeRequestsListPending,
   executeIntentProposeDecision,
   executeServiceProposeUpdate,
   executePricingRuleProposeServicePrice,
 } from '../business-handoff'
-import {
-  executeFxV2GetCurrent,
-  executeFxV2RecordTradeRequest,
-} from '../fx-v2-tools'
-import {
-  executeFxV2AdminListPairs,
-  executeFxV2AdminListTradeRequests,
-  executeFxV2ProposePairChange,
-  executeFxV2ProposeTradeDecision,
-} from '../fx-v2-admin-tools'
-import {
-  executeCoverageFindOffersDirectional,
-  executeCoverageGetRatesDirectional,
-} from '../coverage-directional'
-import { executeCoverageProposalResilient } from '../coverage-proposal-resilient'
 import type { ToolDefinition } from '../../runtime/tool-registry'
+import { CURRENT_BUSINESS_DOMAIN_RUNTIMES } from '@/lib/services/platform/composition'
 import { ToolExecutorRegistry } from './execution-registry'
 import { getCurrentPlatformTool } from './current-domain-registry'
+import type { ModelToolRuntimeExecutor } from './runtime-contracts'
 
 type RuntimeResult = ToolResult<unknown>
-type RuntimeExecutor = (ctx: ToolContext, args: Record<string, unknown>) => Promise<RuntimeResult>
+type RuntimeExecutor = ModelToolRuntimeExecutor
 
 const CURRENT_EXECUTORS = new ToolExecutorRegistry<ToolContext, RuntimeResult>()
 
@@ -46,36 +30,27 @@ function add(key: string, version: number, executor: RuntimeExecutor): void {
   CURRENT_EXECUTORS.register({ key, version, executor })
 }
 
+/**
+ * Transitional registrations for domains that have not yet moved into a
+ * BusinessDomainRuntime. FX V2 and Coverage are registered below from their
+ * owning domain runtimes.
+ */
 add('services.search', 1, (ctx, args) => executeServicesSearchSafe(ctx, args as never))
 add('services.get', 1, (ctx, args) => executeServicesGetSafe(ctx, args as never))
 add('services.match_request', 1, (ctx, args) => executeServicesMatchRequest(ctx, args as never))
 add('services.propose_update', 1, (ctx, args) => executeServiceProposeUpdate(ctx, args as never))
 add('pricing.calculate_quote', 1, (ctx, args) => executePricingCalculateQuote(ctx, args as never))
 add('pricing_rules.propose_service_price', 1, (ctx, args) => executePricingRuleProposeServicePrice(ctx, args as never))
-add('exchange_rates.get_current', 1, (ctx, args) => executeFxV2GetCurrent(ctx, args as never))
-add('exchange_rates.record_trade_request', 2, (ctx, args) => executeFxV2RecordTradeRequest(ctx, args as never))
-add('exchange_rates.admin_list_pairs', 1, (ctx, args) => executeFxV2AdminListPairs(ctx, args as never))
-add('exchange_rates.propose_pair_change', 2, (ctx, args) => executeFxV2ProposePairChange(ctx, args as never))
-add('exchange_rates.admin_list_trade_requests', 1, (ctx, args) => executeFxV2AdminListTradeRequests(ctx, args as never))
-add('exchange_rates.propose_trade_decision', 1, (ctx, args) => executeFxV2ProposeTradeDecision(ctx, args as never))
-add('coverage.check_availability', 1, (ctx, args) => executeCoverageCheckAvailability(ctx, args as never))
-add('coverage.find_offers', 2, (ctx, args) => {
-  const hasDirectionalLegs = Boolean(
-    (args.pay_region_id || args.pay_region || args.pay_macro) &&
-      (args.receive_region_id || args.receive_region || args.receive_macro),
-  )
-  const effectiveArgs = hasDirectionalLegs ? { ...args, limit: 50 } : args
-  return executeCoverageFindOffersDirectional(ctx, effectiveArgs as never)
-})
-add('coverage.get_rates', 1, (ctx, args) => executeCoverageGetRatesDirectional(ctx, args as never))
-add('coverage.propose_offer', 2, (ctx, args) => executeCoverageProposalResilient(ctx, args, 'offer'))
-add('coverage.propose_request', 1, (ctx, args) => executeCoverageProposalResilient(ctx, args, 'request'))
-add('coverage.admin_list_offers', 1, (ctx, args) => executeCoverageAdminListOffers(ctx, args as never))
-add('coverage.admin_list_requests', 1, (ctx, args) => executeCoverageAdminListRequests(ctx, args as never))
 add('intents.record', 1, (ctx, args) => executeIntentsRecord(ctx, args as never))
 add('intents.search', 1, (ctx, args) => executeIntentsSearch(ctx, args as never))
 add('intents.propose_decision', 1, (ctx, args) => executeIntentProposeDecision(ctx, args as never))
 add('change_requests.list_pending', 1, (ctx, args) => executeChangeRequestsListPending(ctx, args as never))
+
+for (const runtime of CURRENT_BUSINESS_DOMAIN_RUNTIMES) {
+  for (const registration of runtime.toolExecutors) {
+    add(registration.key, registration.version, registration.executor)
+  }
+}
 
 const MODEL_SECRET_KEYS = new Set([
   'confirmation_code',

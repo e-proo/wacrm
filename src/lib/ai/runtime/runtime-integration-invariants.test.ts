@@ -88,19 +88,26 @@ describe('multi-agent runtime integration invariants', () => {
     expect(appendedList).not.toContain('coverage.propose_request')
   })
 
-  it('registers exact directional coverage and pending-change executors', () => {
-    const executors = readFileSync(
+  it('registers exact directional coverage executors through the Coverage domain runtime', () => {
+    const centralExecutors = readFileSync(
       new URL('../tools/platform/current-executor-registry.ts', import.meta.url),
       'utf8',
     )
-    expect(executors).toContain("add('coverage.get_rates', 1")
-    expect(executors).toContain("add('coverage.find_offers', 2")
-    expect(executors).toContain("add('coverage.propose_offer', 2")
-    expect(executors).toContain("add('coverage.propose_request', 1")
-    expect(executors).toContain("add('coverage.admin_list_offers', 1")
-    expect(executors).toContain("add('coverage.admin_list_requests', 1")
-    expect(executors).toContain("add('change_requests.list_pending', 1")
-    expect(executors).toContain('sanitizeToolResultForModel')
+    const coverageRuntime = readFileSync(
+      new URL('../../services/coverage/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(coverageRuntime).toContain("key: 'coverage.get_rates'")
+    expect(coverageRuntime).toContain("key: 'coverage.find_offers'")
+    expect(coverageRuntime).toContain("key: 'coverage.propose_offer'")
+    expect(coverageRuntime).toContain("key: 'coverage.propose_request'")
+    expect(coverageRuntime).toContain("key: 'coverage.admin_list_offers'")
+    expect(coverageRuntime).toContain("key: 'coverage.admin_list_requests'")
+    expect(centralExecutors).toContain('CURRENT_BUSINESS_DOMAIN_RUNTIMES')
+    expect(centralExecutors).not.toContain("add('coverage.")
+    expect(centralExecutors).toContain("add('change_requests.list_pending', 1")
+    expect(centralExecutors).toContain('sanitizeToolResultForModel')
   })
 
   it('wires change-request creation to admin notification and admin decisions back to the atomic customer outbox', () => {
