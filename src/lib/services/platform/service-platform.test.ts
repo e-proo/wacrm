@@ -360,3 +360,21 @@ describe('domain-owned model tool executors', () => {
     expect(source).not.toContain('executeCoverage')
   })
 })
+
+
+describe('Coverage business-event registration', () => {
+  it('registers the canonical Coverage event catalog in the shared domain registry', () => {
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.getEvent('coverage.offer.approved', 1)?.snapshotPolicy,
+    ).toBe('embedded_event_snapshot')
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.getEvent('coverage.request.approved', 1)?.subjectTypes,
+    ).toEqual(['coverage_request'])
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.getEvent('coverage.match.reserved', 1)?.subjectTypes,
+    ).toEqual(['coverage_match'])
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.getEvent('coverage.match.released', 1)?.subjectTypes,
+    ).toEqual(['coverage_match'])
+  })
+})

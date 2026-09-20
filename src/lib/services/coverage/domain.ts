@@ -4,6 +4,7 @@ import {
   defineBusinessDomainRuntime,
 } from '@/lib/services/platform/domain-contracts'
 import { COVERAGE_MODEL_TOOL_EXECUTORS } from './ai-tool-runtime'
+import { COVERAGE_BUSINESS_EVENT_MANIFESTS } from './business-events'
 import { COVERAGE_CHANGE_EXECUTORS } from './change-executors'
 import { COVERAGE_TOOL_MANIFESTS } from './tool-manifests'
 
@@ -55,7 +56,7 @@ export const COVERAGE_DOMAIN = defineBusinessDomain({
       ],
     },
   ],
-  events: [],
+  events: COVERAGE_BUSINESS_EVENT_MANIFESTS,
   messageTemplates: coverageTemplates,
 })
 
