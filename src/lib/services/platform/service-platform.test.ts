@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { PlatformToolManifest } from '@/lib/ai/tools/platform/contracts'
+import { COVERAGE_DOMAIN } from '@/lib/services/coverage/domain'
 import { FX_V2_DOMAIN } from '@/lib/services/fx-v2/domain'
 import {
   CURRENT_BUSINESS_DOMAIN_REGISTRY,
@@ -235,5 +236,55 @@ describe('FX V2 first-domain migration', () => {
     expect(source).not.toContain('decideFxTradeRequest')
     expect(source).not.toContain("row.target_type === 'fx_rate_pair'")
     expect(source).not.toContain("row.target_type === 'fx_trade_request'")
+  })
+})
+
+
+describe('Coverage second-domain migration', () => {
+  it('registers Coverage through the same domain/change-executor platform', () => {
+    expect(COVERAGE_DOMAIN.tools.map((tool) => tool.key)).toEqual(
+      expect.arrayContaining([
+        'coverage.check_availability',
+        'coverage.find_offers',
+        'coverage.get_rates',
+        'coverage.propose_offer',
+        'coverage.propose_request',
+        'coverage.admin_list_offers',
+        'coverage.admin_list_requests',
+      ]),
+    )
+    expect(COVERAGE_DOMAIN.changeActions.map((action) => action.key)).toEqual([
+      'coverage.offer.create',
+      'coverage.request.create',
+    ])
+
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
+        targetType: 'coverage_offer',
+        targetId: null,
+        intent: 'create',
+      })?.key,
+    ).toBe('coverage.offer.create')
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
+        targetType: 'coverage_request',
+        targetId: null,
+        intent: 'create',
+      })?.key,
+    ).toBe('coverage.request.create')
+
+    expect(CURRENT_CHANGE_EXECUTOR_REGISTRY.has('coverage.offer.create', 1)).toBe(true)
+    expect(CURRENT_CHANGE_EXECUTOR_REGISTRY.has('coverage.request.create', 1)).toBe(true)
+  })
+
+  it('keeps Coverage mutation branches out of the generic change-request executor', () => {
+    const source = readFileSync(
+      new URL('../../ai/runtime/change-request-executor.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain('tryExecuteCurrentChangeAction')
+    expect(source).not.toContain("row.target_type === 'coverage_offer'")
+    expect(source).not.toContain("row.target_type === 'coverage_request'")
   })
 })

@@ -1,3 +1,4 @@
+import { COVERAGE_DOMAIN, COVERAGE_RUNTIME } from '@/lib/services/coverage/domain'
 import { FX_V2_DOMAIN, FX_V2_RUNTIME } from '@/lib/services/fx-v2/domain'
 import { ChangeExecutorRegistry } from './change-executor-registry'
 import type {
@@ -6,35 +7,62 @@ import type {
   ChangeExecutionResult,
 } from './change-executor-registry'
 import { BusinessDomainRegistry } from './domain-registry'
+import type { BusinessDomainManifest, BusinessDomainRuntime } from './domain-contracts'
 
-export const CURRENT_BUSINESS_DOMAIN_REGISTRY = new BusinessDomainRegistry().register(FX_V2_DOMAIN)
+const DOMAIN_MODULES: readonly BusinessDomainManifest[] = [
+  FX_V2_DOMAIN,
+  COVERAGE_DOMAIN,
+]
+
+const DOMAIN_RUNTIMES: readonly BusinessDomainRuntime<never, never>[] = [
+  FX_V2_RUNTIME,
+  COVERAGE_RUNTIME,
+]
+
+export const CURRENT_BUSINESS_DOMAIN_REGISTRY = new BusinessDomainRegistry()
+for (const domain of DOMAIN_MODULES) CURRENT_BUSINESS_DOMAIN_REGISTRY.register(domain)
 
 export const CURRENT_CHANGE_EXECUTOR_REGISTRY = new ChangeExecutorRegistry()
 
-for (const registration of FX_V2_RUNTIME.changeExecutors) {
-  const action = CURRENT_BUSINESS_DOMAIN_REGISTRY.getChangeAction(
-    registration.actionKey,
-    registration.actionVersion,
-  )
-  if (!action) {
+for (const runtime of DOMAIN_RUNTIMES) {
+  const domain = CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain(runtime.key)
+  if (!domain) throw new Error('Runtime has no registered domain manifest: ' + runtime.key)
+  if (domain.version !== runtime.version) {
     throw new Error(
-      'Cannot register change executor without action contract: ' +
-        registration.actionKey +
-        '@' +
-        registration.actionVersion,
+      'Domain/runtime version mismatch for ' +
+        runtime.key +
+        ': manifest=' +
+        domain.version +
+        ', runtime=' +
+        runtime.version,
     )
   }
-  if (action.domain !== FX_V2_RUNTIME.key) {
-    throw new Error(
-      'Change executor domain mismatch: ' +
-        registration.actionKey +
-        ' belongs to ' +
-        action.domain +
-        ', runtime is ' +
-        FX_V2_RUNTIME.key,
+
+  for (const registration of runtime.changeExecutors) {
+    const action = CURRENT_BUSINESS_DOMAIN_REGISTRY.getChangeAction(
+      registration.actionKey,
+      registration.actionVersion,
     )
+    if (!action) {
+      throw new Error(
+        'Cannot register change executor without action contract: ' +
+          registration.actionKey +
+          '@' +
+          registration.actionVersion,
+      )
+    }
+    if (action.domain !== runtime.key) {
+      throw new Error(
+        'Change executor domain mismatch: ' +
+          registration.actionKey +
+          ' belongs to ' +
+          action.domain +
+          ', runtime is ' +
+          runtime.key,
+      )
+    }
+    CURRENT_CHANGE_EXECUTOR_REGISTRY.register(registration)
   }
-  CURRENT_CHANGE_EXECUTOR_REGISTRY.register(registration)
 }
 
 export type CurrentChangeExecutionAttempt =
