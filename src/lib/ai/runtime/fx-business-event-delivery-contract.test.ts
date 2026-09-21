@@ -10,6 +10,10 @@ const workerSource = readFileSync(
   new URL('./worker.ts', import.meta.url),
   'utf8',
 )
+const businessNotificationsSource = readFileSync(
+  new URL('./business-notifications.ts', import.meta.url),
+  'utf8',
+)
 const unifiedClaimMigrationSource = readFileSync(
   new URL('../../../../supabase/migrations/088_unified_customer_business_event_claim.sql', import.meta.url),
   'utf8',
@@ -74,5 +78,18 @@ describe('background notification worker cutover safety', () => {
   it('shares one batch budget between active and legacy claims', () => {
     expect(deliverySource).toContain('const remaining = limit - activeDelivery.claimed')
     expect(deliverySource).toContain('p_limit: remaining')
+  })
+})
+
+
+describe('legacy sender contraction', () => {
+  it('removes the superseded direct customer sender from business-notifications', () => {
+    expect(businessNotificationsSource).not.toContain(
+      'deliverPendingCustomerIntentNotifications',
+    )
+    expect(businessNotificationsSource).not.toContain(
+      ".from('customer_intent_notifications')",
+    )
+    expect(businessNotificationsSource).not.toContain('engineSendText({')
   })
 })
