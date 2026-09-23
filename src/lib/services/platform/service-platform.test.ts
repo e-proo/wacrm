@@ -511,3 +511,23 @@ describe('shared service primitives cleanup', () => {
     expect(coverageChangeExecutors).not.toContain('Number(payload.requested_amount)')
   })
 })
+
+
+describe('legacy notification contraction', () => {
+  it('keeps FX rollback rendering outside the generic customer notification runtime', () => {
+    const runtime = readFileSync(
+      new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
+      'utf8',
+    )
+    const fxAdapter = readFileSync(
+      new URL('../fx-v2/legacy-notification-adapter.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(runtime).toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
+    expect(runtime).not.toContain('renderFxTradeBusinessEventText')
+    expect(runtime).not.toContain('if (input.row.fx_trade_request_id)')
+    expect(fxAdapter).toContain('renderFxTradeBusinessEventText')
+    expect(fxAdapter).toContain('exchange_rates.legacy_customer_notification')
+  })
+})
