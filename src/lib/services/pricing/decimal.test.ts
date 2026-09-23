@@ -42,6 +42,12 @@ describe('parseDecimal', () => {
     expect(parseDecimal('0', { rejectZero: false })?.toString()).toBe('0')
     expect(parseDecimal('0.0', { rejectZero: true })).toBeNull()
   })
+
+  it('preserves financial strings beyond JavaScript safe-integer precision', () => {
+    expect(parseDecimal('900719925474099312345.67')?.toFixed(2)).toBe(
+      '900719925474099312345.67',
+    )
+  })
 })
 
 describe('formatDecimal', () => {
