@@ -29,6 +29,7 @@ export interface ActiveBusinessEventDeliveryResult {
   sent: number
   reconciliation: number
   failed: number
+  lastLocalMessageId: string | null
 }
 
 /**
@@ -69,13 +70,20 @@ export async function deliverActiveBusinessEventNotifications(input: {
 
   const rows = (data ?? []) as ClaimedBusinessEventDeliveryRow[]
   if (rows.length === 0) {
-    return { claimed: 0, sent: 0, reconciliation: 0, failed: 0 }
+    return {
+      claimed: 0,
+      sent: 0,
+      reconciliation: 0,
+      failed: 0,
+      lastLocalMessageId: null,
+    }
   }
 
   const store = createSupabaseTemplateOverrideStore(db)
   let sent = 0
   let reconciliation = 0
   let failed = 0
+  let lastLocalMessageId: string | null = null
 
   for (const row of rows) {
     const engineKey = businessEventEngineIdempotencyKey({
@@ -159,6 +167,7 @@ export async function deliverActiveBusinessEventNotifications(input: {
       }
 
       sent += 1
+      lastLocalMessageId = delivered.local_message_id
       console.info(
         `[business event delivery] sent ${row.event_type}@${row.event_version} event=${row.id.slice(0, 8)}`,
       )
@@ -205,6 +214,7 @@ export async function deliverActiveBusinessEventNotifications(input: {
     sent,
     reconciliation,
     failed,
+    lastLocalMessageId,
   }
 }
 
