@@ -524,10 +524,25 @@ describe('legacy notification contraction', () => {
       'utf8',
     )
 
+    const shadowParity = readFileSync(
+      new URL('./business-event-outbox.ts', import.meta.url),
+      'utf8',
+    )
+    const registry = readFileSync(
+      new URL('./legacy-notification-renderer-registry.ts', import.meta.url),
+      'utf8',
+    )
+
     expect(runtime).toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
     expect(runtime).not.toContain('renderFxTradeBusinessEventText')
-    expect(runtime).not.toContain('if (input.row.fx_trade_request_id)')
+    expect(runtime).not.toContain('fx_trade_request_id')
+    expect(shadowParity).toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
+    expect(shadowParity).not.toContain('renderFxTradeBusinessEventText')
+    expect(shadowParity).not.toContain('fx_trade_request_id')
+    expect(registry).not.toContain('fxTradeRequestId')
+    expect(registry).not.toContain('fx_trade_request_id')
     expect(fxAdapter).toContain('renderFxTradeBusinessEventText')
+    expect(fxAdapter).toContain('fx_trade_request_id')
     expect(fxAdapter).toContain('exchange_rates.legacy_customer_notification')
   })
 })
@@ -548,7 +563,10 @@ describe('exact-version runtime tool contraction', () => {
       'getCurrentPlatformTool(invocation.toolKey, grantedVersion)',
     )
     expect(dispatch).not.toContain('grantedVersion !== latestTool.version')
-    expect(loop).toContain('getCurrentPlatformTool(key, grant.toolVersion)')
+    expect(loop).toContain('CURRENT_PLATFORM_REGISTRY.modelVisibleTools')
+    expect(loop).toContain(
+      'getCurrentPlatformTool(call.toolKey, grant.toolVersion)',
+    )
     expect(loop).not.toContain('getRegisteredTool(key)')
   })
 
