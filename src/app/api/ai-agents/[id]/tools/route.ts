@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
-import { listRegisteredTools } from '@/lib/ai/runtime/tool-registry'
+import { listCurrentToolDefinitions } from '@/lib/ai/tools/platform/runtime-tool-compat'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .eq('agent_id', id)
       .order('revision_number', { ascending: false })
     if (error) throw error
-    return NextResponse.json({ registry: listRegisteredTools(), revisions: data ?? [] })
+    return NextResponse.json({ registry: listCurrentToolDefinitions(), revisions: data ?? [] })
   } catch (err) {
     return toErrorResponse(err)
   }
