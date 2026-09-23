@@ -40,3 +40,28 @@ describe('FX readiness diagnostics', () => {
     expect(source).toContain('pending_event_types')
   })
 })
+
+
+describe('FX requested-event correlation and ordering repair', () => {
+  const migration = readFileSync(
+    new URL('../../../../supabase/migrations/101_fx_requested_event_correlation_and_ordering.sql', import.meta.url),
+    'utf8',
+  )
+
+  it('correlates requested events to the originating AI run', () => {
+    expect(migration).toContain("new.metadata ->> 'run_id'")
+    expect(migration).toContain("v_event_type = 'exchange_rate.trade.requested'")
+  })
+
+  it('claims older pending events for the same subject before a correlated later event', () => {
+    expect(migration).toContain('with correlated_subjects as')
+    expect(migration).toContain('beo.created_at <= cs.correlated_created_at')
+    expect(migration).toContain('order by beo.created_at asc, beo.id asc')
+  })
+
+  it('quarantines already-overtaken active requested rows instead of sending them late', () => {
+    expect(migration).toContain('SUPERSEDED_BY_LATER_FX_STATE')
+    expect(migration).toContain("etr.status <> 'pending_admin'")
+    expect(migration).toContain("delivery_mode = 'shadow'")
+  })
+})
