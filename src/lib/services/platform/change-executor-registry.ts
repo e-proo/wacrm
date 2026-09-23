@@ -1,3 +1,5 @@
+import { DomainError } from './domain-error'
+
 export interface ChangeExecutionContext {
   accountId: string
   changeRequestId: string
@@ -17,15 +19,10 @@ export interface ClaimedChangeExecution {
 
 export type ChangeExecutionResult = Record<string, unknown>
 
-export class DomainChangeExecutionError extends Error {
-  readonly code: string
-  readonly status: number
-
+export class DomainChangeExecutionError extends DomainError {
   constructor(code: string, message: string, status = 409) {
-    super(message)
+    super(code, message, status)
     this.name = 'DomainChangeExecutionError'
-    this.code = code
-    this.status = status
   }
 }
 
