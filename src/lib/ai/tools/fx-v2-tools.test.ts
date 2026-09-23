@@ -182,6 +182,8 @@ describe('FX V2 customer runtime tools', () => {
     )
     expect(mocks.createChangeRequest).toHaveBeenCalledWith({
       accountId: 'account-1',
+      actionKey: 'exchange_rates.trade.decide',
+      actionVersion: 1,
       targetType: 'fx_trade_request',
       targetId: 'trade-1',
       intent: 'update',
