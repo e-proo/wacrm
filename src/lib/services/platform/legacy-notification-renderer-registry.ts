@@ -2,6 +2,7 @@ export interface LegacyCustomerNotificationDescriptor {
   id: string
   eventType: string
   intentId: string | null
+  changeRequestId: string | null
 }
 
 export interface LegacyCustomerNotificationRenderInput {
