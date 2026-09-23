@@ -301,7 +301,19 @@ export async function executeFxV2ProposeTradeDecision(
       reviewIdempotencyKey,
     )
 
-    if (args.decision === 'approve' && existingReview?.status === 'pending') {
+    const reusableReview =
+      existingReview?.status === 'pending' &&
+      existingReview.target_type === 'fx_trade_request' &&
+      existingReview.target_id === request.id &&
+      (
+        existingReview.action_key === null ||
+        (
+          existingReview.action_key === 'exchange_rates.trade.decide' &&
+          existingReview.action_version === 1
+        )
+      )
+
+    if (reusableReview && existingReview) {
       return {
         ok: true,
         data: {
@@ -325,6 +337,17 @@ export async function executeFxV2ProposeTradeDecision(
           },
         },
         safe_to_show: false,
+      }
+    }
+
+    if (existingReview?.status === 'pending') {
+      return {
+        ok: false,
+        data: null,
+        safe_to_show: false,
+        code: 'FX_TRADE_REVIEW_CONFLICT',
+        message:
+          'The pending FX review does not match the current trade decision contract.',
       }
     }
 
