@@ -14,6 +14,10 @@ describe('FX V2 approved change execution contract', () => {
     new URL('../../services/platform/composition.ts', import.meta.url),
     'utf8',
   )
+  const servicePlatformDomainCatalog = readFileSync(
+    new URL('../../services/platform/domain-catalog.ts', import.meta.url),
+    'utf8',
+  )
   const businessHandoff = readFileSync(
     new URL('../tools/business-handoff.ts', import.meta.url),
     'utf8',
@@ -43,9 +47,13 @@ describe('FX V2 approved change execution contract', () => {
     expect(source).toContain('tryExecuteCurrentChangeAction')
     expect(source).not.toContain("row.target_type === 'fx_rate_pair'")
     expect(source).not.toContain("row.target_type === 'fx_trade_request'")
-    expect(servicePlatformComposition).toContain('FX_V2_DOMAIN')
-    expect(servicePlatformComposition).toContain('FX_V2_RUNTIME')
+    expect(servicePlatformComposition).toContain('CURRENT_BUSINESS_DOMAIN_MODULES')
+    expect(servicePlatformComposition).toContain('CURRENT_BUSINESS_DOMAIN_RUNTIMES')
     expect(servicePlatformComposition).toContain('CURRENT_CHANGE_EXECUTOR_REGISTRY')
+    expect(servicePlatformComposition).not.toContain('FX_V2_DOMAIN')
+    expect(servicePlatformComposition).not.toContain('FX_V2_RUNTIME')
+    expect(servicePlatformDomainCatalog).toContain('FX_V2_DOMAIN')
+    expect(servicePlatformDomainCatalog).toContain('FX_V2_RUNTIME')
   })
 
   it('publishes approved pair changes through the deterministic FX V2 domain executor', () => {
