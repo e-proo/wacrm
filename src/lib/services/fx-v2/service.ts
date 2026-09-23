@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { parseDecimal } from '@/lib/services/pricing/decimal'
+import { DomainError } from '@/lib/services/platform/domain-error'
 import {
   findCurrencyByCode,
   getCurrenciesByIds as getCatalogCurrenciesByIds,
@@ -14,15 +15,10 @@ import {
   type FxTradeSide,
 } from './engine'
 
-export class FxServiceError extends Error {
-  readonly code: string
-  readonly status: number
-
+export class FxServiceError extends DomainError {
   constructor(code: string, message: string, status = 400) {
-    super(message)
+    super(code, message, status)
     this.name = 'FxServiceError'
-    this.code = code
-    this.status = status
   }
 }
 
