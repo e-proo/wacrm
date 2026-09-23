@@ -485,5 +485,20 @@ describe('shared service primitives cleanup', () => {
     expect(fxEngine).toContain(
       "import { parseDecimal } from '@/lib/services/pricing/decimal'",
     )
+
+    const coverageChangeExecutors = readFileSync(
+      new URL('../coverage/change-executors.ts', import.meta.url),
+      'utf8',
+    )
+    expect(coverageChangeExecutors).toContain(
+      "import { parseDecimal } from '@/lib/services/pricing/decimal'",
+    )
+    expect(coverageChangeExecutors).toContain(
+      "parseDecimal(payload.total_amount, { rejectZero: true })",
+    )
+    expect(coverageChangeExecutors).toContain(
+      "parseDecimal(payload.requested_amount, { rejectZero: true })",
+    )
+    expect(coverageChangeExecutors).not.toContain('Number(payload.requested_amount)')
   })
 })
