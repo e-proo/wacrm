@@ -207,7 +207,7 @@ export async function inspectShadowBusinessEventRendering(input: {
 
       const { data: legacy, error: legacyError } = await db
         .from('customer_intent_notifications')
-        .select('message_text, fx_trade_request_id, event_type')
+        .select('message_text, event_type')
         .eq('account_id', input.accountId)
         .eq('id', row.legacy_notification_id)
         .maybeSingle()
@@ -229,7 +229,6 @@ export async function inspectShadowBusinessEventRendering(input: {
         notification: {
           id: row.legacy_notification_id,
           intentId: null,
-          fxTradeRequestId: legacy.fx_trade_request_id,
           eventType: legacy.event_type,
         },
       })
