@@ -58,14 +58,18 @@ export function getCurrentToolDefinition(
 function compactArgumentSchema(
   schema: Readonly<Record<string, unknown>>,
 ): Record<string, ArgumentSchema> {
-  if (schema.type === 'object' && isRecord(schema.properties)) {
+  if (
+    schema.type === 'object' &&
+    (schema.properties === undefined || isRecord(schema.properties))
+  ) {
+    const properties = isRecord(schema.properties) ? schema.properties : {}
     const required = new Set(
       Array.isArray(schema.required)
         ? schema.required.filter((value): value is string => typeof value === 'string')
         : [],
     )
     return Object.fromEntries(
-      Object.entries(schema.properties).map(([key, raw]) => [
+      Object.entries(properties).map(([key, raw]) => [
         key,
         jsonPropertyToArgumentSchema(raw, required.has(key)),
       ]),
