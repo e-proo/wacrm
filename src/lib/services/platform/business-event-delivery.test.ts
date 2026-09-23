@@ -40,4 +40,21 @@ describe('generic active business-event delivery', () => {
     expect(dispatch).toContain('correlationId: runId')
     expect(dispatch).toContain('correlated business events claimed=')
   })
+
+  it('treats a sent correlated business event as the single customer reply', () => {
+    const delivery = readFileSync(
+      new URL('./business-event-delivery.ts', import.meta.url),
+      'utf8',
+    )
+    const dispatch = readFileSync(
+      new URL('../../ai/runtime/dispatch.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(delivery).toContain('lastLocalMessageId: string | null')
+    expect(delivery).toContain('lastLocalMessageId = delivered.local_message_id')
+    expect(dispatch).toContain('correlatedBusinessEventMessageId')
+    expect(dispatch).toContain('outbound_message_id: correlatedBusinessEventMessageId')
+    expect(dispatch).toContain('suppressing model reply')
+  })
 })
