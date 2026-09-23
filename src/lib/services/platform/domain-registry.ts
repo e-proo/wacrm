@@ -105,6 +105,22 @@ export class BusinessDomainRegistry {
     return null
   }
 
+  resolveChangeAction(input: {
+    actionKey: string | null
+    actionVersion: number | null
+    targetType: string
+    targetId: string | null
+    intent: string
+  }): ChangeActionManifest | null {
+    if ((input.actionKey === null) !== (input.actionVersion === null)) {
+      throw new Error('CHANGE_ACTION_IDENTITY_INCOMPLETE')
+    }
+    if (input.actionKey !== null && input.actionVersion !== null) {
+      return this.getChangeAction(input.actionKey, input.actionVersion)
+    }
+    return this.resolveLegacyChangeAction(input)
+  }
+
   listDomains(): readonly BusinessDomainManifest[] {
     return [...this.domains.values()]
   }
