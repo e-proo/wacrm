@@ -5,6 +5,7 @@ import { loadConversationAiState, loadRoutingSnapshotAdmin } from './repositorie
 import { routeInboundMessage } from './router'
 import { runAgentLoop } from './agent-loop'
 import { engineSendText } from '@/lib/automations/meta-send'
+import { deliverActiveBusinessEventNotifications } from '@/lib/services/platform/business-event-delivery'
 import type { ChatMessage } from '../types'
 import type { ToolContext, ToolResult } from '../tools/executors'
 import { recordToolAttempt } from './tool-attempt-audit'
@@ -513,6 +514,34 @@ async function executeAgentRun(
   console.info(
     `[ai dispatch] loop=${loop.status} tools=${loop.toolCalls.length} text=${loop.text ? loop.text.length + 'ch' : 'null'}`,
   )
+
+  // Proposal tools may commit customer-facing business events transactionally
+  // before the model produces its final reply. Flush only events correlated to
+  // this run so customer lifecycle messages are delivered promptly without
+  // draining unrelated account work or introducing domain-specific branches.
+  if (
+    decision.plane === 'customer' &&
+    loop.toolCalls.some((call) => call.ok)
+  ) {
+    try {
+      const delivery = await deliverActiveBusinessEventNotifications({
+        accountId: args.accountId,
+        userId: args.configOwnerUserId,
+        correlationId: runId,
+        limit: 20,
+      })
+      if (delivery.claimed > 0) {
+        console.info(
+          `[ai dispatch] correlated business events claimed=${delivery.claimed} sent=${delivery.sent} reconcile=${delivery.reconciliation} failed=${delivery.failed}`,
+        )
+      }
+    } catch (deliveryError) {
+      // Business state and its durable event are already committed. A
+      // best-effort synchronous flush must never roll back or fail the AI run;
+      // the background worker remains the durable recovery path.
+      console.error('[ai dispatch] correlated business event delivery failed:', deliveryError)
+    }
+  }
 
   const latestInbound =
     [...history].reverse().find((message) => message.role === 'user')?.content ?? ''
