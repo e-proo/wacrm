@@ -580,7 +580,7 @@ describe('Intents third-domain architectural acceptance', () => {
     expect(centralHandoff).not.toContain('executeIntentProposeDecision')
   })
 
-  it('keeps the generic runtime/worker/template resolver free of new Intents-specific branches', () => {
+  it('keeps the generic runtime/worker/template resolver free of Intents business semantics', () => {
     const dispatch = readFileSync(
       new URL('../../ai/runtime/dispatch.ts', import.meta.url),
       'utf8',
@@ -597,11 +597,20 @@ describe('Intents third-domain architectural acceptance', () => {
       new URL('../../messaging/resolver.ts', import.meta.url),
       'utf8',
     )
+    const intentAdapter = readFileSync(
+      new URL('../intents/legacy-notification-adapter.ts', import.meta.url),
+      'utf8',
+    )
 
     expect(dispatch).not.toContain("intents.")
     expect(worker).not.toContain("intents.")
     expect(delivery).not.toContain("intents.")
+    expect(delivery).not.toContain("target_type !== 'service_intent'")
+    expect(delivery).not.toContain("target_type === 'service_intent'")
+    expect(delivery).not.toContain('renderServiceRequestCustomerMessage')
     expect(resolver).not.toContain("intents.")
+    expect(intentAdapter).toContain("target_type !== 'service_intent'")
+    expect(intentAdapter).toContain('renderServiceRequestCustomerMessage')
   })
 })
 
@@ -670,6 +679,27 @@ describe('legacy change-notification contraction', () => {
     expect(adapter).toContain('renderCoverageApprovedCustomerMessage')
     expect(adapter).toContain('coverage.offer.approved')
     expect(adapter).toContain('coverage.request.approved')
+  })
+})
+
+describe('Intents legacy notification contraction', () => {
+  it('keeps service-intent legacy rendering outside the generic notification worker', () => {
+    const runtime = readFileSync(
+      new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
+      'utf8',
+    )
+    const adapter = readFileSync(
+      new URL('../intents/legacy-notification-adapter.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(runtime).toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
+    expect(runtime).not.toContain('renderServiceRequestCustomerMessage')
+    expect(runtime).not.toContain('serviceRequestOutcome')
+    expect(runtime).not.toContain("target_type === 'service_intent'")
+    expect(adapter).toContain('renderServiceRequestCustomerMessage')
+    expect(adapter).toContain("change.target_type !== 'service_intent'")
+    expect(adapter).toContain('intents.legacy_customer_notification')
   })
 })
 
