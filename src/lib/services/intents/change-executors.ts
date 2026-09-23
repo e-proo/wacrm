@@ -24,7 +24,10 @@ const decideIntentExecutor: ChangeExecutorRegistration['executor'] = async (
     )
   }
 
-  const update: Record<string, unknown> = { status: decision }
+  const update: Record<string, unknown> = {
+    status: decision,
+    change_request_id: context.changeRequestId,
+  }
   if (decision === 'matched') {
     const serviceId = change.proposedPayload.matched_service_id as
       | string
