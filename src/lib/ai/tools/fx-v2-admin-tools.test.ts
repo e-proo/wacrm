@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentFxRateByPair: vi.fn(),
   listFxTradeRequests: vi.fn(),
   createChangeRequest: vi.fn(),
+  findChangeRequestByIdempotencyKey: vi.fn(),
 }))
 
 vi.mock('@/lib/services/fx-v2/service', async () => {
@@ -30,6 +31,7 @@ vi.mock('@/lib/services/fx-v2/dashboard', async () => {
 
 vi.mock('@/lib/ai/runtime/change-requests-service', () => ({
   createChangeRequest: mocks.createChangeRequest,
+  findChangeRequestByIdempotencyKey: mocks.findChangeRequestByIdempotencyKey,
 }))
 
 import {
@@ -129,6 +131,7 @@ describe('FX V2 Phase 5 admin tools', () => {
       confirmationCode: '987654',
       status: 'pending',
     })
+    mocks.findChangeRequestByIdempotencyKey.mockResolvedValue(null)
   })
 
   it('lists explicit V2 pairs with current rate and optimistic lock', async () => {
@@ -224,6 +227,41 @@ describe('FX V2 Phase 5 admin tools', () => {
           quote_amount: '428000.00',
         },
       ],
+    })
+  })
+
+  it('reuses the customer-created pending review for an approve decision', async () => {
+    mocks.findChangeRequestByIdempotencyKey.mockResolvedValueOnce({
+      id: 'review-cr-1',
+      code: 73,
+      status: 'pending',
+      target_type: 'fx_trade_request',
+      target_id: 'trade-1',
+      idempotency_key: 'fx-trade-review:trade-1:pending_admin',
+    })
+
+    const result = await executeFxV2ProposeTradeDecision(adminContext(), {
+      request_id: 'trade-1',
+      decision: 'approve',
+    })
+
+    expect(mocks.findChangeRequestByIdempotencyKey).toHaveBeenCalledWith(
+      'account-1',
+      'fx-trade-review:trade-1:pending_admin',
+    )
+    expect(mocks.createChangeRequest).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        proposed_decision: 'approve',
+        change_request: {
+          id: 'review-cr-1',
+          code: 73,
+          status: 'pending',
+          confirmation_code: null,
+          reused: true,
+        },
+      },
     })
   })
 
