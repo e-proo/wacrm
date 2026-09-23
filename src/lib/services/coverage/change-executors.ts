@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
+import { parseDecimal } from '@/lib/services/pricing/decimal'
 import { readCoverageAttributes, type CoverageAttributes } from './attributes'
 import {
   DomainChangeExecutionError,
@@ -41,6 +42,14 @@ const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (conte
     throw new DomainChangeExecutionError(
       'OFFER_PAYLOAD_INCOMPLETE',
       'Approved payload must carry contact_id, service_id, total_amount, currency.',
+    )
+  }
+
+  const offerAmount = parseDecimal(payload.total_amount, { rejectZero: true })
+  if (!offerAmount || offerAmount.isNegative()) {
+    throw new DomainChangeExecutionError(
+      'OFFER_AMOUNT_INVALID',
+      'total_amount must be positive.',
     )
   }
 
@@ -147,8 +156,8 @@ const createRequestExecutor: ChangeExecutorRegistration['executor'] = async (con
     )
   }
 
-  const amount = Number(payload.requested_amount)
-  if (!Number.isFinite(amount) || amount <= 0) {
+  const amount = parseDecimal(payload.requested_amount, { rejectZero: true })
+  if (!amount || amount.isNegative()) {
     throw new DomainChangeExecutionError(
       'REQUEST_AMOUNT_INVALID',
       'requested_amount must be positive.',
