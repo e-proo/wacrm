@@ -235,6 +235,8 @@ describe('FX V2 Phase 5 admin tools', () => {
       id: 'review-cr-1',
       code: 73,
       status: 'pending',
+      action_key: null,
+      action_version: null,
       target_type: 'fx_trade_request',
       target_id: 'trade-1',
       idempotency_key: 'fx-trade-review:trade-1:pending_admin',
@@ -262,6 +264,68 @@ describe('FX V2 Phase 5 admin tools', () => {
           reused: true,
         },
       },
+    })
+  })
+
+  it('reuses the same customer-created pending review for a reject decision', async () => {
+    mocks.findChangeRequestByIdempotencyKey.mockResolvedValueOnce({
+      id: 'review-cr-1',
+      code: 73,
+      status: 'pending',
+      action_key: 'exchange_rates.trade.decide',
+      action_version: 1,
+      target_type: 'fx_trade_request',
+      target_id: 'trade-1',
+      idempotency_key: 'fx-trade-review:trade-1:pending_admin',
+    })
+
+    const result = await executeFxV2ProposeTradeDecision(adminContext(), {
+      request_id: 'trade-1',
+      decision: 'reject',
+      note: 'decline request',
+    })
+
+    expect(mocks.findChangeRequestByIdempotencyKey).toHaveBeenCalledWith(
+      'account-1',
+      'fx-trade-review:trade-1:pending_admin',
+    )
+    expect(mocks.createChangeRequest).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        proposed_decision: 'reject',
+        change_request: {
+          id: 'review-cr-1',
+          code: 73,
+          status: 'pending',
+          confirmation_code: null,
+          reused: true,
+        },
+      },
+    })
+  })
+
+  it('fails closed when a pending review idempotency key points at another contract', async () => {
+    mocks.findChangeRequestByIdempotencyKey.mockResolvedValueOnce({
+      id: 'review-cr-wrong',
+      code: 74,
+      status: 'pending',
+      action_key: 'coverage.offer.create',
+      action_version: 1,
+      target_type: 'coverage_offer',
+      target_id: 'offer-1',
+      idempotency_key: 'fx-trade-review:trade-1:pending_admin',
+    })
+
+    const result = await executeFxV2ProposeTradeDecision(adminContext(), {
+      request_id: 'trade-1',
+      decision: 'reject',
+    })
+
+    expect(mocks.createChangeRequest).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'FX_TRADE_REVIEW_CONFLICT',
     })
   })
 
