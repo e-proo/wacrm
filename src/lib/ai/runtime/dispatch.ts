@@ -1,5 +1,4 @@
 // Server-only by convention.
-import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '../admin-client'
 import { loadConversationAiState, loadRoutingSnapshotAdmin } from './repositories'
 import { routeInboundMessage } from './router'
@@ -519,6 +518,7 @@ async function executeAgentRun(
   // before the model produces its final reply. Flush only events correlated to
   // this run so customer lifecycle messages are delivered promptly without
   // draining unrelated account work or introducing domain-specific branches.
+  let correlatedBusinessEventMessageId: string | null = null
   if (
     decision.plane === 'customer' &&
     loop.toolCalls.some((call) => call.ok)
@@ -534,6 +534,9 @@ async function executeAgentRun(
         console.info(
           `[ai dispatch] correlated business events claimed=${delivery.claimed} sent=${delivery.sent} reconcile=${delivery.reconciliation} failed=${delivery.failed}`,
         )
+      }
+      if (delivery.sent > 0 && delivery.lastLocalMessageId) {
+        correlatedBusinessEventMessageId = delivery.lastLocalMessageId
       }
     } catch (deliveryError) {
       // Business state and its durable event are already committed. A
@@ -595,6 +598,34 @@ async function executeAgentRun(
   if (loop.status === 'failed' || !effectiveText) {
     await markRun(db, args.accountId, runId, 'failed', loop.error ?? 'EMPTY_REPLY')
     return 'failed'
+  }
+
+  // If a durable customer-facing business event was already sent for this
+  // exact run, it is the authoritative acknowledgement. Do not follow it with
+  // a second model-written message that repeats the same lifecycle outcome.
+  if (correlatedBusinessEventMessageId) {
+    const { data: completed, error: completeErr } = await db
+      .from('ai_agent_runs')
+      .update({
+        status: 'succeeded',
+        completed_at: new Date().toISOString(),
+        outbound_message_id: correlatedBusinessEventMessageId,
+        input_tokens: loop.inputTokens,
+        output_tokens: loop.outputTokens,
+        error_code: null,
+      })
+      .eq('id', runId)
+      .eq('status', 'claimed')
+      .select('id')
+      .maybeSingle()
+    if (completeErr || !completed) {
+      console.error('[ai dispatch] business-event run completion CAS failed:', completeErr)
+      return 'lost'
+    }
+    console.info(
+      `[ai dispatch] business event already replied run=${runId.slice(0, 8)} local_message=${correlatedBusinessEventMessageId.slice(0, 8)}; suppressing model reply`,
+    )
+    return 'succeeded'
   }
 
   // LIVE SEND via the shared engine channel (service-role scoped,
