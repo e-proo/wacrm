@@ -100,15 +100,38 @@ export async function tryExecuteCurrentChangeAction(
   context: ChangeExecutionContext,
   change: ClaimedChangeExecution,
 ): Promise<CurrentChangeExecutionAttempt> {
-  const action = CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
-    targetType: change.targetType,
-    targetId: change.targetId,
-    intent: change.intent,
-  })
-  if (!action) return { matched: false }
+  if ((change.actionKey === null) !== (change.actionVersion === null)) {
+    throw new Error('CHANGE_ACTION_IDENTITY_INCOMPLETE')
+  }
+
+  const action =
+    change.actionKey !== null && change.actionVersion !== null
+      ? CURRENT_BUSINESS_DOMAIN_REGISTRY.getChangeAction(
+          change.actionKey,
+          change.actionVersion,
+        )
+      : CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
+          targetType: change.targetType,
+          targetId: change.targetId,
+          intent: change.intent,
+        })
+
+  if (!action) {
+    if (change.actionKey !== null && change.actionVersion !== null) {
+      throw new Error(
+        'CHANGE_ACTION_NOT_REGISTERED:' +
+          change.actionKey +
+          '@' +
+          change.actionVersion,
+      )
+    }
+    return { matched: false }
+  }
 
   if (!CURRENT_CHANGE_EXECUTOR_REGISTRY.has(action.key, action.version)) {
-    throw new Error('CHANGE_EXECUTOR_NOT_REGISTERED:' + action.key + '@' + action.version)
+    throw new Error(
+      'CHANGE_EXECUTOR_NOT_REGISTERED:' + action.key + '@' + action.version,
+    )
   }
 
   return {
