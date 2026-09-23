@@ -36,11 +36,16 @@ export interface CurrencyInput {
   symbol?: string | null
 }
 
-const CODE_PATTERN = /^[A-Z_]{3,8}$/
+export const CURRENCY_CURRENCY_CODE_PATTERN = /^[A-Z_]{3,8}$/
+
+export function normalizeCurrencyCode(code: string): string | null {
+  const normalized = code.trim().toUpperCase()
+  return CURRENCY_CURRENCY_CODE_PATTERN.test(normalized) ? normalized : null
+}
 const VALID_KIND = new Set<CurrencyInput['kind']>(['iso_4217', 'historical', 'local'])
 
 function validateInput(input: CurrencyInput): void {
-  if (!input.code || !CODE_PATTERN.test(input.code)) {
+  if (!input.code || !CURRENCY_CODE_PATTERN.test(input.code)) {
     throw new ServiceError(
       'INVALID_CODE',
       'code must be 3-8 uppercase letters (e.g. SAR, YER_OLD).',
@@ -99,6 +104,47 @@ export async function getCurrency(
   return (data as unknown as CurrencyRow | null) ?? null
 }
 
+export async function findCurrencyByCode(
+  accountId: string,
+  code: string,
+  options: { includeDisabled?: boolean } = {},
+): Promise<CurrencyRow | null> {
+  const normalized = normalizeCurrencyCode(code)
+  if (!normalized) return null
+
+  let query = supabaseAdmin()
+    .from('currencies')
+    .select(
+      'id, account_id, code, display_name, notes, status, kind, decimal_digits, symbol, created_at, updated_at',
+    )
+    .eq('account_id', accountId)
+    .eq('code', normalized)
+
+  if (!options.includeDisabled) query = query.eq('status', 'active')
+
+  const { data, error } = await query.maybeSingle()
+  if (error) throw error
+  return (data as unknown as CurrencyRow | null) ?? null
+}
+
+export async function getCurrenciesByIds(
+  accountId: string,
+  ids: readonly string[],
+): Promise<CurrencyRow[]> {
+  const unique = [...new Set(ids.filter(Boolean))]
+  if (unique.length === 0) return []
+
+  const { data, error } = await supabaseAdmin()
+    .from('currencies')
+    .select(
+      'id, account_id, code, display_name, notes, status, kind, decimal_digits, symbol, created_at, updated_at',
+    )
+    .eq('account_id', accountId)
+    .in('id', unique)
+  if (error) throw error
+  return (data ?? []) as unknown as CurrencyRow[]
+}
+
 // ------------------------------------------------------------
 // Write
 // ------------------------------------------------------------
@@ -145,7 +191,7 @@ export async function updateCurrency(
   input: Partial<CurrencyInput> & { status?: 'active' | 'disabled' },
   actorUserId: string | null,
 ): Promise<CurrencyRow> {
-  if (input.code !== undefined && !CODE_PATTERN.test(input.code)) {
+  if (input.code !== undefined && !CURRENCY_CODE_PATTERN.test(input.code)) {
     throw new ServiceError(
       'INVALID_CODE',
       'code must be 3-8 uppercase letters or underscores.',
