@@ -36,11 +36,11 @@ export interface CurrencyInput {
   symbol?: string | null
 }
 
-export const CURRENCY_CURRENCY_CODE_PATTERN = /^[A-Z_]{3,8}$/
+export const CURRENCY_CODE_PATTERN = /^[A-Z_]{3,8}$/
 
 export function normalizeCurrencyCode(code: string): string | null {
   const normalized = code.trim().toUpperCase()
-  return CURRENCY_CURRENCY_CODE_PATTERN.test(normalized) ? normalized : null
+  return CURRENCY_CODE_PATTERN.test(normalized) ? normalized : null
 }
 const VALID_KIND = new Set<CurrencyInput['kind']>(['iso_4217', 'historical', 'local'])
 
