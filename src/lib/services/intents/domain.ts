@@ -45,6 +45,11 @@ export const INTENTS_DOMAIN = defineBusinessDomain({
       legacySelectors: [
         {
           targetType: 'service_intent',
+          intent: 'create',
+          targetId: 'present',
+        },
+        {
+          targetType: 'service_intent',
           intent: 'update',
           targetId: 'present',
         },
