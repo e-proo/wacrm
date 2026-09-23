@@ -30,4 +30,14 @@ describe('generic active business-event delivery', () => {
     expect(source).not.toContain('coverage')
     expect(source).not.toContain('service_intent')
   })
+
+  it('lets the AI runtime flush only business events correlated to the current run', () => {
+    const dispatch = readFileSync(
+      new URL('../../ai/runtime/dispatch.ts', import.meta.url),
+      'utf8',
+    )
+    expect(dispatch).toContain('deliverActiveBusinessEventNotifications')
+    expect(dispatch).toContain('correlationId: runId')
+    expect(dispatch).toContain('correlated business events claimed=')
+  })
 })
