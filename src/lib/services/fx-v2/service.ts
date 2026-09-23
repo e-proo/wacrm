@@ -1,13 +1,18 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { parseDecimal } from '@/lib/services/pricing/decimal'
 import {
+  findCurrencyByCode,
+  getCurrenciesByIds as getCatalogCurrenciesByIds,
+  getCurrency as getCatalogCurrency,
+  normalizeCurrencyCode,
+  type CurrencyRow,
+} from '@/lib/services/currencies/crud'
+import {
   calculateFxTrade,
   type FxAmountBasis,
   type FxTradeCalculation,
   type FxTradeSide,
 } from './engine'
-
-const CURRENCY_CODE = /^[A-Z_]{3,8}$/
 
 export class FxServiceError extends Error {
   readonly code: string
@@ -98,9 +103,9 @@ export interface CreateFxTradeRequestResult extends FxTradeRequestMutationResult
   quoteAmount: string
 }
 
-function normalizeCurrencyCode(code: string): string {
-  const value = code.trim().toUpperCase()
-  if (!CURRENCY_CODE.test(value)) {
+function requireCurrencyCode(code: string): string {
+  const value = normalizeCurrencyCode(code)
+  if (!value) {
     throw new FxServiceError(
       'FX_INVALID_CURRENCY_CODE',
       'Currency code must be 3-8 uppercase letters or underscores.',
@@ -109,51 +114,37 @@ function normalizeCurrencyCode(code: string): string {
   return value
 }
 
-function currencyRef(row: Record<string, unknown>): FxCurrencyRef {
+function currencyRef(row: CurrencyRow): FxCurrencyRef {
   return {
-    id: String(row.id),
-    code: String(row.code),
-    displayName: String(row.display_name),
-    symbol: row.symbol === null ? null : String(row.symbol),
-    decimalDigits: Number(row.decimal_digits),
-    status: row.status as FxCurrencyRef['status'],
+    id: row.id,
+    code: row.code,
+    displayName: row.display_name,
+    symbol: row.symbol,
+    decimalDigits: row.decimal_digits,
+    status: row.status,
   }
 }
 
-async function getCurrencyByCode(
+async function getFxCurrencyByCode(
   accountId: string,
   code: string,
   activeOnly = true,
 ): Promise<FxCurrencyRef | null> {
-  let query = supabaseAdmin()
-    .from('currencies')
-    .select('id, code, display_name, symbol, decimal_digits, status')
-    .eq('account_id', accountId)
-    .eq('code', normalizeCurrencyCode(code))
-
-  if (activeOnly) query = query.eq('status', 'active')
-
-  const { data, error } = await query.maybeSingle()
-  if (error) throw error
-  return data ? currencyRef(data as Record<string, unknown>) : null
+  const normalized = requireCurrencyCode(code)
+  const row = await findCurrencyByCode(accountId, normalized, {
+    includeDisabled: !activeOnly,
+  })
+  return row ? currencyRef(row) : null
 }
 
-async function getCurrenciesByIds(
+async function getFxCurrenciesByIds(
   accountId: string,
   ids: string[],
 ): Promise<Map<string, FxCurrencyRef>> {
-  if (ids.length === 0) return new Map()
-  const unique = [...new Set(ids)]
-  const { data, error } = await supabaseAdmin()
-    .from('currencies')
-    .select('id, code, display_name, symbol, decimal_digits, status')
-    .eq('account_id', accountId)
-    .in('id', unique)
-  if (error) throw error
-
+  const rows = await getCatalogCurrenciesByIds(accountId, ids)
   return new Map(
-    (data ?? []).map((row) => {
-      const ref = currencyRef(row as Record<string, unknown>)
+    rows.map((row) => {
+      const ref = currencyRef(row)
       return [ref.id, ref] as const
     }),
   )
@@ -201,14 +192,11 @@ export async function getFxBaseCurrency(
   if (error) throw error
   if (!settings) return null
 
-  const { data: currency, error: currencyError } = await supabaseAdmin()
-    .from('currencies')
-    .select('id, code, display_name, symbol, decimal_digits, status')
-    .eq('account_id', accountId)
-    .eq('id', String((settings as { base_currency_id: string }).base_currency_id))
-    .maybeSingle()
-  if (currencyError) throw currencyError
-  return currency ? currencyRef(currency as Record<string, unknown>) : null
+  const currency = await getCatalogCurrency(
+    accountId,
+    String((settings as { base_currency_id: string }).base_currency_id),
+  )
+  return currency ? currencyRef(currency) : null
 }
 
 export async function setFxBaseCurrency(
@@ -216,7 +204,7 @@ export async function setFxBaseCurrency(
   currencyCode: string,
   actorUserId: string | null,
 ): Promise<FxCurrencyRef> {
-  const currency = await getCurrencyByCode(accountId, currencyCode, true)
+  const currency = await getFxCurrencyByCode(accountId, currencyCode, true)
   if (!currency) {
     throw new FxServiceError(
       'FX_CURRENCY_NOT_FOUND',
@@ -256,7 +244,7 @@ export async function listFxPairs(
   const { data, error } = await query
   if (error) throw error
   const rows = (data ?? []) as unknown as Record<string, unknown>[]
-  const currencies = await getCurrenciesByIds(
+  const currencies = await getFxCurrenciesByIds(
     accountId,
     rows.flatMap((row) => [
       String(row.base_currency_id),
@@ -272,8 +260,8 @@ export async function ensureFxPair(
   quoteCode: string,
   actorUserId: string | null,
 ): Promise<FxPair> {
-  const base = await getCurrencyByCode(accountId, baseCode, true)
-  const quote = await getCurrencyByCode(accountId, quoteCode, true)
+  const base = await getFxCurrencyByCode(accountId, baseCode, true)
+  const quote = await getFxCurrencyByCode(accountId, quoteCode, true)
   if (!base || !quote) {
     throw new FxServiceError(
       'FX_CURRENCY_NOT_FOUND',
@@ -342,8 +330,8 @@ export async function resolveFxPair(
   baseCode: string,
   quoteCode: string,
 ): Promise<FxPair | null> {
-  const base = await getCurrencyByCode(accountId, baseCode, false)
-  const quote = await getCurrencyByCode(accountId, quoteCode, false)
+  const base = await getFxCurrencyByCode(accountId, baseCode, false)
+  const quote = await getFxCurrencyByCode(accountId, quoteCode, false)
   if (!base || !quote) return null
 
   const { data, error } = await supabaseAdmin()
