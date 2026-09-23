@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { parseDecimal } from '@/lib/services/pricing/decimal'
 import { calculateQuote, type QuoteResult } from '@/lib/services/pricing/engine'
 import { DomainError } from '@/lib/services/platform/domain-error'
+import { normalizeIdempotencyKey } from '@/lib/services/platform/idempotency'
 
 // ============================================================
 // Services, coverage, and pricing domain services.
@@ -85,10 +86,11 @@ export async function reserveCoverageMatch(
       'matchedAmount must be a positive decimal string.',
     )
   }
-  if (!input.idempotencyKey || input.idempotencyKey.length < 8) {
+  const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey)
+  if (!idempotencyKey) {
     throw new ServiceError(
       'INVALID_IDEMPOTENCY_KEY',
-      'idempotencyKey must be at least 8 characters.',
+      'idempotencyKey must be 8-500 characters.',
     )
   }
   const { data, error } = await supabaseAdmin().rpc('reserve_coverage_match', {
@@ -97,7 +99,7 @@ export async function reserveCoverageMatch(
     p_request_id: input.requestId,
     p_matched_amount: amount.toString(),
     p_currency: input.currency,
-    p_idempotency_key: input.idempotencyKey,
+    p_idempotency_key: idempotencyKey,
     p_reserved_until: input.reservedUntil ?? null,
     p_rate_snapshot: input.rateSnapshot ?? {},
     p_fee_snapshot: input.feeSnapshot ?? {},
