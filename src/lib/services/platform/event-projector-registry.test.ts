@@ -9,7 +9,7 @@ import {
 } from './event-projector-registry'
 import { buildCoverageApprovedBusinessEventProjection } from '@/lib/services/coverage/message-projectors'
 import { buildFxTradeBusinessEventProjection } from '@/lib/services/fx-v2/message-projectors'
-import { buildGenericServiceRequestProjection } from './generic-message-projectors'
+import { buildIntentBusinessEventProjection } from '@/lib/services/intents/message-projectors'
 
 describe('EventProjectorRegistry', () => {
   const input: BusinessEventProjectionInput = {
@@ -196,7 +196,7 @@ describe('domain message projectors', () => {
   })
 
   it('projects generic service requests from the embedded snapshot with legacy rendering parity', async () => {
-    const matched = buildGenericServiceRequestProjection({
+    const matched = buildIntentBusinessEventProjection({
       accountId: 'acc-1',
       eventType: 'service_request.matched',
       eventVersion: 1,
@@ -225,7 +225,7 @@ describe('domain message projectors', () => {
     })
     expect(projectedMatched.text).toBe(legacyMatched.text)
 
-    const rejected = buildGenericServiceRequestProjection({
+    const rejected = buildIntentBusinessEventProjection({
       accountId: 'acc-1',
       eventType: 'service_request.rejected',
       eventVersion: 1,
