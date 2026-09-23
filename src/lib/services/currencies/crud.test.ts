@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { CURRENCY_CURRENCY_CODE_PATTERN, DEFAULT_CURRENCIES, normalizeCurrencyCode } from './crud'
+import { CURRENCY_CODE_PATTERN, DEFAULT_CURRENCIES, normalizeCurrencyCode } from './crud'
 
 // Phase 2 completion: pure-shape guarantees for the currency
 // catalog. The service itself talks to Supabase; these tests
