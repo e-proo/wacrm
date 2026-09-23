@@ -5,6 +5,8 @@ export interface ChangeRequestRow {
   id: string
   account_id: string
   code: number
+  action_key: string | null
+  action_version: number | null
   target_type: string
   target_id: string | null
   intent: string
@@ -31,6 +33,8 @@ export interface ChangeRequestRow {
 
 export interface CreateChangeRequestInput {
   accountId: string
+  actionKey?: string | null
+  actionVersion?: number | null
   targetType: string
   targetId: string | null
   intent: 'create' | 'create_and_attach' | 'update' | 'publish' | 'cancel' | 'archive'
@@ -53,8 +57,10 @@ export interface CreateChangeRequestResult {
 export async function createChangeRequest(
   input: CreateChangeRequestInput,
 ): Promise<CreateChangeRequestResult> {
-  const { data, error } = await supabaseAdmin().rpc('create_change_request_v2', {
+  const { data, error } = await supabaseAdmin().rpc('create_change_request_v3', {
     p_account_id: input.accountId,
+    p_action_key: input.actionKey ?? null,
+    p_action_version: input.actionVersion ?? null,
     p_target_type: input.targetType,
     p_target_id: input.targetId,
     p_intent: input.intent,
@@ -252,17 +258,36 @@ export async function cancelChangeRequest(input: {
 export async function findChangeRequestByIdempotencyKey(
   accountId: string,
   idempotencyKey: string,
-): Promise<Pick<ChangeRequestRow, 'id' | 'code' | 'status' | 'target_type' | 'target_id' | 'idempotency_key'> | null> {
+): Promise<Pick<
+  ChangeRequestRow,
+  | 'id'
+  | 'code'
+  | 'status'
+  | 'action_key'
+  | 'action_version'
+  | 'target_type'
+  | 'target_id'
+  | 'idempotency_key'
+> | null> {
   const { data, error } = await supabaseAdmin()
     .from('change_requests')
-    .select('id, code, status, target_type, target_id, idempotency_key')
+    .select(
+      'id, code, status, action_key, action_version, target_type, target_id, idempotency_key',
+    )
     .eq('account_id', accountId)
     .eq('idempotency_key', idempotencyKey)
     .maybeSingle()
   if (error) throw error
   return (data as Pick<
     ChangeRequestRow,
-    'id' | 'code' | 'status' | 'target_type' | 'target_id' | 'idempotency_key'
+    | 'id'
+    | 'code'
+    | 'status'
+    | 'action_key'
+    | 'action_version'
+    | 'target_type'
+    | 'target_id'
+    | 'idempotency_key'
   > | null) ?? null
 }
 
@@ -275,7 +300,7 @@ export async function listChangeRequests(
     .from('change_requests')
     // Never select confirmation_code or confirmation_code_hash.
     .select(
-      'id, account_id, code, target_type, target_id, intent, proposed_payload, expected_version, idempotency_key, status, content_digest, summary, expires_at, created_by, created_at, approved_by, approved_at, approved_identity_id, approved_message_id, approved_run_id, rejected_by, rejected_at, executed_at, execution_result, error_code',
+      'id, account_id, code, action_key, action_version, target_type, target_id, intent, proposed_payload, expected_version, idempotency_key, status, content_digest, summary, expires_at, created_by, created_at, approved_by, approved_at, approved_identity_id, approved_message_id, approved_run_id, rejected_by, rejected_at, executed_at, execution_result, error_code',
     )
     .eq('account_id', accountId)
     .order('code', { ascending: false })
