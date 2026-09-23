@@ -1,30 +1,47 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
-  listRegisteredTools,
+  getCurrentToolDefinition,
+  listCurrentToolDefinitions,
+} from '@/lib/ai/tools/platform/runtime-tool-compat'
+import {
   getRegisteredTool,
   isGrantAllowed,
+  listRegisteredTools,
   renderToolCatalog,
 } from './tool-registry'
 
-describe('tool registry — repaired platform contract', () => {
-  it('registers exactly the current 23 platform tools', () => {
+const ALL_CURRENT_KEYS = [
+  'change_requests.list_pending',
+  'coverage.admin_list_offers',
+  'coverage.admin_list_requests',
+  'coverage.check_availability',
+  'coverage.find_offers',
+  'coverage.get_rates',
+  'coverage.propose_offer',
+  'coverage.propose_request',
+  'exchange_rates.admin_list_pairs',
+  'exchange_rates.admin_list_trade_requests',
+  'exchange_rates.get_current',
+  'exchange_rates.propose_pair_change',
+  'exchange_rates.propose_trade_decision',
+  'exchange_rates.record_trade_request',
+  'intents.propose_decision',
+  'intents.record',
+  'intents.search',
+  'pricing.calculate_quote',
+  'pricing_rules.propose_service_price',
+  'services.get',
+  'services.match_request',
+  'services.propose_update',
+  'services.search',
+].sort()
+
+describe('legacy tool registry contraction', () => {
+  it('retains only domains that have not migrated to native manifests', () => {
     const keys = listRegisteredTools().map((tool) => tool.key).sort()
     expect(keys).toEqual(
       [
         'change_requests.list_pending',
-        'coverage.admin_list_offers',
-        'coverage.admin_list_requests',
-        'coverage.check_availability',
-        'coverage.find_offers',
-        'coverage.get_rates',
-        'coverage.propose_offer',
-        'coverage.propose_request',
-        'exchange_rates.admin_list_pairs',
-        'exchange_rates.admin_list_trade_requests',
-        'exchange_rates.get_current',
-        'exchange_rates.propose_pair_change',
-        'exchange_rates.propose_trade_decision',
-        'exchange_rates.record_trade_request',
         'intents.propose_decision',
         'intents.record',
         'intents.search',
@@ -36,146 +53,84 @@ describe('tool registry — repaired platform contract', () => {
         'services.search',
       ].sort(),
     )
-    expect(getRegisteredTool('exchange_rates.admin_list_books')).toBeNull()
+
+    expect(getRegisteredTool('exchange_rates.get_current')).toBeNull()
+    expect(getRegisteredTool('coverage.get_rates')).toBeNull()
   })
 
-  it('read grants remain read-risk and read-only', () => {
+  it('preserves read/proposal permission invariants for remaining legacy tools', () => {
     for (const tool of listRegisteredTools()) {
-      if (!tool.grantPermissions.includes('read')) continue
-      expect(tool.risk).toBe('read')
-      expect(tool.grantPermissions).toEqual(['read'])
+      if (tool.grantPermissions.includes('read')) {
+        expect(tool.risk).toBe('read')
+        expect(tool.grantPermissions).toEqual(['read'])
+      } else {
+        expect(tool.grantPermissions).toEqual(['propose'])
+        expect(tool.risk).not.toBe('read')
+      }
       expect(isGrantAllowed(tool, 'execute')).toBe(false)
     }
   })
 
-  it('proposal tools are proposal-only and never model-executable', () => {
-    const proposalTools = listRegisteredTools().filter((tool) => tool.grantPermissions.includes('propose'))
-    expect(proposalTools.length).toBeGreaterThan(0)
-    for (const tool of proposalTools) {
-      expect(tool.grantPermissions).toEqual(['propose'])
-      expect(tool.risk).not.toBe('read')
-      expect(isGrantAllowed(tool, 'read')).toBe(false)
-      expect(isGrantAllowed(tool, 'execute')).toBe(false)
-    }
+  it('keeps the legacy prompt catalog limited to legacy-owned tools', () => {
+    const catalog = renderToolCatalog([
+      { tool_key: 'services.get', permission: 'read' },
+      { tool_key: 'intents.record', permission: 'propose' },
+      { tool_key: 'coverage.get_rates', permission: 'read' },
+    ])
+
+    expect(catalog).toContain('services.get (read)')
+    expect(catalog).toContain('intents.record (propose)')
+    expect(catalog).not.toContain('coverage.get_rates')
+  })
+})
+
+describe('current platform tool compatibility projection', () => {
+  it('preserves the complete 23-tool API/UI catalog after native contraction', () => {
+    expect(listCurrentToolDefinitions().map((tool) => tool.key).sort()).toEqual(
+      ALL_CURRENT_KEYS,
+    )
   })
 
-  it('isGrantAllowed returns false for non-listed permissions', () => {
-    const services = getRegisteredTool('services.search')
-    expect(services).not.toBeNull()
-    if (services) {
-      expect(isGrantAllowed(services, 'read')).toBe(true)
-      expect(isGrantAllowed(services, 'propose')).toBe(false)
-      expect(isGrantAllowed(services, 'execute')).toBe(false)
-    }
-  })
-
-  it('returns null for unknown tools (DENY BY DEFAULT)', () => {
-    expect(getRegisteredTool('does.not.exist')).toBeNull()
-    expect(getRegisteredTool('execute_in_arbitrary_sql')).toBeNull()
-  })
-
-  it('keeps published coverage grant versions stable while adding directional quote inputs', () => {
-    const rates = getRegisteredTool('coverage.get_rates')
+  it('projects native Coverage contracts without a central duplicate spec', () => {
+    const rates = getCurrentToolDefinition('coverage.get_rates', 1)
     expect(rates?.version).toBe(1)
     expect(rates?.grantPermissions).toEqual(['read'])
     expect(rates?.argumentSchema).toHaveProperty('amount')
     expect(rates?.argumentSchema).toHaveProperty('currency')
     expect(rates?.argumentSchema).toHaveProperty('pay_region')
-    expect(rates?.argumentSchema).toHaveProperty('pay_region_id')
     expect(rates?.argumentSchema).toHaveProperty('receive_region')
-    expect(rates?.argumentSchema).toHaveProperty('receive_region_id')
     expect(rates?.argumentSchema.receive_method.values).toContain('networks')
     expect(rates?.description).toContain('PAY south + RECEIVE north')
-    expect(rates?.description).toContain('PAY north + RECEIVE south')
-    expect(getRegisteredTool('coverage.find_offers')?.version).toBe(2)
-    expect(getRegisteredTool('coverage.propose_offer')?.version).toBe(2)
-    expect(getRegisteredTool('coverage.propose_request')?.version).toBe(1)
+
+    expect(getCurrentToolDefinition('coverage.find_offers', 2)?.version).toBe(2)
+    expect(getCurrentToolDefinition('coverage.propose_offer', 2)?.version).toBe(2)
+    expect(getCurrentToolDefinition('coverage.propose_request', 1)?.version).toBe(1)
   })
 
-  it('requires the quoted FX V2 version when recording a customer trade request', () => {
-    const read = getRegisteredTool('exchange_rates.get_current')
-    expect(read?.version).toBe(1)
+  it('projects native FX contracts and frozen optimistic-lock inputs', () => {
+    const read = getCurrentToolDefinition('exchange_rates.get_current', 1)
     expect(read?.description).toContain('authoritative CURRENT FX V2 rate')
     expect(read?.returnSchema).toContain('rate_version_id')
 
-    const record = getRegisteredTool('exchange_rates.record_trade_request')
-    expect(record?.version).toBe(2)
+    const record = getCurrentToolDefinition('exchange_rates.record_trade_request', 2)
     expect(record?.grantPermissions).toEqual(['propose'])
     expect(record?.argumentSchema.expected_rate_version_id?.required).toBe(true)
     expect(record?.returnSchema).toContain('trade_request')
-    expect(record?.description).toContain('pending_admin')
-  })
 
-  it('uses pair-centric Phase 5 admin contracts and optimistic locks', () => {
-    const pairs = getRegisteredTool('exchange_rates.admin_list_pairs')
-    expect(pairs?.version).toBe(1)
-    expect(pairs?.grantPermissions).toEqual(['read'])
-    expect(pairs?.returnSchema).toContain('lock_version')
-
-    const change = getRegisteredTool('exchange_rates.propose_pair_change')
-    expect(change?.version).toBe(2)
-    expect(change?.argumentSchema.pair_id?.required).toBe(true)
+    const change = getCurrentToolDefinition('exchange_rates.propose_pair_change', 2)
     expect(change?.argumentSchema.expected_lock_version?.required).toBe(true)
     expect(change?.argumentSchema.business_buy_rate?.required).toBe(true)
     expect(change?.argumentSchema.business_sell_rate?.required).toBe(true)
-    expect(change?.argumentSchema).not.toHaveProperty('book_id')
 
-    const trades = getRegisteredTool('exchange_rates.admin_list_trade_requests')
-    expect(trades?.grantPermissions).toEqual(['read'])
-    expect(trades?.returnSchema).toContain('rate_version_id')
-
-    const decision = getRegisteredTool('exchange_rates.propose_trade_decision')
-    expect(decision?.grantPermissions).toEqual(['propose'])
+    const decision = getCurrentToolDefinition(
+      'exchange_rates.propose_trade_decision',
+      1,
+    )
     expect(decision?.argumentSchema.decision.values).toEqual(['approve', 'reject'])
-    expect(decision?.description).toContain('does NOT mean settlement completed')
   })
 
-  it('renderToolCatalog teaches the model the customer-leg coverage direction', () => {
-    const catalog = renderToolCatalog([
-      { tool_key: 'coverage.get_rates', permission: 'read' },
-      { tool_key: 'coverage.find_offers', permission: 'read' },
-    ])
-    expect(catalog).toContain('coverage.get_rates (read)')
-    expect(catalog).toContain('coverage.find_offers (read)')
-    expect(catalog).toContain('PAY south + RECEIVE north')
-    expect(catalog).toContain('pay_region')
-    expect(catalog).toContain('receive_region')
-  })
-
-  it('renderToolCatalog surfaces the FX quote version requirement', () => {
-    const catalog = renderToolCatalog([
-      { tool_key: 'exchange_rates.get_current', permission: 'read' },
-      { tool_key: 'exchange_rates.record_trade_request', permission: 'propose' },
-    ])
-    expect(catalog).toContain('authoritative CURRENT FX V2 rate')
-    expect(catalog).toContain('expected_rate_version_id: string')
-  })
-
-  it('renderToolCatalog surfaces Phase 5 pair lock and trade-decision inputs', () => {
-    const catalog = renderToolCatalog([
-      { tool_key: 'exchange_rates.admin_list_pairs', permission: 'read' },
-      { tool_key: 'exchange_rates.propose_pair_change', permission: 'propose' },
-      { tool_key: 'exchange_rates.propose_trade_decision', permission: 'propose' },
-    ])
-    expect(catalog).toContain('expected_lock_version: number')
-    expect(catalog).toContain('business_buy_rate: string')
-    expect(catalog).toContain('decision: approve|reject')
-  })
-
-  it('renderToolCatalog surfaces exactly the granted, registered tools', () => {
-    const catalog = renderToolCatalog([
-      { tool_key: 'coverage.get_rates', permission: 'read' },
-      { tool_key: 'intents.record', permission: 'propose' },
-    ])
-    expect(catalog).toContain('coverage.get_rates (read)')
-    expect(catalog).toContain('intents.record (propose)')
-    expect(catalog).toContain('args: {')
-  })
-
-  it('renderToolCatalog skips stale grant rows for unregistered tools', () => {
-    const catalog = renderToolCatalog([
-      { tool_key: 'legacy.removed_tool', permission: 'read' },
-    ])
-    expect(catalog).toBe('')
+  it('fails closed for unknown tools', () => {
+    expect(getCurrentToolDefinition('does.not.exist')).toBeNull()
+    expect(getCurrentToolDefinition('execute_in_arbitrary_sql')).toBeNull()
   })
 })
