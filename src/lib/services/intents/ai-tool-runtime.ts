@@ -215,6 +215,8 @@ async function executeIntentProposeDecision(
 
     const change = await createChangeRequest({
       accountId: ctx.accountId,
+      actionKey: 'intents.decision.apply',
+      actionVersion: 1,
       targetType: 'service_intent',
       targetId: args.intent_id,
       intent: 'update',
