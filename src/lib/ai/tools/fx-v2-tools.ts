@@ -370,6 +370,8 @@ export async function executeFxV2RecordTradeRequest(
       const actionAr = args.intent === 'customer_sells_base' ? 'بيع' : 'شراء'
       const change = await createChangeRequest({
         accountId: ctx.accountId,
+        actionKey: 'exchange_rates.trade.decide',
+        actionVersion: 1,
         targetType: 'fx_trade_request',
         targetId: trade.requestId,
         intent: 'update',
