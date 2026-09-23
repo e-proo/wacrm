@@ -100,21 +100,13 @@ export async function tryExecuteCurrentChangeAction(
   context: ChangeExecutionContext,
   change: ClaimedChangeExecution,
 ): Promise<CurrentChangeExecutionAttempt> {
-  if ((change.actionKey === null) !== (change.actionVersion === null)) {
-    throw new Error('CHANGE_ACTION_IDENTITY_INCOMPLETE')
-  }
-
-  const action =
-    change.actionKey !== null && change.actionVersion !== null
-      ? CURRENT_BUSINESS_DOMAIN_REGISTRY.getChangeAction(
-          change.actionKey,
-          change.actionVersion,
-        )
-      : CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
-          targetType: change.targetType,
-          targetId: change.targetId,
-          intent: change.intent,
-        })
+  const action = CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveChangeAction({
+    actionKey: change.actionKey,
+    actionVersion: change.actionVersion,
+    targetType: change.targetType,
+    targetId: change.targetId,
+    intent: change.intent,
+  })
 
   if (!action) {
     if (change.actionKey !== null && change.actionVersion !== null) {
