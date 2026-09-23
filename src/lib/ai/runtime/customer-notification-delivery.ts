@@ -16,7 +16,6 @@ interface ClaimedCustomerNotificationRow {
   attempts: number
   claim_token: string
   intent_id: string | null
-  fx_trade_request_id: string | null
   event_type: string
   change_request_id: string | null
 }
@@ -207,7 +206,6 @@ async function resolveCustomerOutcomeText(input: {
     notification: {
       id: input.row.id,
       intentId: input.row.intent_id,
-      fxTradeRequestId: input.row.fx_trade_request_id,
       eventType: input.row.event_type,
     },
   })
