@@ -1,6 +1,4 @@
 export * from './business-event-delivery'
-export * from './generic-message-projectors'
-export * from './generic-business-events'
 export * from './business-event-cutover'
 export * from './event-projector-registry'
 export * from './business-event-message-renderer'
