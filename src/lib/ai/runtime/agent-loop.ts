@@ -12,7 +12,7 @@ import { generateNativeAgentTurn, type NativeAgentMessage } from './native-agent
 import { mergeConsecutive } from '../providers/shared'
 import { loadAccountRuntimePolicy } from './runtime-policy'
 import { reserveRuntimeBudget, releaseRuntimeBudget, RuntimeBudgetError } from './runtime-budget'
-import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
+import { CURRENT_PLATFORM_REGISTRY, getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import {
   coverageRegionIdsFromArgs,
   guardCoverageLegWording,
@@ -138,27 +138,26 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       constraintsMap[row.tool_key] = row.constraints ?? {}
     }
 
-    const maxRounds = Math.max(Number.isFinite(revision.maxToolRounds) ? revision.maxToolRounds : 0, 0)
-    const offeredTools = maxRounds > 0 && policy.nativeToolsEnabled
-      ? Object.entries(grants).flatMap(([key, grant]) => {
-          const manifest = getCurrentPlatformTool(key, grant.toolVersion)
-          // Offer only tools that can actually pass the deterministic runtime
-          // authorization boundary. Stale/cross-plane grants remain frozen for
-          // audit history but are invisible to the model instead of causing a
-          // predictable TOOL_PLANE_DENIED / ADMIN_CAPABILITY_DENIED round.
-          if (!manifest || !manifest.modelExposed || manifest.serverOnly) return []
-          if (manifest.permission !== grant.permission) return []
-          if (!manifest.allowedPlanes.includes(input.plane)) return []
-          if (grant.permission === 'propose' && !policy.proposalToolsEnabled) return []
-          if (
-            input.plane === 'admin' &&
-            manifest.requiredCapabilities.some(
-              (capability) => !input.trustedAdminCapabilities.includes(capability),
-            )
-          ) return []
-          return [manifest]
-        })
-      : []
+    const maxRounds = Math.max(
+      Number.isFinite(revision.maxToolRounds) ? revision.maxToolRounds : 0,
+      0,
+    )
+    const platformVisibleTools = CURRENT_PLATFORM_REGISTRY.modelVisibleTools({
+      plane: input.plane,
+      capabilities: input.trustedAdminCapabilities,
+      grants: Object.entries(grants).map(([toolKey, grant]) => ({
+        toolKey,
+        toolVersion: grant.toolVersion,
+        permission: grant.permission,
+      })),
+    })
+    const offeredTools =
+      maxRounds > 0 && policy.nativeToolsEnabled
+        ? platformVisibleTools.filter(
+            (manifest) =>
+              manifest.permission !== 'propose' || policy.proposalToolsEnabled,
+          )
+        : []
 
     if (input.plane === 'admin') {
       const hiddenCount = Object.keys(grants).length - offeredTools.length
