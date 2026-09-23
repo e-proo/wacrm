@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { PlatformToolManifest } from '@/lib/ai/tools/platform/contracts'
 import { getRegisteredTool } from '@/lib/ai/runtime/tool-registry'
 import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
+import { getCurrentToolDefinition } from '@/lib/ai/tools/platform/runtime-tool-compat'
 import { COVERAGE_DOMAIN, COVERAGE_RUNTIME } from '@/lib/services/coverage/domain'
 import { COVERAGE_TOOL_MANIFESTS } from '@/lib/services/coverage/tool-manifests'
 import { FX_V2_DOMAIN, FX_V2_RUNTIME } from '@/lib/services/fx-v2/domain'
@@ -310,22 +311,28 @@ describe('native domain tool ownership', () => {
     )
   })
 
-  it('keeps native manifests compatible with the provider-facing legacy schemas during cutover', () => {
+  it('contracts native tools out of the central registry while preserving the API compatibility projection', () => {
     for (const manifest of nativeManifests) {
-      const legacy = getRegisteredTool(manifest.key)
-      expect(legacy, manifest.key).not.toBeNull()
-      expect(legacy?.version, manifest.key).toBe(manifest.version)
-      expect(manifest.description, manifest.key).toBe(legacy?.description)
-      expect(manifest.inputSchema, manifest.key).toEqual(legacy?.argumentSchema)
-      expect(manifest.outputSchema, manifest.key).toEqual({
-        description: legacy?.returnSchema,
-      })
+      expect(getRegisteredTool(manifest.key), manifest.key).toBeNull()
+
+      const projected = getCurrentToolDefinition(manifest.key, manifest.version)
+      expect(projected, manifest.key).not.toBeNull()
+      expect(projected?.version, manifest.key).toBe(manifest.version)
+      expect(projected?.description, manifest.key).toBe(manifest.description)
+      expect(projected?.argumentSchema, manifest.key).toEqual(manifest.inputSchema)
+      expect(projected?.returnSchema, manifest.key).toBe(
+        manifest.outputSchema.description,
+      )
     }
   })
 
-  it('removes FX and Coverage semantic specs from the legacy bridge registry', () => {
+  it('removes FX and Coverage semantic specs from both the legacy bridge and central tool registry', () => {
     const registrySource = readFileSync(
       new URL('../../ai/tools/platform/current-domain-registry.ts', import.meta.url),
+      'utf8',
+    )
+    const legacyToolRegistrySource = readFileSync(
+      new URL('../../ai/runtime/tool-registry.ts', import.meta.url),
       'utf8',
     )
 
@@ -333,6 +340,8 @@ describe('native domain tool ownership', () => {
     expect(registrySource).toContain('COVERAGE_TOOL_MANIFESTS')
     expect(registrySource).not.toContain("key: 'exchange_rates.")
     expect(registrySource).not.toContain("key: 'coverage.")
+    expect(legacyToolRegistrySource).not.toContain("key: 'exchange_rates.")
+    expect(legacyToolRegistrySource).not.toContain("key: 'coverage.")
   })
 })
 
