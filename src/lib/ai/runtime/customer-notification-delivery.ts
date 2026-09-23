@@ -1,11 +1,6 @@
 import { supabaseAdmin } from '../admin-client'
 import { engineSendText } from '@/lib/automations/meta-send'
-import {
-  renderServiceRequestCustomerMessage,
-  type ServiceRequestCustomerOutcome,
-} from '@/lib/messaging/service-request-customer'
 import { CURRENT_LEGACY_NOTIFICATION_RENDERERS } from '@/lib/services/platform/legacy-notification-composition'
-import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 import { deliverActiveBusinessEventNotifications } from '@/lib/services/platform/business-event-delivery'
 
 interface ClaimedCustomerNotificationRow {
@@ -20,12 +15,6 @@ interface ClaimedCustomerNotificationRow {
   change_request_id: string | null
 }
 
-interface ChangeRequestDeliveryContext {
-  target_type: string
-  target_id: string | null
-  proposed_payload: Record<string, unknown> | null
-  execution_result: Record<string, unknown> | null
-}
 
 /**
  * Deliver due customer business-event notifications using the same durable
@@ -69,10 +58,6 @@ export async function deliverCustomerOutcomeNotifications(input: {
     return activeDelivery
   }
 
-  const deliveryContext = input.changeRequestId
-    ? await loadChangeRequestDeliveryContext(input.accountId, input.changeRequestId)
-    : null
-
   const { data, error } = await db.rpc('claim_customer_business_notifications', {
     p_account_id: input.accountId,
     p_change_request_id: input.changeRequestId ?? null,
@@ -108,7 +93,6 @@ export async function deliverCustomerOutcomeNotifications(input: {
         accountId: input.accountId,
         row,
         fallbackText: row.message_text,
-        deliveryContext,
       })
       const sent = await engineSendText({
         accountId: input.accountId,
@@ -174,115 +158,20 @@ export async function deliverCustomerOutcomeNotifications(input: {
   }
 }
 
-async function loadChangeRequestDeliveryContext(
-  accountId: string,
-  changeRequestId: string,
-): Promise<ChangeRequestDeliveryContext | null> {
-  const db = supabaseAdmin()
-  const { data, error } = await db
-    .from('change_requests')
-    .select('target_type, target_id, proposed_payload, execution_result')
-    .eq('account_id', accountId)
-    .eq('id', changeRequestId)
-    .maybeSingle()
-  if (error) throw error
-  if (!data) return null
-  return {
-    target_type: data.target_type,
-    target_id: data.target_id,
-    proposed_payload: asRecord(data.proposed_payload),
-    execution_result: asRecord(data.execution_result),
-  }
-}
 
 async function resolveCustomerOutcomeText(input: {
   accountId: string
   row: ClaimedCustomerNotificationRow
   fallbackText: string
-  deliveryContext: ChangeRequestDeliveryContext | null
 }): Promise<string> {
   const domainRendered = await CURRENT_LEGACY_NOTIFICATION_RENDERERS.render({
     accountId: input.accountId,
     notification: {
       id: input.row.id,
       intentId: input.row.intent_id,
+      changeRequestId: input.row.change_request_id,
       eventType: input.row.event_type,
     },
   })
-  if (domainRendered !== null) return domainRendered
-
-  const ctx = input.deliveryContext
-  if (!ctx || ctx.target_type !== 'service_intent') return input.fallbackText
-
-  const decision =
-    stringValue(ctx.execution_result?.decision) ?? stringValue(ctx.proposed_payload?.decision)
-  const outcome = serviceRequestOutcome(decision)
-  if (!outcome) return input.fallbackText
-
-  const serviceId =
-    outcome === 'matched' ? stringValue(ctx.proposed_payload?.matched_service_id) : null
-  const serviceName = serviceId ? await loadServiceName(input.accountId, serviceId) : null
-  const customerReason = stringValue(ctx.proposed_payload?.customer_reason)
-
-  const rendered = await renderServiceRequestCustomerMessage({
-    accountId: input.accountId,
-    outcome,
-    entityId: ctx.target_id,
-    serviceId,
-    serviceName,
-    customerReason,
-    store: createSupabaseTemplateOverrideStore(supabaseAdmin()),
-  })
-
-  console.info(
-    [
-      `[messaging] event=${rendered.eventKey}`,
-      `source=${rendered.source}`,
-      `template=${rendered.eventKey}`,
-      `locale=${rendered.resolvedLocale}`,
-      'channel=whatsapp',
-      rendered.revisionId ? `revision=${rendered.revisionId}` : null,
-      rendered.version != null ? `version=${rendered.version}` : null,
-      rendered.fallbackReason ? `fallback=${rendered.fallbackReason}` : null,
-    ]
-      .filter((part): part is string => Boolean(part))
-      .join(' '),
-  )
-
-  return rendered.text
-}
-
-function serviceRequestOutcome(decision: string | null): ServiceRequestCustomerOutcome | null {
-  switch (decision) {
-    case 'fulfilled':
-      return 'approved'
-    case 'rejected':
-      return 'rejected'
-    case 'matched':
-      return 'matched'
-    case 'clarifying':
-      return 'needs_clarification'
-    default:
-      return null
-  }
-}
-
-async function loadServiceName(accountId: string, serviceId: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin()
-    .from('services')
-    .select('name')
-    .eq('account_id', accountId)
-    .eq('id', serviceId)
-    .maybeSingle()
-  if (error) throw error
-  return typeof data?.name === 'string' && data.name.trim() ? data.name.trim() : null
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, unknown>
-}
-
-function stringValue(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+  return domainRendered ?? input.fallbackText
 }
