@@ -1,15 +1,12 @@
 import {
   executePricingCalculateQuote,
   executeServicesMatchRequest,
-  executeIntentsRecord,
-  executeIntentsSearch,
   type ToolContext,
   type ToolResult,
 } from '../executors'
 import { executeServicesGetSafe, executeServicesSearchSafe } from '../service-search'
 import {
   executeChangeRequestsListPending,
-  executeIntentProposeDecision,
   executeServiceProposeUpdate,
   executePricingRuleProposeServicePrice,
 } from '../business-handoff'
@@ -32,8 +29,8 @@ function add(key: string, version: number, executor: RuntimeExecutor): void {
 
 /**
  * Transitional registrations for domains that have not yet moved into a
- * BusinessDomainRuntime. FX V2 and Coverage are registered below from their
- * owning domain runtimes.
+ * BusinessDomainRuntime. FX V2, Coverage, and Intents are registered below
+ * from their owning domain runtimes.
  */
 add('services.search', 1, (ctx, args) => executeServicesSearchSafe(ctx, args as never))
 add('services.get', 1, (ctx, args) => executeServicesGetSafe(ctx, args as never))
@@ -41,9 +38,6 @@ add('services.match_request', 1, (ctx, args) => executeServicesMatchRequest(ctx,
 add('services.propose_update', 1, (ctx, args) => executeServiceProposeUpdate(ctx, args as never))
 add('pricing.calculate_quote', 1, (ctx, args) => executePricingCalculateQuote(ctx, args as never))
 add('pricing_rules.propose_service_price', 1, (ctx, args) => executePricingRuleProposeServicePrice(ctx, args as never))
-add('intents.record', 1, (ctx, args) => executeIntentsRecord(ctx, args as never))
-add('intents.search', 1, (ctx, args) => executeIntentsSearch(ctx, args as never))
-add('intents.propose_decision', 1, (ctx, args) => executeIntentProposeDecision(ctx, args as never))
 add('change_requests.list_pending', 1, (ctx, args) => executeChangeRequestsListPending(ctx, args as never))
 
 for (const runtime of CURRENT_BUSINESS_DOMAIN_RUNTIMES) {
