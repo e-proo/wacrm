@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { normalizeIdempotencyKey } from './idempotency'
 
 describe('normalizeIdempotencyKey', () => {
-  it('trims valid keys without changing their identity', () => {
-    expect(normalizeIdempotencyKey('  fx-trade:abc123  ')).toBe('fx-trade:abc123')
+  it('preserves raw identity by default and trims only when explicitly requested', () => {
+    expect(normalizeIdempotencyKey('  fx-trade:abc123  ')).toBe('  fx-trade:abc123  ')
+    expect(normalizeIdempotencyKey('  fx-trade:abc123  ', { trim: true })).toBe(
+      'fx-trade:abc123',
+    )
   })
 
   it('rejects keys shorter than the shared minimum', () => {
