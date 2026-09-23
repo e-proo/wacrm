@@ -456,3 +456,34 @@ describe('platform-generic service request projectors', () => {
     expect(CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain('platform')).toBeNull()
   })
 })
+
+
+describe('shared service primitives cleanup', () => {
+  it('uses the shared decimal parser for Coverage money validation and removes dead manual arithmetic', () => {
+    const coverageExecutors = readFileSync(
+      new URL('../../ai/tools/executors.ts', import.meta.url),
+      'utf8',
+    )
+    const fxEngine = readFileSync(
+      new URL('../fx-v2/engine.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(coverageExecutors).toContain(
+      "import { parseDecimal } from '@/lib/services/pricing/decimal'",
+    )
+    expect(coverageExecutors).toContain(
+      "parseDecimal(args.total_amount, { rejectZero: true })",
+    )
+    expect(coverageExecutors).toContain(
+      'parseDecimal(args.commission_per_thousand)',
+    )
+    expect(coverageExecutors).not.toContain('Number(args.total_amount)')
+    expect(coverageExecutors).not.toContain('Number(args.commission_per_thousand)')
+    expect(coverageExecutors).not.toContain('function addDecimalStrings')
+    expect(coverageExecutors).not.toContain('function negDecimalStrings')
+    expect(fxEngine).toContain(
+      "import { parseDecimal } from '@/lib/services/pricing/decimal'",
+    )
+  })
+})
