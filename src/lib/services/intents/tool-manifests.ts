@@ -15,7 +15,7 @@ export const INTENTS_TOOL_MANIFESTS: readonly PlatformToolManifest[] = [
     domain: 'intents',
     title: 'Record customer intent',
     description:
-      "Record a general observation about a customer's need or offer — even for services NOT equipped yet. Optionally marks it for trusted-admin review.",
+      "Record a general observation about a customer's need or offer — even for services NOT equipped yet. Optionally escalates to the trusted admin for a decision.",
     purpose:
       'Persist a structured customer need/offer the configured services cannot yet resolve.',
     whenToUse: [
@@ -64,7 +64,7 @@ export const INTENTS_TOOL_MANIFESTS: readonly PlatformToolManifest[] = [
     },
     outputSchema: {
       description:
-        '{ intent_id, status, change_request?: { id, code, confirmation_code }, review_required? }',
+        '{ intent_id, status, change_request?: { id, code, confirmation_code } }',
     },
     permission: 'propose',
     risk: 'low',
