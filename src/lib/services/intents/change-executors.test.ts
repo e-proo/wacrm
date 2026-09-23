@@ -47,6 +47,8 @@ const context = {
 
 const baseChange = {
   id: 'change-1',
+  actionKey: 'intents.decision.apply',
+  actionVersion: 1,
   targetType: 'service_intent',
   targetId: 'intent-1',
   intent: 'update',
