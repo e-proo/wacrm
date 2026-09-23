@@ -301,10 +301,13 @@ export async function executeFxV2ProposeTradeDecision(
       reviewIdempotencyKey,
     )
 
+    const reviewPayload = existingReview?.proposed_payload ?? null
     const reusableReview =
       existingReview?.status === 'pending' &&
       existingReview.target_type === 'fx_trade_request' &&
       existingReview.target_id === request.id &&
+      reviewPayload?.expected_status === 'pending_admin' &&
+      reviewPayload?.decision === 'approve' &&
       (
         existingReview.action_key === null ||
         (
