@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INTENTS_DOMAIN, INTENTS_RUNTIME } from './domain'
+import { renderToolUsageDescription } from '@/lib/ai/tools/platform/contracts'
 import { INTENTS_TOOL_MANIFESTS } from './tool-manifests'
 import { INTENT_BUSINESS_EVENT_MANIFESTS } from './business-events'
 import { buildIntentBusinessEventProjection } from './message-projectors'
@@ -30,6 +31,28 @@ describe('Intents domain contract', () => {
       'service_request.needs_clarification',
       'service_request.completed',
     ])
+  })
+
+  it('preserves the historical model-facing usage metadata during migration', () => {
+    const record = INTENTS_TOOL_MANIFESTS.find((tool) => tool.key === 'intents.record')!
+    const search = INTENTS_TOOL_MANIFESTS.find((tool) => tool.key === 'intents.search')!
+    const decision = INTENTS_TOOL_MANIFESTS.find(
+      (tool) => tool.key === 'intents.propose_decision',
+    )!
+
+    expect(record.purpose).toBe(
+      'Persist a structured need/offer the configured services cannot yet resolve.',
+    )
+    expect(search.purpose).toBe(
+      'Inspect the structured admin inbox of customer needs/offers.',
+    )
+    expect(decision.purpose).toBe(
+      'Create a typed proposal to resolve/match/reject/clarify a customer intent.',
+    )
+    expect(decision.approvalRequired).toBe(false)
+    expect(renderToolUsageDescription(decision)).not.toContain(
+      'Requires human approval before execution.',
+    )
   })
 
   it('keeps customer and admin tool planes explicit', () => {
