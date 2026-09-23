@@ -110,6 +110,40 @@ describe('service platform domain contracts', () => {
     ).toBe('testing.item.update')
   })
 
+  it('resolves exact action identity before legacy metadata and falls back for historical rows', () => {
+    const registry = new BusinessDomainRegistry().register(TEST_DOMAIN)
+
+    expect(
+      registry.resolveChangeAction({
+        actionKey: 'testing.item.update',
+        actionVersion: 1,
+        targetType: 'totally_unrelated_target',
+        targetId: null,
+        intent: 'archive',
+      })?.key,
+    ).toBe('testing.item.update')
+
+    expect(
+      registry.resolveChangeAction({
+        actionKey: null,
+        actionVersion: null,
+        targetType: 'test_item',
+        targetId: 'item-1',
+        intent: 'update',
+      })?.key,
+    ).toBe('testing.item.update')
+
+    expect(() =>
+      registry.resolveChangeAction({
+        actionKey: 'testing.item.update',
+        actionVersion: null,
+        targetType: 'test_item',
+        targetId: 'item-1',
+        intent: 'update',
+      }),
+    ).toThrow('CHANGE_ACTION_IDENTITY_INCOMPLETE')
+  })
+
   it('rejects duplicate domains and cross-domain legacy selector ambiguity', () => {
     const registry = new BusinessDomainRegistry().register(TEST_DOMAIN)
     expect(() => registry.register(TEST_DOMAIN)).toThrow('Duplicate business domain')
@@ -160,6 +194,8 @@ describe('change executor registry', () => {
         { accountId: 'acc-1', changeRequestId: 'cr-1', actorUserId: null },
         {
           id: 'cr-1',
+          actionKey: 'testing.item.update',
+          actionVersion: 1,
           targetType: 'test_item',
           targetId: 'item-1',
           intent: 'update',
@@ -186,6 +222,8 @@ describe('change executor registry', () => {
         { accountId: 'acc-1', changeRequestId: 'cr-1', actorUserId: null },
         {
           id: 'cr-1',
+          actionKey: 'testing.item.update',
+          actionVersion: 2,
           targetType: 'test_item',
           targetId: 'item-1',
           intent: 'update',
