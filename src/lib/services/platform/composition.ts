@@ -1,9 +1,8 @@
 import { COVERAGE_DOMAIN, COVERAGE_RUNTIME } from '@/lib/services/coverage/domain'
 import { FX_V2_DOMAIN, FX_V2_RUNTIME } from '@/lib/services/fx-v2/domain'
+import { INTENTS_DOMAIN, INTENTS_RUNTIME } from '@/lib/services/intents/domain'
 import { ChangeExecutorRegistry } from './change-executor-registry'
 import { EventProjectorRegistry } from './event-projector-registry'
-import { PLATFORM_GENERIC_BUSINESS_EVENT_MANIFESTS } from './generic-business-events'
-import { PLATFORM_GENERIC_EVENT_PROJECTORS } from './generic-message-projectors'
 import type {
   ChangeExecutionContext,
   ClaimedChangeExecution,
@@ -15,11 +14,13 @@ import type { BusinessDomainManifest } from './domain-contracts'
 export const CURRENT_BUSINESS_DOMAIN_MODULES: readonly BusinessDomainManifest[] = [
   FX_V2_DOMAIN,
   COVERAGE_DOMAIN,
+  INTENTS_DOMAIN,
 ]
 
 export const CURRENT_BUSINESS_DOMAIN_RUNTIMES = [
   FX_V2_RUNTIME,
   COVERAGE_RUNTIME,
+  INTENTS_RUNTIME,
 ] as const
 
 export const CURRENT_BUSINESS_DOMAIN_REGISTRY = new BusinessDomainRegistry()
@@ -127,22 +128,3 @@ export async function tryExecuteCurrentChangeAction(
   }
 }
 
-
-const PLATFORM_GENERIC_EVENT_BY_ID = new Map(
-  PLATFORM_GENERIC_BUSINESS_EVENT_MANIFESTS.map((event) => [
-    event.key + '@' + event.version,
-    event,
-  ]),
-)
-
-for (const registration of PLATFORM_GENERIC_EVENT_PROJECTORS) {
-  const id = registration.eventType + '@' + registration.eventVersion
-  const event = PLATFORM_GENERIC_EVENT_BY_ID.get(id)
-  if (!event) {
-    throw new Error('Cannot register platform event projector without event contract: ' + id)
-  }
-  if (event.domain !== 'platform') {
-    throw new Error('Platform event projector manifest must belong to platform: ' + id)
-  }
-  CURRENT_EVENT_PROJECTOR_REGISTRY.register(registration)
-}
