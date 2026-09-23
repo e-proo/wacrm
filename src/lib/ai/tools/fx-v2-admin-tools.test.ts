@@ -239,6 +239,10 @@ describe('FX V2 Phase 5 admin tools', () => {
       action_version: null,
       target_type: 'fx_trade_request',
       target_id: 'trade-1',
+      proposed_payload: {
+        expected_status: 'pending_admin',
+        decision: 'approve',
+      },
       idempotency_key: 'fx-trade-review:trade-1:pending_admin',
     })
 
@@ -305,6 +309,34 @@ describe('FX V2 Phase 5 admin tools', () => {
     })
   })
 
+  it('fails closed when the pending FX review payload is no longer the original approve review', async () => {
+    mocks.findChangeRequestByIdempotencyKey.mockResolvedValueOnce({
+      id: 'review-cr-mutated',
+      code: 75,
+      status: 'pending',
+      action_key: 'exchange_rates.trade.decide',
+      action_version: 1,
+      target_type: 'fx_trade_request',
+      target_id: 'trade-1',
+      proposed_payload: {
+        expected_status: 'pending_admin',
+        decision: 'reject',
+      },
+      idempotency_key: 'fx-trade-review:trade-1:pending_admin',
+    })
+
+    const result = await executeFxV2ProposeTradeDecision(adminContext(), {
+      request_id: 'trade-1',
+      decision: 'reject',
+    })
+
+    expect(mocks.createChangeRequest).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'FX_TRADE_REVIEW_CONFLICT',
+    })
+  })
+
   it('fails closed when a pending review idempotency key points at another contract', async () => {
     mocks.findChangeRequestByIdempotencyKey.mockResolvedValueOnce({
       id: 'review-cr-wrong',
@@ -314,6 +346,10 @@ describe('FX V2 Phase 5 admin tools', () => {
       action_version: 1,
       target_type: 'coverage_offer',
       target_id: 'offer-1',
+      proposed_payload: {
+        expected_status: 'pending_admin',
+        decision: 'approve',
+      },
       idempotency_key: 'fx-trade-review:trade-1:pending_admin',
     })
 
