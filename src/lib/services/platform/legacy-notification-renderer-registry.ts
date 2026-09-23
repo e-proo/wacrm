@@ -1,8 +1,7 @@
 export interface LegacyCustomerNotificationDescriptor {
   id: string
-  intentId: string | null
-  fxTradeRequestId: string | null
   eventType: string
+  intentId: string | null
 }
 
 export interface LegacyCustomerNotificationRenderInput {
@@ -12,8 +11,9 @@ export interface LegacyCustomerNotificationRenderInput {
 
 export interface LegacyCustomerNotificationRendererRegistration {
   key: string
-  matches: (notification: LegacyCustomerNotificationDescriptor) => boolean
-  render: (input: LegacyCustomerNotificationRenderInput) => Promise<string>
+  render: (
+    input: LegacyCustomerNotificationRenderInput,
+  ) => Promise<string | null>
 }
 
 /**
@@ -40,8 +40,11 @@ export class LegacyCustomerNotificationRendererRegistry {
   async render(
     input: LegacyCustomerNotificationRenderInput,
   ): Promise<string | null> {
-    const matches = this.registrations.filter((entry) =>
-      entry.matches(input.notification),
+    const rendered = await Promise.all(
+      this.registrations.map((entry) => entry.render(input)),
+    )
+    const matches = rendered.filter(
+      (value): value is string => value !== null,
     )
     if (matches.length === 0) return null
     if (matches.length > 1) {
@@ -50,7 +53,7 @@ export class LegacyCustomerNotificationRendererRegistry {
           input.notification.id,
       )
     }
-    return matches[0].render(input)
+    return matches[0]
   }
 
   listKeys(): readonly string[] {
