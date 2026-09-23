@@ -10,8 +10,9 @@ describe('normalizeIdempotencyKey', () => {
     expect(normalizeIdempotencyKey('short')).toBeNull()
   })
 
-  it('rejects keys beyond the outbox-compatible maximum', () => {
-    expect(normalizeIdempotencyKey('x'.repeat(501))).toBeNull()
+  it('does not impose a new maximum unless the caller explicitly requests one', () => {
+    expect(normalizeIdempotencyKey('x'.repeat(501))).toBe('x'.repeat(501))
+    expect(normalizeIdempotencyKey('x'.repeat(5), { maxLength: 4 })).toBeNull()
   })
 
   it('allows callers to narrow the accepted length contract', () => {
