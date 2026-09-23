@@ -17,6 +17,10 @@ const intents = readFileSync(
   new URL('../intents/ai-tool-runtime.ts', import.meta.url),
   'utf8',
 )
+const intentsService = readFileSync(
+  new URL('../intents/intents-service.ts', import.meta.url),
+  'utf8',
+)
 const coverage = readFileSync(
   new URL('../../ai/tools/business-handoff.ts', import.meta.url),
   'utf8',
@@ -71,6 +75,12 @@ describe('Change Request action identity expansion', () => {
     expect(fxCustomer).toContain("actionKey: 'exchange_rates.trade.decide'")
     expect(fxAdmin).toContain("actionKey: 'exchange_rates.pair.publish'")
     expect(fxAdmin).toContain("actionKey: 'exchange_rates.trade.decide'")
+  })
+
+  it('keeps non-authoritative intent review handoff out of the approval engine', () => {
+    expect(intentsService).not.toContain('createChangeRequest({')
+    expect(intentsService).toContain("status: 'forwarded_to_admin'")
+    expect(intentsService).toContain('changeRequest: null')
   })
 
   it('keeps create_and_attach compatible with the existing pricing proposal path', () => {
