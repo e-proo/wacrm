@@ -1,5 +1,5 @@
 import type { AgentPurpose, ToolGrantPermission, RunPlane } from './multi-agent-types'
-import type { ToolDefinition } from './tool-registry'
+import type { PlatformToolManifest } from '../tools/platform/contracts'
 import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 
 export interface RuntimeFeaturePolicy {
@@ -23,7 +23,7 @@ export interface ToolAuthorizationContext {
 // it does not maintain a second hand-written allowlist.
 
 export function authorizeToolInvocation(input: {
-  tool: ToolDefinition
+  tool: Pick<PlatformToolManifest, 'key' | 'version'>
   permission: ToolGrantPermission
   args: Record<string, unknown>
   constraints: Record<string, unknown>
