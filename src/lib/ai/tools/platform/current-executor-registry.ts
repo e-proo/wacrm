@@ -13,7 +13,7 @@ import {
   executeServiceProposeUpdate,
   executePricingRuleProposeServicePrice,
 } from '../business-handoff'
-import type { ToolDefinition } from '../../runtime/tool-registry'
+import type { PlatformToolManifest } from './contracts'
 import { CURRENT_BUSINESS_DOMAIN_RUNTIMES } from '@/lib/services/platform/composition'
 import { ToolExecutorRegistry } from './execution-registry'
 import { getCurrentPlatformTool } from './current-domain-registry'
@@ -78,7 +78,7 @@ export function sanitizeToolResultForModel(result: RuntimeResult): RuntimeResult
 
 export async function executeCurrentPlatformTool(
   ctx: ToolContext,
-  tool: ToolDefinition,
+  tool: PlatformToolManifest,
   args: Record<string, unknown>,
 ): Promise<RuntimeResult> {
   const contract = getCurrentPlatformTool(tool.key, tool.version)
