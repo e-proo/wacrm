@@ -11,7 +11,6 @@ vi.mock('@/lib/ai/admin-client', () => ({
   supabaseAdmin: mocks.supabaseAdmin,
 }))
 
-import { DomainChangeExecutionError } from '@/lib/services/platform/change-executor-registry'
 import { INTENTS_CHANGE_EXECUTORS } from './change-executors'
 
 function installDb() {
@@ -130,7 +129,7 @@ describe('Intents deterministic change executor', () => {
           matched_service_id: 'missing-service',
         },
       }),
-    ).rejects.toMatchObject<Partial<DomainChangeExecutionError>>({
+    ).rejects.toMatchObject({
       code: 'SERVICE_NOT_FOUND',
       status: 404,
     })
