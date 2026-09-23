@@ -6,6 +6,7 @@ import { recordIntent, listIntents } from '@/lib/services/intents/intents-servic
 import { readCoverageAttributes } from '@/lib/services/coverage/attributes'
 import { supabaseAdmin as adminClient } from '@/lib/ai/admin-client'
 import Decimal from 'decimal.js'
+import { parseDecimal } from '@/lib/services/pricing/decimal'
 import type {
   AccountId,
   Uuid,
@@ -384,98 +385,6 @@ export async function executeCoverageCheckAvailability(
 }
 
 // ------------------------------------------------------------
-// Minimal string-arithmetic helpers (no decimal.js dependency
-// at this layer — Phase 2's pricing engine handles the more
-// interesting math). These stay exact for the values we expect
-// from numeric(20, 4) columns.
-// ------------------------------------------------------------
-function addDecimalStrings(a: string, b: string): string {
-  const aNeg = a.startsWith('-')
-  const bNeg = b.startsWith('-')
-  if (aNeg && bNeg) {
-    return '-' + addPositives(a.slice(1), b.slice(1))
-  }
-  if (aNeg) {
-    return subPositives(b, a.slice(1))
-  }
-  if (bNeg) {
-    return subPositives(a, b.slice(1))
-  }
-  return addPositives(a, b)
-}
-
-function negDecimalStrings(a: string): string {
-  if (a.startsWith('-')) return a.slice(1)
-  if (a === '0') return '0'
-  return '-' + a
-}
-
-function compareDecimalStrings(a: string, b: string): number {
-  // Treat both as big-decimal integers; scale to common exponent.
-  const [ai, ad] = splitScale(a)
-  const [bi, bd] = splitScale(b)
-  const scale = Math.max(ad, bd)
-  const an = alignToScale(ai, ad, scale)
-  const bn = alignToScale(bi, bd, scale)
-  // Trim leading zeros for accurate comparison.
-  const as = an.replace(/^0+(?=\d)/, '')
-  const bs = bn.replace(/^0+(?=\d)/, '')
-  if (as.length !== bs.length) return as.length - bs.length
-  return as < bs ? -1 : as > bs ? 1 : 0
-}
-
-function splitScale(n: string): [string, number] {
-  const neg = n.startsWith('-')
-  const body = neg ? n.slice(1) : n
-  const [i, d = ''] = body.split('.')
-  return [`${neg ? '-' : ''}${i}`, d.length]
-}
-
-function alignToScale(intPart: string, scale: number, target: number): string {
-  const pad = target - scale
-  if (pad <= 0) return intPart
-  return intPart + '0'.repeat(pad)
-}
-
-function addPositives(a: string, b: string): string {
-  const [ai, ad] = splitScale(a)
-  const [bi, bd] = splitScale(b)
-  const scale = Math.max(ad, bd)
-  const an = alignToScale(ai, ad, scale)
-  const bn = alignToScale(bi, bd, scale)
-  const aNeg = an.startsWith('-')
-  const bNeg = bn.startsWith('-')
-  const aBody = aNeg ? an.slice(1) : an
-  const bBody = bNeg ? bn.slice(1) : bn
-  const max = Math.max(aBody.length, bBody.length)
-  const ap = aBody.padStart(max, '0')
-  const bp = bBody.padStart(max, '0')
-  let carry = 0
-  let out = ''
-  for (let i = max - 1; i >= 0; i--) {
-    const sum = Number(ap[i]) + Number(bp[i]) + carry
-    out = (sum % 10).toString() + out
-    carry = Math.floor(sum / 10)
-  }
-  if (carry > 0) out = carry.toString() + out
-  if (aNeg && bNeg) out = '-' + out
-  const head = out.slice(0, out.length - scale)
-  const tail = scale > 0 ? '.' + out.slice(out.length - scale) : ''
-  return (head || '0') + tail
-}
-
-function subPositives(a: string, b: string): string {
-  const cmp = compareDecimalStrings(a, b)
-  if (cmp === 0) return '0'
-  if (cmp > 0) return addPositives(a, negatePositiveString(b))
-  return '-' + addPositives(negatePositiveString(a), b)
-}
-
-function negatePositiveString(n: string): string {
-  return n.startsWith('-') ? n.slice(1) : '-' + n
-}
-
-// ------------------------------------------------------------
 // coverage.find_offers — anonymized provider view.
 // The runtime may see which contact supplies liquidity (to route
 // the admin decision), but the result handed to the model strips
@@ -742,8 +651,8 @@ export async function executeCoverageProposeOffer(
       message: 'contact_id, service_id, total_amount, and currency are required.',
     }
   }
-  const amount = Number(args.total_amount)
-  if (!Number.isFinite(amount) || amount <= 0) {
+  const amount = parseDecimal(args.total_amount, { rejectZero: true })
+  if (!amount || amount.isNegative()) {
     return {
       ok: false,
       data: null,
@@ -779,8 +688,8 @@ export async function executeCoverageProposeOffer(
     }
   }
   if (args.commission_per_thousand !== undefined) {
-    const rate = Number(args.commission_per_thousand)
-    if (!Number.isFinite(rate) || rate < 0) {
+    const rate = parseDecimal(args.commission_per_thousand)
+    if (!rate || rate.isNegative()) {
       return {
         ok: false,
         data: null,
