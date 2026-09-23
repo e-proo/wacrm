@@ -9,6 +9,7 @@ import type { ChatMessage } from '../types'
 import type { ToolContext, ToolResult } from '../tools/executors'
 import { recordToolAttempt } from './tool-attempt-audit'
 import { executeCurrentPlatformTool } from '../tools/platform/current-executor-registry'
+import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import { loadAccountRuntimePolicy } from './runtime-policy'
 import { authorizeToolInvocation } from './tool-policy'
 import { canonicalizeE164 } from './phone-e164'
@@ -798,9 +799,8 @@ export async function executeTool(
     }
   }
 
-  const { getRegisteredTool, isGrantAllowed } = await import('./tool-registry')
-  const tool = getRegisteredTool(invocation.toolKey)
-  if (!tool) {
+  const latestTool = getCurrentPlatformTool(invocation.toolKey)
+  if (!latestTool) {
     await audit({ status: 'denied', errorCode: 'UNKNOWN_TOOL' })
     return {
       ...baseOutcome,
@@ -818,12 +818,14 @@ export async function executeTool(
   }
 
   // DENY BY DEFAULT — the RUNNING REVISION must carry a grant for
-  // this exact tool. The doc comment promised this check for phases
-  // now and a half of shipping; without it a prompt-injected tool
-  // call to ANY registered tool would execute.
+  // this exact tool and exact frozen version.
   const grantedLvl = ctx.grants?.[invocation.toolKey]
   if (!grantedLvl) {
-    await audit({ status: 'denied', errorCode: 'TOOL_NOT_GRANTED', toolVersion: tool.version })
+    await audit({
+      status: 'denied',
+      errorCode: 'TOOL_NOT_GRANTED',
+      toolVersion: latestTool.version,
+    })
     return {
       ...baseOutcome,
       result: {
@@ -838,9 +840,18 @@ export async function executeTool(
       roundsExhausted: false,
     }
   }
-  const RANK: Record<ToolGrantPermission, number> = { read: 1, propose: 2, execute: 3 }
+
+  const RANK: Record<ToolGrantPermission, number> = {
+    read: 1,
+    propose: 2,
+    execute: 3,
+  }
   if (RANK[invocation.permission] > RANK[grantedLvl]) {
-    await audit({ status: 'denied', errorCode: 'TOOL_GRANT_LEVEL_DENIED', toolVersion: tool.version })
+    await audit({
+      status: 'denied',
+      errorCode: 'TOOL_GRANT_LEVEL_DENIED',
+      toolVersion: latestTool.version,
+    })
     return {
       ...baseOutcome,
       result: {
@@ -856,26 +867,13 @@ export async function executeTool(
     }
   }
 
-  if (!isGrantAllowed(tool, invocation.permission)) {
-    await audit({ status: 'denied', errorCode: 'TOOL_PERMISSION_DENIED', toolVersion: tool.version })
-    return {
-      ...baseOutcome,
-      result: {
-        ok: false,
-        data: null,
-        safe_to_show: true,
-        code: 'TOOL_PERMISSION_DENIED',
-        message: `Tool "${invocation.toolKey}" cannot be used with permission "${invocation.permission}".`,
-      },
-      toolFound: true,
-      granted: false,
-      roundsExhausted: false,
-    }
-  }
-
   const grantedVersion = ctx.grantVersions?.[invocation.toolKey]
-  if (grantedVersion !== tool.version) {
-    await audit({ status: 'denied', errorCode: 'TOOL_VERSION_MISMATCH', toolVersion: tool.version })
+  if (grantedVersion !== latestTool.version) {
+    await audit({
+      status: 'denied',
+      errorCode: 'TOOL_VERSION_MISMATCH',
+      toolVersion: latestTool.version,
+    })
     return {
       ...baseOutcome,
       result: {
@@ -884,6 +882,28 @@ export async function executeTool(
         safe_to_show: true,
         code: 'TOOL_VERSION_MISMATCH',
         message: `Tool "${invocation.toolKey}" grant is stale.`,
+      },
+      toolFound: true,
+      granted: false,
+      roundsExhausted: false,
+    }
+  }
+
+  const tool = getCurrentPlatformTool(invocation.toolKey, grantedVersion)
+  if (!tool || tool.permission !== invocation.permission) {
+    await audit({
+      status: 'denied',
+      errorCode: 'TOOL_PERMISSION_DENIED',
+      toolVersion: latestTool.version,
+    })
+    return {
+      ...baseOutcome,
+      result: {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'TOOL_PERMISSION_DENIED',
+        message: `Tool "${invocation.toolKey}" cannot be used with permission "${invocation.permission}".`,
       },
       toolFound: true,
       granted: false,
