@@ -8,6 +8,8 @@ import { COVERAGE_DOMAIN, COVERAGE_RUNTIME } from '@/lib/services/coverage/domai
 import { COVERAGE_TOOL_MANIFESTS } from '@/lib/services/coverage/tool-manifests'
 import { FX_V2_DOMAIN, FX_V2_RUNTIME } from '@/lib/services/fx-v2/domain'
 import { FX_V2_TOOL_MANIFESTS } from '@/lib/services/fx-v2/tool-manifests'
+import { INTENTS_DOMAIN, INTENTS_RUNTIME } from '@/lib/services/intents/domain'
+import { INTENTS_TOOL_MANIFESTS } from '@/lib/services/intents/tool-manifests'
 import {
   CURRENT_BUSINESS_DOMAIN_REGISTRY,
   CURRENT_CHANGE_EXECUTOR_REGISTRY,
@@ -297,17 +299,25 @@ describe('Coverage second-domain migration', () => {
 
 
 describe('native domain tool ownership', () => {
-  const nativeManifests = [...FX_V2_TOOL_MANIFESTS, ...COVERAGE_TOOL_MANIFESTS]
+  const nativeManifests = [
+    ...FX_V2_TOOL_MANIFESTS,
+    ...COVERAGE_TOOL_MANIFESTS,
+    ...INTENTS_TOOL_MANIFESTS,
+  ]
 
   it('makes the business domains own their native platform manifests', () => {
     expect(FX_V2_DOMAIN.tools).toEqual(FX_V2_TOOL_MANIFESTS)
     expect(COVERAGE_DOMAIN.tools).toEqual(COVERAGE_TOOL_MANIFESTS)
+    expect(INTENTS_DOMAIN.tools).toEqual(INTENTS_TOOL_MANIFESTS)
 
     expect(getCurrentPlatformTool('exchange_rates.get_current', 1)).toEqual(
       FX_V2_TOOL_MANIFESTS.find((tool) => tool.key === 'exchange_rates.get_current'),
     )
     expect(getCurrentPlatformTool('coverage.get_rates', 1)).toEqual(
       COVERAGE_TOOL_MANIFESTS.find((tool) => tool.key === 'coverage.get_rates'),
+    )
+    expect(getCurrentPlatformTool('intents.record', 1)).toEqual(
+      INTENTS_TOOL_MANIFESTS.find((tool) => tool.key === 'intents.record'),
     )
   })
 
@@ -326,7 +336,7 @@ describe('native domain tool ownership', () => {
     }
   })
 
-  it('removes FX and Coverage semantic specs from both the legacy bridge and central tool registry', () => {
+  it('removes FX, Coverage, and Intents semantic specs from both the legacy bridge and central tool registry', () => {
     const registrySource = readFileSync(
       new URL('../../ai/tools/platform/current-domain-registry.ts', import.meta.url),
       'utf8',
@@ -338,16 +348,19 @@ describe('native domain tool ownership', () => {
 
     expect(registrySource).toContain('FX_V2_TOOL_MANIFESTS')
     expect(registrySource).toContain('COVERAGE_TOOL_MANIFESTS')
+    expect(registrySource).toContain('INTENTS_TOOL_MANIFESTS')
     expect(registrySource).not.toContain("key: 'exchange_rates.")
     expect(registrySource).not.toContain("key: 'coverage.")
+    expect(registrySource).not.toContain("key: 'intents.")
     expect(legacyToolRegistrySource).not.toContain("key: 'exchange_rates.")
     expect(legacyToolRegistrySource).not.toContain("key: 'coverage.")
+    expect(legacyToolRegistrySource).not.toContain("key: 'intents.")
   })
 })
 
 
 describe('domain-owned model tool executors', () => {
-  it('binds every native FX and Coverage manifest to an exact-version domain runtime executor', () => {
+  it('binds every native FX, Coverage, and Intents manifest to an exact-version domain runtime executor', () => {
     expect(
       FX_V2_RUNTIME.toolExecutors.map(({ key, version }) => key + '@' + version),
     ).toEqual(FX_V2_TOOL_MANIFESTS.map(({ key, version }) => key + '@' + version))
@@ -355,6 +368,10 @@ describe('domain-owned model tool executors', () => {
     expect(
       COVERAGE_RUNTIME.toolExecutors.map(({ key, version }) => key + '@' + version),
     ).toEqual(COVERAGE_TOOL_MANIFESTS.map(({ key, version }) => key + '@' + version))
+
+    expect(
+      INTENTS_RUNTIME.toolExecutors.map(({ key, version }) => key + '@' + version),
+    ).toEqual(INTENTS_TOOL_MANIFESTS.map(({ key, version }) => key + '@' + version))
   })
 
   it('keeps native tool names and implementation imports out of the central executor registry', () => {
@@ -366,8 +383,10 @@ describe('domain-owned model tool executors', () => {
     expect(source).toContain('CURRENT_BUSINESS_DOMAIN_RUNTIMES')
     expect(source).not.toContain("add('exchange_rates.")
     expect(source).not.toContain("add('coverage.")
+    expect(source).not.toContain("add('intents.")
     expect(source).not.toContain('executeFxV2')
     expect(source).not.toContain('executeCoverage')
+    expect(source).not.toContain('executeIntents')
   })
 })
 
@@ -450,19 +469,101 @@ describe('messaging purity', () => {
 })
 
 
-describe('platform-generic service request projectors', () => {
-  it('registers generic service_request events without inventing a business domain', () => {
-    for (const eventType of [
-      'service_request.approved',
-      'service_request.rejected',
-      'service_request.matched',
-      'service_request.needs_clarification',
-      'service_request.completed',
-    ]) {
+describe('Intents third-domain architectural acceptance', () => {
+  const intentEvents = [
+    'service_request.approved',
+    'service_request.rejected',
+    'service_request.matched',
+    'service_request.needs_clarification',
+    'service_request.completed',
+  ] as const
+
+  it('registers a real third domain with tools, deterministic change action, events, templates, and projectors', () => {
+    expect(CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain('intents')).toBe(INTENTS_DOMAIN)
+    expect(INTENTS_DOMAIN.tools.map((tool) => tool.key)).toEqual([
+      'intents.record',
+      'intents.search',
+      'intents.propose_decision',
+    ])
+    expect(INTENTS_DOMAIN.changeActions.map((action) => action.key)).toEqual([
+      'intents.decision.apply',
+    ])
+    expect(INTENTS_DOMAIN.events.map((event) => event.key)).toEqual(intentEvents)
+    expect(INTENTS_DOMAIN.messageTemplates.map((template) => template.key).sort()).toEqual(
+      [...intentEvents].sort(),
+    )
+
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
+        targetType: 'service_intent',
+        targetId: 'intent-1',
+        intent: 'update',
+      })?.key,
+    ).toBe('intents.decision.apply')
+    expect(CURRENT_CHANGE_EXECUTOR_REGISTRY.has('intents.decision.apply', 1)).toBe(true)
+
+    for (const eventType of intentEvents) {
+      expect(
+        CURRENT_BUSINESS_DOMAIN_REGISTRY.getEvent(eventType, 1)?.domain,
+        eventType,
+      ).toBe('intents')
       expect(CURRENT_EVENT_PROJECTOR_REGISTRY.has(eventType, 1), eventType).toBe(true)
     }
+  })
 
-    expect(CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain('platform')).toBeNull()
+  it('removes Intents branches from kernel execution and central registries', () => {
+    const changeExecutor = readFileSync(
+      new URL('../../ai/runtime/change-request-executor.ts', import.meta.url),
+      'utf8',
+    )
+    const toolRegistry = readFileSync(
+      new URL('../../ai/runtime/tool-registry.ts', import.meta.url),
+      'utf8',
+    )
+    const executorRegistry = readFileSync(
+      new URL('../../ai/tools/platform/current-executor-registry.ts', import.meta.url),
+      'utf8',
+    )
+    const centralExecutors = readFileSync(
+      new URL('../../ai/tools/executors.ts', import.meta.url),
+      'utf8',
+    )
+    const centralHandoff = readFileSync(
+      new URL('../../ai/tools/business-handoff.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(changeExecutor).toContain('tryExecuteCurrentChangeAction')
+    expect(changeExecutor).not.toContain("row.target_type === 'service_intent'")
+    expect(toolRegistry).not.toContain("key: 'intents.")
+    expect(executorRegistry).not.toContain("add('intents.")
+    expect(centralExecutors).not.toContain('executeIntentsRecord')
+    expect(centralExecutors).not.toContain('executeIntentsSearch')
+    expect(centralHandoff).not.toContain('executeIntentProposeDecision')
+  })
+
+  it('keeps the generic runtime/worker/template resolver free of new Intents-specific branches', () => {
+    const dispatch = readFileSync(
+      new URL('../../ai/runtime/dispatch.ts', import.meta.url),
+      'utf8',
+    )
+    const worker = readFileSync(
+      new URL('../../ai/runtime/worker.ts', import.meta.url),
+      'utf8',
+    )
+    const delivery = readFileSync(
+      new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
+      'utf8',
+    )
+    const resolver = readFileSync(
+      new URL('../../messaging/resolver.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(dispatch).not.toContain("intents.")
+    expect(worker).not.toContain("intents.")
+    expect(delivery).not.toContain("intents.")
+    expect(resolver).not.toContain("intents.")
   })
 })
 
