@@ -1,11 +1,10 @@
 import { AiError, type AiUsage } from '@/lib/ai/types'
 import type { RuntimeConnection } from '@/lib/ai/connections/types'
-import type { ToolDefinition } from './tool-registry'
+import type { PlatformToolManifest } from '@/lib/ai/tools/platform/contracts'
 import { toJsonSchema } from './tool-schema'
 import { providerFetch, providerHttpError, normalizeUsage, toNetworkError } from '@/lib/ai/providers/shared'
 import { joinApiPath } from '@/lib/ai/outbound/url-join'
 import { aiRequestTimeoutMs, MAX_OUTPUT_TOKENS } from '@/lib/ai/defaults'
-import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import { renderToolUsageDescription } from '../tools/platform/contracts'
 
 export interface NativeToolCall {
@@ -30,7 +29,7 @@ export interface NativeAgentGenerateInput {
   model: string
   systemPrompt: string
   messages: NativeAgentMessage[]
-  tools: ReadonlyArray<ToolDefinition>
+  tools: ReadonlyArray<PlatformToolManifest>
   maxOutputTokens?: number | null
   temperature?: number | null
 }
@@ -64,27 +63,20 @@ function providerName(toolKey: string): string {
   return `wacrm__${toolKey.replace(/[^A-Za-z0-9_-]/g, '__')}`
 }
 
-function keyByProviderName(tools: ReadonlyArray<ToolDefinition>): Map<string, string> {
+function keyByProviderName(tools: ReadonlyArray<PlatformToolManifest>): Map<string, string> {
   return new Map(tools.map((tool) => [providerName(tool.key), tool.key]))
 }
 
-function toolPayloads(tools: ReadonlyArray<ToolDefinition>) {
-  return tools.map((tool) => {
-    const manifest = getCurrentPlatformTool(tool.key, tool.version)
-    if (!manifest) {
-      throw new AiError(`Tool ${tool.key}@${tool.version} has no platform manifest.`, {
-        code: 'tool_contract_missing', status: 500,
-      })
-    }
-    return {
-      key: tool.key,
-      name: providerName(tool.key),
-      // Provider-facing descriptions are generated from the same contract
-      // the runtime authorizes, so "when to use" cannot drift from policy.
-      description: renderToolUsageDescription(manifest),
-      schema: toJsonSchema(tool),
-    }
-  })
+function toolPayloads(tools: ReadonlyArray<PlatformToolManifest>) {
+  return tools.map((tool) => ({
+    key: tool.key,
+    name: providerName(tool.key),
+    // Provider-facing descriptions and schemas come from the same manifest
+    // the runtime authorizes, so native domains no longer depend on central
+    // legacy tool specs.
+    description: renderToolUsageDescription(tool),
+    schema: toJsonSchema(tool),
+  }))
 }
 
 function parseArgs(raw: unknown, toolKey: string): Record<string, unknown> {
