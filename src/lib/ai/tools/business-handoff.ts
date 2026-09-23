@@ -117,7 +117,8 @@ export async function executeCoverageProposeOfferIntegrated(ctx: ToolContext, ar
         ...(args.deal_date ? { deal_date: args.deal_date } : {}) },
     })
     const cr = await createChangeRequest({
-      accountId: ctx.accountId, targetType: 'coverage_offer', targetId: null, intent: 'create',
+      accountId: ctx.accountId, actionKey: 'coverage.offer.create', actionVersion: 1,
+      targetType: 'coverage_offer', targetId: null, intent: 'create',
       proposedPayload: { contact_id: bound.contactId, conversation_id: bound.conversationId, source_message_id: bound.sourceMessageId, intent_id: intentId,
         service_id: args.service_id, total_amount: args.total_amount, currency: args.currency, attributes: attrs,
         ...(args.commission_per_thousand !== undefined ? { commission_per_thousand: args.commission_per_thousand, commission_currency: args.commission_currency } : {}),
@@ -151,7 +152,8 @@ export async function executeCoverageProposeRequest(ctx: ToolContext, args: Cove
         ...(args.deal_date ? { deal_date: args.deal_date } : {}), ...(args.expires_at ? { expires_at: args.expires_at } : {}) },
     })
     const cr = await createChangeRequest({
-      accountId: ctx.accountId, targetType: 'coverage_request', targetId: null, intent: 'create',
+      accountId: ctx.accountId, actionKey: 'coverage.request.create', actionVersion: 1,
+      targetType: 'coverage_request', targetId: null, intent: 'create',
       proposedPayload: { contact_id: bound.contactId, conversation_id: bound.conversationId, source_message_id: bound.sourceMessageId, intent_id: intentId,
         service_id: args.service_id, requested_amount: args.requested_amount, currency: args.currency, attributes: attrs,
         ...(args.commission_per_thousand !== undefined ? { commission_per_thousand: args.commission_per_thousand, commission_currency: args.commission_currency } : {}),
