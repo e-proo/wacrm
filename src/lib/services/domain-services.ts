@@ -2,6 +2,7 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { parseDecimal } from '@/lib/services/pricing/decimal'
 import { calculateQuote, type QuoteResult } from '@/lib/services/pricing/engine'
+import { DomainError } from '@/lib/services/platform/domain-error'
 
 // ============================================================
 // Services, coverage, and pricing domain services.
@@ -10,14 +11,10 @@ import { calculateQuote, type QuoteResult } from '@/lib/services/pricing/engine'
 // This shared layer intentionally contains no legacy rate-book reads/writes.
 // ============================================================
 
-export class ServiceError extends Error {
-  readonly code: string
-  readonly status: number
+export class ServiceError extends DomainError {
   constructor(code: string, message: string, status = 400) {
-    super(message)
+    super(code, message, status)
     this.name = 'ServiceError'
-    this.code = code
-    this.status = status
   }
 }
 
