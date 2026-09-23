@@ -129,15 +129,27 @@ describe('current platform tool compatibility projection', () => {
     expect(decision?.argumentSchema.decision.values).toEqual(['approve', 'reject'])
   })
 
-  it('projects native Intents contracts without central duplicate specs', () => {
+  it('projects native Intents contracts without changing the historical provider/UI shape', () => {
     const record = getCurrentToolDefinition('intents.record', 1)
+    expect(record?.description).toBe(
+      "Record a general observation about a customer's need or offer — even for services NOT equipped yet. Optionally escalates to the trusted admin for a decision.",
+    )
     expect(record?.grantPermissions).toEqual(['propose'])
     expect(record?.argumentSchema.direction.values).toEqual(['offer', 'request'])
-    expect(record?.argumentSchema.escalate_to_admin?.required).toBe(false)
+    expect(record?.argumentSchema.escalate_to_admin).toMatchObject({
+      required: false,
+      description: 'True when the admin must decide before anything is promised.',
+    })
+    expect(record?.returnSchema).toBe(
+      '{ intent_id, status, change_request?: { id, code, confirmation_code } }',
+    )
 
     const search = getCurrentToolDefinition('intents.search', 1)
     expect(search?.grantPermissions).toEqual(['read'])
     expect(search?.argumentSchema.status.values).toContain('forwarded_to_admin')
+    expect(search?.returnSchema).toBe(
+      'Array<{ intent_id, contact_id, direction, service_hint, summary, status, attributes, created_at }>',
+    )
 
     const decision = getCurrentToolDefinition('intents.propose_decision', 1)
     expect(decision?.grantPermissions).toEqual(['propose'])
@@ -147,6 +159,9 @@ describe('current platform tool compatibility projection', () => {
       'matched',
       'clarifying',
     ])
+    expect(decision?.returnSchema).toBe(
+      '{ change_request: { id, code, confirmation_code, status } }',
+    )
   })
 
   it('fails closed for unknown tools', () => {
