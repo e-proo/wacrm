@@ -7,7 +7,6 @@ import { retrieveKnowledgeV2, renderKnowledgeForPrompt } from '../knowledge-v2'
 import { loadRuntimeConnection } from '../connections/loader'
 import type { ChatMessage } from '../types'
 import { executeTool } from './dispatch'
-import { getRegisteredTool } from './tool-registry'
 import { validateToolArguments } from './tool-schema'
 import { generateNativeAgentTurn, type NativeAgentMessage } from './native-agent-tools'
 import { mergeConsecutive } from '../providers/shared'
@@ -142,13 +141,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     const maxRounds = Math.max(Number.isFinite(revision.maxToolRounds) ? revision.maxToolRounds : 0, 0)
     const offeredTools = maxRounds > 0 && policy.nativeToolsEnabled
       ? Object.entries(grants).flatMap(([key, grant]) => {
-          const tool = getRegisteredTool(key)
           const manifest = getCurrentPlatformTool(key, grant.toolVersion)
           // Offer only tools that can actually pass the deterministic runtime
           // authorization boundary. Stale/cross-plane grants remain frozen for
           // audit history but are invisible to the model instead of causing a
           // predictable TOOL_PLANE_DENIED / ADMIN_CAPABILITY_DENIED round.
-          if (!tool || tool.version !== grant.toolVersion || !manifest) return []
+          if (!manifest || !manifest.modelExposed || manifest.serverOnly) return []
           if (manifest.permission !== grant.permission) return []
           if (!manifest.allowedPlanes.includes(input.plane)) return []
           if (grant.permission === 'propose' && !policy.proposalToolsEnabled) return []
@@ -158,7 +156,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               (capability) => !input.trustedAdminCapabilities.includes(capability),
             )
           ) return []
-          return [tool]
+          return [manifest]
         })
       : []
 
@@ -383,8 +381,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       messages.push({ role: 'assistant_tool', content: parsed.text, calls: turn.toolCalls })
       for (const call of turn.toolCalls) {
         const grant = grants[call.toolKey]
-        const tool = getRegisteredTool(call.toolKey)
-        if (!grant || !tool || grant.toolVersion !== tool.version) {
+        const tool = grant
+          ? getCurrentPlatformTool(call.toolKey, grant.toolVersion)
+          : null
+        if (!grant || !tool) {
           auditCalls.push({ toolKey: call.toolKey, round, ok: false })
           messages.push({
             role: 'tool', callId: call.id, toolKey: call.toolKey,
