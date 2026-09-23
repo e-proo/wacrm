@@ -16,4 +16,18 @@ describe('strict native tool schemas', () => {
   it('accepts the closed valid shape', () => {
     expect(validateToolArguments(tool, { id_or_code: 'SVC' })).toMatchObject({ ok: true })
   })
+
+  it('supports a closed root object schema with no properties', () => {
+    const empty = {
+      inputSchema: { type: 'object', additionalProperties: false },
+    }
+    expect(toJsonSchema(empty as never)).toEqual({
+      type: 'object',
+      additionalProperties: false,
+    })
+    expect(validateToolArguments(empty as never, {})).toMatchObject({ ok: true })
+    expect(validateToolArguments(empty as never, { injected: true })).toMatchObject({
+      ok: false,
+    })
+  })
 })
