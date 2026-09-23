@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_CURRENCIES } from './crud'
+import { CURRENCY_CURRENCY_CODE_PATTERN, DEFAULT_CURRENCIES, normalizeCurrencyCode } from './crud'
 
 // Phase 2 completion: pure-shape guarantees for the currency
 // catalog. The service itself talks to Supabase; these tests
@@ -48,31 +48,35 @@ describe('DEFAULT_CURRENCIES', () => {
 })
 
 describe('code pattern validation', () => {
-  const CODE_PATTERN = /^[A-Z_]{3,8}$/
-
   it('accepts SAR, USD, EUR, YER_OLD', () => {
-    expect(CODE_PATTERN.test('SAR')).toBe(true)
-    expect(CODE_PATTERN.test('USD')).toBe(true)
-    expect(CODE_PATTERN.test('EUR')).toBe(true)
+    expect(CURRENCY_CODE_PATTERN.test('SAR')).toBe(true)
+    expect(CURRENCY_CODE_PATTERN.test('USD')).toBe(true)
+    expect(CURRENCY_CODE_PATTERN.test('EUR')).toBe(true)
     // Underscore is allowed for historical codes like YER_OLD.
-    expect(CODE_PATTERN.test('YER_OLD')).toBe(true)
+    expect(CURRENCY_CODE_PATTERN.test('YER_OLD')).toBe(true)
   })
 
   it('rejects mixed-case and too-short codes', () => {
-    expect(CODE_PATTERN.test('sar')).toBe(false)
-    expect(CODE_PATTERN.test('US')).toBe(false)
+    expect(CURRENCY_CODE_PATTERN.test('sar')).toBe(false)
+    expect(CURRENCY_CODE_PATTERN.test('US')).toBe(false)
   })
 
   it('accepts 8-letter codes (the maximum width)', () => {
-    expect(CODE_PATTERN.test('USDOLLAR')).toBe(true)
+    expect(CURRENCY_CODE_PATTERN.test('USDOLLAR')).toBe(true)
   })
 
   it('rejects 9-letter codes (over the max)', () => {
-    expect(CODE_PATTERN.test('USDOLLARX')).toBe(false)
+    expect(CURRENCY_CODE_PATTERN.test('USDOLLARX')).toBe(false)
   })
 
   it('rejects non-letter non-underscore characters', () => {
-    expect(CODE_PATTERN.test('SAR-OLD')).toBe(false)
-    expect(CODE_PATTERN.test('SAR1')).toBe(false)
+    expect(CURRENCY_CODE_PATTERN.test('SAR-OLD')).toBe(false)
+    expect(CURRENCY_CODE_PATTERN.test('SAR1')).toBe(false)
+  })
+
+  it('normalizes lookup input while preserving the canonical validation contract', () => {
+    expect(normalizeCurrencyCode(' sar ')).toBe('SAR')
+    expect(normalizeCurrencyCode(' yer_old ')).toBe('YER_OLD')
+    expect(normalizeCurrencyCode('bad-code')).toBeNull()
   })
 })
