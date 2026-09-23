@@ -85,7 +85,10 @@ describe('Intents deterministic change executor', () => {
       },
     })
 
-    expect(mocks.intentUpdate).toHaveBeenCalledWith({ status: 'fulfilled' })
+    expect(mocks.intentUpdate).toHaveBeenCalledWith({
+      status: 'fulfilled',
+      change_request_id: 'change-1',
+    })
   })
 
   it('validates a matched service in the same account before applying the match', async () => {
@@ -111,6 +114,7 @@ describe('Intents deterministic change executor', () => {
 
     expect(mocks.intentUpdate).toHaveBeenCalledWith({
       status: 'matched',
+      change_request_id: 'change-1',
       matched_service_id: 'service-1',
     })
   })
