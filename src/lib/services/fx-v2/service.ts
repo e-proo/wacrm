@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { parseDecimal } from '@/lib/services/pricing/decimal'
 import { DomainError } from '@/lib/services/platform/domain-error'
+import { normalizeIdempotencyKey } from '@/lib/services/platform/idempotency'
 import {
   findCurrencyByCode,
   getCurrenciesByIds as getCatalogCurrenciesByIds,
@@ -519,10 +520,11 @@ export async function createFxTradeRequest(
       'requestedAmount must be a positive decimal.',
     )
   }
-  if (input.idempotencyKey.trim().length < 8) {
+  const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey)
+  if (!idempotencyKey) {
     throw new FxServiceError(
       'FX_INVALID_IDEMPOTENCY_KEY',
-      'idempotencyKey must be at least 8 characters.',
+      'idempotencyKey must be 8-500 characters.',
     )
   }
 
@@ -534,7 +536,7 @@ export async function createFxTradeRequest(
       p_side: input.side,
       p_amount_basis: input.amountBasis,
       p_requested_amount: amount.toFixed(8),
-      p_idempotency_key: input.idempotencyKey.trim(),
+      p_idempotency_key: idempotencyKey,
       p_expected_rate_version_id: input.expectedRateVersionId ?? null,
       p_contact_id: input.contactId ?? null,
       p_conversation_id: input.conversationId ?? null,
