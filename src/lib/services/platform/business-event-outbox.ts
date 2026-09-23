@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { renderFxTradeBusinessEventText } from '@/lib/messaging/fx-v2-outbox'
+import { CURRENT_LEGACY_NOTIFICATION_RENDERERS } from './legacy-notification-composition'
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 import type { MessageAudience, MessageChannel } from '@/lib/messaging/types'
 import { renderBusinessEventProjection } from './business-event-message-renderer'
@@ -224,13 +224,16 @@ export async function inspectShadowBusinessEventRendering(input: {
         continue
       }
 
-      const legacyText = legacy.fx_trade_request_id
-        ? await renderFxTradeBusinessEventText({
-            accountId: input.accountId,
-            tradeRequestId: legacy.fx_trade_request_id,
-            eventType: legacy.event_type,
-          })
-        : legacy.message_text
+      const domainLegacyText = await CURRENT_LEGACY_NOTIFICATION_RENDERERS.render({
+        accountId: input.accountId,
+        notification: {
+          id: row.legacy_notification_id,
+          intentId: null,
+          fxTradeRequestId: legacy.fx_trade_request_id,
+          eventType: legacy.event_type,
+        },
+      })
+      const legacyText = domainLegacyText ?? legacy.message_text
 
       if (rendered.text === legacyText) {
         result.matchedLegacy += 1
