@@ -6,6 +6,7 @@ const input = {
   notification: {
     id: 'n-1',
     intentId: null,
+    changeRequestId: null,
     eventType: 'exchange_rate.trade.approved',
   },
 }
