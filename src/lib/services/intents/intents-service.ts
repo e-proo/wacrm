@@ -1,6 +1,7 @@
 // Server-only by convention.
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { createChangeRequest } from '@/lib/ai/runtime/change-requests-service'
+import { DomainError } from '@/lib/services/platform/domain-error'
 
 // ============================================================
 // Customer intents — the agent's GENERAL memory of unequipped
@@ -29,14 +30,10 @@ export interface CustomerIntentRow {
   updated_at: string
 }
 
-export class IntentError extends Error {
-  readonly code: string
-  readonly status: number
+export class IntentError extends DomainError {
   constructor(code: string, message: string, status = 400) {
-    super(message)
+    super(code, message, status)
     this.name = 'IntentError'
-    this.code = code
-    this.status = status
   }
 }
 
