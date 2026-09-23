@@ -22,9 +22,10 @@ export function fxOutcomeForBusinessEvent(eventType: string): FxTradeCustomerOut
 }
 
 /**
- * Legacy active renderer retained during Phase F shadow verification.
- * Business facts are loaded through the same domain-owned immutable fact loader
- * used by the new Event Projector, preventing two competing FX read models.
+ * Transitional rollback-only renderer retained while the controlled FX legacy
+ * route remains reversible. Canonical active delivery uses the domain Event
+ * Projector. This adapter deliberately shares the same immutable fact loader so
+ * rollback/shadow comparison cannot create a competing FX read model.
  */
 export async function renderFxTradeBusinessEventText(input: {
   accountId: string
