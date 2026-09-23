@@ -90,7 +90,7 @@ export async function reserveCoverageMatch(
   if (!idempotencyKey) {
     throw new ServiceError(
       'INVALID_IDEMPOTENCY_KEY',
-      'idempotencyKey must be 8-500 characters.',
+      'idempotencyKey must be at least 8 characters.',
     )
   }
   const { data, error } = await supabaseAdmin().rpc('reserve_coverage_match', {
