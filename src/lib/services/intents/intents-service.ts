@@ -1,6 +1,5 @@
 // Server-only by convention.
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { createChangeRequest } from '@/lib/ai/runtime/change-requests-service'
 import { DomainError } from '@/lib/services/platform/domain-error'
 
 // ============================================================
@@ -45,8 +44,8 @@ export interface RecordIntentInput {
   serviceHint: string
   summary?: string | null
   attributes?: Record<string, unknown>
-  /** When true, also create an escalation change request for the
-   *  admin plane and flip the intent to forwarded_to_admin. */
+  /** When true, mark the intent for trusted-admin review.
+   *  Review handoff is not an authoritative Change Action. */
   escalateToAdmin?: boolean
   actorUserId: string | null
 }
@@ -99,44 +98,21 @@ export async function recordIntent(
     return { intentId, status: 'new', changeRequest: null }
   }
 
-  // Escalation through the SAME approval engine every other admin
-  // change uses — same confirmation codes, expiry, audit.
-  const escalation = await createChangeRequest({
-    accountId: input.accountId,
-    targetType: 'service_intent',
-    targetId: intentId,
-    intent: 'create',
-    proposedPayload: {
-      intent_id: intentId,
-      direction: input.direction,
-      service_hint: input.serviceHint,
-      summary: input.summary ?? null,
-      attributes: input.attributes ?? {},
-    },
-    idempotencyKey: `intent-escalate:${intentId}`,
-    summary:
-      `Customer ${input.direction}: ${input.serviceHint}` +
-      (input.summary ? ` — ${input.summary}` : ''),
-    actorUserId: input.actorUserId,
-  })
-
-  const db = supabaseAdmin()
-  const { error: linkError } = await db
+  // Review handoff is not an authoritative mutation. Keep it out of the
+  // approval engine; a later explicit admin decision creates
+  // intents.decision.apply@1 through the native Intents tool.
+  const { error: forwardError } = await supabaseAdmin()
     .from('customer_intents')
-    .update({ status: 'forwarded_to_admin', change_request_id: escalation.id })
+    .update({ status: 'forwarded_to_admin' })
     .eq('account_id', input.accountId)
     .eq('id', intentId)
     .eq('status', 'new')
-  if (linkError) throw linkError
+  if (forwardError) throw forwardError
 
   return {
     intentId,
     status: 'forwarded_to_admin',
-    changeRequest: {
-      id: escalation.id,
-      code: escalation.code,
-      confirmationCode: escalation.confirmationCode,
-    },
+    changeRequest: null,
   }
 }
 
