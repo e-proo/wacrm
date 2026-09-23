@@ -18,6 +18,8 @@ export class ChangeExecutionError extends Error {
 
 interface ClaimedChange {
   id: string
+  action_key: string | null
+  action_version: number | null
   target_type: string
   target_id: string | null
   intent: string
@@ -42,7 +44,7 @@ export async function executeApprovedChangeRequest(input: {
 }): Promise<Record<string, unknown>> {
   const db = supabaseAdmin()
   const { data: claimedRows, error: claimError } = await db.rpc(
-    'claim_change_request_execution',
+    'claim_change_request_execution_v2',
     {
       p_account_id: input.accountId,
       p_change_request_id: input.changeRequestId,
@@ -136,6 +138,8 @@ async function executeClaimedTarget(
       },
       {
         id: row.id,
+        actionKey: row.action_key,
+        actionVersion: row.action_version,
         targetType: row.target_type,
         targetId: row.target_id,
         intent: row.intent,
