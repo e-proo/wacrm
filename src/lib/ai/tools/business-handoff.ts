@@ -3,6 +3,7 @@ import { createChangeRequest, listChangeRequests } from '@/lib/ai/runtime/change
 import { readCoverageAttributes } from '@/lib/services/coverage/attributes'
 import { compileFieldSchema, validateValues, type FieldDefinitionInput } from '@/lib/services/catalog/field-schema'
 import { calculateQuote, type PricingKind, type RoundingMode } from '@/lib/services/pricing/engine'
+import { parseDecimal } from '@/lib/services/pricing/decimal'
 import type { ToolContext, ToolResult } from './executors'
 
 interface CoverageProposalArgs {
@@ -45,8 +46,7 @@ function customerBinding(ctx: ToolContext):
 }
 
 function validateAmountCurrency(amount: string, currency: string): ToolResult<never> | null {
-  const parsed = Number(amount)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  if (!parseDecimal(amount, { rejectZero: true })) {
     return { ok: false, data: null, safe_to_show: true, code: 'INVALID_AMOUNT', message: 'Amount must be a positive number.' }
   }
   if (!/^[A-Z_]{3,8}$/.test(currency)) {
@@ -57,8 +57,7 @@ function validateAmountCurrency(amount: string, currency: string): ToolResult<ne
 
 function validateCommission(rate?: string, currency?: string): ToolResult<never> | null {
   if (rate === undefined) return null
-  const parsed = Number(rate)
-  if (!Number.isFinite(parsed) || parsed < 0 || !currency) {
+  if (!parseDecimal(rate) || !currency) {
     return { ok: false, data: null, safe_to_show: true, code: 'INVALID_COMMISSION', message: 'commission_per_thousand must be non-negative and commission_currency is required.' }
   }
   return null
