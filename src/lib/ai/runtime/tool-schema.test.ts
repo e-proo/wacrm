@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { getRegisteredTool } from './tool-registry'
+import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
 import { toJsonSchema, validateToolArguments } from './tool-schema'
 
 describe('strict native tool schemas', () => {
-  const tool = getRegisteredTool('services.get')!
+  const tool = getCurrentPlatformTool('services.get', 1)!
 
   it('emits additionalProperties=false', () => {
     expect(toJsonSchema(tool)).toMatchObject({ additionalProperties: false })
