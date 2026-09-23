@@ -11,6 +11,7 @@ import {
   decideFxTradeRequest,
 } from '@/lib/services/fx-v2/service'
 import { toFxApiError } from '@/lib/services/fx-v2/http'
+import { deliverActiveSubjectBusinessEventNotifications } from '@/lib/ai/runtime/customer-notification-delivery'
 
 type TradeAction = 'approve' | 'reject' | 'complete' | 'cancel'
 
@@ -61,6 +62,48 @@ export async function PATCH(
         { error: 'action must be approve, reject, complete, or cancel' },
         { status: 400 },
       )
+    }
+
+    if (
+      body.action === 'approve' ||
+      body.action === 'reject' ||
+      body.action === 'complete'
+    ) {
+      try {
+        const delivery = await deliverActiveSubjectBusinessEventNotifications({
+          accountId: ctx.accountId,
+          subjectType: 'fx_trade_request',
+          subjectId: requestId,
+          correlationId:
+            body.action === 'approve' || body.action === 'reject'
+              ? body.changeRequestId ?? null
+              : null,
+          limit: 10,
+        })
+        if (
+          delivery.failed > 0 ||
+          delivery.reconciliation > 0
+        ) {
+          console.error(
+            '[fx-v2 trade route] customer event delivery incomplete:',
+            {
+              requestId,
+              action: body.action,
+              delivery,
+            },
+          )
+        }
+      } catch (deliveryError) {
+        // Business mutation is authoritative and already committed. Delivery is
+        // durable/recoverable through the business-event worker, so transport
+        // failure must not turn a successful mutation into an API failure.
+        console.error(
+          '[fx-v2 trade route] customer event delivery failed:',
+          requestId,
+          body.action,
+          deliveryError,
+        )
+      }
     }
 
     return NextResponse.json(result)
