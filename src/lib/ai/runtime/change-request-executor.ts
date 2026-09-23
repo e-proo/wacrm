@@ -288,57 +288,6 @@ async function executeClaimedTarget(
     }
   }
 
-  if (row.target_type === 'service_intent' && ['create', 'update'].includes(row.intent) && row.target_id) {
-    const decision = row.proposed_payload.decision as string | undefined
-    const allowed = new Set(['fulfilled', 'rejected', 'matched', 'clarifying'])
-    if (!decision || !allowed.has(decision)) {
-      throw new ChangeExecutionError('DECISION_REQUIRED', `decision must be one of: ${[...allowed].join(', ')}.`)
-    }
-    const update: Record<string, unknown> = { status: decision }
-    if (decision === 'matched') {
-      const serviceId = row.proposed_payload.matched_service_id as string | undefined
-      if (!serviceId) throw new ChangeExecutionError('MATCHED_SERVICE_REQUIRED', 'matched_service_id is required when decision=matched.')
-      const { data: svc } = await supabaseAdmin()
-        .from('services')
-        .select('id')
-        .eq('account_id', input.accountId)
-        .eq('id', serviceId)
-        .maybeSingle()
-      if (!svc) throw new ChangeExecutionError('SERVICE_NOT_FOUND', 'Matched service not found in this account.', 404)
-      update.matched_service_id = serviceId
-    }
-    const { error } = await supabaseAdmin()
-      .from('customer_intents')
-      .update(update)
-      .eq('account_id', input.accountId)
-      .eq('id', row.target_id)
-    if (error) throw error
-    return {
-      target_type: row.target_type,
-      target_id: row.target_id,
-      operation: 'intent_decision',
-      decision,
-      customer_notification: {
-        intent_id: row.target_id,
-        event_type:
-          decision === 'rejected'
-            ? 'rejected'
-            : decision === 'clarifying'
-              ? 'needs_clarification'
-              : decision === 'matched'
-                ? 'matched'
-                : 'approved_and_applied',
-        message_text:
-          decision === 'rejected'
-            ? 'تمت مراجعة طلبك من الإدارة ولم يتم اعتماده.'
-            : decision === 'clarifying'
-              ? 'راجعت الإدارة طلبك وتحتاج إلى معلومات إضافية قبل اتخاذ القرار.'
-              : decision === 'matched'
-                ? 'تمت مراجعة طلبك وربطه بخدمة متوفرة لدينا.'
-                : 'تمت مراجعة طلبك واعتماده من الإدارة.',
-      },
-    }
-  }
 
   throw new ChangeExecutionError(
     'UNSUPPORTED_TARGET',
