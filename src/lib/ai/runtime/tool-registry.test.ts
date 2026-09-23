@@ -42,9 +42,6 @@ describe('legacy tool registry contraction', () => {
     expect(keys).toEqual(
       [
         'change_requests.list_pending',
-        'intents.propose_decision',
-        'intents.record',
-        'intents.search',
         'pricing.calculate_quote',
         'pricing_rules.propose_service_price',
         'services.get',
@@ -56,6 +53,9 @@ describe('legacy tool registry contraction', () => {
 
     expect(getRegisteredTool('exchange_rates.get_current')).toBeNull()
     expect(getRegisteredTool('coverage.get_rates')).toBeNull()
+    expect(getRegisteredTool('intents.record')).toBeNull()
+    expect(getRegisteredTool('intents.search')).toBeNull()
+    expect(getRegisteredTool('intents.propose_decision')).toBeNull()
   })
 
   it('preserves read/proposal permission invariants for remaining legacy tools', () => {
@@ -74,13 +74,13 @@ describe('legacy tool registry contraction', () => {
   it('keeps the legacy prompt catalog limited to legacy-owned tools', () => {
     const catalog = renderToolCatalog([
       { tool_key: 'services.get', permission: 'read' },
+      { tool_key: 'pricing.calculate_quote', permission: 'read' },
       { tool_key: 'intents.record', permission: 'propose' },
-      { tool_key: 'coverage.get_rates', permission: 'read' },
     ])
 
     expect(catalog).toContain('services.get (read)')
-    expect(catalog).toContain('intents.record (propose)')
-    expect(catalog).not.toContain('coverage.get_rates')
+    expect(catalog).toContain('pricing.calculate_quote (read)')
+    expect(catalog).not.toContain('intents.record')
   })
 })
 
@@ -127,6 +127,26 @@ describe('current platform tool compatibility projection', () => {
       1,
     )
     expect(decision?.argumentSchema.decision.values).toEqual(['approve', 'reject'])
+  })
+
+  it('projects native Intents contracts without central duplicate specs', () => {
+    const record = getCurrentToolDefinition('intents.record', 1)
+    expect(record?.grantPermissions).toEqual(['propose'])
+    expect(record?.argumentSchema.direction.values).toEqual(['offer', 'request'])
+    expect(record?.argumentSchema.escalate_to_admin?.required).toBe(false)
+
+    const search = getCurrentToolDefinition('intents.search', 1)
+    expect(search?.grantPermissions).toEqual(['read'])
+    expect(search?.argumentSchema.status.values).toContain('forwarded_to_admin')
+
+    const decision = getCurrentToolDefinition('intents.propose_decision', 1)
+    expect(decision?.grantPermissions).toEqual(['propose'])
+    expect(decision?.argumentSchema.decision.values).toEqual([
+      'fulfilled',
+      'rejected',
+      'matched',
+      'clarifying',
+    ])
   })
 
   it('fails closed for unknown tools', () => {
