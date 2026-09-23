@@ -16,6 +16,42 @@ interface ClaimedCustomerNotificationRow {
 }
 
 
+interface WhatsAppDeliveryOwner {
+  user_id: string
+}
+
+async function loadWhatsAppDeliveryOwner(
+  accountId: string,
+): Promise<WhatsAppDeliveryOwner> {
+  const { data, error } = await supabaseAdmin()
+    .from('whatsapp_config')
+    .select('user_id')
+    .eq('account_id', accountId)
+    .maybeSingle()
+  if (error) throw error
+  if (!data?.user_id) throw new Error('WHATSAPP_CONFIG_OWNER_MISSING')
+  return { user_id: data.user_id }
+}
+
+export async function deliverActiveSubjectBusinessEventNotifications(input: {
+  accountId: string
+  subjectType: string
+  subjectId: string
+  correlationId?: string | null
+  limit?: number
+}): Promise<{ claimed: number; sent: number; reconciliation: number; failed: number }> {
+  const owner = await loadWhatsAppDeliveryOwner(input.accountId)
+  return deliverActiveBusinessEventNotifications({
+    accountId: input.accountId,
+    userId: owner.user_id,
+    correlationId: input.correlationId ?? null,
+    subjectType: input.subjectType,
+    subjectId: input.subjectId,
+    limit: input.limit,
+  })
+}
+
+
 /**
  * Deliver due customer business-event notifications using the same durable
  * outbox for service intents, coverage outcomes, and FX V2 trade lifecycle
@@ -37,14 +73,7 @@ export async function deliverCustomerOutcomeNotifications(input: {
 
   // Check transport ownership before claiming rows so a configuration failure
   // never strands notifications in `sending`.
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('user_id')
-    .eq('account_id', input.accountId)
-    .maybeSingle()
-  if (configError || !config?.user_id) {
-    throw configError ?? new Error('WHATSAPP_CONFIG_OWNER_MISSING')
-  }
+  const config = await loadWhatsAppDeliveryOwner(input.accountId)
 
   const activeDelivery = await deliverActiveBusinessEventNotifications({
     accountId: input.accountId,
