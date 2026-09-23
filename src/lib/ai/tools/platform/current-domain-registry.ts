@@ -1,5 +1,6 @@
 import { COVERAGE_TOOL_MANIFESTS } from '@/lib/services/coverage/tool-manifests'
 import { FX_V2_TOOL_MANIFESTS } from '@/lib/services/fx-v2/tool-manifests'
+import { INTENTS_TOOL_MANIFESTS } from '@/lib/services/intents/tool-manifests'
 import { STANDARD_PLATFORM_TOOL_ERRORS } from '@/lib/services/platform/tool-contract-defaults'
 import { getRegisteredTool } from '../../runtime/tool-registry'
 import type {
@@ -33,8 +34,8 @@ type CurrentToolSpec = {
 /**
  * Transitional legacy specs only.
  *
- * FX V2 and Coverage are intentionally absent: their native PlatformToolManifest
- * objects now live with the owning business domains.
+ * FX V2, Coverage, and Intents are intentionally absent: their native
+ * PlatformToolManifest objects live with the owning business domains.
  */
 const LEGACY_SPECS: readonly CurrentToolSpec[] = [
   {
@@ -117,45 +118,6 @@ const LEGACY_SPECS: readonly CurrentToolSpec[] = [
     use: ['A trusted administrator explicitly supplies a pricing change.'],
     avoid: ['Never expose it to customers and never directly overwrite the live pricing row.'],
     approval: true,
-  },
-  {
-    key: 'intents.record',
-    version: 1,
-    domain: 'intents',
-    title: 'Record customer intent',
-    permission: 'propose',
-    risk: 'low',
-    planes: ['customer', 'admin'],
-    capability: 'intents.propose',
-    purpose: 'Persist a structured need/offer the configured services cannot yet resolve.',
-    use: ['A business need/offer should be remembered or forwarded for review.'],
-    avoid: ['Do not treat a generic intent as an approved authoritative mutation.'],
-  },
-  {
-    key: 'intents.search',
-    version: 1,
-    domain: 'intents',
-    title: 'Search customer intents',
-    permission: 'read',
-    risk: 'read',
-    planes: ['admin'],
-    capability: 'intents.read',
-    purpose: 'Inspect the structured admin inbox of customer needs/offers.',
-    use: ['Administration asks what customer requests/offers are waiting or recorded.'],
-    avoid: ['Do not expose the administrative intent queue to customer plane.'],
-  },
-  {
-    key: 'intents.propose_decision',
-    version: 1,
-    domain: 'intents',
-    title: 'Propose intent decision',
-    permission: 'propose',
-    risk: 'medium',
-    planes: ['admin'],
-    capability: 'intents.propose',
-    purpose: 'Create a typed proposal to resolve/match/reject/clarify a customer intent.',
-    use: ['A trusted administrator has reviewed an intent and instructs a decision.'],
-    avoid: ['Do not resolve a customer intent without the explicit admin decision.'],
   },
   {
     key: 'change_requests.list_pending',
@@ -247,6 +209,13 @@ const NATIVE_DOMAINS = [
     title: 'Coverage',
     description: 'Native Coverage tool contracts owned by the coverage domain.',
     tools: COVERAGE_TOOL_MANIFESTS,
+  },
+  {
+    key: 'intents',
+    version: 1,
+    title: 'Customer Intents',
+    description: 'Native Intents tool contracts owned by the intents domain.',
+    tools: INTENTS_TOOL_MANIFESTS,
   },
 ] as const
 
