@@ -500,6 +500,13 @@ describe('Intents third-domain architectural acceptance', () => {
         intent: 'update',
       })?.key,
     ).toBe('intents.decision.apply')
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
+        targetType: 'service_intent',
+        targetId: 'intent-1',
+        intent: 'create',
+      })?.key,
+    ).toBe('intents.decision.apply')
     expect(CURRENT_CHANGE_EXECUTOR_REGISTRY.has('intents.decision.apply', 1)).toBe(true)
 
     for (const eventType of intentEvents) {
