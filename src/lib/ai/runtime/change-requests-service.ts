@@ -267,12 +267,13 @@ export async function findChangeRequestByIdempotencyKey(
   | 'action_version'
   | 'target_type'
   | 'target_id'
+  | 'proposed_payload'
   | 'idempotency_key'
 > | null> {
   const { data, error } = await supabaseAdmin()
     .from('change_requests')
     .select(
-      'id, code, status, action_key, action_version, target_type, target_id, idempotency_key',
+      'id, code, status, action_key, action_version, target_type, target_id, proposed_payload, idempotency_key',
     )
     .eq('account_id', accountId)
     .eq('idempotency_key', idempotencyKey)
@@ -287,6 +288,7 @@ export async function findChangeRequestByIdempotencyKey(
     | 'action_version'
     | 'target_type'
     | 'target_id'
+    | 'proposed_payload'
     | 'idempotency_key'
   > | null) ?? null
 }
