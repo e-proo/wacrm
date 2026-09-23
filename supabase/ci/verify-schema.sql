@@ -97,6 +97,29 @@ BEGIN
     RAISE EXCEPTION 'FX V2 customer lifecycle trigger is missing — migration 084 did not apply';
   END IF;
 
+  -- Subject-scoped active Business Event claim (105).
+  IF to_regprocedure(
+    'public.claim_business_event_delivery_v2(uuid,text,text,text,integer)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'claim_business_event_delivery_v2 is missing — migration 105 did not apply';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.claim_business_event_delivery_v2(uuid,text,text,text,integer)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.claim_business_event_delivery_v2(uuid,text,text,text,integer)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.claim_business_event_delivery_v2(uuid,text,text,text,integer)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'claim_business_event_delivery_v2 privileges are unsafe';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
