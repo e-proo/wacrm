@@ -346,9 +346,11 @@ describe('native domain tool ownership', () => {
       'utf8',
     )
 
-    expect(registrySource).toContain('FX_V2_TOOL_MANIFESTS')
-    expect(registrySource).toContain('COVERAGE_TOOL_MANIFESTS')
-    expect(registrySource).toContain('INTENTS_TOOL_MANIFESTS')
+    expect(registrySource).toContain('CURRENT_BUSINESS_DOMAIN_MODULES')
+    expect(registrySource).not.toContain('const NATIVE_DOMAINS')
+    expect(registrySource).not.toContain('FX_V2_TOOL_MANIFESTS')
+    expect(registrySource).not.toContain('COVERAGE_TOOL_MANIFESTS')
+    expect(registrySource).not.toContain('INTENTS_TOOL_MANIFESTS')
     expect(registrySource).not.toContain("key: 'exchange_rates.")
     expect(registrySource).not.toContain("key: 'coverage.")
     expect(registrySource).not.toContain("key: 'intents.")
@@ -465,6 +467,31 @@ describe('messaging purity', () => {
     expect(projector).toContain('commission_amount')
     expect(projector).not.toContain('commission_per_thousand /')
     expect(executor).toContain('commission_amount')
+  })
+})
+
+
+describe('single business-domain composition root', () => {
+  it('derives tool-platform domains and business runtime composition from one catalog', () => {
+    const catalog = readFileSync(
+      new URL('./domain-catalog.ts', import.meta.url),
+      'utf8',
+    )
+    const toolRegistry = readFileSync(
+      new URL('../../ai/tools/platform/current-domain-registry.ts', import.meta.url),
+      'utf8',
+    )
+    const composition = readFileSync(
+      new URL('./composition.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(catalog).toContain('FX_V2_DOMAIN')
+    expect(catalog).toContain('COVERAGE_DOMAIN')
+    expect(catalog).toContain('INTENTS_DOMAIN')
+    expect(toolRegistry).toContain('CURRENT_BUSINESS_DOMAIN_MODULES')
+    expect(toolRegistry).not.toContain('const NATIVE_DOMAINS')
+    expect(composition).toContain("from './domain-catalog'")
   })
 })
 
