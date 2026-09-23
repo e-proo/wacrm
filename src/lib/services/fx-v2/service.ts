@@ -520,7 +520,7 @@ export async function createFxTradeRequest(
       'requestedAmount must be a positive decimal.',
     )
   }
-  const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey)
+  const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey, { trim: true })
   if (!idempotencyKey) {
     throw new FxServiceError(
       'FX_INVALID_IDEMPOTENCY_KEY',
