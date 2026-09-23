@@ -23,7 +23,7 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
-import { listRegisteredTools, getRegisteredTool } from '@/lib/ai/runtime/tool-registry'
+import { getCurrentToolDefinition, listCurrentToolDefinitions } from '@/lib/ai/tools/platform/runtime-tool-compat'
 
 interface GrantInput {
   tool_key: string
@@ -63,7 +63,7 @@ export async function GET(
       .eq('agent_revision_id', revisionId)
     if (error) throw error
     return NextResponse.json({
-      registry: listRegisteredTools(),
+      registry: listCurrentToolDefinitions(),
       grants: grants ?? [],
       revisionStatus: (revision as { status: string }).status,
     })
@@ -117,7 +117,7 @@ export async function PUT(
     const seen = new Set<string>()
     const rows: Array<Record<string, unknown>> = []
     for (const g of grants) {
-      const tool = getRegisteredTool(g.tool_key)
+      const tool = getCurrentToolDefinition(g.tool_key)
       if (!tool) {
         return NextResponse.json(
           { error: `Tool not registered: ${g.tool_key}`, code: 'UNKNOWN_TOOL' },
