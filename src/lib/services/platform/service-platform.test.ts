@@ -531,3 +531,40 @@ describe('legacy notification contraction', () => {
     expect(fxAdapter).toContain('exchange_rates.legacy_customer_notification')
   })
 })
+
+
+describe('exact-version runtime tool contraction', () => {
+  it('resolves the frozen grant version directly instead of requiring the newest version', () => {
+    const dispatch = readFileSync(
+      new URL('../../ai/runtime/dispatch.ts', import.meta.url),
+      'utf8',
+    )
+    const loop = readFileSync(
+      new URL('../../ai/runtime/agent-loop.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(dispatch).toContain(
+      'getCurrentPlatformTool(invocation.toolKey, grantedVersion)',
+    )
+    expect(dispatch).not.toContain('grantedVersion !== latestTool.version')
+    expect(loop).toContain('getCurrentPlatformTool(key, grant.toolVersion)')
+    expect(loop).not.toContain('getRegisteredTool(key)')
+  })
+
+  it('builds provider tools from native platform manifests, not legacy ToolDefinition', () => {
+    const nativeTools = readFileSync(
+      new URL('../../ai/runtime/native-agent-tools.ts', import.meta.url),
+      'utf8',
+    )
+    const schema = readFileSync(
+      new URL('../../ai/runtime/tool-schema.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(nativeTools).toContain('ReadonlyArray<PlatformToolManifest>')
+    expect(nativeTools).not.toContain("from './tool-registry'")
+    expect(schema).toContain("PlatformToolManifest")
+    expect(schema).not.toContain("from './tool-registry'")
+  })
+})
