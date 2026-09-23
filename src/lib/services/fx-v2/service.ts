@@ -524,7 +524,7 @@ export async function createFxTradeRequest(
   if (!idempotencyKey) {
     throw new FxServiceError(
       'FX_INVALID_IDEMPOTENCY_KEY',
-      'idempotencyKey must be 8-500 characters.',
+      'idempotencyKey must be at least 8 characters.',
     )
   }
 
