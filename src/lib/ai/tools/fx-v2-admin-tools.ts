@@ -1,4 +1,7 @@
-import { createChangeRequest } from '@/lib/ai/runtime/change-requests-service'
+import {
+  createChangeRequest,
+  findChangeRequestByIdempotencyKey,
+} from '@/lib/ai/runtime/change-requests-service'
 import {
   getCurrentFxRateByPair,
   listFxPairs,
@@ -290,6 +293,39 @@ export async function executeFxV2ProposeTradeDecision(
       }
     }
 
+    const reviewIdempotencyKey = `fx-trade-review:${request.id}:pending_admin`
+    const existingReview = await findChangeRequestByIdempotencyKey(
+      ctx.accountId,
+      reviewIdempotencyKey,
+    )
+
+    if (args.decision === 'approve' && existingReview?.status === 'pending') {
+      return {
+        ok: true,
+        data: {
+          trade_request: {
+            request_id: request.id,
+            code: request.code,
+            pair: `${request.pair.base.code}/${request.pair.quote.code}`,
+            status: request.status,
+            rate_version_id: request.rateVersionId,
+            effective_rate: request.effectiveRate,
+            base_amount: request.baseAmount,
+            quote_amount: request.quoteAmount,
+          },
+          proposed_decision: args.decision,
+          change_request: {
+            id: existingReview.id,
+            code: existingReview.code,
+            confirmation_code: null,
+            status: existingReview.status,
+            reused: true,
+          },
+        },
+        safe_to_show: false,
+      }
+    }
+
     const cr = await createChangeRequest({
       accountId: ctx.accountId,
       targetType: 'fx_trade_request',
@@ -331,6 +367,7 @@ export async function executeFxV2ProposeTradeDecision(
           code: cr.code,
           confirmation_code: cr.confirmationCode,
           status: cr.status,
+          reused: false,
         },
       },
       safe_to_show: false,
