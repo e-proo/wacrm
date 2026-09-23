@@ -8,6 +8,8 @@ export interface ChangeExecutionContext {
 
 export interface ClaimedChangeExecution {
   id: string
+  actionKey: string | null
+  actionVersion: number | null
   targetType: string
   targetId: string | null
   intent: string
