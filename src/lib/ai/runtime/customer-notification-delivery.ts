@@ -4,7 +4,7 @@ import {
   renderServiceRequestCustomerMessage,
   type ServiceRequestCustomerOutcome,
 } from '@/lib/messaging/service-request-customer'
-import { renderFxTradeBusinessEventText } from '@/lib/messaging/fx-v2-outbox'
+import { CURRENT_LEGACY_NOTIFICATION_RENDERERS } from '@/lib/services/platform/legacy-notification-composition'
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 import { deliverActiveBusinessEventNotifications } from '@/lib/services/platform/business-event-delivery'
 
@@ -35,9 +35,9 @@ interface ChangeRequestDeliveryContext {
  * prevents concurrent senders from claiming the same event.
  *
  * Customer-facing text is rendered from authoritative business state at
- * delivery time. FX rows therefore never expose the internal SQL outbox marker
- * and use the same MessageContext -> resolver -> renderer -> transport path as
- * the coverage/service notification loop.
+ * delivery time. Domain-specific legacy rollback renderers are isolated behind
+ * a temporary adapter registry; the runtime kernel contains no FX/Coverage
+ * rendering branch. New delivery uses the canonical Business Event path.
  */
 export async function deliverCustomerOutcomeNotifications(input: {
   accountId: string
@@ -135,7 +135,7 @@ export async function deliverCustomerOutcomeNotifications(input: {
 
       sentCount += 1
       console.info(
-        `[customer business event] sent ${row.event_type} notification=${row.id.slice(0, 8)} source=${row.fx_trade_request_id ? 'fx_trade_request' : 'customer_intent'}`,
+        `[customer business event] sent ${row.event_type} notification=${row.id.slice(0, 8)} source=legacy_outbox`,
       )
     } catch (sendError) {
       const message = sendError instanceof Error ? sendError.message : String(sendError)
@@ -202,13 +202,16 @@ async function resolveCustomerOutcomeText(input: {
   fallbackText: string
   deliveryContext: ChangeRequestDeliveryContext | null
 }): Promise<string> {
-  if (input.row.fx_trade_request_id) {
-    return renderFxTradeBusinessEventText({
-      accountId: input.accountId,
-      tradeRequestId: input.row.fx_trade_request_id,
+  const domainRendered = await CURRENT_LEGACY_NOTIFICATION_RENDERERS.render({
+    accountId: input.accountId,
+    notification: {
+      id: input.row.id,
+      intentId: input.row.intent_id,
+      fxTradeRequestId: input.row.fx_trade_request_id,
       eventType: input.row.event_type,
-    })
-  }
+    },
+  })
+  if (domainRendered !== null) return domainRendered
 
   const ctx = input.deliveryContext
   if (!ctx || ctx.target_type !== 'service_intent') return input.fallbackText
