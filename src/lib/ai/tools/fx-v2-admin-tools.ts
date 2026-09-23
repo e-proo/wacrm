@@ -139,6 +139,8 @@ export async function executeFxV2ProposePairChange(
 
     const cr = await createChangeRequest({
       accountId: ctx.accountId,
+      actionKey: 'exchange_rates.pair.publish',
+      actionVersion: 1,
       targetType: 'fx_rate_pair',
       targetId: pair.id,
       intent: 'update',
@@ -328,6 +330,8 @@ export async function executeFxV2ProposeTradeDecision(
 
     const cr = await createChangeRequest({
       accountId: ctx.accountId,
+      actionKey: 'exchange_rates.trade.decide',
+      actionVersion: 1,
       targetType: 'fx_trade_request',
       targetId: request.id,
       intent: 'update',
