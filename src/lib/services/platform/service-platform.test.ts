@@ -655,6 +655,10 @@ describe('Intents third-domain architectural acceptance', () => {
 
 describe('shared service primitives cleanup', () => {
   it('uses the shared decimal parser for Coverage money validation and removes dead manual arithmetic', () => {
+    const coverageHandoff = readFileSync(
+      new URL('../../ai/tools/business-handoff.ts', import.meta.url),
+      'utf8',
+    )
     const coverageExecutors = readFileSync(
       new URL('../../ai/tools/executors.ts', import.meta.url),
       'utf8',
@@ -664,17 +668,16 @@ describe('shared service primitives cleanup', () => {
       'utf8',
     )
 
-    expect(coverageExecutors).toContain(
+    expect(coverageHandoff).toContain(
       "import { parseDecimal } from '@/lib/services/pricing/decimal'",
     )
-    expect(coverageExecutors).toContain(
-      "parseDecimal(args.total_amount, { rejectZero: true })",
+    expect(coverageHandoff).toContain(
+      'parseDecimal(amount, { rejectZero: true })',
     )
-    expect(coverageExecutors).toContain(
-      'parseDecimal(args.commission_per_thousand)',
-    )
-    expect(coverageExecutors).not.toContain('Number(args.total_amount)')
-    expect(coverageExecutors).not.toContain('Number(args.commission_per_thousand)')
+    expect(coverageHandoff).toContain('parseDecimal(rate)')
+    expect(coverageHandoff).not.toContain('const parsed = Number(amount)')
+    expect(coverageHandoff).not.toContain('const parsed = Number(rate)')
+    expect(coverageExecutors).not.toContain('executeCoverageProposeOffer')
     expect(coverageExecutors).not.toContain('function addDecimalStrings')
     expect(coverageExecutors).not.toContain('function negDecimalStrings')
     expect(fxEngine).toContain(
