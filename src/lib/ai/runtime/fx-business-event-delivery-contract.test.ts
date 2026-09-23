@@ -6,6 +6,10 @@ const deliverySource = readFileSync(
   new URL('./customer-notification-delivery.ts', import.meta.url),
   'utf8',
 )
+const fxLegacyAdapterSource = readFileSync(
+  new URL('../../services/fx-v2/legacy-notification-adapter.ts', import.meta.url),
+  'utf8',
+)
 const workerSource = readFileSync(
   new URL('./worker.ts', import.meta.url),
   'utf8',
@@ -31,11 +35,15 @@ describe('FX V2 unified customer business-event delivery', () => {
     expect(unifiedClaimMigrationSource).toContain('event_type text')
   })
 
-  it('renders FX rows from authoritative trade state before WhatsApp transport', () => {
-    expect(deliverySource).toContain('renderFxTradeBusinessEventText')
-    expect(deliverySource).toContain('row.fx_trade_request_id')
-    expect(deliverySource).toContain('eventType: input.row.event_type')
+  it('keeps authoritative FX legacy rendering behind the domain adapter before WhatsApp transport', () => {
+    expect(deliverySource).toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
+    expect(deliverySource).not.toContain('renderFxTradeBusinessEventText')
+    expect(deliverySource).not.toContain('fx_trade_request_id')
     expect(deliverySource).toContain('engineSendText({')
+
+    expect(fxLegacyAdapterSource).toContain('renderFxTradeBusinessEventText')
+    expect(fxLegacyAdapterSource).toContain('fx_trade_request_id')
+    expect(fxLegacyAdapterSource).toContain('eventType: data.event_type ?? notification.eventType')
   })
 
   it('maps only the canonical FX trade business-event lifecycle', () => {
