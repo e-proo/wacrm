@@ -47,6 +47,7 @@ describe('FX V2 legacy notification adapter', () => {
         notification: {
           id: 'notification-1',
           intentId: 'intent-1',
+          changeRequestId: 'change-1',
           eventType: 'approved_and_applied',
         },
       }),
@@ -71,6 +72,7 @@ describe('FX V2 legacy notification adapter', () => {
         notification: {
           id: 'notification-1',
           intentId: null,
+          changeRequestId: null,
           eventType: 'exchange_rate.trade.approved',
         },
       }),
