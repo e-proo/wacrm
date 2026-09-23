@@ -1,6 +1,3 @@
-import { COVERAGE_DOMAIN, COVERAGE_RUNTIME } from '@/lib/services/coverage/domain'
-import { FX_V2_DOMAIN, FX_V2_RUNTIME } from '@/lib/services/fx-v2/domain'
-import { INTENTS_DOMAIN, INTENTS_RUNTIME } from '@/lib/services/intents/domain'
 import { ChangeExecutorRegistry } from './change-executor-registry'
 import { EventProjectorRegistry } from './event-projector-registry'
 import type {
@@ -9,19 +6,16 @@ import type {
   ChangeExecutionResult,
 } from './change-executor-registry'
 import { BusinessDomainRegistry } from './domain-registry'
-import type { BusinessDomainManifest } from './domain-contracts'
 
-export const CURRENT_BUSINESS_DOMAIN_MODULES: readonly BusinessDomainManifest[] = [
-  FX_V2_DOMAIN,
-  COVERAGE_DOMAIN,
-  INTENTS_DOMAIN,
-]
+import {
+  CURRENT_BUSINESS_DOMAIN_MODULES,
+  CURRENT_BUSINESS_DOMAIN_RUNTIMES,
+} from './domain-catalog'
 
-export const CURRENT_BUSINESS_DOMAIN_RUNTIMES = [
-  FX_V2_RUNTIME,
-  COVERAGE_RUNTIME,
-  INTENTS_RUNTIME,
-] as const
+export {
+  CURRENT_BUSINESS_DOMAIN_MODULES,
+  CURRENT_BUSINESS_DOMAIN_RUNTIMES,
+} from './domain-catalog'
 
 export const CURRENT_BUSINESS_DOMAIN_REGISTRY = new BusinessDomainRegistry()
 for (const domain of CURRENT_BUSINESS_DOMAIN_MODULES) {
