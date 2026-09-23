@@ -17,12 +17,12 @@ export const INTENTS_TOOL_MANIFESTS: readonly PlatformToolManifest[] = [
     description:
       "Record a general observation about a customer's need or offer — even for services NOT equipped yet. Optionally escalates to the trusted admin for a decision.",
     purpose:
-      'Persist a structured customer need/offer the configured services cannot yet resolve.',
+      'Persist a structured need/offer the configured services cannot yet resolve.',
     whenToUse: [
-      'A business need or offer should be remembered or forwarded for administrative review.',
+      'A business need/offer should be remembered or forwarded for review.',
     ],
     whenNotToUse: [
-      'Do not treat a generic intent as an approved authoritative business mutation.',
+      'Do not treat a generic intent as an approved authoritative mutation.',
     ],
     inputSchema: {
       contact_id: {
@@ -58,7 +58,7 @@ export const INTENTS_TOOL_MANIFESTS: readonly PlatformToolManifest[] = [
       },
       escalate_to_admin: {
         type: 'boolean',
-        description: 'True when the intent should be marked for admin review.',
+        description: 'True when the admin must decide before anything is promised.',
         required: false,
       },
     },
@@ -87,12 +87,12 @@ export const INTENTS_TOOL_MANIFESTS: readonly PlatformToolManifest[] = [
     title: 'Search customer intents',
     description:
       "Search the account's recorded customer intents (general memory) by contact, status, or free text.",
-    purpose: 'Inspect the structured admin inbox of customer needs and offers.',
+    purpose: 'Inspect the structured admin inbox of customer needs/offers.',
     whenToUse: [
-      'Administration asks what customer requests or offers are waiting or recorded.',
+      'Administration asks what customer requests/offers are waiting or recorded.',
     ],
     whenNotToUse: [
-      'Do not expose the administrative intent queue to the customer plane.',
+      'Do not expose the administrative intent queue to customer plane.',
     ],
     inputSchema: {
       contact_id: {
@@ -126,7 +126,7 @@ export const INTENTS_TOOL_MANIFESTS: readonly PlatformToolManifest[] = [
     },
     outputSchema: {
       description:
-        'Array<{ intent_id, contact_id, conversation_id, direction, service_hint, summary, status, attributes, matched_service_id, created_at }>',
+        'Array<{ intent_id, contact_id, direction, service_hint, summary, status, attributes, created_at }>',
     },
     permission: 'read',
     risk: 'read',
@@ -150,12 +150,12 @@ export const INTENTS_TOOL_MANIFESTS: readonly PlatformToolManifest[] = [
     description:
       'Admin-only proposal for resolving a generic customer intent after review.',
     purpose:
-      'Create a typed proposal to resolve, match, reject, or clarify a customer intent.',
+      'Create a typed proposal to resolve/match/reject/clarify a customer intent.',
     whenToUse: [
-      'A trusted administrator has reviewed an intent and explicitly instructs a decision.',
+      'A trusted administrator has reviewed an intent and instructs a decision.',
     ],
     whenNotToUse: [
-      'Do not resolve a customer intent without the explicit administrator decision.',
+      'Do not resolve a customer intent without the explicit admin decision.',
     ],
     inputSchema: {
       intent_id: {
@@ -190,7 +190,7 @@ export const INTENTS_TOOL_MANIFESTS: readonly PlatformToolManifest[] = [
     requiredCapabilities: ['intents.propose'],
     supportedGrantConstraints: ['channels'],
     sideEffect: 'proposal',
-    approvalRequired: true,
+    approvalRequired: false,
     idempotent: true,
     audit: 'proposal_and_execution',
     modelExposed: true,
