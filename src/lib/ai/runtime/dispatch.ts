@@ -818,7 +818,8 @@ export async function executeTool(
   }
 
   // DENY BY DEFAULT — the RUNNING REVISION must carry a grant for
-  // this exact tool and exact frozen version.
+  // this exact tool and exact frozen version. A newer registered version must
+  // not invalidate a still-registered historical grant.
   const grantedLvl = ctx.grants?.[invocation.toolKey]
   if (!grantedLvl) {
     await audit({
@@ -841,38 +842,16 @@ export async function executeTool(
     }
   }
 
-  const RANK: Record<ToolGrantPermission, number> = {
-    read: 1,
-    propose: 2,
-    execute: 3,
-  }
-  if (RANK[invocation.permission] > RANK[grantedLvl]) {
-    await audit({
-      status: 'denied',
-      errorCode: 'TOOL_GRANT_LEVEL_DENIED',
-      toolVersion: latestTool.version,
-    })
-    return {
-      ...baseOutcome,
-      result: {
-        ok: false,
-        data: null,
-        safe_to_show: true,
-        code: 'TOOL_GRANT_LEVEL_DENIED',
-        message: `Tool "${invocation.toolKey}" is granted at level "${grantedLvl}", not "${invocation.permission}".`,
-      },
-      toolFound: true,
-      granted: false,
-      roundsExhausted: false,
-    }
-  }
-
   const grantedVersion = ctx.grantVersions?.[invocation.toolKey]
-  if (grantedVersion !== latestTool.version) {
+  const tool =
+    grantedVersion == null
+      ? null
+      : getCurrentPlatformTool(invocation.toolKey, grantedVersion)
+  if (!tool) {
     await audit({
       status: 'denied',
       errorCode: 'TOOL_VERSION_MISMATCH',
-      toolVersion: latestTool.version,
+      toolVersion: grantedVersion ?? latestTool.version,
     })
     return {
       ...baseOutcome,
@@ -889,8 +868,33 @@ export async function executeTool(
     }
   }
 
-  const tool = getCurrentPlatformTool(invocation.toolKey, grantedVersion)
-  if (!tool || tool.permission !== invocation.permission) {
+  const RANK: Record<ToolGrantPermission, number> = {
+    read: 1,
+    propose: 2,
+    execute: 3,
+  }
+  if (RANK[invocation.permission] > RANK[grantedLvl]) {
+    await audit({
+      status: 'denied',
+      errorCode: 'TOOL_GRANT_LEVEL_DENIED',
+      toolVersion: tool.version,
+    })
+    return {
+      ...baseOutcome,
+      result: {
+        ok: false,
+        data: null,
+        safe_to_show: true,
+        code: 'TOOL_GRANT_LEVEL_DENIED',
+        message: `Tool "${invocation.toolKey}" is granted at level "${grantedLvl}", not "${invocation.permission}".`,
+      },
+      toolFound: true,
+      granted: false,
+      roundsExhausted: false,
+    }
+  }
+
+  if (tool.permission !== invocation.permission) {
     await audit({
       status: 'denied',
       errorCode: 'TOOL_PERMISSION_DENIED',
