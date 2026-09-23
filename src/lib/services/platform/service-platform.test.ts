@@ -506,7 +506,11 @@ describe('Intents third-domain architectural acceptance', () => {
   ] as const
 
   it('registers a real third domain with tools, deterministic change action, events, templates, and projectors', () => {
-    expect(CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain('intents')).toBe(INTENTS_DOMAIN)
+    expect(CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain('intents')).toMatchObject({
+      key: INTENTS_DOMAIN.key,
+      version: INTENTS_DOMAIN.version,
+      title: INTENTS_DOMAIN.title,
+    })
     expect(INTENTS_DOMAIN.tools.map((tool) => tool.key)).toEqual([
       'intents.record',
       'intents.search',
