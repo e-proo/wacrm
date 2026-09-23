@@ -56,14 +56,21 @@ export async function deliverActiveBusinessEventNotifications(input: {
   accountId: string
   userId: string
   correlationId?: string | null
+  subjectType?: string | null
+  subjectId?: string | null
   limit?: number
 }): Promise<ActiveBusinessEventDeliveryResult> {
   const db = supabaseAdmin()
   const limit = Math.min(Math.max(input.limit ?? 20, 1), 100)
+  if ((input.subjectType == null) !== (input.subjectId == null)) {
+    throw new Error('BUSINESS_EVENT_SUBJECT_FILTER_INCOMPLETE')
+  }
 
-  const { data, error } = await db.rpc('claim_business_event_delivery', {
+  const { data, error } = await db.rpc('claim_business_event_delivery_v2', {
     p_account_id: input.accountId,
     p_correlation_id: input.correlationId ?? null,
+    p_subject_type: input.subjectType ?? null,
+    p_subject_id: input.subjectId ?? null,
     p_limit: limit,
   })
   if (error) throw error
