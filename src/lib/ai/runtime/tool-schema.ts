@@ -197,7 +197,10 @@ function asArgumentSchema(value: unknown): ArgumentSchema | null {
 function isRootJsonSchema(
   value: Readonly<Record<string, unknown>>,
 ): boolean {
-  return value.type === 'object' && isRecord(value.properties)
+  return (
+    value.type === 'object' &&
+    (value.properties === undefined || isRecord(value.properties))
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
