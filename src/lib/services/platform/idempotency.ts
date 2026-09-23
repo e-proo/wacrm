@@ -8,9 +8,10 @@ export function normalizeIdempotencyKey(
   options: IdempotencyKeyOptions = {},
 ): string | null {
   const minLength = options.minLength ?? 8
-  const maxLength = options.maxLength ?? 500
+  const maxLength = options.maxLength
   const key = value?.trim() ?? ''
 
-  if (key.length < minLength || key.length > maxLength) return null
+  if (key.length < minLength) return null
+  if (maxLength !== undefined && key.length > maxLength) return null
   return key
 }
