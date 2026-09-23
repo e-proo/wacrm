@@ -1,6 +1,4 @@
-import { COVERAGE_TOOL_MANIFESTS } from '@/lib/services/coverage/tool-manifests'
-import { FX_V2_TOOL_MANIFESTS } from '@/lib/services/fx-v2/tool-manifests'
-import { INTENTS_TOOL_MANIFESTS } from '@/lib/services/intents/tool-manifests'
+import { CURRENT_BUSINESS_DOMAIN_MODULES } from '@/lib/services/platform/domain-catalog'
 import { STANDARD_PLATFORM_TOOL_ERRORS } from '@/lib/services/platform/tool-contract-defaults'
 import { getRegisteredTool } from '../../runtime/tool-registry'
 import type {
@@ -34,8 +32,8 @@ type CurrentToolSpec = {
 /**
  * Transitional legacy specs only.
  *
- * FX V2, Coverage, and Intents are intentionally absent: their native
- * PlatformToolManifest objects live with the owning business domains.
+ * Business domains registered in the shared domain catalog are intentionally
+ * absent: their native PlatformToolManifest objects live with the owners.
  */
 const LEGACY_SPECS: readonly CurrentToolSpec[] = [
   {
@@ -195,37 +193,15 @@ for (const [domain, tools] of legacyByDomain) {
   )
 }
 
-const NATIVE_DOMAINS = [
-  {
-    key: 'exchange_rates',
-    version: 1,
-    title: 'Exchange Rates V2',
-    description: 'Native FX V2 tool contracts owned by the exchange-rates domain.',
-    tools: FX_V2_TOOL_MANIFESTS,
-  },
-  {
-    key: 'coverage',
-    version: 1,
-    title: 'Coverage',
-    description: 'Native Coverage tool contracts owned by the coverage domain.',
-    tools: COVERAGE_TOOL_MANIFESTS,
-  },
-  {
-    key: 'intents',
-    version: 1,
-    title: 'Customer Intents',
-    description: 'Native Intents tool contracts owned by the intents domain.',
-    tools: INTENTS_TOOL_MANIFESTS,
-  },
-] as const
-
-for (const domain of NATIVE_DOMAINS) {
+for (const domain of CURRENT_BUSINESS_DOMAIN_MODULES) {
   CURRENT_PLATFORM_REGISTRY.register(
     defineDomain({
-      ...domain,
-      capabilities: [
-        ...new Set(domain.tools.flatMap((tool) => tool.requiredCapabilities)),
-      ],
+      key: domain.key,
+      version: domain.version,
+      title: domain.title,
+      description: domain.description,
+      capabilities: domain.capabilities,
+      tools: domain.tools,
     }),
   )
 }
