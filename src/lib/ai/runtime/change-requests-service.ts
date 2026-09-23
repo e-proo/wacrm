@@ -249,6 +249,23 @@ export async function cancelChangeRequest(input: {
   return { status: data as string }
 }
 
+export async function findChangeRequestByIdempotencyKey(
+  accountId: string,
+  idempotencyKey: string,
+): Promise<Pick<ChangeRequestRow, 'id' | 'code' | 'status' | 'target_type' | 'target_id' | 'idempotency_key'> | null> {
+  const { data, error } = await supabaseAdmin()
+    .from('change_requests')
+    .select('id, code, status, target_type, target_id, idempotency_key')
+    .eq('account_id', accountId)
+    .eq('idempotency_key', idempotencyKey)
+    .maybeSingle()
+  if (error) throw error
+  return (data as Pick<
+    ChangeRequestRow,
+    'id' | 'code' | 'status' | 'target_type' | 'target_id' | 'idempotency_key'
+  > | null) ?? null
+}
+
 export async function listChangeRequests(
   accountId: string,
   opts: { status?: string; limit?: number } = {},
