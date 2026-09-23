@@ -68,54 +68,12 @@ const SERVICES_MATCH_REQUEST: ToolDefinition = {
   grantPermissions: ['read'], category: 'services', risk: 'read',
 }
 
-const INTENTS_RECORD: ToolDefinition = {
-  key: 'intents.record', version: 1,
-  description: "Record a general observation about a customer's need or offer — even for services NOT equipped yet. Optionally escalates to the trusted admin for a decision.",
-  argumentSchema: {
-    contact_id: { type: 'string', description: 'Contact UUID of the customer.', required: true },
-    conversation_id: { type: 'string', description: 'Current conversation UUID.', required: false },
-    direction: { type: 'enum', description: 'Whether the customer provides or needs the service.', values: ['offer', 'request'], required: true },
-    service_hint: { type: 'string', description: 'Short label of the service.', required: true },
-    summary: { type: 'string', description: 'One-paragraph human summary for the admin.', required: false },
-    attributes: { type: 'object', description: 'Key/value details the agent understood.', required: false },
-    escalate_to_admin: { type: 'boolean', description: 'True when the admin must decide before anything is promised.', required: false },
-  },
-  returnSchema: '{ intent_id, status, change_request?: { id, code, confirmation_code } }',
-  grantPermissions: ['propose'], category: 'intents', risk: 'low',
-}
-
-const INTENTS_SEARCH: ToolDefinition = {
-  key: 'intents.search', version: 1,
-  description: "Search the account's recorded customer intents (general memory) by contact, status, or free text.",
-  argumentSchema: {
-    contact_id: { type: 'string', description: 'Restrict to one contact.', required: false },
-    status: { type: 'enum', description: 'Filter by lifecycle status.', values: ['new', 'clarifying', 'forwarded_to_admin', 'fulfilled', 'rejected', 'matched'], required: false },
-    q: { type: 'string', description: 'Free text over service_hint and summary.', required: false },
-    limit: { type: 'number', description: 'Max results. Default 20, max 100.', required: false },
-  },
-  returnSchema: 'Array<{ intent_id, contact_id, direction, service_hint, summary, status, attributes, created_at }>',
-  grantPermissions: ['read'], category: 'intents', risk: 'read',
-}
-
 const CHANGE_REQUESTS_LIST_PENDING: ToolDefinition = {
   key: 'change_requests.list_pending', version: 1,
   description: 'Admin-only list of pending proposed system changes awaiting a human decision.',
   argumentSchema: { limit: { type: 'number', description: 'Default 20, max 100.', required: false } },
   returnSchema: 'Array<{ id, code, target_type, intent, summary, proposed_payload, created_at, expires_at }>',
   grantPermissions: ['read'], category: 'changes', risk: 'read',
-}
-
-const INTENTS_PROPOSE_DECISION: ToolDefinition = {
-  key: 'intents.propose_decision', version: 1,
-  description: 'Admin-only proposal for resolving a generic customer intent after review.',
-  argumentSchema: {
-    intent_id: { type: 'string', description: 'Customer intent UUID.', required: true },
-    decision: { type: 'enum', description: 'Resolution.', values: ['fulfilled', 'rejected', 'matched', 'clarifying'], required: true },
-    matched_service_id: { type: 'string', description: 'Required when decision=matched.', required: false },
-    reason: { type: 'string', description: 'Optional admin-facing rationale.', required: false },
-  },
-  returnSchema: '{ change_request: { id, code, confirmation_code, status } }',
-  grantPermissions: ['propose'], category: 'intents', risk: 'medium',
 }
 
 const SERVICES_PROPOSE_UPDATE: ToolDefinition = {
@@ -158,12 +116,9 @@ const REGISTRY: ReadonlyArray<ToolDefinition> = [
   SERVICES_GET,
   PRICING_CALCULATE_QUOTE,
   CHANGE_REQUESTS_LIST_PENDING,
-  INTENTS_PROPOSE_DECISION,
   SERVICES_PROPOSE_UPDATE,
   PRICING_RULES_PROPOSE_SERVICE_PRICE,
   SERVICES_MATCH_REQUEST,
-  INTENTS_RECORD,
-  INTENTS_SEARCH,
 ]
 
 export function listRegisteredTools(): ReadonlyArray<ToolDefinition> {
