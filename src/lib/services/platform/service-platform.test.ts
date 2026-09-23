@@ -513,6 +513,27 @@ describe('shared service primitives cleanup', () => {
 })
 
 
+describe('legacy change-notification contraction', () => {
+  it('keeps Coverage legacy rendering outside the generic change executor', () => {
+    const executor = readFileSync(
+      new URL('../../ai/runtime/change-request-executor.ts', import.meta.url),
+      'utf8',
+    )
+    const adapter = readFileSync(
+      new URL('../coverage/legacy-notification-adapter.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(executor).toContain('CURRENT_LEGACY_STRUCTURED_NOTIFICATION_RENDERERS')
+    expect(executor).not.toContain('renderCoverageApprovedCustomerMessage')
+    expect(executor).not.toContain("eventKey !== 'coverage.offer.approved'")
+    expect(executor).not.toContain('CoverageNotificationPayload')
+    expect(adapter).toContain('renderCoverageApprovedCustomerMessage')
+    expect(adapter).toContain('coverage.offer.approved')
+    expect(adapter).toContain('coverage.request.approved')
+  })
+})
+
 describe('legacy notification contraction', () => {
   it('keeps FX rollback rendering outside the generic customer notification runtime', () => {
     const runtime = readFileSync(
