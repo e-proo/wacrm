@@ -280,6 +280,10 @@ describe('FX V2 Phase 5 admin tools', () => {
       action_version: 1,
       target_type: 'fx_trade_request',
       target_id: 'trade-1',
+      proposed_payload: {
+        expected_status: 'pending_admin',
+        decision: 'approve',
+      },
       idempotency_key: 'fx-trade-review:trade-1:pending_admin',
     })
 
