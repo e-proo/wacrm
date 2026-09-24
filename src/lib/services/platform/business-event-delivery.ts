@@ -5,7 +5,7 @@ import type { MessageAudience, MessageChannel } from '@/lib/messaging/types'
 import { renderBusinessEventProjection } from './business-event-message-renderer'
 import { CURRENT_EVENT_PROJECTOR_REGISTRY } from './composition'
 
-interface ClaimedBusinessEventDeliveryRow {
+export interface BusinessEventDeliveryProjectionRow {
   id: string
   event_type: string
   event_version: number
@@ -18,9 +18,13 @@ interface ClaimedBusinessEventDeliveryRow {
   correlation_id: string | null
   causation_id: string | null
   payload: Record<string, unknown>
+  legacy_notification_id: string | null
+}
+
+interface ClaimedBusinessEventDeliveryRow
+  extends BusinessEventDeliveryProjectionRow {
   attempts: number
   claim_token: string
-  legacy_notification_id: string | null
   dedupe_key: string
 }
 
@@ -30,6 +34,69 @@ export interface ActiveBusinessEventDeliveryResult {
   reconciliation: number
   failed: number
   lastLocalMessageId: string | null
+}
+
+
+export async function renderBusinessEventDeliveryMessage(input: {
+  accountId: string
+  row: BusinessEventDeliveryProjectionRow
+  db?: ReturnType<typeof supabaseAdmin>
+}) {
+  const db = input.db ?? supabaseAdmin()
+  const audience = asMessageAudience(input.row.audience)
+  const channel = asMessageChannel(input.row.channel)
+  if (!audience || !channel) {
+    throw new Error('BUSINESS_EVENT_DELIVERY_SURFACE_UNSUPPORTED')
+  }
+
+  const projection = await CURRENT_EVENT_PROJECTOR_REGISTRY.project({
+    accountId: input.accountId,
+    eventType: input.row.event_type,
+    eventVersion: input.row.event_version,
+    subjectType: input.row.subject_type,
+    subjectId: input.row.subject_id,
+    audience,
+    channel,
+    correlationId: input.row.correlation_id,
+    causationId: input.row.causation_id,
+    payload: input.row.payload,
+  })
+
+  return renderBusinessEventProjection({
+    accountId: input.accountId,
+    projection,
+    store: createSupabaseTemplateOverrideStore(db),
+  })
+}
+
+export async function renderLinkedLegacyBusinessEventNotification(input: {
+  accountId: string
+  legacyNotificationId: string
+  db?: ReturnType<typeof supabaseAdmin>
+}) {
+  const db = input.db ?? supabaseAdmin()
+  const { data, error } = await db
+    .from('business_event_outbox')
+    .select(
+      'id, event_type, event_version, subject_type, subject_id, audience, channel, contact_id, conversation_id, correlation_id, causation_id, payload, legacy_notification_id',
+    )
+    .eq('account_id', input.accountId)
+    .eq('legacy_notification_id', input.legacyNotificationId)
+    .order('created_at', { ascending: true })
+    .limit(2)
+  if (error) throw error
+
+  const rows = (data ?? []) as BusinessEventDeliveryProjectionRow[]
+  if (rows.length === 0) return null
+  if (rows.length > 1) {
+    throw new Error('LEGACY_NOTIFICATION_BUSINESS_EVENT_AMBIGUOUS')
+  }
+
+  return renderBusinessEventDeliveryMessage({
+    accountId: input.accountId,
+    row: rows[0],
+    db,
+  })
 }
 
 /**
@@ -86,7 +153,6 @@ export async function deliverActiveBusinessEventNotifications(input: {
     }
   }
 
-  const store = createSupabaseTemplateOverrideStore(db)
   let sent = 0
   let reconciliation = 0
   let failed = 0
@@ -99,31 +165,13 @@ export async function deliverActiveBusinessEventNotifications(input: {
     })
 
     try {
-      const audience = asMessageAudience(row.audience)
-      const channel = asMessageChannel(row.channel)
-      if (!audience || !channel) {
-        throw new Error('BUSINESS_EVENT_DELIVERY_SURFACE_UNSUPPORTED')
-      }
       if (!row.contact_id) throw new Error('BUSINESS_EVENT_CONTACT_MISSING')
       if (!row.conversation_id) throw new Error('BUSINESS_EVENT_CONVERSATION_MISSING')
 
-      const projection = await CURRENT_EVENT_PROJECTOR_REGISTRY.project({
+      const rendered = await renderBusinessEventDeliveryMessage({
         accountId: input.accountId,
-        eventType: row.event_type,
-        eventVersion: row.event_version,
-        subjectType: row.subject_type,
-        subjectId: row.subject_id,
-        audience,
-        channel,
-        correlationId: row.correlation_id,
-        causationId: row.causation_id,
-        payload: row.payload,
-      })
-
-      const rendered = await renderBusinessEventProjection({
-        accountId: input.accountId,
-        projection,
-        store,
+        row,
+        db,
       })
 
       const delivered = await engineSendText({
