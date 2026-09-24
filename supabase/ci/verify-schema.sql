@@ -191,6 +191,62 @@ BEGIN
     RAISE EXCEPTION 'Coverage cutover mode RPC privileges are unsafe';
   END IF;
 
+
+  -- Intents controlled customer Business Event cutover (107).
+  IF to_regprocedure(
+    'public.inspect_intents_business_event_cutover_readiness(uuid)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'Intents cutover readiness RPC is missing — migration 107 did not apply';
+  END IF;
+
+  IF to_regprocedure(
+    'public.set_intents_business_event_delivery_mode(uuid,text)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'Intents cutover mode RPC is missing — migration 107 did not apply';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'customer_intents_business_event_zz_route'
+      AND tgrelid = 'public.customer_intents'::regclass
+      AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'Intents route trigger is missing — migration 107 did not apply';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.inspect_intents_business_event_cutover_readiness(uuid)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.inspect_intents_business_event_cutover_readiness(uuid)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.inspect_intents_business_event_cutover_readiness(uuid)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'Intents cutover readiness RPC privileges are unsafe';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.set_intents_business_event_delivery_mode(uuid,text)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.set_intents_business_event_delivery_mode(uuid,text)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.set_intents_business_event_delivery_mode(uuid,text)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'Intents cutover mode RPC privileges are unsafe';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;

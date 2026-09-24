@@ -39,7 +39,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:fx-cutover-live": "vitest run src/lib/services/fx-v2/cutover.live.test.ts",
-    "test:fx-cutover-control-live": "vitest run src/lib/services/fx-v2/cutover-control.live.test.ts"
+    "test:fx-cutover-control-live": "vitest run src/lib/services/fx-v2/cutover-control.live.test.ts",
+    "test:intents-cutover-live": "vitest run src/lib/services/intents/cutover.live.test.ts",
+    "test:intents-cutover-control-live": "vitest run src/lib/services/intents/cutover-control.live.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
