@@ -258,9 +258,9 @@ Phase 6  Full acceptance
 - [x] تحديث schema verification.
 - [x] تطبيق migration 107 على `wacrm test`.
 - [x] اكتشاف cross-domain events من Coverage ومنع احتسابها أو تفعيلها عبر migration 108.
-- [ ] تطبيق migration 108 على `wacrm test`.
-- [ ] جمع parity evidence للأحداث الأربعة.
-- [ ] readiness = true.
+- [x] تطبيق migration 108 على `wacrm test`.
+- [ ] جمع parity evidence للأحداث الأربعة. الحالة الحالية: 0/4 matched، ولا توجد blockers بعد ownership hardening.
+- [ ] readiness = true. الحالة الحالية على TEST: `mode=legacy`, `ready=false`, `blockers=0`, `legacy_nonterminal=0`, `active_nonterminal=0`.
 - [ ] activation test.
 - [ ] active delivery E2E.
 - [ ] rollback test.
@@ -284,3 +284,26 @@ Phase 6  Full acceptance
 - readiness/activation/rollback تصبح action-owned، وليس event-name-owned فقط.
 
 هذا invariant يصبح جزءًا من Definition of Done للمرحلة الأولى.
+
+
+### Phase 1 — آخر تحقق مسجل
+
+بعد تطبيق migrations 107 و108 على `wacrm test`:
+
+- route mode بقي `legacy` ولم يحدث cutover تلقائي.
+- `verify-schema.sql` نجح على قاعدة TEST.
+- RPCs الخاصة بالفحص والتفعيل متاحة لـ `service_role` فقط، وليست قابلة للتنفيذ من `anon/authenticated`.
+- الأربع أحداث القديمة التي نتجت من Coverage تم الاحتفاظ بها وتصنيفها `native_only`.
+- Intents readiness أصبحت:
+  - required: 4 event types.
+  - matched: 0.
+  - blockers: 0.
+  - pending owned types: 0.
+  - legacy nonterminal: 0.
+  - active nonterminal: 0.
+  - mode: `legacy`.
+  - ready: `false`.
+- سبب عدم الجاهزية الوحيد حاليًا هو عدم وجود evidence حقيقية لكل outcomes الأربعة الخاصة بـIntents.
+- Supabase Security Advisor لم يشر إلى وظائف migrations 107/108 الجديدة؛ التحذيرات الأقدم للمشروع تبقى ضمن `PROJECT_NOTES.md`.
+
+الخطوة التالية داخل Phase 1 هي إنشاء/تنفيذ سيناريوهات TEST حقيقية لكل outcome، تشغيل shadow projection comparison، ثم إعادة قراءة readiness. لا يجوز تفعيل المسار قبل وصول matched event types إلى 4/4.
