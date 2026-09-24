@@ -580,3 +580,38 @@ Rollback live E2E       ⏳ after active transport proof
 ```
 
 Phase 1 تبقى **IN PROGRESS** حتى إغلاق Gates A-D.
+
+
+### Phase 1 — Active transport harness is prepared
+
+تمت إضافة:
+
+`src/lib/services/intents/cutover-transport.live.test.ts`
+
+والأمر:
+
+`npm run test:intents-cutover-transport-live`
+
+الاختبار **skipped افتراضيًا** ولا يمكنه الإرسال إلا إذا اجتمعت الشروط التالية:
+
+- `WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_LIVE=1`
+- `WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_CONFIRM=SEND_TEST_WHATSAPP`
+- route الحالي `active`
+- readiness الحالية `true`
+- TEST contact id محدد صراحة.
+- TEST conversation id محدد صراحة ومتطابق مع contact/account.
+
+وهو يثبت:
+
+- إنشاء Intent حقيقية.
+- Change Request من النوع `intents.decision.apply@1`.
+- approval الحقيقي.
+- deterministic execution الحقيقي.
+- event مستقبلية تصبح `active`.
+- subject-scoped active delivery يرسل رسالة واحدة.
+- linked legacy notification تصبح `sent` بنفس `local_message_id`.
+- replay ثاني لا يجد شيئًا claimable، أي لا يوجد duplicate send من المسارين.
+
+**لا يتم تشغيل هذا الاختبار على sink الخاص بالـparity.** يحتاج رقم WhatsApp TEST فعلي مخصص للتجربة.
+
+بعد إضافته لا يتبقى في Phase 1 أي harness برمجي ناقص؛ المتبقي هو تشغيل Gates A-D على TEST بالترتيب الموثق.
