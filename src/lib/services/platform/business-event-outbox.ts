@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { CURRENT_LEGACY_NOTIFICATION_RENDERERS } from './legacy-notification-composition'
+import { renderLinkedLegacyBusinessEventNotification } from './business-event-delivery'
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 import type { MessageAudience, MessageChannel } from '@/lib/messaging/types'
 import { renderBusinessEventProjection } from './business-event-message-renderer'
@@ -207,7 +207,7 @@ export async function inspectShadowBusinessEventRendering(input: {
 
       const { data: legacy, error: legacyError } = await db
         .from('customer_intent_notifications')
-        .select('message_text, event_type, intent_id, change_request_id')
+        .select('message_text')
         .eq('account_id', input.accountId)
         .eq('id', row.legacy_notification_id)
         .maybeSingle()
@@ -224,16 +224,12 @@ export async function inspectShadowBusinessEventRendering(input: {
         continue
       }
 
-      const domainLegacyText = await CURRENT_LEGACY_NOTIFICATION_RENDERERS.render({
+      const linkedFallback = await renderLinkedLegacyBusinessEventNotification({
         accountId: input.accountId,
-        notification: {
-          id: row.legacy_notification_id,
-          intentId: legacy.intent_id,
-          changeRequestId: legacy.change_request_id,
-          eventType: legacy.event_type,
-        },
+        legacyNotificationId: row.legacy_notification_id,
+        db,
       })
-      const legacyText = domainLegacyText ?? legacy.message_text
+      const legacyText = linkedFallback?.text ?? legacy.message_text
 
       if (rendered.text === legacyText) {
         result.matchedLegacy += 1
