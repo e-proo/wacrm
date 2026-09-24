@@ -230,7 +230,8 @@ export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
     channel: 'whatsapp',
     locale: 'ar',
     body: [
-      '✅ تم اعتماد طلب الصرف للتواصل معك ومتابعة التنفيذ.',
+      '✅ تم قبول طلب الصرف.',
+      'ستتواصل معك الإدارة في أقرب وقت لمتابعة التنفيذ.',
       'تنبيه: الطلب لم يُسجل كمكتمل بعد.',
       ...FX_TRADE_DETAIL_LINES,
     ].join('\n'),
