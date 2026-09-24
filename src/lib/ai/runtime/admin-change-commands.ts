@@ -97,7 +97,7 @@ export async function handleAdminChangeCommand(input: {
 
     const providedReason = reject?.[2]?.trim() || null
     const storedReason = providedReason || 'Rejected by trusted administrator via WhatsApp'
-    const rejected = await rejectChangeRequest({
+    await rejectChangeRequest({
       accountId: input.accountId,
       changeRequestId: request.id,
       actorUserId: input.identity.memberId,
