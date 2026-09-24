@@ -5,7 +5,6 @@ import { matchServiceRequest } from './service-matcher'
 import { readCoverageAttributes } from '@/lib/services/coverage/attributes'
 import { supabaseAdmin as adminClient } from '@/lib/ai/admin-client'
 import Decimal from 'decimal.js'
-import { parseDecimal } from '@/lib/services/pricing/decimal'
 import type {
   AccountId,
   Uuid,
