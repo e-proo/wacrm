@@ -1,22 +1,11 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { parseDecimal } from '@/lib/services/pricing/decimal'
-import { readCoverageAttributes, type CoverageAttributes } from './attributes'
+import { readCoverageAttributes } from './attributes'
 import {
   DomainChangeExecutionError,
   type ChangeExecutorRegistration,
 } from '@/lib/services/platform/change-executor-registry'
 
-interface CoverageNotificationPayload {
-  kind: 'offer' | 'request'
-  entity_id?: string | null
-  reference?: string | null
-  service_id?: string | null
-  amount: string
-  currency: string
-  attributes: CoverageAttributes
-  commission_amount?: string | null
-  commission_currency?: string | null
-}
 
 const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (context, change) => {
   if (change.targetId) {
@@ -104,19 +93,7 @@ const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (conte
           customer_notification: {
             intent_id: payload.intent_id,
             event_type: 'approved_and_applied',
-            template_event: 'coverage.offer.approved',
-            template_payload: {
-              kind: 'offer',
-              entity_id: offer.id,
-              reference: offer.reference_code,
-              service_id: payload.service_id,
-              amount: payload.total_amount,
-              currency: payload.currency,
-              attributes: offerAttrs,
-              commission_amount:
-                offer.commission_amount == null ? null : String(offer.commission_amount),
-              commission_currency: offer.commission_currency ?? payload.currency,
-            } satisfies CoverageNotificationPayload,
+            render_from_business_event: true,
           },
         }
       : {}),
@@ -214,19 +191,7 @@ const createRequestExecutor: ChangeExecutorRegistration['executor'] = async (con
           customer_notification: {
             intent_id: payload.intent_id,
             event_type: 'approved_and_applied',
-            template_event: 'coverage.request.approved',
-            template_payload: {
-              kind: 'request',
-              entity_id: request.id,
-              reference: null,
-              service_id: payload.service_id,
-              amount: payload.requested_amount,
-              currency: payload.currency,
-              attributes: requestAttrs,
-              commission_amount:
-                request.commission_amount == null ? null : String(request.commission_amount),
-              commission_currency: request.commission_currency ?? payload.currency,
-            } satisfies CoverageNotificationPayload,
+            render_from_business_event: true,
           },
         }
       : {}),
