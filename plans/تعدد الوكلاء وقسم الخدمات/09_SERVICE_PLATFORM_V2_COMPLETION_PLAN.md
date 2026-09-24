@@ -355,3 +355,19 @@ WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID=<test-account>
 تم توسيع GitHub Actions مؤقتًا ليعمل `CI` و`Migrations` على push إلى `refactor/service-platform-v2` أيضًا، حتى نحصل على دليل فعلي لـ lint/typecheck/tests/build/migration replay أثناء العمل.
 
 **ملاحظة cleanup لاحقة:** عند إغلاق الفرع/دمجه، إما إزالة اسم الفرع من workflow filters أو تحويل سياسة CI إلى قاعدة branch عامة إذا تقرر إبقاؤها.
+
+
+### Phase 1 — Clean-database safety smoke
+
+تمت إضافة `supabase/ci/intents-cutover-smoke.sql` إلى Migrations CI.
+
+يثبت على قاعدة تُبنى من الصفر:
+
+- default route = `legacy`.
+- readiness لا تصبح true دون evidence.
+- activation بدون evidence يفشل بـ `INTENTS_BUSINESS_EVENT_CUTOVER_NOT_READY`.
+- producer النهائي يحتوي ownership guard لـ `intents.decision.apply`.
+- route function تحتوي ownership guard + route key الصحيح.
+- readiness/mode RPCs غير متاحة لـ `anon/authenticated`.
+
+هذا الفحص مستقل عن TEST live evidence ويجب أن يبقى جزءًا من migration replay حتى بعد إغلاق Phase 1.

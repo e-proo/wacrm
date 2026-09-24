@@ -74,6 +74,9 @@ jobs:
       # created above. The smoke file is one transactional DO statement:
       # failed assertions roll back automatically and successful fixtures
       # are explicitly removed before commit.
+      - name: Verify Intents controlled cutover safety
+        run: supabase db query --local --file supabase/ci/intents-cutover-smoke.sql
+
       - name: Verify FX V2 Phase 2 domain behavior
         run: supabase db query --local --file supabase/ci/fx-v2-phase-2-smoke.sql
 
