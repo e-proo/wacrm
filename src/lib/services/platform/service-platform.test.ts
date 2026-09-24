@@ -697,24 +697,29 @@ describe('shared service primitives cleanup', () => {
 })
 
 
-describe('legacy change-notification contraction', () => {
-  it('keeps Coverage legacy rendering outside the generic change executor', () => {
+describe('Coverage legacy change-notification contraction', () => {
+  it('uses a generic render-at-delivery marker instead of a Coverage renderer registry', () => {
     const executor = readFileSync(
       new URL('../../ai/runtime/change-request-executor.ts', import.meta.url),
       'utf8',
     )
-    const adapter = readFileSync(
-      new URL('../coverage/legacy-notification-adapter.ts', import.meta.url),
+    const coverageExecutors = readFileSync(
+      new URL('../coverage/change-executors.ts', import.meta.url),
       'utf8',
     )
 
-    expect(executor).toContain('CURRENT_LEGACY_STRUCTURED_NOTIFICATION_RENDERERS')
+    expect(executor).toContain('BUSINESS_EVENT_RENDER_AT_DELIVERY_MARKER')
+    expect(executor).toContain('render_from_business_event?: boolean')
+    expect(executor).not.toContain('CURRENT_LEGACY_STRUCTURED_NOTIFICATION_RENDERERS')
     expect(executor).not.toContain('renderCoverageApprovedCustomerMessage')
-    expect(executor).not.toContain("eventKey !== 'coverage.offer.approved'")
-    expect(executor).not.toContain('CoverageNotificationPayload')
-    expect(adapter).toContain('renderCoverageApprovedCustomerMessage')
-    expect(adapter).toContain('coverage.offer.approved')
-    expect(adapter).toContain('coverage.request.approved')
+    expect(executor).not.toContain('coverage.offer.approved')
+    expect(executor).not.toContain('coverage.request.approved')
+
+    expect(coverageExecutors).toContain('render_from_business_event: true')
+    expect(coverageExecutors).not.toContain('template_event')
+    expect(coverageExecutors).not.toContain('template_payload')
+    expect(coverageExecutors).not.toContain('CoverageNotificationPayload')
+    expect(coverageExecutors).not.toContain('renderCoverageApprovedCustomerMessage')
   })
 })
 
