@@ -20,6 +20,19 @@ export function fxOutcomeForBusinessEvent(eventType: string): FxTradeCustomerOut
   }
 }
 
+function fxStatusForOutcome(outcome: FxTradeCustomerOutcome): string {
+  switch (outcome) {
+    case 'pending_admin':
+      return 'pending_admin'
+    case 'approved_for_contact':
+      return 'approved_for_contact'
+    case 'rejected':
+      return 'rejected'
+    case 'completed':
+      return 'completed'
+  }
+}
+
 /**
  * Renders an FX V2 outbox event from authoritative immutable trade facts.
  * The outbox row stores only the stable business-event key; customer-facing
@@ -39,13 +52,20 @@ export async function renderFxTradeBusinessEventText(input: {
   const { data: trade, error: tradeError } = await db
     .from('exchange_trade_requests')
     .select(
-      'id, code, pair_id, side, amount_basis, requested_amount, effective_rate, base_amount, quote_amount, rate_version_id',
+      'id, code, status, pair_id, side, amount_basis, requested_amount, effective_rate, base_amount, quote_amount, rate_version_id',
     )
     .eq('account_id', input.accountId)
     .eq('id', input.tradeRequestId)
     .maybeSingle()
   if (tradeError) throw tradeError
   if (!trade) throw new Error('FX_TRADE_NOTIFICATION_REQUEST_NOT_FOUND')
+
+  const expectedStatus = fxStatusForOutcome(outcome)
+  if (trade.status !== expectedStatus) {
+    throw new Error(
+      `FX_TRADE_NOTIFICATION_EVENT_SUPERSEDED:${input.eventType}:${trade.status}`,
+    )
+  }
 
   const { data: pair, error: pairError } = await db
     .from('exchange_rate_pairs')
