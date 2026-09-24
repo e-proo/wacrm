@@ -1,4 +1,16 @@
+import { loadEnvConfig } from "@next/env";
 import { defineConfig } from "vitest/config";
+
+const liveTestRequested = Object.entries(process.env).some(
+  ([key, value]) => key.startsWith("WACRM_") && key.endsWith("_LIVE") && value === "1",
+);
+
+// Next.js loads .env.local automatically for dev/build, while Vitest does not.
+// Only opt-in live tests may load the real local server environment; ordinary
+// unit tests keep using the isolated dummy env below and never connect to TEST.
+if (liveTestRequested) {
+  loadEnvConfig(process.cwd());
+}
 
 export default defineConfig({
   resolve: {
