@@ -166,7 +166,7 @@ describe('Phase G shadow cutover evidence', () => {
   it('keeps legacy fallback while adding a generic active delivery path behind explicit routing', () => {
     expect(activeDelivery).toContain('deliverActiveBusinessEventNotifications')
     expect(activeDelivery).toContain("db.rpc('claim_customer_business_notifications'")
-    expect(genericActiveDelivery).toContain("db.rpc('claim_business_event_delivery'")
+    expect(genericActiveDelivery).toContain("db.rpc('claim_business_event_delivery_v2'")
     expect(genericActiveDelivery).toContain('CURRENT_EVENT_PROJECTOR_REGISTRY')
   })
 })
