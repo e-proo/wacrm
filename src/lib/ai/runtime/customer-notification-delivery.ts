@@ -1,7 +1,9 @@
 import { supabaseAdmin } from '../admin-client'
 import { engineSendText } from '@/lib/automations/meta-send'
-import { CURRENT_LEGACY_NOTIFICATION_RENDERERS } from '@/lib/services/platform/legacy-notification-composition'
-import { deliverActiveBusinessEventNotifications } from '@/lib/services/platform/business-event-delivery'
+import {
+  deliverActiveBusinessEventNotifications,
+  renderLinkedLegacyBusinessEventNotification,
+} from '@/lib/services/platform/business-event-delivery'
 
 interface ClaimedCustomerNotificationRow {
   id: string
@@ -122,6 +124,7 @@ export async function deliverCustomerOutcomeNotifications(input: {
         accountId: input.accountId,
         row,
         fallbackText: row.message_text,
+        db,
       })
       const sent = await engineSendText({
         accountId: input.accountId,
@@ -192,15 +195,21 @@ async function resolveCustomerOutcomeText(input: {
   accountId: string
   row: ClaimedCustomerNotificationRow
   fallbackText: string
+  db: ReturnType<typeof supabaseAdmin>
 }): Promise<string> {
-  const domainRendered = await CURRENT_LEGACY_NOTIFICATION_RENDERERS.render({
+  const linked = await renderLinkedLegacyBusinessEventNotification({
     accountId: input.accountId,
-    notification: {
-      id: input.row.id,
-      intentId: input.row.intent_id,
-      changeRequestId: input.row.change_request_id,
-      eventType: input.row.event_type,
-    },
+    legacyNotificationId: input.row.id,
+    db: input.db,
   })
-  return domainRendered ?? input.fallbackText
+  if (linked) return linked.text
+
+  // Historical, pre-canonical rows may still carry a final persisted message.
+  // Opaque render-at-delivery markers must never leak to a customer if their
+  // canonical Business Event link is unexpectedly absent.
+  const fallback = input.fallbackText.trim()
+  if (/^__[A-Z0-9_]+__$/.test(fallback)) {
+    throw new Error('LEGACY_NOTIFICATION_CANONICAL_EVENT_MISSING')
+  }
+  return input.fallbackText
 }
