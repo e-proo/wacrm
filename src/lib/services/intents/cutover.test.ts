@@ -77,3 +77,48 @@ describe('Intents controlled Business Event cutover', () => {
     )
   })
 })
+
+
+const ownershipMigration = readFileSync(
+  new URL(
+    '../../../../supabase/migrations/108_intents_business_event_ownership_scope.sql',
+    import.meta.url,
+  ),
+  'utf8',
+)
+
+describe('Intents Business Event ownership hardening', () => {
+  it('requires exact Intents action ownership before active routing', () => {
+    expect(ownershipMigration).toContain(
+      "cr.action_key = 'intents.decision.apply' and cr.action_version = 1",
+    )
+    expect(ownershipMigration).toContain(
+      "cr.action_key is null and cr.target_type = 'service_intent'",
+    )
+    expect(ownershipMigration).toContain('if not v_owned then')
+  })
+
+  it('quarantines historical cross-domain service-request events without deleting them', () => {
+    expect(ownershipMigration).toContain(
+      "shadow_projection_status = 'native_only'",
+    )
+    expect(ownershipMigration).toContain(
+      "'INTENTS_EVENT_OWNERSHIP_MISMATCH'",
+    )
+    expect(ownershipMigration).not.toContain(
+      'delete from public.business_event_outbox',
+    )
+  })
+
+  it('scopes readiness blockers and rollback work to Intents-owned change requests', () => {
+    expect(ownershipMigration).toContain(
+      'create or replace function public.inspect_intents_business_event_cutover_readiness',
+    )
+    expect(ownershipMigration).toContain(
+      'create or replace function public.set_intents_business_event_delivery_mode',
+    )
+    expect(ownershipMigration).toContain(
+      "cr.action_key = 'intents.decision.apply'",
+    )
+  })
+})

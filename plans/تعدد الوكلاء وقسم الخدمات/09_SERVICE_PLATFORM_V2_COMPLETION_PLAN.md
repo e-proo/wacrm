@@ -251,12 +251,14 @@ Phase 6  Full acceptance
 
 - [x] تعريف النطاق والأحداث الداخلة في cutover.
 - [x] تخصيص migration رقم 107 بعد التحقق أن آخر migration هو 106.
-- [ ] إضافة controlled route/readiness/rollback SQL.
-- [ ] إضافة TypeScript cutover API.
-- [ ] إضافة contract tests.
-- [ ] إضافة opt-in live verification.
-- [ ] تحديث schema verification.
-- [ ] تطبيق migration على `wacrm test`.
+- [x] إضافة controlled route/readiness/rollback SQL عبر migration 107.
+- [x] إضافة TypeScript cutover API.
+- [x] إضافة contract tests.
+- [x] إضافة opt-in live verification.
+- [x] تحديث schema verification.
+- [x] تطبيق migration 107 على `wacrm test`.
+- [x] اكتشاف cross-domain events من Coverage ومنع احتسابها أو تفعيلها عبر migration 108.
+- [ ] تطبيق migration 108 على `wacrm test`.
 - [ ] جمع parity evidence للأحداث الأربعة.
 - [ ] readiness = true.
 - [ ] activation test.
@@ -265,3 +267,20 @@ Phase 6  Full acceptance
 - [ ] إعادة activation بعد إثبات rollback إذا كان TEST سيستمر على المسار الجديد.
 
 يتم تحديث هذه القائمة مع تقدم التنفيذ، دون تغيير معايير القبول لتلائم النتيجة.
+
+
+### Phase 1 — ملاحظة تنفيذية: Ownership hardening
+
+أثناء فحص readiness بعد migration 107 ظهر أن بعض `service_request.approved` shadow rows نتجت من Coverage Change Requests التي غيّرت حالة `customer_intents` إلى `fulfilled`. هذه الأحداث ليست Intents-owned ولا يجوز استخدامها كدليل parity أو تفعيلها عبر route الخاص بـIntents.
+
+القرار:
+
+- لا حذف للتاريخ.
+- لا تعديل migration 102 أو 107 بعد تطبيقهما.
+- migration 108 تعيد تعريف producer النهائي ليقبل فقط:
+  - `intents.decision.apply@1`
+  - أو legacy `target_type=service_intent` عندما لا يوجد `action_key`.
+- الأحداث التاريخية cross-domain تُصنف `native_only` مع سبب `INTENTS_EVENT_OWNERSHIP_MISMATCH`.
+- readiness/activation/rollback تصبح action-owned، وليس event-name-owned فقط.
+
+هذا invariant يصبح جزءًا من Definition of Done للمرحلة الأولى.
