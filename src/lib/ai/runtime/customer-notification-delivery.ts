@@ -60,10 +60,10 @@ export async function deliverActiveSubjectBusinessEventNotifications(input: {
  * events. Eligibility is evaluated with the database clock and SKIP LOCKED
  * prevents concurrent senders from claiming the same event.
  *
- * Customer-facing text is rendered from authoritative business state at
- * delivery time. Domain-specific legacy rollback renderers are isolated behind
- * a temporary adapter registry; the runtime kernel contains no FX/Coverage
- * rendering branch. New delivery uses the canonical Business Event path.
+ * Customer-facing text is rendered from canonical Business Event projections
+ * whenever a legacy row is strangler-linked to the general outbox. Historical
+ * pre-canonical rows may still fall back to their persisted message_text, but
+ * the runtime kernel contains no FX/Coverage/Intents rendering branch.
  */
 export async function deliverCustomerOutcomeNotifications(input: {
   accountId: string
