@@ -371,3 +371,18 @@ WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID=<test-account>
 - readiness/mode RPCs غير متاحة لـ `anon/authenticated`.
 
 هذا الفحص مستقل عن TEST live evidence ويجب أن يبقى جزءًا من migration replay حتى بعد إغلاق Phase 1.
+
+
+### Verification note — stale FX contract test
+
+عند تشغيل CI على branch الحالي، نجح lint وtypecheck لكن test suite توقف لأن `fx-business-event-delivery-contract.test.ts` كان ما يزال يقرأ الملف المحذوف سابقًا:
+
+`src/lib/services/fx-v2/legacy-notification-adapter.ts`
+
+لم تتم إعادة إنشاء هذا الملف لأن ذلك سيعيد legacy seam أزيل عمدًا. تم تحديث الاختبار ليتحقق من المعمارية الحالية:
+
+`legacy notification link → generic business-event-delivery → CURRENT_EVENT_PROJECTOR_REGISTRY → FX projector`
+
+أي أن contract test أصبح يثبت غياب FX semantics من generic delivery kernel ووجودها داخل `fx-v2/message-projectors.ts`.
+
+هذه ملاحظة مهمة عند Legacy Contraction: لا نصلح اختبارات قديمة بإعادة abstractions انتهى دورها؛ نحدّث contract إلى ownership الحالي.

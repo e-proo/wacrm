@@ -6,8 +6,12 @@ const deliverySource = readFileSync(
   new URL('./customer-notification-delivery.ts', import.meta.url),
   'utf8',
 )
-const fxLegacyAdapterSource = readFileSync(
-  new URL('../../services/fx-v2/legacy-notification-adapter.ts', import.meta.url),
+const businessEventDeliverySource = readFileSync(
+  new URL('../../services/platform/business-event-delivery.ts', import.meta.url),
+  'utf8',
+)
+const fxProjectorSource = readFileSync(
+  new URL('../../services/fx-v2/message-projectors.ts', import.meta.url),
   'utf8',
 )
 const workerSource = readFileSync(
@@ -35,15 +39,20 @@ describe('FX V2 unified customer business-event delivery', () => {
     expect(unifiedClaimMigrationSource).toContain('event_type text')
   })
 
-  it('keeps authoritative FX legacy rendering behind the domain adapter before WhatsApp transport', () => {
-    expect(deliverySource).toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
+  it('renders linked legacy FX rows through the generic Business Event projector path', () => {
+    expect(deliverySource).toContain('renderLinkedLegacyBusinessEventNotification')
     expect(deliverySource).not.toContain('renderFxTradeBusinessEventText')
     expect(deliverySource).not.toContain('fx_trade_request_id')
     expect(deliverySource).toContain('engineSendText({')
 
-    expect(fxLegacyAdapterSource).toContain('renderFxTradeBusinessEventText')
-    expect(fxLegacyAdapterSource).toContain('fx_trade_request_id')
-    expect(fxLegacyAdapterSource).toContain('eventType: data.event_type ?? notification.eventType')
+    expect(businessEventDeliverySource).toContain('CURRENT_EVENT_PROJECTOR_REGISTRY.project')
+    expect(businessEventDeliverySource).toContain('renderBusinessEventProjection')
+    expect(businessEventDeliverySource).not.toContain('fx_trade_request_id')
+    expect(businessEventDeliverySource).not.toContain('renderFxTradeBusinessEventText')
+
+    expect(fxProjectorSource).toContain('loadFxTradeMessageFacts')
+    expect(fxProjectorSource).toContain('buildFxTradeBusinessEventProjection')
+    expect(fxProjectorSource).toContain("subjectType !== 'fx_trade_request'")
   })
 
   it('maps only the canonical FX trade business-event lifecycle', () => {
@@ -71,7 +80,6 @@ describe('FX V2 unified customer business-event delivery', () => {
   })
 })
 
-
 describe('background notification worker cutover safety', () => {
   it('delegates all claiming and sending to the route-aware unified delivery boundary', () => {
     expect(workerSource).toContain('deliverCustomerOutcomeNotifications')
@@ -88,7 +96,6 @@ describe('background notification worker cutover safety', () => {
     expect(deliverySource).toContain('p_limit: remaining')
   })
 })
-
 
 describe('legacy sender contraction', () => {
   it('removes the superseded direct customer sender from business-notifications', () => {
