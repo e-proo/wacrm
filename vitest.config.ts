@@ -9,15 +9,23 @@ const liveTestRequested = Object.entries(process.env).some(
 // Only opt-in live tests may load the real local server environment; ordinary
 // unit tests keep using the isolated dummy env below and never connect to TEST.
 if (liveTestRequested) {
-  const previousNodeEnv = process.env.NODE_ENV
-  process.env.NODE_ENV = 'development'
+  // Next's environment typings expose NODE_ENV as readonly. The underlying
+  // Node process environment is mutable, so use a narrow mutable view only
+  // while loading the opt-in live-test environment.
+  const mutableEnv = process.env as Record<string, string | undefined>
+  const previousNodeEnv = mutableEnv.NODE_ENV
+  mutableEnv.NODE_ENV = 'development'
   try {
     // Next intentionally skips .env.local when NODE_ENV=test. Live verification
     // must use the same local server environment as `next dev`, so load it
     // under the development mode and immediately restore Vitest's test mode.
     loadEnvConfig(process.cwd(), true)
   } finally {
-    process.env.NODE_ENV = previousNodeEnv
+    if (previousNodeEnv === undefined) {
+      delete mutableEnv.NODE_ENV
+    } else {
+      mutableEnv.NODE_ENV = previousNodeEnv
+    }
   }
 }
 
