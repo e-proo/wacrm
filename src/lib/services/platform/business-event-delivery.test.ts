@@ -31,6 +31,25 @@ describe('generic active business-event delivery', () => {
     expect(source).not.toContain('service_intent')
   })
 
+  it('uses canonical projectors for linked legacy rollback rows without domain adapters', () => {
+    const delivery = readFileSync(
+      new URL('./business-event-delivery.ts', import.meta.url),
+      'utf8',
+    )
+    const runtime = readFileSync(
+      new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(delivery).toContain('renderLinkedLegacyBusinessEventNotification')
+    expect(delivery).toContain('CURRENT_EVENT_PROJECTOR_REGISTRY')
+    expect(runtime).toContain('renderLinkedLegacyBusinessEventNotification')
+    expect(runtime).not.toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
+    expect(runtime).toContain('LEGACY_NOTIFICATION_CANONICAL_EVENT_MISSING')
+    expect(runtime).not.toContain('renderFxTradeBusinessEventText')
+    expect(runtime).not.toContain('renderServiceRequestCustomerMessage')
+  })
+
   it('lets the AI runtime flush only business events correlated to the current run', () => {
     const dispatch = readFileSync(
       new URL('../../ai/runtime/dispatch.ts', import.meta.url),
