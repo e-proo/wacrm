@@ -386,3 +386,197 @@ WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID=<test-account>
 أي أن contract test أصبح يثبت غياب FX semantics من generic delivery kernel ووجودها داخل `fx-v2/message-projectors.ts`.
 
 هذه ملاحظة مهمة عند Legacy Contraction: لا نصلح اختبارات قديمة بإعادة abstractions انتهى دورها؛ نحدّث contract إلى ownership الحالي.
+
+
+## 7. Verification checkpoint — 2026-09-24
+
+تم تشغيل GitHub Actions فعليًا على `refactor/service-platform-v2` بعد إضافة branch CI gate.
+
+### General CI
+
+آخر run على HEAD بعد إصلاح stale FX contract:
+
+- `npm ci`: success.
+- `npm run lint`: success.
+- `npm run typecheck`: success.
+- `npm test`: success.
+- `npm run build`: success.
+
+وبذلك أصبح لدينا تحقق فعلي على الفرع، وليس مجرد وجود اختبارات في المستودع.
+
+ملاحظات غير حاجبة ظهرت أثناء التشغيل ويجب عدم نسيانها:
+
+- lint يحتوي warnings قديمة في أجزاء متعددة من المشروع لكنه لا يفشل.
+- `npm ci` أبلغ عن dependency audit findings: 12 vulnerabilities وقت هذا التشغيل:
+  - 1 low
+  - 6 moderate
+  - 4 high
+  - 1 critical
+- لا يتم إصلاح dependency audit ضمن Phase 1 تلقائيًا؛ يجب مراجعته ضمن Final Architectural Acceptance/maintenance حتى لا يتوسع نطاق cutover بصمت.
+
+### Migration CI
+
+تم بنجاح:
+
+- تشغيل Supabase local database.
+- replay لكل migrations من الصفر حتى 108.
+- `supabase/ci/verify-schema.sql`.
+- `supabase/ci/intents-cutover-smoke.sql`.
+- FX V2 Phase 2 smoke.
+- FX V2 Phase 6 messaging smoke.
+- FX V2 Phase 7 legacy cleanup smoke.
+
+هذا يثبت أن migrations 107/108 قابلة لإعادة البناء من الصفر ولا تعتمد فقط على حالة قاعدة TEST الحالية.
+
+---
+
+## 8. Phase 1 — ما تبقى قبل الإغلاق
+
+الكود والبنية وDB safety gates جاهزة. **لا نعلن Phase 1 مكتملة بعد** لأن live evidence وactive transport لم يُثبتا بعد.
+
+### Gate A — Generate real TEST parity evidence
+
+شغّل على بيئة التطبيق المربوطة بـ `wacrm test`:
+
+```bash
+WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID=<TEST_ACCOUNT_UUID>
+WACRM_INTENTS_CUTOVER_EVIDENCE_LIVE=1
+WACRM_INTENTS_CUTOVER_EVIDENCE_CONFIRM=GENERATE_TEST_EVIDENCE
+npm run test:intents-cutover-evidence-live
+```
+
+هذا الاختبار يحتاج `NEXT_PUBLIC_SUPABASE_URL` و`SUPABASE_SERVICE_ROLE_KEY` الخاصة بـTEST.
+
+النتيجة المطلوبة:
+
+- `matched_event_types = 4`
+- `missing_event_types = []`
+- `blockers = 0`
+- `legacy_nonterminal = 0`
+- `active_nonterminal = 0`
+- `ready = true`
+- route يبقى `legacy`
+
+**لا نستبدل هذه الخطوة بإدخال rows يدويًا عبر SQL**؛ الهدف هو إثبات مسار approval + deterministic executor + native event + legacy bridge + projector/template.
+
+### Gate B — Explicit activation
+
+بعد Gate A فقط:
+
+```bash
+WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID=<TEST_ACCOUNT_UUID>
+WACRM_INTENTS_CUTOVER_ACTIVATE_LIVE=1
+WACRM_INTENTS_CUTOVER_CONFIRM=ACTIVATE_TEST
+npm run test:intents-cutover-control-live
+```
+
+يجب أن يتحول:
+
+`service_request_customer_whatsapp: legacy → active`
+
+دون ترقية historical shadow rows.
+
+### Gate C — Active WhatsApp transport E2E
+
+الـsink fixture المستخدم لبناء parity **ليس** اختبار transport.
+
+قبل هذا الاختبار يجب تجهيز contact/رقم WhatsApp TEST مخصص ومقبول الإرسال إليه.
+
+المطلوب إثباته:
+
+`intents.decision.apply → business_event_outbox(active) → projector/template → engineSendText → sent`
+
+مع:
+
+- عدم إرسال duplicate من `customer_intent_notifications`.
+- نفس transport idempotency boundary.
+- legacy row تصبح terminal/sent بعد الإرسال الجديد.
+
+**لا تستخدم contact حقيقي عشوائيًا لهذا الاختبار.**
+
+### Gate D — Guarded rollback
+
+بعد active E2E:
+
+```bash
+WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID=<TEST_ACCOUNT_UUID>
+WACRM_INTENTS_CUTOVER_ROLLBACK_LIVE=1
+WACRM_INTENTS_CUTOVER_CONFIRM=ROLLBACK_TEST
+npm run test:intents-cutover-control-live
+```
+
+ثم يجب إثبات:
+
+- route = `legacy`.
+- لا active rows في `sending/requires_reconciliation`.
+- sent-state synchronization يمنع duplicate عند الرجوع.
+- pending/failed new-path rows تعود shadow بأمان.
+
+بعد إثبات rollback يمكن إعادة activation في TEST إذا كان المطلوب استمرار التجربة على المنصة الجديدة.
+
+---
+
+## 9. Deferred notes — يجب الرجوع إليها لاحقًا
+
+هذه العناصر مقصودة ومؤجلة، وليست منسية:
+
+1. `service_request.completed`:
+   - موجود في Domain event/template contract.
+   - لا يوجد له authoritative transition في `customer_intents` حاليًا.
+   - لا يدخل Phase 1 readiness.
+   - يجب تحديد lifecycle حقيقي له قبل إضافة producer، لا اختراع حدث لمجرد إكمال القائمة.
+
+2. TEST evidence fixtures:
+   - sink contact والـintent/change-request evidence الناتجة من harness مخصصة لـTEST.
+   - لا تحذف أثناء جمع cutover evidence.
+   - cleanup النهائي لها يراجع في Legacy Contraction/Final Acceptance بعد تثبيت الأدلة المطلوبة.
+
+3. Temporary branch CI:
+   - `CI` و`Migrations` يعملان حاليًا على push إلى `refactor/service-platform-v2`.
+   - عند إغلاق/دمج الفرع يجب إزالة branch-specific filter أو تعميم السياسة بشكل مقصود.
+
+4. Supabase Advisors:
+   - وظائف Intents الجديدة في 107/108 لم تظهر ضمن التحذيرات الجديدة أثناء الفحص.
+   - توجد تحذيرات أقدم في المشروع (RLS/search_path/SECURITY DEFINER/performance وغيرها) خارج نطاق Phase 1.
+   - يجب مراجعتها في Final Acceptance/PROJECT_NOTES بدل إصلاحها بصمت داخل cutover.
+
+5. Dependency audit:
+   - سجل CI الحالي 12 findings بينها 1 critical.
+   - تحتاج triage مستقل مع مراعاة pinned dependencies وNext.js/Supabase compatibility.
+   - لا تستخدم `npm audit fix --force` عشوائيًا.
+
+6. Message source of truth:
+   - Intents legacy rows يجب أن تبقى `render_from_business_event` ولا تعود إلى hard-coded customer prose.
+   - أي regression يعيد `message_text` خاصًا بالـDomain يعتبر إعادة ازدواجية يجب منعها.
+
+7. Cross-domain ownership:
+   - اسم event وحده غير كافٍ لإثبات ownership.
+   - Intents cutover يعتمد على `intents.decision.apply@1` أو legacy selector المحدد فقط.
+   - Coverage-originated `customer_intents` status changes لا تصبح Intents customer delivery events.
+
+8. Stale contract tests:
+   - لا تعاد الملفات/abstractions المحذوفة فقط لإرضاء اختبار قديم.
+   - يحدث الاختبار ليصف ownership الحالي ما دام السلوك المقصود موثقًا ومثبتًا.
+
+---
+
+## 10. Current Phase 1 status
+
+```text
+Schema/migrations       ✅
+Ownership isolation     ✅
+Canonical rendering     ✅
+Rollback controls       ✅
+Clean DB replay         ✅
+Lint                    ✅
+Typecheck               ✅
+Unit/contract tests     ✅
+Build                   ✅
+TEST parity evidence    ⏳ 0/4 until live harness is run
+Readiness               ⏳ false by design
+Activation              ⏳ blocked until readiness=true
+Active transport E2E    ⏳ needs dedicated TEST WhatsApp recipient
+Rollback live E2E       ⏳ after active transport proof
+```
+
+Phase 1 تبقى **IN PROGRESS** حتى إغلاق Gates A-D.
