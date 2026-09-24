@@ -65,6 +65,8 @@ describe('renderFxTradeCustomerMessage', () => {
 
     expect(approved.eventKey).toBe('exchange_rate.trade.approved')
     expect(approved.source).toBe('system')
+    expect(approved.text).toContain('تم قبول طلب الصرف')
+    expect(approved.text).toContain('ستتواصل معك الإدارة في أقرب وقت')
     expect(approved.text).toContain('لم يُسجل كمكتمل بعد')
     expect(approved.text).not.toContain('تسجيلها كمكتملة')
     expect(completed.eventKey).toBe('exchange_rate.trade.completed')
