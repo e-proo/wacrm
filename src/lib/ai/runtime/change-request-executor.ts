@@ -2,7 +2,6 @@ import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { publishPricingRuleRaw } from '@/lib/services/pricing/rules-crud'
 import { tryExecuteCurrentChangeAction } from '@/lib/services/platform/composition'
 import { DomainChangeExecutionError } from '@/lib/services/platform/change-executor-registry'
-import { CURRENT_LEGACY_STRUCTURED_NOTIFICATION_RENDERERS } from '@/lib/services/platform/legacy-structured-notification-composition'
 import { compileFieldSchema, validateValues, type FieldDefinitionInput } from '@/lib/services/catalog/field-schema'
 
 export class ChangeExecutionError extends Error {
@@ -33,9 +32,11 @@ interface CustomerNotificationDescriptor {
   intent_id?: string
   event_type?: string
   message_text?: string
-  template_event?: string
-  template_payload?: Record<string, unknown>
+  render_from_business_event?: boolean
 }
+
+const BUSINESS_EVENT_RENDER_AT_DELIVERY_MARKER =
+  '__BUSINESS_EVENT_RENDER_AT_DELIVERY__'
 
 export async function executeApprovedChangeRequest(input: {
   accountId: string
@@ -317,14 +318,12 @@ async function enqueueCustomerNotification(
   if (intentError) throw intentError
   if (!intent?.conversation_id || !intent.contact_id) return
 
-  let messageText = notification.message_text ?? null
-  if (!messageText && notification.template_event && notification.template_payload) {
-    messageText = await CURRENT_LEGACY_STRUCTURED_NOTIFICATION_RENDERERS.render({
-      accountId,
-      eventKey: notification.template_event,
-      payload: notification.template_payload,
-    })
-  }
+  const explicitMessageText = notification.message_text?.trim() || null
+  const messageText =
+    explicitMessageText ??
+    (notification.render_from_business_event
+      ? BUSINESS_EVENT_RENDER_AT_DELIVERY_MARKER
+      : null)
   if (!messageText) return
 
   const { error } = await db
