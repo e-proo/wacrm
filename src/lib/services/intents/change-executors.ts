@@ -87,14 +87,11 @@ const decideIntentExecutor: ChangeExecutorRegistration['executor'] = async (
             : decision === 'matched'
               ? 'matched'
               : 'approved_and_applied',
-      message_text:
-        decision === 'rejected'
-          ? 'تمت مراجعة طلبك من الإدارة ولم يتم اعتماده.'
-          : decision === 'clarifying'
-            ? 'راجعت الإدارة طلبك وتحتاج إلى معلومات إضافية قبل اتخاذ القرار.'
-            : decision === 'matched'
-              ? 'تمت مراجعة طلبك وربطه بخدمة متوفرة لدينا.'
-              : 'تمت مراجعة طلبك واعتماده من الإدارة.',
+      // Keep the historical outbox row for rollback/idempotency, but never
+      // maintain a second copy of customer-facing Intents prose. The linked
+      // canonical Business Event owns rendering in both shadow comparison and
+      // legacy delivery, exactly like Coverage.
+      render_from_business_event: true,
     },
   }
 }

@@ -84,6 +84,7 @@ describe('Intents deterministic change executor', () => {
       customer_notification: {
         intent_id: 'intent-1',
         event_type: 'approved_and_applied',
+        render_from_business_event: true,
       },
     })
 
@@ -111,6 +112,7 @@ describe('Intents deterministic change executor', () => {
       decision: 'matched',
       customer_notification: {
         event_type: 'matched',
+        render_from_business_event: true,
       },
     })
 
@@ -143,3 +145,18 @@ describe('Intents deterministic change executor', () => {
     expect(mocks.intentUpdate).not.toHaveBeenCalled()
   })
 })
+
+
+  it('does not persist parallel customer-facing prose for canonical Intents events', async () => {
+    const result = await executor(context, {
+      ...baseChange,
+      proposedPayload: { decision: 'rejected' },
+    })
+
+    expect(result.customer_notification).toMatchObject({
+      intent_id: 'intent-1',
+      event_type: 'rejected',
+      render_from_business_event: true,
+    })
+    expect(result.customer_notification).not.toHaveProperty('message_text')
+  })

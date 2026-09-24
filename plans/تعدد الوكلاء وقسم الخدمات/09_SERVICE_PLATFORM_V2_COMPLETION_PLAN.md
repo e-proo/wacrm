@@ -307,3 +307,51 @@ Phase 6  Full acceptance
 - Supabase Security Advisor لم يشر إلى وظائف migrations 107/108 الجديدة؛ التحذيرات الأقدم للمشروع تبقى ضمن `PROJECT_NOTES.md`.
 
 الخطوة التالية داخل Phase 1 هي إنشاء/تنفيذ سيناريوهات TEST حقيقية لكل outcome، تشغيل shadow projection comparison، ثم إعادة قراءة readiness. لا يجوز تفعيل المسار قبل وصول matched event types إلى 4/4.
+
+
+### Phase 1 — ملاحظة تنفيذية: Message parity source
+
+تم اكتشاف أن رسائل Intents القديمة كانت تحمل نصوصًا hard-coded مختلفة عن system templates الخاصة بـ `service_request.*`. الاعتماد على مقارنة النصين كما هما كان سيجعل shadow parity تفشل حتى عندما تكون business facts صحيحة.
+
+القرار المعماري:
+
+- لا نضيف normalization لتغطية الاختلاف.
+- لا نحتفظ بنسختين من customer-facing prose.
+- `INTENTS_CHANGE_EXECUTORS` يعيد `render_from_business_event: true`.
+- legacy `customer_intent_notifications` يبقى موجودًا للـrollback وtransport idempotency فقط.
+- عند delivery أو shadow comparison، النص يُرندر من الـcanonical linked Business Event عبر Event Projector + Template Resolver.
+- هذا يطابق النمط الذي أصبح مستخدمًا في Coverage ويجعل القالب مصدر الحقيقة الوحيد للرسالة.
+
+### Phase 1 — TEST Evidence Harness
+
+تمت إضافة harness اختياري:
+
+`src/lib/services/intents/cutover-evidence.live.test.ts`
+
+ويجب تشغيله فقط على TEST مع:
+
+```text
+WACRM_INTENTS_CUTOVER_EVIDENCE_LIVE=1
+WACRM_INTENTS_CUTOVER_EVIDENCE_CONFIRM=GENERATE_TEST_EVIDENCE
+WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID=<test-account>
+```
+
+قواعد الأمان فيه:
+
+- يبدأ فقط عندما route mode = `legacy`.
+- يوقف recovery worker مؤقتًا أثناء إنشاء fixtures ثم يعيد القيمة السابقة.
+- يستخدم contact sink واضح باسم `[TEST] Intents Cutover Sink — DO NOT MESSAGE`.
+- proposal تُنشأ مباشرة عبر authoritative `create_change_request_v3` حتى لا يتم إرسال trusted-admin WhatsApp alert أثناء fixture setup.
+- approval يتم عبر عقد approval الحقيقي.
+- deterministic execution يتم عبر `executeApprovedChangeRequest` الحقيقي.
+- legacy notification الناتجة من التنفيذ تُجعل terminal داخل TEST قبل إعادة worker، لذلك لا تستخدم كاختبار transport.
+- shadow comparison نفسه يستخدم canonical projector/template.
+- الـharness يجب أن يصل إلى 4/4 matched قبل السماح بالactivation.
+
+**تنبيه للرجوع لاحقًا:** هذا الـharness يثبت producer + approval + executor + legacy bridge + projector/template parity. لا يعتبر اختبار WhatsApp transport الفعلي. active transport E2E يحتاج رقم TEST مخصص قبل إغلاق Phase 1 نهائيًا.
+
+### Temporary branch CI gate
+
+تم توسيع GitHub Actions مؤقتًا ليعمل `CI` و`Migrations` على push إلى `refactor/service-platform-v2` أيضًا، حتى نحصل على دليل فعلي لـ lint/typecheck/tests/build/migration replay أثناء العمل.
+
+**ملاحظة cleanup لاحقة:** عند إغلاق الفرع/دمجه، إما إزالة اسم الفرع من workflow filters أو تحويل سياسة CI إلى قاعدة branch عامة إذا تقرر إبقاؤها.
