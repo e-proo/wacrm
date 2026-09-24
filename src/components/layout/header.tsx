@@ -27,6 +27,7 @@ const pageTitles: Record<string, string> = {
   "/pipelines": "pipelines",
   "/broadcasts": "broadcasts",
   "/automations": "automations",
+  "/fx": "__fx",
   "/settings": "settings",
 };
 
@@ -70,7 +71,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
           <Menu className="h-5 w-5" />
         </button>
         <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
-          {t(titleKey as string)}
+          {titleKey === "__fx" ? "FX" : t(titleKey as string)}
         </h1>
       </div>
 

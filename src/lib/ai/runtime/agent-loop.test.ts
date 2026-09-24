@@ -1,52 +1,19 @@
+import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
-import { parseToolCall } from './agent-loop'
 
-// The tool-call wire protocol between the model and the runtime:
-// the model emits a ```tool fenced JSON block; everything outside
-// it is the customer-facing answer.
-
-describe('parseToolCall', () => {
-  it('extracts a fenced tool call and strips it from the text', () => {
-    const raw = 'Let me check.\n```tool\n{"tool":"services.search","args":{"query":"coverage"}}\n```'
-    const { call, text } = parseToolCall(raw)
-    expect(call).toEqual({
-      toolKey: 'services.search',
-      args: { query: 'coverage' },
-    })
-    expect(text).toBe('Let me check.')
+describe('agent-loop structured tool safety', () => {
+  it('uses native structured tools and does not export the legacy fenced parser', () => {
+    const source = readFileSync(new URL('./agent-loop.ts', import.meta.url), 'utf8')
+    expect(source).toContain('generateNativeAgentTurn')
+    expect(source).not.toMatch(/export\s+(?:async\s+)?function\s+parseToolCall/)
   })
 
-  it('returns null for plain text (final answer)', () => {
-    const { call, text } = parseToolCall('Here is your answer: 420 YER.')
-    expect(call).toBeNull()
-    expect(text).toBe('Here is your answer: 420 YER.')
-  })
-
-  it('drops malformed JSON blocks from the text (never crashes the loop)', () => {
-    const raw = '```tool\n{not json}\n```'
-    const { call, text } = parseToolCall(raw)
-    expect(call).toBeNull()
-    expect(text).toBe('')
-  })
-
-  it('honors only the FIRST tool block per turn and strips all blocks', () => {
-    const raw = [
-      '```tool',
-      '{"tool":"intents.search","args":{}}',
-      '```',
-      'more text',
-      '```tool',
-      '{"tool":"services.get","args":{}}',
-      '```',
-    ].join('\n')
-    const { call, text } = parseToolCall(raw)
-    expect(call?.toolKey).toBe('intents.search')
-    expect(text).toBe('more text')
-  })
-
-  it('defaults missing args to an empty object', () => {
-    const raw = '```tool\n{"tool":"intents.search"}\n```'
-    const { call } = parseToolCall(raw)
-    expect(call?.args).toEqual({})
+  it('fails closed on concrete current FX questions until the authoritative tool succeeds', () => {
+    const source = readFileSync(new URL('./agent-loop.ts', import.meta.url), 'utf8')
+    expect(source).toContain("requiresFreshFxRate(latestCustomerText)")
+    expect(source).toContain("exchange_rates.get_current")
+    expect(source).toContain('FX_CURRENT_RATE_TOOL_UNAVAILABLE')
+    expect(source).toContain('Conversation history and retrieved knowledge are NOT authoritative for current FX prices')
+    expect(source).toContain("call.toolKey === 'exchange_rates.get_current' && outcome.result.ok")
   })
 })

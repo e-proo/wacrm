@@ -1,27 +1,16 @@
-// ============================================================
-// /api/change-requests/[id]/[action]
-//
-// Phase 3 actions:
-//   approve  — admin supplies the confirmation code; record approval.
-//   reject   — admin rejects; record rejection.
-//   cancel   — admin cancels their own pending proposal.
-//
-// All admin+ only.
-// ============================================================
-
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
-import {
-  checkRateLimit,
-  rateLimitResponse,
-  RATE_LIMITS,
-} from '@/lib/rate-limit'
+import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import {
   approveChangeRequest,
   cancelChangeRequest,
   ChangeRequestError,
   rejectChangeRequest,
 } from '@/lib/ai/runtime/change-requests-service'
+import {
+  ChangeExecutionError,
+  executeApprovedChangeRequest,
+} from '@/lib/ai/runtime/change-request-executor'
 
 export async function POST(
   request: Request,
@@ -51,14 +40,46 @@ export async function POST(
             { status: 400 },
           )
         }
-        const result = await approveChangeRequest({
+
+        const approved = await approveChangeRequest({
           accountId: ctx.accountId,
           changeRequestId: id,
           confirmationCode: body.confirmationCode,
           actorUserId: ctx.userId,
         })
-        return NextResponse.json(result)
+
+        // Approval is a business command, not merely a state toggle. Attempt
+        // deterministic execution in the same API request. If the process dies
+        // after approval but before this call, the recovery worker will pick up
+        // the still-approved request. Claim/CAS keeps concurrent callers safe.
+        if (approved.status === 'approved' || approved.status === 'executed') {
+          try {
+            const execution = await executeApprovedChangeRequest({
+              accountId: ctx.accountId,
+              changeRequestId: id,
+              actorUserId: ctx.userId,
+            })
+            return NextResponse.json({ ...approved, execution })
+          } catch (executionErr) {
+            if (executionErr instanceof ChangeExecutionError) {
+              return NextResponse.json(
+                {
+                  ...approved,
+                  execution: {
+                    status: 'failed',
+                    error: executionErr.message,
+                    code: executionErr.code,
+                  },
+                },
+                { status: executionErr.status },
+              )
+            }
+            throw executionErr
+          }
+        }
+        return NextResponse.json(approved)
       }
+
       if (action === 'reject') {
         let body: { reason?: string }
         try {
@@ -74,6 +95,7 @@ export async function POST(
         })
         return NextResponse.json(result)
       }
+
       if (action === 'cancel') {
         const result = await cancelChangeRequest({
           accountId: ctx.accountId,
@@ -91,6 +113,7 @@ export async function POST(
       }
       throw innerErr
     }
+
     return NextResponse.json({ error: 'Unknown action' }, { status: 404 })
   } catch (err) {
     return toErrorResponse(err)

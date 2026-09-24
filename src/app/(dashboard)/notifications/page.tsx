@@ -5,16 +5,15 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import type { Notification } from "@/types";
-import { Bell, CheckCheck, Loader2, UserPlus } from "lucide-react";
+import { Bell, CheckCheck, ClipboardList, Loader2, UserPlus } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-// Icon per notification type. Only one type exists today
-// (conversation_assigned) but this keeps future types a one-line add.
 const TYPE_ICON: Record<Notification["type"], typeof Bell> = {
   conversation_assigned: UserPlus,
+  customer_intent_forwarded: ClipboardList,
 };
 
 export default function NotificationsPage() {
@@ -167,7 +166,7 @@ export default function NotificationsPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Notifications</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Conversations other teammates assign to you show up here.
+            Conversation assignments and customer requests that need review show up here.
           </p>
         </div>
         <Button
@@ -194,8 +193,7 @@ export default function NotificationsPage() {
             No notifications yet
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            You&apos;ll see an alert here when someone assigns you a
-            conversation.
+            You&apos;ll see alerts here for assignments and customer requests that need review.
           </p>
         </div>
       ) : (

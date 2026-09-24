@@ -57,7 +57,7 @@ export interface RecordIntentInput {
 export interface RecordedIntent {
   intentId: string
   status: CustomerIntentRow['status']
-  changeRequest: { id: string; code: number; confirmationCode: string } | null
+  changeRequest: { id: string; code: number; confirmationCode: string | null } | null
 }
 
 export async function recordIntent(

@@ -12,9 +12,13 @@ import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import {
   dispatchInboundToAiAgent,
+  resolveTrustedAdminIdentity,
   shouldRouteToMultiAgent,
 } from '@/lib/ai/runtime/dispatch'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { loadRuntimeRoutingSignals } from '@/lib/ai/runtime/routing-signals'
+import { handleAdminChangeCommand } from '@/lib/ai/runtime/admin-change-commands'
+import { engineSendText } from '@/lib/automations/meta-send'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -311,6 +315,7 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // Tenancy — drives every contact / conversation lookup
           // and the engines' active-row dispatch.
           config.account_id,
+          config.id,
           // Audit / sender-of-record — used as the user_id on row
           // inserts that need it for NOT NULL FK compliance. Always
           // the admin who saved the WhatsApp config.
@@ -583,6 +588,7 @@ async function processMessage(
   // contact / conversation / message row created downstream is
   // stamped with this so any member of the account can see it.
   accountId: string,
+  inboxId: string,
   // Sender-of-record for inserts that need a NOT NULL user_id FK
   // (contacts, conversations). Always the admin who saved the
   // WhatsApp config; the choice is arbitrary post-017 but stable.
@@ -773,6 +779,82 @@ async function processMessage(
   // trigger installed in migration 003).
   await flagBroadcastReplyIfAny(accountId, contactRecord.id)
 
+  // SECURITY BOUNDARY: resolve the sender plane before ANY customer Flow,
+  // Automation, or legacy auto-reply sees the message. A verified admin
+  // address is owned exclusively by the admin-plane runtime. If the lookup
+  // itself fails we fail closed for this message rather than accidentally
+  // executing customer automations with an administrator's instructions.
+  const normalizedSenderAddress = normalizePhone(senderPhone)
+  let trustedAdminIdentity = null
+  try {
+    trustedAdminIdentity = await resolveTrustedAdminIdentity({
+      accountId,
+      senderAddress: normalizedSenderAddress,
+    })
+  } catch (err) {
+    console.error('[webhook] trusted-admin plane lookup failed:', err)
+    return
+  }
+
+  if (trustedAdminIdentity) {
+    const adminText = contentText ?? message.text?.body ?? ''
+    const multiAgent = process.env.MULTI_AGENT_ENABLED === 'true'
+    console.info(
+      `[ai gate] plane=admin identity=${trustedAdminIdentity.id.slice(0, 8)} env=${multiAgent}`,
+    )
+
+    const changeCommand = await handleAdminChangeCommand({
+      accountId,
+      identity: trustedAdminIdentity,
+      inboundMessageId: insertedRows[0].id,
+      text: adminText,
+    })
+    if (changeCommand.handled) {
+      if (configOwnerUserId) {
+        await engineSendText({
+          accountId,
+          userId: configOwnerUserId,
+          conversationId: conversation.id,
+          contactId: contactRecord.id,
+          text: changeCommand.reply,
+        })
+      }
+      await dispatchWebhookEvent(supabaseAdmin(), accountId, 'message.received', {
+        conversation_id: conversation.id,
+        contact_id: contactRecord.id,
+        whatsapp_message_id: message.id,
+        content_type: contentType,
+        text: contentText,
+      })
+      return
+    }
+
+    if (multiAgent && !interactiveReplyId && adminText.trim()) {
+      await dispatchInboundToAiAgent({
+        accountId,
+        conversationId: conversation.id,
+        inboundMessageId: insertedRows[0].id,
+        contactId: contactRecord.id,
+        configOwnerUserId,
+        senderAddress: normalizedSenderAddress,
+        hasHumanAssignee: Boolean(conversation.assigned_agent_id),
+        multiAgentEnabled: true,
+        workerId: 'webhook-admin',
+      })
+    }
+
+    // Public inbound event remains observable, but customer-plane engines
+    // below are intentionally skipped even if the admin agent is disabled.
+    await dispatchWebhookEvent(supabaseAdmin(), accountId, 'message.received', {
+      conversation_id: conversation.id,
+      contact_id: contactRecord.id,
+      whatsapp_message_id: message.id,
+      content_type: contentType,
+      text: contentText,
+    })
+    return
+  }
+
   // ============================================================
   // Flow runner dispatch.
   //
@@ -870,6 +952,22 @@ async function processMessage(
     }).catch((err) => console.error('[automations] dispatch failed:', err))
   }
 
+  // Load route signals AFTER Flows/Automations have had their chance to
+  // update contact tags, but feed the SAME snapshot to pre-check + dispatch
+  // so ownership cannot change between the two routing passes.
+  let routingSignals: Awaited<ReturnType<typeof loadRuntimeRoutingSignals>>
+  try {
+    routingSignals = await loadRuntimeRoutingSignals(supabaseAdmin(), {
+      accountId,
+      contactId: contactRecord.id,
+      inboxId,
+      text: inboundText,
+    })
+  } catch (err) {
+    console.error('[ai gate] routing signal lookup failed:', err)
+    routingSignals = { inboxId, tags: [], language: null }
+  }
+
   // AI reply — EXACTLY ONE path owns the message.
   //
   // Gate order (fail-safe to the legacy path):
@@ -889,6 +987,7 @@ async function processMessage(
         conversationId: conversation.id,
         senderAddress: normalizePhone(senderPhone),
         hasHumanAssignee: Boolean(conversation.assigned_agent_id),
+        ...routingSignals,
       })
     }
     // Permanent diagnostic: one line per message shows which path
@@ -907,6 +1006,7 @@ async function processMessage(
         hasHumanAssignee: Boolean(conversation.assigned_agent_id),
         multiAgentEnabled: true,
         workerId: 'webhook',
+        ...routingSignals,
       })
     } else {
       await dispatchInboundToAiReply({
