@@ -120,6 +120,77 @@ BEGIN
     RAISE EXCEPTION 'claim_business_event_delivery_v2 privileges are unsafe';
   END IF;
 
+  -- Coverage controlled customer Business Event cutover (106).
+  IF to_regprocedure(
+    'public.inspect_coverage_business_event_cutover_readiness(uuid)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'Coverage cutover readiness RPC is missing — migration 106 did not apply';
+  END IF;
+
+  IF to_regprocedure(
+    'public.set_coverage_business_event_delivery_mode(uuid,text)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'Coverage cutover mode RPC is missing — migration 106 did not apply';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'coverage_offers_business_event_zz_route'
+      AND tgrelid = 'public.coverage_offers'::regclass
+      AND NOT tgisinternal
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'coverage_requests_business_event_zz_route'
+      AND tgrelid = 'public.coverage_requests'::regclass
+      AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'Coverage route triggers are missing — migration 106 did not apply';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'zz_customer_intent_notifications_business_event_sent_sync'
+      AND tgrelid = 'public.customer_intent_notifications'::regclass
+      AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'Late legacy Business Event sent-state sync trigger is missing';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.inspect_coverage_business_event_cutover_readiness(uuid)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.inspect_coverage_business_event_cutover_readiness(uuid)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.inspect_coverage_business_event_cutover_readiness(uuid)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'Coverage cutover readiness RPC privileges are unsafe';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.set_coverage_business_event_delivery_mode(uuid,text)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.set_coverage_business_event_delivery_mode(uuid,text)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.set_coverage_business_event_delivery_mode(uuid,text)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'Coverage cutover mode RPC privileges are unsafe';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
