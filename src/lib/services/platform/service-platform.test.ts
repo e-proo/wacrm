@@ -635,11 +635,6 @@ describe('Intents third-domain architectural acceptance', () => {
       new URL('../../messaging/resolver.ts', import.meta.url),
       'utf8',
     )
-    const intentAdapter = readFileSync(
-      new URL('../intents/legacy-notification-adapter.ts', import.meta.url),
-      'utf8',
-    )
-
     expect(dispatch).not.toContain("intents.")
     expect(worker).not.toContain("intents.")
     expect(delivery).not.toContain("intents.")
@@ -647,8 +642,8 @@ describe('Intents third-domain architectural acceptance', () => {
     expect(delivery).not.toContain("target_type === 'service_intent'")
     expect(delivery).not.toContain('renderServiceRequestCustomerMessage')
     expect(resolver).not.toContain("intents.")
-    expect(intentAdapter).toContain("target_type !== 'service_intent'")
-    expect(intentAdapter).toContain('renderServiceRequestCustomerMessage')
+    expect(delivery).toContain('renderLinkedLegacyBusinessEventNotification')
+    expect(delivery).not.toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
   })
 })
 
@@ -723,58 +718,40 @@ describe('legacy change-notification contraction', () => {
   })
 })
 
-describe('Intents legacy notification contraction', () => {
-  it('keeps service-intent legacy rendering outside the generic notification worker', () => {
+describe('canonical legacy notification fallback contraction', () => {
+  it('renders linked rollback rows through the generic Business Event path', () => {
     const runtime = readFileSync(
       new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
       'utf8',
     )
-    const adapter = readFileSync(
-      new URL('../intents/legacy-notification-adapter.ts', import.meta.url),
+    const delivery = readFileSync(
+      new URL('./business-event-delivery.ts', import.meta.url),
       'utf8',
     )
-
-    expect(runtime).toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
-    expect(runtime).not.toContain('renderServiceRequestCustomerMessage')
-    expect(runtime).not.toContain('serviceRequestOutcome')
-    expect(runtime).not.toContain("target_type === 'service_intent'")
-    expect(adapter).toContain('renderServiceRequestCustomerMessage')
-    expect(adapter).toContain("change.target_type !== 'service_intent'")
-    expect(adapter).toContain('intents.legacy_customer_notification')
-  })
-})
-
-describe('legacy notification contraction', () => {
-  it('keeps FX rollback rendering outside the generic customer notification runtime', () => {
-    const runtime = readFileSync(
-      new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
-      'utf8',
-    )
-    const fxAdapter = readFileSync(
-      new URL('../fx-v2/legacy-notification-adapter.ts', import.meta.url),
-      'utf8',
-    )
-
     const shadowParity = readFileSync(
       new URL('./business-event-outbox.ts', import.meta.url),
       'utf8',
     )
-    const registry = readFileSync(
-      new URL('./legacy-notification-renderer-registry.ts', import.meta.url),
-      'utf8',
-    )
 
-    expect(runtime).toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
+    expect(runtime).toContain('renderLinkedLegacyBusinessEventNotification')
+    expect(runtime).not.toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
+    expect(runtime).not.toContain('renderServiceRequestCustomerMessage')
     expect(runtime).not.toContain('renderFxTradeBusinessEventText')
     expect(runtime).not.toContain('fx_trade_request_id')
-    expect(shadowParity).toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
+    expect(runtime).not.toContain("target_type === 'service_intent'")
+
+    expect(delivery).toContain('renderLinkedLegacyBusinessEventNotification')
+    expect(delivery).toContain('CURRENT_EVENT_PROJECTOR_REGISTRY')
+    expect(delivery).toContain('renderBusinessEventProjection')
+    expect(delivery).not.toContain('exchange_rate')
+    expect(delivery).not.toContain('fx_trade_request')
+    expect(delivery).not.toContain('coverage')
+    expect(delivery).not.toContain('service_intent')
+
+    expect(shadowParity).toContain('renderLinkedLegacyBusinessEventNotification')
+    expect(shadowParity).not.toContain('CURRENT_LEGACY_NOTIFICATION_RENDERERS')
     expect(shadowParity).not.toContain('renderFxTradeBusinessEventText')
     expect(shadowParity).not.toContain('fx_trade_request_id')
-    expect(registry).not.toContain('fxTradeRequestId')
-    expect(registry).not.toContain('fx_trade_request_id')
-    expect(fxAdapter).toContain('renderFxTradeBusinessEventText')
-    expect(fxAdapter).toContain('fx_trade_request_id')
-    expect(fxAdapter).toContain('exchange_rates.legacy_customer_notification')
   })
 })
 
