@@ -224,12 +224,27 @@ export async function inspectShadowBusinessEventRendering(input: {
         continue
       }
 
-      const linkedFallback = await renderLinkedLegacyBusinessEventNotification({
-        accountId: input.accountId,
-        legacyNotificationId: row.legacy_notification_id,
-        db,
-      })
-      const legacyText = linkedFallback?.text ?? legacy.message_text
+      const persistedLegacyText = legacy.message_text.trim()
+      let legacyText = legacy.message_text
+      if (/^__[A-Z0-9_]+__$/.test(persistedLegacyText)) {
+        const linkedFallback = await renderLinkedLegacyBusinessEventNotification({
+          accountId: input.accountId,
+          legacyNotificationId: row.legacy_notification_id,
+          db,
+        })
+        if (!linkedFallback) {
+          result.comparisonMissing += 1
+          await persistShadowProjectionEvidence({
+            accountId: input.accountId,
+            eventId: row.id,
+            status: 'comparison_missing',
+            renderedText: rendered.text,
+            error: 'LEGACY_CANONICAL_EVENT_LINK_MISSING',
+          })
+          continue
+        }
+        legacyText = linkedFallback.text
+      }
 
       if (rendered.text === legacyText) {
         result.matchedLegacy += 1
