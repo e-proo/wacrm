@@ -1,5 +1,5 @@
-import { Decimal } from 'decimal.js'
-import { formatDecimal, parseDecimal } from './decimal'
+import { Decimal, formatDecimal, parseDecimal } from '@/lib/services/shared/money/decimal'
+import type { MoneyJson } from '@/lib/services/shared/money/money-json'
 
 // ============================================================
 // Pricing engine — pure functions over a service's published
@@ -18,10 +18,8 @@ import { formatDecimal, parseDecimal } from './decimal'
 // should serialize at; default 2 (most currencies).
 // ============================================================
 
-export interface QuoteInput {
+export interface QuoteInput extends MoneyJson {
   /** Raw amount string (e.g. "10000.00"). Decimal-parsed. */
-  amount: string
-  currency: string
   /** Service attributes that affect the calculation (e.g.
    *  coverage_region, deposit_method). Free-form; the rule body
    *  decides which keys it needs. */

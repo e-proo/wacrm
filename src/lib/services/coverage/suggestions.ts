@@ -23,11 +23,11 @@
 // anomalies so an operator can correct the misclassified row.
 // ============================================================
 
-import { Decimal } from 'decimal.js'
+import { Decimal, formatDecimal } from '@/lib/services/shared/money/decimal'
+import type { MoneyJson } from '@/lib/services/shared/money/money-json'
 import { readCoverageAttributes, type CoverageMethod } from './attributes'
 import { classifyCoverageDirection } from './direction'
 
-Decimal.set({ precision: 40, rounding: Decimal.ROUND_HALF_UP })
 
 export interface RegionRef {
   id: string
@@ -65,11 +65,9 @@ export interface RequestLike {
 // canonical bookable suggestions emitted by this module are always 'mirror'.
 export type MatchOrientation = 'direct' | 'mirror'
 
-export interface SuggestionLeg {
+export interface SuggestionLeg extends MoneyJson {
   offer_id: string
   request_id: string
-  amount: string
-  currency: string
   score: number
   region_score: number
   method_score: number
@@ -94,10 +92,8 @@ export interface RequestSuggestions {
   fully_coverable: boolean
 }
 
-export interface OfferCandidate {
+export interface OfferCandidate extends MoneyJson {
   request_id: string
-  amount: string
-  currency: string
   score: number
   region_score: number
   method_score: number
@@ -115,13 +111,11 @@ export interface OfferCandidate {
  * Same-type anti-parallel rows are not valid bookable pairs. They are
  * returned as repair hints for legacy/misclassified data only.
  */
-export interface ComplementaryPair {
+export interface ComplementaryPair extends MoneyJson {
   a_type: 'offer' | 'request'
   a_id: string
   b_type: 'offer' | 'request'
   b_id: string
-  currency: string
-  amount: string
   score: number
   region_score: number
   method_score: number
@@ -135,7 +129,7 @@ function d(input: string | number): Decimal {
 }
 
 function fmt(value: Decimal): string {
-  return value.toFixed(SCALE)
+  return formatDecimal(value, SCALE)
 }
 
 function methodPairScore(a: CoverageMethod, b: CoverageMethod): number {

@@ -1,5 +1,4 @@
-import { Decimal } from 'decimal.js'
-import { parseDecimal } from '@/lib/services/pricing/decimal'
+import { Decimal, parseDecimal } from '@/lib/services/shared/money/decimal'
 
 export type FxTradeSide = 'customer_buy' | 'customer_sell'
 export type FxAmountBasis = 'base' | 'quote'
