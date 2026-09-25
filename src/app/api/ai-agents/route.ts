@@ -267,7 +267,7 @@ async function createAgentFromTemplate(
     .map((key) => getCurrentPlatformTool(key))
     .filter(
       (tool): tool is NonNullable<typeof tool> =>
-        Boolean(tool) && tool.modelExposed && !tool.serverOnly,
+        tool !== null && tool.modelExposed && !tool.serverOnly,
     )
   if (grants.length > 0) {
     await db.from('ai_agent_tool_grants').insert(
