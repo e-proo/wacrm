@@ -891,14 +891,20 @@ describe('Services/Pricing Phase 2A native ownership', () => {
   })
 
   it('keeps exact action identity on newly created service/pricing proposals', () => {
-    const handoff = readFileSync(
-      new URL('../../ai/tools/business-handoff.ts', import.meta.url),
+    const servicesRuntime = readFileSync(
+      new URL('../service-catalog/ai-tool-runtime.ts', import.meta.url),
       'utf8',
     )
-    expect(handoff).toContain("actionKey: 'services.update'")
-    expect(handoff).toContain(
+    const pricingRulesRuntime = readFileSync(
+      new URL('../pricing-rules/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+    expect(servicesRuntime).toContain("actionKey: 'services.update'")
+    expect(servicesRuntime).toContain('actionVersion: 1')
+    expect(pricingRulesRuntime).toContain(
       "actionKey: 'pricing_rules.create_and_attach'",
     )
+    expect(pricingRulesRuntime).toContain('actionVersion: 1')
   })
 })
 
@@ -981,5 +987,35 @@ describe('Services/Pricing Phase 2B ownership contraction', () => {
     expect(pricingRules).toContain(
       "actionKey: 'pricing_rules.create_and_attach'",
     )
+  })
+})
+
+
+describe('Phase 2 generic Change Request kernel purity', () => {
+  it('keeps domain current-state/version validation out of the generic executor', () => {
+    const kernel = readFileSync(
+      new URL('../../ai/runtime/change-request-executor.ts', import.meta.url),
+      'utf8',
+    )
+    const servicesExecutor = readFileSync(
+      new URL('../service-catalog/change-executors.ts', import.meta.url),
+      'utf8',
+    )
+    const pricingExecutor = readFileSync(
+      new URL('../pricing-rules/change-executors.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(kernel).not.toContain('assertExpectedVersion')
+    expect(kernel).not.toContain("service: 'services'")
+    expect(kernel).not.toContain("ai_agent: 'ai_agents'")
+    expect(kernel).not.toContain('EXPECTED_VERSION_UNSUPPORTED')
+    expect(kernel).not.toContain('SERVICE_VERSION_CONFLICT')
+    expect(kernel).not.toContain('SERVICE_PRICING_VERSION_CONFLICT')
+
+    expect(servicesExecutor).toContain('p_expected_version: change.expectedVersion')
+    expect(servicesExecutor).toContain('SERVICE_VERSION_CONFLICT')
+    expect(pricingExecutor).toContain('p_expected_service_version')
+    expect(pricingExecutor).toContain('SERVICE_PRICING_VERSION_CONFLICT')
   })
 })

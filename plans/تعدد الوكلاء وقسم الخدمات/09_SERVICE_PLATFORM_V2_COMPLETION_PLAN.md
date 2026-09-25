@@ -668,3 +668,22 @@ Legacy ToolDefinition registry:
 ملاحظة مؤجلة لمرحلة Legacy Contraction:
 
 `src/lib/ai/tools/executors.ts` ما زال يحتوي بعض exports القديمة read-only لخدمات/تسعير قد يستخدمها مستهلك داخلي تاريخي. لم تعد هذه الدوال مسجلة في model runtime ولا مصدر العقود. حذفها النهائي يُجرى بعد فحص consumers ضمن Phase 5، ولا يعاد ربطها كمسار تشغيل.
+
+
+### Phase 2C — Generic Change Request kernel purity
+
+تمت إزالة `assertExpectedVersion()` من `change-request-executor.ts`.
+
+السبب:
+
+- الدالة كانت تعرف أن `service` تعني جدول `services` وأن `ai_agent` تعني `ai_agents`.
+- هذا يتعارض مع boundary الخطة: generic kernel يملك claim/completion/failure/audit، بينما الـDomain يملك current-state validation.
+- `services.update` يمرر `change.expectedVersion` إلى `apply_service_agent_change` ويحوّل version conflict إلى `SERVICE_VERSION_CONFLICT`.
+- `pricing_rules.create_and_attach` يحمل `expected_service_version` داخل payload ويمرره إلى `apply_service_pricing_change`.
+- لذلك إزالة precheck المركزي لا تزيل حماية optimistic concurrency؛ تنقلها إلى المالك الصحيح.
+- legacy historical rows تستمر في الوصول إلى نفس Domain executors عبر legacy selectors.
+
+تم كذلك تحديث اختبارات action identity القديمة لتقرأ exact action identity من:
+- `service-catalog/ai-tool-runtime.ts`
+- `pricing-rules/ai-tool-runtime.ts`
+بدل افتراض أن `business-handoff.ts` ما زال يملك هذه المقترحات.

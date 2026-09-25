@@ -76,7 +76,6 @@ export async function executeApprovedChangeRequest(input: {
   }
 
   try {
-    await assertExpectedVersion(db, input.accountId, row)
     const result = await executeClaimedTarget(input, row)
     const { data: completed, error: completeError } = await db.rpc(
       'complete_change_request_execution',
@@ -207,43 +206,6 @@ async function enqueueCustomerNotification(
       },
     )
   if (error) throw error
-}
-
-async function assertExpectedVersion(
-  db: ReturnType<typeof supabaseAdmin>,
-  accountId: string,
-  row: ClaimedChange,
-): Promise<void> {
-  if (row.expected_version == null) return
-  if (!row.target_id) {
-    throw new ChangeExecutionError(
-      'EXPECTED_VERSION_WITHOUT_TARGET',
-      'expected_version cannot be used without a target row.',
-    )
-  }
-
-  const versionedTables: Record<string, string> = {
-    service: 'services',
-    ai_agent: 'ai_agents',
-  }
-  const table = versionedTables[row.target_type]
-  if (!table) {
-    throw new ChangeExecutionError(
-      'EXPECTED_VERSION_UNSUPPORTED',
-      `Target ${row.target_type} does not expose a runtime version check.`,
-    )
-  }
-  const { data, error } = await db
-    .from(table)
-    .select('version')
-    .eq('account_id', accountId)
-    .eq('id', row.target_id)
-    .maybeSingle()
-  if (error) throw error
-  if (!data) throw new ChangeExecutionError('TARGET_NOT_FOUND', 'Change target not found.', 404)
-  if (Number((data as { version: number }).version) !== Number(row.expected_version)) {
-    throw new ChangeExecutionError('EXPECTED_VERSION_CONFLICT', 'Target changed after this proposal was created.')
-  }
 }
 
 function mapClaimError(message: string): string {

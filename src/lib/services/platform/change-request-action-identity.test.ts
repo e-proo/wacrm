@@ -25,6 +25,14 @@ const coverage = readFileSync(
   new URL('../../ai/tools/business-handoff.ts', import.meta.url),
   'utf8',
 )
+const services = readFileSync(
+  new URL('../service-catalog/ai-tool-runtime.ts', import.meta.url),
+  'utf8',
+)
+const pricingRules = readFileSync(
+  new URL('../pricing-rules/ai-tool-runtime.ts', import.meta.url),
+  'utf8',
+)
 const fxCustomer = readFileSync(
   new URL('../../ai/tools/fx-v2-tools.ts', import.meta.url),
   'utf8',
@@ -75,6 +83,13 @@ describe('Change Request action identity expansion', () => {
     expect(fxCustomer).toContain("actionKey: 'exchange_rates.trade.decide'")
     expect(fxAdmin).toContain("actionKey: 'exchange_rates.pair.publish'")
     expect(fxAdmin).toContain("actionKey: 'exchange_rates.trade.decide'")
+
+    expect(services).toContain("actionKey: 'services.update'")
+    expect(services).toContain('actionVersion: 1')
+    expect(pricingRules).toContain(
+      "actionKey: 'pricing_rules.create_and_attach'",
+    )
+    expect(pricingRules).toContain('actionVersion: 1')
   })
 
   it('keeps non-authoritative intent review handoff out of the approval engine', () => {
@@ -85,6 +100,6 @@ describe('Change Request action identity expansion', () => {
 
   it('keeps create_and_attach compatible with the existing pricing proposal path', () => {
     expect(migration).toContain("'create_and_attach'")
-    expect(coverage).toContain("intent: 'create_and_attach'")
+    expect(pricingRules).toContain("intent: 'create_and_attach'")
   })
 })
