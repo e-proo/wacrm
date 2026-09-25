@@ -21,6 +21,7 @@ import {
   RATE_LIMITS,
 } from '@/lib/rate-limit'
 import { publishAgentRevision } from '@/lib/ai/runtime/agents-service'
+import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
 import {
   SLUG_PATTERN_BUILDER,
   deriveSlugFromName,
@@ -253,32 +254,29 @@ async function createAgentFromTemplate(
   }
   const revisionId = (revRow as { id: string }).id
 
-  // Copy the template's suggested tool keys into read-only
-  // grants — intersected with the registry so unknown keys are
-  // dropped (Phase 4 §5 step 5).
-  const { getRegisteredTool } = await import('@/lib/ai/runtime/tool-registry')
+  // Copy the template's suggested tool keys into grants using the
+  // current platform registry. Native business-domain tools are intentionally
+  // absent from the contracted legacy ToolDefinition registry, so template
+  // seeding must resolve them from PlatformToolManifest ownership.
   const suggested = Array.isArray(
     (tpl as { suggested_tool_keys: unknown }).suggested_tool_keys,
   )
     ? ((tpl as { suggested_tool_keys: unknown[] }).suggested_tool_keys as string[])
     : []
   const grants = suggested
-    .map((key) => getRegisteredTool(key))
-    .filter((t): t is NonNullable<typeof t> => Boolean(t))
+    .map((key) => getCurrentPlatformTool(key))
+    .filter(
+      (tool): tool is NonNullable<typeof tool> =>
+        Boolean(tool) && tool.modelExposed && !tool.serverOnly,
+    )
   if (grants.length > 0) {
     await db.from('ai_agent_tool_grants').insert(
-      grants.map((t) => ({
+      grants.map((tool) => ({
         account_id: ctx.accountId,
         agent_revision_id: revisionId,
-        tool_key: t.key,
-        tool_version: t.version,
-        // Read tools get 'read'; propose-class tools (intents.record,
-        // coverage.propose_offer) MUST get 'propose' — seeding them
-        // as 'read' would fail publish validation with
-        // PERMISSION_NOT_ALLOWED.
-        permission: (t.grantPermissions.includes('read')
-          ? 'read'
-          : t.grantPermissions[0]) as 'read' | 'propose' | 'execute',
+        tool_key: tool.key,
+        tool_version: tool.version,
+        permission: tool.permission as 'read' | 'propose' | 'execute',
         constraints: {},
         granted_by: ctx.userId,
       })),
