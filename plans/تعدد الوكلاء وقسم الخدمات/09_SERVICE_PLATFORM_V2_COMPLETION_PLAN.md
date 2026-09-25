@@ -706,3 +706,19 @@ Legacy ToolDefinition registry:
 - لا يفرض builder أحدث نسخة على revision منشورة؛ النسخة المجمدة تبقى صالحة طالما contract exact-version ما زال مسجلاً.
 
 هذه نقطة compatibility أساسية ويجب الحفاظ عليها عند إضافة Domains جديدة لاحقًا.
+
+
+### Phase 2 — Agent-template grant seeding compatibility
+
+اكتُشف أثناء فحص consumers بعد نجاح CI أن إنشاء وكيل جديد من template كان ما يزال يستخدم `getRegisteredTool()` عند تحويل `suggested_tool_keys` إلى grants.
+
+بعد contraction، هذا كان سيؤدي إلى إسقاط أي أداة native من الوكيل الجديد بصمت، لأن legacy registry لم يعد يملك Services/Pricing/FX/Coverage/Intents.
+
+تم التصحيح بحيث:
+
+- template seeding يحل المفتاح من `getCurrentPlatformTool(key)`.
+- لا تُزرع إلا الأدوات `modelExposed` وغير `serverOnly`.
+- `tool_version` يأتي من manifest الحالي.
+- permission يأتي من `PlatformToolManifest.permission`.
+- unknown template keys تظل تسقط بأمان كما في السلوك السابق.
+- أضيف contract test يمنع الرجوع إلى `getRegisteredTool()` في هذا المسار.
