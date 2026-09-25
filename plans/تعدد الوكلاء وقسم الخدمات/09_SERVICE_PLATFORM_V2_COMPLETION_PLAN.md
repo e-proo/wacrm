@@ -90,7 +90,7 @@
 
 ### Phase 2 — Services / Pricing Native Platform Ownership
 
-**الحالة:** IN PROGRESS
+**الحالة:** COMPLETE
 
 الهدف:
 
@@ -740,3 +740,55 @@ Legacy ToolDefinition registry:
 - Pricing quote → `pricing/ai-tool-runtime.ts`
 
 بهذا لا يوجد مسار تنفيذي ثانٍ يمكن أن ينحرف عن العقود native، مع بقاء imports الداخلية القديمة صالحة خلال فترة الانتقال.
+
+
+### Phase 2 — Closure evidence
+
+تم إغلاق Phase 2 بعد مطابقة التنفيذ الفعلي مع بوابة الخروج، وليس اعتمادًا على وجود الملفات فقط.
+
+**Code evidence:**
+
+- `service-catalog` يملك native manifests + model executors + `services.update@1` deterministic change executor.
+- `pricing` يملك `pricing.calculate_quote@1` native manifest/executor.
+- `pricing_rules` يملك native proposal manifest/executor و:
+  - `pricing_rules.create_and_attach@1`
+  - `pricing_rules.publish@1`
+- `domain-catalog.ts` هو composition root الوحيد لتسجيل Domains/Runtimes الثلاثة.
+- `change-request-executor.ts` لا يعرف:
+  - `service` target semantics
+  - `pricing_rule` target semantics
+  - `apply_service_agent_change`
+  - `apply_service_pricing_change`
+  - `publishPricingRuleRaw`
+  - service table version mapping
+- `tool-registry.ts` لا يملك أي `services.*` أو `pricing.*` أو `pricing_rules.*`; يبقى `change_requests.list_pending` فقط كـgeneric transitional tool.
+- `current-domain-registry.ts` و`current-executor-registry.ts` لا يحتويان registrations انتقالية لـServices/Pricing.
+- implementations القديمة في `executors.ts` أزيلت واستبدلت بـcompatibility re-exports فقط.
+- `service-search.ts` و`service-matcher.ts` أصبحا compatibility re-exports للمسارات المملوكة للـDomain.
+- proposal الجديدة تكتب exact `action_key/action_version`، مع بقاء legacy selectors للصفوف التاريخية.
+- agent publish validation وtemplate grant seeding يعتمدان Platform registry، لذلك contraction لا يكسر published-agent/new-agent tool compatibility.
+
+**Verification evidence:**
+
+- Code head: `3abce161ca87f14c8929eb8beff66f2049e36871`
+- GitHub Actions CI run: `36181274607`
+- `npm run lint`: PASS
+- `npm run typecheck`: PASS
+- `npm test`: PASS
+- `npm run build`: PASS
+- source gate check: لا توجد service/pricing mutation branches أو registrations مركزية متبقية.
+
+**Database/migrations:**
+
+- Phase 2 لم تتطلب migration جديدة.
+- exact action identity تعتمد على migration الحالية الخاصة بـChange Request action identity، مع backward compatibility للصفوف التاريخية.
+
+**ما لا يعنيه هذا الإغلاق:**
+
+- Phase 1 live cutover gates المؤجلة ما تزال مؤجلة كما هو موثق ولا تُعتبر مكتملة بسبب إغلاق Phase 2.
+- `change_requests.list_pending` والـlegacy registry العام سيبقيان إلى مرحلة Legacy Contraction المخصصة لهما.
+- لم يتم بدء Phase 3 ضمن هذا الإغلاق.
+
+**نتيجة بوابة الخروج: PASS**
+
+الـgeneric Change Request kernel لم يعد يعرف معنى service أو pricing mutation.
