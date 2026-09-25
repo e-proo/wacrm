@@ -40,15 +40,7 @@ describe('legacy tool registry contraction', () => {
   it('retains only domains that have not migrated to native manifests', () => {
     const keys = listRegisteredTools().map((tool) => tool.key).sort()
     expect(keys).toEqual(
-      [
-        'change_requests.list_pending',
-        'pricing.calculate_quote',
-        'pricing_rules.propose_service_price',
-        'services.get',
-        'services.match_request',
-        'services.propose_update',
-        'services.search',
-      ].sort(),
+      ['change_requests.list_pending'],
     )
 
     expect(getRegisteredTool('exchange_rates.get_current')).toBeNull()
@@ -56,6 +48,12 @@ describe('legacy tool registry contraction', () => {
     expect(getRegisteredTool('intents.record')).toBeNull()
     expect(getRegisteredTool('intents.search')).toBeNull()
     expect(getRegisteredTool('intents.propose_decision')).toBeNull()
+    expect(getRegisteredTool('services.search')).toBeNull()
+    expect(getRegisteredTool('services.get')).toBeNull()
+    expect(getRegisteredTool('services.match_request')).toBeNull()
+    expect(getRegisteredTool('services.propose_update')).toBeNull()
+    expect(getRegisteredTool('pricing.calculate_quote')).toBeNull()
+    expect(getRegisteredTool('pricing_rules.propose_service_price')).toBeNull()
   })
 
   it('preserves read/proposal permission invariants for remaining legacy tools', () => {
@@ -73,14 +71,14 @@ describe('legacy tool registry contraction', () => {
 
   it('keeps the legacy prompt catalog limited to legacy-owned tools', () => {
     const catalog = renderToolCatalog([
+      { tool_key: 'change_requests.list_pending', permission: 'read' },
       { tool_key: 'services.get', permission: 'read' },
       { tool_key: 'pricing.calculate_quote', permission: 'read' },
-      { tool_key: 'intents.record', permission: 'propose' },
     ])
 
-    expect(catalog).toContain('services.get (read)')
-    expect(catalog).toContain('pricing.calculate_quote (read)')
-    expect(catalog).not.toContain('intents.record')
+    expect(catalog).toContain('change_requests.list_pending (read)')
+    expect(catalog).not.toContain('services.get')
+    expect(catalog).not.toContain('pricing.calculate_quote')
   })
 })
 

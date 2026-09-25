@@ -901,3 +901,85 @@ describe('Services/Pricing Phase 2A native ownership', () => {
     )
   })
 })
+
+
+describe('Services/Pricing Phase 2B ownership contraction', () => {
+  it('contracts all Services/Pricing tool definitions out of the legacy registry', () => {
+    const manifests = [
+      ...SERVICES_TOOL_MANIFESTS,
+      ...PRICING_TOOL_MANIFESTS,
+      ...PRICING_RULES_TOOL_MANIFESTS,
+    ]
+    for (const manifest of manifests) {
+      expect(getRegisteredTool(manifest.key), manifest.key).toBeNull()
+      expect(getCurrentPlatformTool(manifest.key, manifest.version)).toEqual(
+        manifest,
+      )
+      expect(
+        getCurrentToolDefinition(manifest.key, manifest.version),
+        manifest.key,
+      ).toMatchObject({
+        key: manifest.key,
+        version: manifest.version,
+        description: manifest.description,
+      })
+    }
+  })
+
+  it('owns service read/match/proposal implementations under service-catalog while keeping compatibility exports', () => {
+    const runtime = readFileSync(
+      new URL('../service-catalog/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+    const legacySearch = readFileSync(
+      new URL('../../ai/tools/service-search.ts', import.meta.url),
+      'utf8',
+    )
+    const legacyMatcher = readFileSync(
+      new URL('../../ai/tools/service-matcher.ts', import.meta.url),
+      'utf8',
+    )
+    const handoff = readFileSync(
+      new URL('../../ai/tools/business-handoff.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(runtime).toContain('executeServiceProposeUpdate')
+    expect(runtime).toContain('matchServiceRequest')
+    expect(runtime).toContain('executeServicesSearchSafe')
+    expect(legacySearch).toContain(
+      "export * from '@/lib/services/service-catalog/read-tools'",
+    )
+    expect(legacyMatcher).toContain(
+      "export * from '@/lib/services/service-catalog/matcher'",
+    )
+    expect(handoff).toContain(
+      "export { executeServiceProposeUpdate } from '@/lib/services/service-catalog/ai-tool-runtime'",
+    )
+    expect(handoff).toContain(
+      "export { executePricingRuleProposeServicePrice } from '@/lib/services/pricing-rules/ai-tool-runtime'",
+    )
+    expect(handoff).not.toContain(
+      'export async function executeServiceProposeUpdate(',
+    )
+    expect(handoff).not.toContain(
+      'export async function executePricingRuleProposeServicePrice(',
+    )
+  })
+
+  it('owns quote and pricing proposal executors inside their native runtime modules', () => {
+    const pricing = readFileSync(
+      new URL('../pricing/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+    const pricingRules = readFileSync(
+      new URL('../pricing-rules/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+    expect(pricing).toContain('previewServiceQuote({')
+    expect(pricingRules).toContain('calculateQuote(')
+    expect(pricingRules).toContain(
+      "actionKey: 'pricing_rules.create_and_attach'",
+    )
+  })
+})

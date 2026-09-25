@@ -640,3 +640,31 @@ Phase 1 تبقى مفتوحة تشغيليًا فقط عند Gates A-D المو�
 - Phase 2B ستنقل implementations نفسها وتزيل النسخ/التعريفات الانتقالية من `tool-registry` و`business-handoff` و`executors`.
 
 سبب استخدام 3 Domains بدل Domain واحد: عقود الأدوات الحالية تشترط تطابق namespace مع domain key. دمجها تحت اسم جديد يتطلب تغيير tool keys ويكسر grants المنشورة، لذلك نحافظ على boundaries الحالية ونجمعها فقط عبر composition root.
+
+
+### Phase 2B — Tool implementation ownership and legacy contract contraction
+
+تم نقل source-of-truth للأدوات إلى Domains الجديدة:
+
+- `service-catalog/read-tools.ts` يملك service search/get.
+- `service-catalog/matcher.ts` يملك service matching.
+- `service-catalog/ai-tool-runtime.ts` يملك proposal/update model executor.
+- `pricing/ai-tool-runtime.ts` يملك quote executor.
+- `pricing-rules/ai-tool-runtime.ts` يملك pricing proposal executor.
+
+Compatibility:
+
+- `src/lib/ai/tools/service-search.ts` أصبح re-export للمسار الجديد.
+- `src/lib/ai/tools/service-matcher.ts` أصبح re-export للمسار الجديد.
+- `business-handoff.ts` يعيد تصدير service/pricing proposal executors بدل امتلاك implementations مكررة.
+- هذا يسمح للمستهلكين الداخليين القدامى بالاستمرار دون جعل الملفات القديمة مصدر الحقيقة.
+
+Legacy ToolDefinition registry:
+
+- تم إخراج جميع `services.*`, `pricing.*`, `pricing_rules.*` منه.
+- يبقى فيه فقط `change_requests.list_pending` كأداة generic transitional.
+- API/UI compatibility للأدوات native تستمر عبر `runtime-tool-compat.ts`.
+
+ملاحظة مؤجلة لمرحلة Legacy Contraction:
+
+`src/lib/ai/tools/executors.ts` ما زال يحتوي بعض exports القديمة read-only لخدمات/تسعير قد يستخدمها مستهلك داخلي تاريخي. لم تعد هذه الدوال مسجلة في model runtime ولا مصدر العقود. حذفها النهائي يُجرى بعد فحص consumers ضمن Phase 5، ولا يعاد ربطها كمسار تشغيل.
