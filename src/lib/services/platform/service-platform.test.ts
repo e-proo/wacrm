@@ -1036,3 +1036,24 @@ describe('native-tool builder publish compatibility', () => {
     expect(builder).toContain('manifest.permission !== row.permission')
   })
 })
+
+
+describe('native-tool template seeding compatibility', () => {
+  it('seeds new agent template grants from PlatformToolManifest ownership', () => {
+    const route = readFileSync(
+      new URL('../../../app/api/ai-agents/route.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(route).toContain(
+      "getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'",
+    )
+    expect(route).toContain('.map((key) => getCurrentPlatformTool(key))')
+    expect(route).toContain('tool.modelExposed && !tool.serverOnly')
+    expect(route).toContain('permission: tool.permission')
+    expect(route).not.toContain('getRegisteredTool')
+    expect(route).not.toContain(
+      "import('@/lib/ai/runtime/tool-registry')",
+    )
+  })
+})
