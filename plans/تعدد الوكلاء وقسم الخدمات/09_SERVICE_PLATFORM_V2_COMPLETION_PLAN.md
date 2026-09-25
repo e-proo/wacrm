@@ -90,7 +90,7 @@
 
 ### Phase 2 — Services / Pricing Native Platform Ownership
 
-**الحالة:** PENDING
+**الحالة:** IN PROGRESS
 
 الهدف:
 
@@ -615,3 +615,28 @@ Phase 1 تبقى **IN PROGRESS** حتى إغلاق Gates A-D.
 **لا يتم تشغيل هذا الاختبار على sink الخاص بالـparity.** يحتاج رقم WhatsApp TEST فعلي مخصص للتجربة.
 
 بعد إضافته لا يتبقى في Phase 1 أي harness برمجي ناقص؛ المتبقي هو تشغيل Gates A-D على TEST بالترتيب الموثق.
+
+
+### Phase 1 — ملاحظة مؤجلة أثناء الانتقال إلى Phase 2
+
+Phase 1 تبقى مفتوحة تشغيليًا فقط عند Gates A-D الموثقة سابقًا: parity 4/4، activation، active WhatsApp E2E، rollback. جميع harnesses جاهزة، ولا يجوز اعتبار Phase 1 مكتملة لاحقًا دون تشغيل هذه الـgates على TEST recipient مخصص.
+
+الانتقال إلى Phase 2 لا يلغي هذه المتطلبات ولا يغير readiness الحالية.
+
+### Phase 2A — Native registration and deterministic mutation extraction
+
+بدأت Phase 2 على أساس الحفاظ على backward compatibility:
+
+- Domain `services` يملك contracts لـ `services.*` وaction `services.update@1`.
+- Domain `pricing` يملك `pricing.calculate_quote@1`.
+- Domain `pricing_rules` يملك `pricing_rules.propose_service_price@1` وactions:
+  - `pricing_rules.create_and_attach@1`
+  - `pricing_rules.publish@1`
+- tool keys/versions الحالية لا تتغير حتى تبقى published-agent grants صالحة.
+- المقترحات الجديدة تكتب exact `action_key/action_version`.
+- historical Change Requests بدون action identity تستمر عبر legacy selectors.
+- deterministic service/pricing mutation branches تُنقل من generic Change Request kernel إلى domain change executors.
+- في Phase 2A تبقى بعض implementation functions في مواقعها القديمة وتُستدعى من domain runtime كطبقة compatibility مؤقتة.
+- Phase 2B ستنقل implementations نفسها وتزيل النسخ/التعريفات الانتقالية من `tool-registry` و`business-handoff` و`executors`.
+
+سبب استخدام 3 Domains بدل Domain واحد: عقود الأدوات الحالية تشترط تطابق namespace مع domain key. دمجها تحت اسم جديد يتطلب تغيير tool keys ويكسر grants المنشورة، لذلك نحافظ على boundaries الحالية ونجمعها فقط عبر composition root.

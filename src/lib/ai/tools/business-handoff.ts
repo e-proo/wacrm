@@ -348,6 +348,8 @@ export async function executeServiceProposeUpdate(
     })
     const cr = await createChangeRequest({
       accountId: ctx.accountId,
+      actionKey: 'services.update',
+      actionVersion: 1,
       targetType: 'service',
       targetId: args.service_id,
       intent: 'update',
@@ -469,6 +471,8 @@ export async function executePricingRuleProposeServicePrice(
     const fingerprint = JSON.stringify(proposedPayload)
     const cr = await createChangeRequest({
       accountId: ctx.accountId,
+      actionKey: 'pricing_rules.create_and_attach',
+      actionVersion: 1,
       targetType: 'pricing_rule',
       targetId: null,
       intent: 'create_and_attach',

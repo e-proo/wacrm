@@ -10,6 +10,12 @@ import { FX_V2_DOMAIN, FX_V2_RUNTIME } from '@/lib/services/fx-v2/domain'
 import { FX_V2_TOOL_MANIFESTS } from '@/lib/services/fx-v2/tool-manifests'
 import { INTENTS_DOMAIN, INTENTS_RUNTIME } from '@/lib/services/intents/domain'
 import { INTENTS_TOOL_MANIFESTS } from '@/lib/services/intents/tool-manifests'
+import { SERVICES_DOMAIN, SERVICES_RUNTIME } from '@/lib/services/service-catalog/domain'
+import { SERVICES_TOOL_MANIFESTS } from '@/lib/services/service-catalog/tool-manifests'
+import { PRICING_DOMAIN, PRICING_RUNTIME } from '@/lib/services/pricing/domain'
+import { PRICING_TOOL_MANIFESTS } from '@/lib/services/pricing/tool-manifests'
+import { PRICING_RULES_DOMAIN, PRICING_RULES_RUNTIME } from '@/lib/services/pricing-rules/domain'
+import { PRICING_RULES_TOOL_MANIFESTS } from '@/lib/services/pricing-rules/tool-manifests'
 import {
   CURRENT_BUSINESS_DOMAIN_REGISTRY,
   CURRENT_CHANGE_EXECUTOR_REGISTRY,
@@ -797,5 +803,101 @@ describe('exact-version runtime tool contraction', () => {
     expect(nativeTools).not.toContain("from './tool-registry'")
     expect(schema).toContain("PlatformToolManifest")
     expect(schema).not.toContain("from './tool-registry'")
+  })
+})
+
+
+describe('Services/Pricing Phase 2A native ownership', () => {
+  it('registers native domains and deterministic actions without central change branches', () => {
+    expect(CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain('services')?.version).toBe(
+      SERVICES_DOMAIN.version,
+    )
+    expect(CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain('pricing')?.version).toBe(
+      PRICING_DOMAIN.version,
+    )
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.getDomain('pricing_rules')?.version,
+    ).toBe(PRICING_RULES_DOMAIN.version)
+
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
+        targetType: 'service',
+        targetId: 'service-1',
+        intent: 'update',
+      })?.key,
+    ).toBe('services.update')
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
+        targetType: 'pricing_rule',
+        targetId: null,
+        intent: 'create_and_attach',
+      })?.key,
+    ).toBe('pricing_rules.create_and_attach')
+    expect(
+      CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
+        targetType: 'pricing_rule',
+        targetId: 'rule-1',
+        intent: 'publish',
+      })?.key,
+    ).toBe('pricing_rules.publish')
+
+    expect(CURRENT_CHANGE_EXECUTOR_REGISTRY.has('services.update', 1)).toBe(true)
+    expect(
+      CURRENT_CHANGE_EXECUTOR_REGISTRY.has('pricing_rules.create_and_attach', 1),
+    ).toBe(true)
+    expect(
+      CURRENT_CHANGE_EXECUTOR_REGISTRY.has('pricing_rules.publish', 1),
+    ).toBe(true)
+
+    const source = readFileSync(
+      new URL('../../ai/runtime/change-request-executor.ts', import.meta.url),
+      'utf8',
+    )
+    expect(source).not.toContain("row.target_type === 'service'")
+    expect(source).not.toContain("row.target_type === 'pricing_rule'")
+    expect(source).not.toContain('apply_service_agent_change')
+    expect(source).not.toContain('apply_service_pricing_change')
+    expect(source).not.toContain('publishPricingRuleRaw')
+  })
+
+  it('registers Services/Pricing model executors through domain runtimes, not the central executor registry', () => {
+    expect(
+      SERVICES_RUNTIME.toolExecutors.map(({ key, version }) => key + '@' + version),
+    ).toEqual(
+      SERVICES_TOOL_MANIFESTS.map(({ key, version }) => key + '@' + version),
+    )
+    expect(
+      PRICING_RUNTIME.toolExecutors.map(({ key, version }) => key + '@' + version),
+    ).toEqual(
+      PRICING_TOOL_MANIFESTS.map(({ key, version }) => key + '@' + version),
+    )
+    expect(
+      PRICING_RULES_RUNTIME.toolExecutors.map(
+        ({ key, version }) => key + '@' + version,
+      ),
+    ).toEqual(
+      PRICING_RULES_TOOL_MANIFESTS.map(
+        ({ key, version }) => key + '@' + version,
+      ),
+    )
+
+    const central = readFileSync(
+      new URL('../../ai/tools/platform/current-executor-registry.ts', import.meta.url),
+      'utf8',
+    )
+    expect(central).not.toContain("add('services.")
+    expect(central).not.toContain("add('pricing.")
+    expect(central).not.toContain("add('pricing_rules.")
+  })
+
+  it('keeps exact action identity on newly created service/pricing proposals', () => {
+    const handoff = readFileSync(
+      new URL('../../ai/tools/business-handoff.ts', import.meta.url),
+      'utf8',
+    )
+    expect(handoff).toContain("actionKey: 'services.update'")
+    expect(handoff).toContain(
+      "actionKey: 'pricing_rules.create_and_attach'",
+    )
   })
 })

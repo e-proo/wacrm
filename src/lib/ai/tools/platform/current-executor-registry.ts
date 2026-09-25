@@ -1,15 +1,8 @@
 import {
-  executePricingCalculateQuote,
-  executeServicesMatchRequest,
   type ToolContext,
   type ToolResult,
 } from '../executors'
-import { executeServicesGetSafe, executeServicesSearchSafe } from '../service-search'
-import {
-  executeChangeRequestsListPending,
-  executeServiceProposeUpdate,
-  executePricingRuleProposeServicePrice,
-} from '../business-handoff'
+import { executeChangeRequestsListPending } from '../business-handoff'
 import type { PlatformToolManifest } from './contracts'
 import { CURRENT_BUSINESS_DOMAIN_RUNTIMES } from '@/lib/services/platform/composition'
 import { ToolExecutorRegistry } from './execution-registry'
@@ -32,12 +25,6 @@ function add(key: string, version: number, executor: RuntimeExecutor): void {
  * BusinessDomainRuntime. FX V2, Coverage, and Intents are registered below
  * from their owning domain runtimes.
  */
-add('services.search', 1, (ctx, args) => executeServicesSearchSafe(ctx, args as never))
-add('services.get', 1, (ctx, args) => executeServicesGetSafe(ctx, args as never))
-add('services.match_request', 1, (ctx, args) => executeServicesMatchRequest(ctx, args as never))
-add('services.propose_update', 1, (ctx, args) => executeServiceProposeUpdate(ctx, args as never))
-add('pricing.calculate_quote', 1, (ctx, args) => executePricingCalculateQuote(ctx, args as never))
-add('pricing_rules.propose_service_price', 1, (ctx, args) => executePricingRuleProposeServicePrice(ctx, args as never))
 add('change_requests.list_pending', 1, (ctx, args) => executeChangeRequestsListPending(ctx, args as never))
 
 for (const runtime of CURRENT_BUSINESS_DOMAIN_RUNTIMES) {
