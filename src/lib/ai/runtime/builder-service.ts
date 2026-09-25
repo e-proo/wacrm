@@ -1,5 +1,4 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { getRegisteredTool } from './tool-registry'
 import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import { analyzeRouteConflicts } from './route-conflicts'
 
@@ -86,16 +85,17 @@ export async function validateAgentRevisionForPublish(
 
   for (const grant of grantsRes.data ?? []) {
     const row = grant as { tool_key: string; tool_version: number; permission: string }
-    const tool = getRegisteredTool(row.tool_key)
     const manifest = getCurrentPlatformTool(row.tool_key, row.tool_version)
-    if (!tool) {
-      checks.push({ path: `grants.${row.tool_key}`, code: 'UNKNOWN_TOOL', message: `Tool ${row.tool_key} is not registered.`, severity: 'error' })
-    } else if (tool.version !== row.tool_version) {
-      checks.push({ path: `grants.${row.tool_key}`, code: 'STALE_TOOL_VERSION', message: `Tool ${row.tool_key} requires version ${tool.version}.`, severity: 'error' })
-    } else if (!tool.grantPermissions.includes(row.permission as never)) {
-      checks.push({ path: `grants.${row.tool_key}`, code: 'PERMISSION_NOT_ALLOWED', message: `Permission ${row.permission} is not allowed for ${row.tool_key}.`, severity: 'error' })
-    } else if (!manifest) {
-      checks.push({ path: `grants.${row.tool_key}`, code: 'TOOL_POLICY_MISSING', message: `Tool ${row.tool_key}@${row.tool_version} has no platform policy.`, severity: 'error' })
+    if (!manifest) {
+      const latest = getCurrentPlatformTool(row.tool_key)
+      checks.push({
+        path: `grants.${row.tool_key}`,
+        code: latest ? 'STALE_TOOL_VERSION' : 'UNKNOWN_TOOL',
+        message: latest
+          ? `Tool ${row.tool_key}@${row.tool_version} is no longer a supported frozen version; latest registered version is ${latest.version}.`
+          : `Tool ${row.tool_key} is not registered.`,
+        severity: 'error',
+      })
     } else if (manifest.permission !== row.permission) {
       checks.push({ path: `grants.${row.tool_key}`, code: 'TOOL_PERMISSION_MISMATCH', message: `Grant permission ${row.permission} does not match the platform contract for ${row.tool_key}.`, severity: 'error' })
     } else if (expectedPlane && !manifest.allowedPlanes.includes(expectedPlane)) {

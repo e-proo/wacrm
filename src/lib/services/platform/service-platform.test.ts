@@ -1019,3 +1019,20 @@ describe('Phase 2 generic Change Request kernel purity', () => {
     expect(pricingExecutor).toContain('SERVICE_PRICING_VERSION_CONFLICT')
   })
 })
+
+
+describe('native-tool builder publish compatibility', () => {
+  it('validates frozen grants from the exact-version platform registry, not the contracted legacy registry', () => {
+    const builder = readFileSync(
+      new URL('../../ai/runtime/builder-service.ts', import.meta.url),
+      'utf8',
+    )
+    expect(builder).toContain(
+      'getCurrentPlatformTool(row.tool_key, row.tool_version)',
+    )
+    expect(builder).toContain('getCurrentPlatformTool(row.tool_key)')
+    expect(builder).not.toContain('getRegisteredTool')
+    expect(builder).not.toContain('tool.grantPermissions')
+    expect(builder).toContain('manifest.permission !== row.permission')
+  })
+})

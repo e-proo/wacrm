@@ -687,3 +687,22 @@ Legacy ToolDefinition registry:
 - `service-catalog/ai-tool-runtime.ts`
 - `pricing-rules/ai-tool-runtime.ts`
 بدل افتراض أن `business-handoff.ts` ما زال يملك هذه المقترحات.
+
+
+### Phase 2 — Builder/publish compatibility hardening
+
+أثناء contraction تم اكتشاف مستهلك متبقٍ للـlegacy registry داخل `builder-service.ts`.
+
+المشكلة:
+
+لو بقي `validateAgentRevisionForPublish` يستخدم `getRegisteredTool()`، فإن الأدوات native ستظهر كـ`UNKNOWN_TOOL` عند محاولة نشر revision، رغم أن runtime يستطيع تنفيذها.
+
+الإصلاح:
+
+- publish validation يعتمد الآن على `getCurrentPlatformTool(tool_key, tool_version)` exact-version.
+- إذا لم يوجد المفتاح إطلاقًا → `UNKNOWN_TOOL`.
+- إذا كان المفتاح معروفًا لكن النسخة المجمدة لم تعد مسجلة → `STALE_TOOL_VERSION`.
+- permission validation تقارن مباشرة مع `PlatformToolManifest.permission`.
+- لا يفرض builder أحدث نسخة على revision منشورة؛ النسخة المجمدة تبقى صالحة طالما contract exact-version ما زال مسجلاً.
+
+هذه نقطة compatibility أساسية ويجب الحفاظ عليها عند إضافة Domains جديدة لاحقًا.
