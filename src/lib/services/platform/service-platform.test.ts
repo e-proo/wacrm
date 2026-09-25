@@ -1057,3 +1057,48 @@ describe('native-tool template seeding compatibility', () => {
     )
   })
 })
+
+
+describe('Phase 2 executable ownership contraction', () => {
+  it('keeps no duplicate Services/Pricing implementations in the central executors module', () => {
+    const central = readFileSync(
+      new URL('../../ai/tools/executors.ts', import.meta.url),
+      'utf8',
+    )
+    const serviceRuntime = readFileSync(
+      new URL('../service-catalog/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(central).not.toContain(
+      'export async function executeServicesSearch(',
+    )
+    expect(central).not.toContain(
+      'export async function executeServicesGet(',
+    )
+    expect(central).not.toContain(
+      'export async function executePricingCalculateQuote(',
+    )
+    expect(central).not.toContain(
+      'export async function executeServicesMatchRequest(',
+    )
+    expect(central).not.toContain('previewServiceQuote({')
+    expect(central).not.toContain('matchServiceRequest({')
+
+    expect(central).toContain(
+      'executeServicesSearchSafe as executeServicesSearch',
+    )
+    expect(central).toContain(
+      'executeServicesGetSafe as executeServicesGet',
+    )
+    expect(central).toContain(
+      "export { executeServicesMatchRequest } from '@/lib/services/service-catalog/ai-tool-runtime'",
+    )
+    expect(central).toContain(
+      "export { executePricingCalculateQuote } from '@/lib/services/pricing/ai-tool-runtime'",
+    )
+    expect(serviceRuntime).toContain(
+      'export async function executeServicesMatchRequest(',
+    )
+  })
+})

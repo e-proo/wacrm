@@ -1,7 +1,5 @@
 // Server-only by convention.
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { previewServiceQuote } from '@/lib/services/domain-services'
-import { matchServiceRequest } from './service-matcher'
 import { readCoverageAttributes } from '@/lib/services/coverage/attributes'
 import { supabaseAdmin as adminClient } from '@/lib/ai/admin-client'
 import Decimal from 'decimal.js'
@@ -13,7 +11,6 @@ import type {
   AgentPurpose,
 } from '@/lib/ai/runtime/multi-agent-types'
 import type { RuntimeFeaturePolicy } from '@/lib/ai/runtime/tool-policy'
-import { projectServiceFieldsForAgent } from './service-field-visibility'
 
 // ============================================================
 // Tool executors (Phase 3).
@@ -103,46 +100,6 @@ export interface ServicesSearchRow {
   status: string
 }
 
-export async function executeServicesSearch(
-  ctx: ToolContext,
-  args: ServicesSearchArgs,
-): Promise<ToolResult<ServicesSearchRow[]>> {
-  const limit = Math.min(args.limit ?? 10, 50)
-  let q = supabaseAdmin()
-    .from('services')
-    .select(
-      'id, name, code, category_id, public_description, status',
-    )
-    .eq('account_id', ctx.accountId)
-    .eq('status', 'active')
-    .order('created_at', { ascending: false })
-    .limit(limit)
-  if (args.category_id) q = q.eq('category_id', args.category_id)
-  if (args.query && args.query.trim().length > 0) {
-    // Use ilike on name + code — Postgres-only operators via the
-    // `.or()` shorthand. ilike is sanitized by Supabase for the
-    // % and _ wildcards so the admin query is treated as a
-    // literal substring.
-    const term = `%${args.query.trim()}%`
-    q = q.or(`name.ilike.${term},code.ilike.${term}`)
-  }
-  const { data, error } = await q
-  if (error) {
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: false,
-      code: 'SEARCH_FAILED',
-      message: 'Could not run the search.',
-    }
-  }
-  return {
-    ok: true,
-    data: (data ?? []) as unknown as ServicesSearchRow[],
-    safe_to_show: true,
-  }
-}
-
 // ------------------------------------------------------------
 // services.get
 // ------------------------------------------------------------
@@ -161,92 +118,6 @@ export interface ServicesGetRow {
   pricing_quote: unknown | null
 }
 
-export async function executeServicesGet(
-  ctx: ToolContext,
-  args: ServicesGetArgs,
-): Promise<ToolResult<ServicesGetRow>> {
-  if (!args.id_or_code?.trim()) {
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: true,
-      code: 'INVALID_INPUT',
-      message: 'id_or_code is required.',
-    }
-  }
-  // Try UUID first; fall back to code lookup.
-  const isUuid = /^[0-9a-f]{8}-/i.test(args.id_or_code)
-  let q = supabaseAdmin()
-    .from('services')
-    .select(
-      'id, name, code, category_id, status, public_description',
-    )
-    .eq('account_id', ctx.accountId)
-    .limit(1)
-  q = isUuid
-    ? q.eq('id', args.id_or_code)
-    : q.eq('code', args.id_or_code)
-  const { data: svc, error: svcErr } = await q.maybeSingle()
-  if (svcErr || !svc) {
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: true,
-      code: 'NOT_FOUND',
-      message: 'No active service matched.',
-    }
-  }
-  // Read the published revision's field_values + pricing rule.
-  const { data: rev, error: revErr } = await supabaseAdmin()
-    .from('service_revisions')
-    .select(
-      'field_values, category_schema_version_id, service_pricing_rules(id, kind, fee_currency, input_currency, formula_config)',
-    )
-    .eq('account_id', ctx.accountId)
-    .eq('service_id', (svc as { id: string }).id)
-    .eq('status', 'published')
-    .order('revision_number', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (revErr) {
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: false,
-      code: 'READ_FAILED',
-      message: 'Could not read the service revision.',
-    }
-  }
-  const revRow = rev as unknown as {
-    field_values: Record<string, unknown> | null
-    category_schema_version_id: string
-    service_pricing_rules: unknown
-  } | null
-  const rule = revRow?.service_pricing_rules
-  const visibleFieldValues = revRow
-    ? await projectServiceFieldsForAgent({
-        accountId: ctx.accountId,
-        schemaVersionId: revRow.category_schema_version_id,
-        plane: ctx.plane,
-        values: revRow.field_values,
-      })
-    : {}
-  return {
-    ok: true,
-    data: {
-      id: (svc as { id: string }).id,
-      name: (svc as { name: string }).name,
-      code: (svc as { code: string }).code,
-      category_id: (svc as { category_id: string }).category_id,
-      status: (svc as { status: string }).status,
-      public_description: (svc as { public_description: string | null }).public_description,
-      field_values: visibleFieldValues,
-      pricing_quote: rule ?? null,
-    } as ServicesGetRow,
-    safe_to_show: true,
-  }
-}
-
 // ------------------------------------------------------------
 // pricing.calculate_quote
 // ------------------------------------------------------------
@@ -255,47 +126,6 @@ export interface PricingCalculateQuoteArgs {
   amount: string
   currency: string
   attributes?: Record<string, unknown>
-}
-
-export async function executePricingCalculateQuote(
-  ctx: ToolContext,
-  args: PricingCalculateQuoteArgs,
-): Promise<ToolResult<unknown>> {
-  if (!args.service_id || !args.amount || !args.currency) {
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: true,
-      code: 'INVALID_INPUT',
-      message: 'service_id, amount, and currency are required.',
-    }
-  }
-  try {
-    const quote = await previewServiceQuote({
-      accountId: ctx.accountId,
-      serviceId: args.service_id,
-      amount: args.amount,
-      currency: args.currency,
-      attributes: args.attributes,
-    })
-    return { ok: true, data: quote, safe_to_show: true }
-  } catch (err) {
-    const code = (err as { code?: string }).code ?? 'QUOTE_FAILED'
-    const message = (err as { message?: string }).message ?? 'Quote failed.'
-    const safe =
-      code === 'SERVICE_NOT_FOUND' ||
-      code === 'SERVICE_NOT_ACTIVE' ||
-      code === 'NO_PRICING_RULE' ||
-      code === 'INVALID_RULE' ||
-      code === 'INVALID_INPUT'
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: safe,
-      code,
-      message,
-    }
-  }
 }
 
 // ------------------------------------------------------------
@@ -623,35 +453,16 @@ export interface ServicesMatchRequestArgs {
   limit?: number
 }
 
-export async function executeServicesMatchRequest(
-  ctx: ToolContext,
-  args: ServicesMatchRequestArgs,
-): Promise<ToolResult<unknown>> {
-  if (!args.attributes || typeof args.attributes !== 'object' || Array.isArray(args.attributes)) {
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: true,
-      code: 'INVALID_INPUT',
-      message: 'attributes must be an object of what the customer said.',
-    }
-  }
-  try {
-    const result = await matchServiceRequest({
-      accountId: ctx.accountId,
-      serviceHint: args.service_hint,
-      attributes: args.attributes,
-      limit: args.limit,
-    })
-    return { ok: true, data: result, safe_to_show: true }
-  } catch (err) {
-    console.error('[tool] services.match_request failed:', err)
-    return {
-      ok: false,
-      data: null,
-      safe_to_show: false,
-      code: 'MATCH_FAILED',
-      message: 'Could not run the service match.',
-    }
-  }
-}
+/**
+ * Compatibility exports only.
+ *
+ * Services/Pricing execution is owned by native business-domain runtimes.
+ * Keep these historical import names working without maintaining a second
+ * executable implementation in the central AI tools module.
+ */
+export {
+  executeServicesSearchSafe as executeServicesSearch,
+  executeServicesGetSafe as executeServicesGet,
+} from '@/lib/services/service-catalog/read-tools'
+export { executeServicesMatchRequest } from '@/lib/services/service-catalog/ai-tool-runtime'
+export { executePricingCalculateQuote } from '@/lib/services/pricing/ai-tool-runtime'

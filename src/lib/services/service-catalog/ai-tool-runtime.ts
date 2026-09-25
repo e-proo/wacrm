@@ -16,7 +16,7 @@ interface ServicesMatchArgs {
   limit?: number
 }
 
-async function executeServicesMatchRequest(
+export async function executeServicesMatchRequest(
   ctx: ToolContext,
   args: ServicesMatchArgs,
 ): Promise<ToolResult<unknown>> {

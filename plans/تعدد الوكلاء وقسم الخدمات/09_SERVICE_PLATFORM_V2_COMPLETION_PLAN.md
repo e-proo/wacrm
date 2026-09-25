@@ -722,3 +722,21 @@ Legacy ToolDefinition registry:
 - permission يأتي من `PlatformToolManifest.permission`.
 - unknown template keys تظل تسقط بأمان كما في السلوك السابق.
 - أضيف contract test يمنع الرجوع إلى `getRegisteredTool()` في هذا المسار.
+
+
+### Phase 2 — Executable ownership contraction
+
+تمت إزالة implementations المكررة التالية من `src/lib/ai/tools/executors.ts`:
+
+- `executeServicesSearch`
+- `executeServicesGet`
+- `executeServicesMatchRequest`
+- `executePricingCalculateQuote`
+
+للحفاظ على backward compatibility، يحتفظ الملف بالأسماء التاريخية كـre-exports فقط نحو المالكين الجدد:
+
+- Service search/get → `service-catalog/read-tools.ts`
+- Service matching → `service-catalog/ai-tool-runtime.ts`
+- Pricing quote → `pricing/ai-tool-runtime.ts`
+
+بهذا لا يوجد مسار تنفيذي ثانٍ يمكن أن ينحرف عن العقود native، مع بقاء imports الداخلية القديمة صالحة خلال فترة الانتقال.
