@@ -7,6 +7,7 @@ import {
   type PricingKind,
   type RoundingMode,
 } from '@/lib/services/pricing/engine'
+import { normalizeCurrencyCode } from '@/lib/services/shared/currencies/currency-code'
 
 export interface PricingRuleProposeServicePriceArgs {
   service_id: string
@@ -113,18 +114,25 @@ export async function executePricingRuleProposeServicePrice(
     }
   }
 
-  const feeCurrency = args.fee_currency?.trim().toUpperCase() || null
-  const inputCurrency = args.input_currency?.trim().toUpperCase() || null
-  for (const code of [feeCurrency, inputCurrency]) {
-    if (code && !/^[A-Z_]{3,8}$/.test(code)) {
-      return {
-        ok: false,
-        data: null,
-        safe_to_show: false,
-        code: 'INVALID_CURRENCY',
-        message:
-          'Pricing currencies must be configured uppercase currency codes.',
-      }
+  const feeCurrency =
+    args.fee_currency === undefined
+      ? null
+      : normalizeCurrencyCode(args.fee_currency)
+  const inputCurrency =
+    args.input_currency === undefined
+      ? null
+      : normalizeCurrencyCode(args.input_currency)
+  if (
+    (args.fee_currency !== undefined && feeCurrency === null) ||
+    (args.input_currency !== undefined && inputCurrency === null)
+  ) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: false,
+      code: 'INVALID_CURRENCY',
+      message:
+        'Pricing currencies must use a configured 3-8 character currency code.',
     }
   }
 

@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { parseDecimal } from '@/lib/services/pricing/decimal'
+import { parseDecimal } from '@/lib/services/shared/money/decimal'
 import { readCoverageAttributes } from './attributes'
 import {
   DomainChangeExecutionError,

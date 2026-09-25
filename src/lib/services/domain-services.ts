@@ -1,6 +1,6 @@
 // Server-only by convention — see repositories.ts comment.
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { parseDecimal } from '@/lib/services/pricing/decimal'
+import { parseDecimal } from '@/lib/services/shared/money/decimal'
 import { calculateQuote, type QuoteResult } from '@/lib/services/pricing/engine'
 import { DomainError } from '@/lib/services/platform/domain-error'
 import { normalizeIdempotencyKey } from '@/lib/services/platform/idempotency'

@@ -1,14 +1,14 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { parseDecimal } from '@/lib/services/pricing/decimal'
+import { parseDecimal } from '@/lib/services/shared/money/decimal'
 import { DomainError } from '@/lib/services/platform/domain-error'
 import { normalizeIdempotencyKey } from '@/lib/services/platform/idempotency'
 import {
   findCurrencyByCode,
   getCurrenciesByIds as getCatalogCurrenciesByIds,
   getCurrency as getCatalogCurrency,
-  normalizeCurrencyCode,
   type CurrencyRow,
 } from '@/lib/services/currencies/crud'
+import { normalizeCurrencyCode } from '@/lib/services/shared/currencies/currency-code'
 import {
   calculateFxTrade,
   type FxAmountBasis,

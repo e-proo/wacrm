@@ -1,5 +1,9 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { ServiceError } from '@/lib/services/domain-services'
+import {
+  CURRENCY_CODE_PATTERN,
+  normalizeCurrencyCode,
+} from '@/lib/services/shared/currencies/currency-code'
 
 export { ServiceError }
 
@@ -36,12 +40,7 @@ export interface CurrencyInput {
   symbol?: string | null
 }
 
-export const CURRENCY_CODE_PATTERN = /^[A-Z_]{3,8}$/
-
-export function normalizeCurrencyCode(code: string): string | null {
-  const normalized = code.trim().toUpperCase()
-  return CURRENCY_CODE_PATTERN.test(normalized) ? normalized : null
-}
+export { CURRENCY_CODE_PATTERN, normalizeCurrencyCode }
 const VALID_KIND = new Set<CurrencyInput['kind']>(['iso_4217', 'historical', 'local'])
 
 function validateInput(input: CurrencyInput): void {
