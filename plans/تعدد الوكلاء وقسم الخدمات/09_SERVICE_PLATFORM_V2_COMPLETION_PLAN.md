@@ -120,7 +120,7 @@
 
 ### Phase 3 — Shared Business Primitives Closure
 
-**الحالة:** PENDING
+**الحالة:** IN PROGRESS
 
 الهدف:
 
@@ -792,3 +792,53 @@ Legacy ToolDefinition registry:
 **نتيجة بوابة الخروج: PASS**
 
 الـgeneric Change Request kernel لم يعد يعرف معنى service أو pricing mutation.
+
+
+### Phase 3A — Money/Decimal + Currency shared ownership
+
+تم استخراج أول مجموعة shared primitives بعد إثبات استخدامها عبر أكثر من Domain.
+
+#### Money / Decimal
+
+المصدر المشترك:
+
+- `src/lib/services/shared/money/decimal.ts`
+- `src/lib/services/shared/money/money-json.ts`
+
+العقد:
+
+- القيم المالية تعبر JSON كـdecimal strings.
+- الحساب الداخلي يستخدم `Decimal`.
+- إعداد `decimal.js` موحد: precision=40 وROUND_HALF_UP.
+- `MoneyJson` عقد type-level بسيط: amount + currency، بدون فرض معنى fee/principal/commission على الـDomains.
+
+تم نقل الاستخدام الفعلي في Pricing وFX وCoverage إلى المصدر المشترك.
+`src/lib/services/pricing/decimal.ts` أصبح compatibility re-export فقط.
+
+في Coverage Suggestions أزيل `Decimal.set` المحلي، لكن SCALE=4 بقي قرارًا خاصًا بالـDomain لأنه output precision للمطابقة وليس إعداد Decimal عالميًا.
+
+#### Currency code
+
+المصدر المشترك:
+
+`src/lib/services/shared/currencies/currency-code.ts`
+
+ويملك:
+
+- `CURRENCY_CODE_PATTERN`
+- `normalizeCurrencyCode`
+- `isCurrencyCode`
+
+العقد يدعم ISO codes إضافة إلى historical/local codes مثل `YER_OLD`.
+
+تم:
+
+- إزالة regex المكررة من Pricing Rules.
+- فصل FX عن الاعتماد على Currency CRUD للحصول على normalization primitive.
+- إبقاء `currencies/crud.ts` كـcompatibility re-export لنفس العقد.
+
+#### حدود مقصودة
+
+`src/lib/currency.ts` لم يُدمج مع primitive الجديد، لأنه UI/deal-display helper أقدم وله fallback/list semantics مختلفة عن account-scoped service currency catalog. دمجه الآن سيخلط UI concerns مع business primitive.
+
+لا migration مطلوبة في Phase 3A.
