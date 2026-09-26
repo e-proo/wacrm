@@ -670,7 +670,7 @@ describe('shared service primitives cleanup', () => {
     )
 
     expect(coverageHandoff).toContain(
-      "import { parseDecimal } from '@/lib/services/pricing/decimal'",
+      "@/lib/services/shared/money/decimal",
     )
     expect(coverageHandoff).toContain(
       'parseDecimal(amount, { rejectZero: true })',
