@@ -1244,3 +1244,125 @@ Variables:
 عند وجود opt-in live test (`WACRM_*_LIVE=1`) لا تقوم Vitest بالكتابة فوق البيئة الحقيقية. هذا ضروري خصوصًا لـWhatsApp transport E2E لأن access token المخزن في TEST يجب فكّه بمفتاح التشفير الحقيقي.
 
 **Phase 5 تبقى غير مبدوءة:** شرطها الصريح يتطلب إغلاق Phase 1 أولًا. لا يتم حذف `customer_intent_notifications` أو fallback/legacy claim path قبل نجاح evidence → activation → transport → rollback.
+
+
+### Phase 5 — Preflight inventory (NOT STARTED)
+
+Phase 5 ما تزال `PENDING` لأن شرطها الصريح "لا تبدأ قبل إغلاق Phase 1 وPhase 2" لم يتحقق بالكامل. هذا القسم جرد فقط ولا يجيز حذف fallback.
+
+#### TEST cutover snapshot
+
+تم فحص `wacrm test` مباشرة:
+
+**FX**
+- mode = `active`
+- ready = `true`
+- matched event types = `4/4`
+- evidence rows = `8`
+- blockers = `0`
+- legacy nonterminal = `0`
+- active nonterminal = `0`
+
+**Coverage**
+- mode = `active`
+- ready = `true`
+- matched event types = `2/2`
+- evidence rows = `2`
+- blockers = `0`
+- legacy nonterminal = `0`
+- active nonterminal = `0`
+
+**Intents**
+- mode = `legacy`
+- ready = `false`
+- matched event types = `0/4`
+- evidence rows = `0`
+- blockers = `0`
+- legacy nonterminal = `0`
+- active nonterminal = `0`
+
+إذًا المانع المتبقي قبل Phase 5 هو Intents live cutover فقط، وليس FX/Coverage.
+
+#### Legacy tool registry inventory
+
+`src/lib/ai/runtime/tool-registry.ts` يحتوي حاليًا tool واحدًا فقط:
+
+- `change_requests.list_pending@1`
+
+`src/lib/ai/tools/platform/current-domain-registry.ts` يستخدم `legacy-bridge.ts` فقط لبناء Platform manifest لهذا tool الانتقالي.
+
+`src/lib/ai/tools/platform/current-executor-registry.ts` يسجل executor مركزيًا لهذا tool فقط، عبر:
+
+- `executeChangeRequestsListPending`
+
+الموجود في:
+
+- `src/lib/ai/tools/business-handoff.ts`
+
+بعد إغلاق Phase 1، أول contraction آمن في Phase 5 هو نقل `change_requests.list_pending` إلى native Change Requests domain/runtime. عندها يمكن تقييم حذف:
+
+- `tool-registry.ts`
+- `legacy-bridge.ts`
+
+إذا أثبت consumer scan عدم وجود استخدام آخر.
+
+#### لا تخلط runtime-tool-compat مع legacy ownership
+
+`src/lib/ai/tools/platform/runtime-tool-compat.ts` ما زال compatibility projection مقصودًا لواجهات API/UI التي تستهلك شكل `ToolDefinition`.
+
+لا يُحذف لمجرد إزالة legacy registry. حذفه يحتاج migration منفصلة لكل API/UI consumer إلى `PlatformToolManifest`.
+
+#### customer_intent_notifications ما زالت rollback infrastructure
+
+فحص قاعدة TEST يثبت وجود database functions ما زالت تعتمد على `customer_intent_notifications`، ومنها:
+
+- `claim_customer_business_notifications`
+- `claim_customer_intent_notifications`
+- `inspect_fx_business_event_cutover_readiness`
+- `inspect_coverage_business_event_cutover_readiness`
+- `inspect_intents_business_event_cutover_readiness`
+- `set_fx_business_event_delivery_mode`
+- `set_coverage_business_event_delivery_mode`
+- `set_intents_business_event_delivery_mode`
+- `sync_linked_active_business_event_legacy_sent`
+- historical FX reconciliation/backfill helpers.
+
+وفي runtime:
+
+`src/lib/ai/runtime/customer-notification-delivery.ts`
+
+ما زال المسار:
+
+`active business-event delivery → remaining capacity → legacy claim`
+
+ويستخدم linked canonical rendering قبل fallback إلى persisted historical text.
+
+لا يجوز إزالة هذا الجزء قبل إثبات Intents activation + active transport + rollback، ثم إعادة تقييم حاجة FX/Coverage rollback compatibility.
+
+#### ملفات تحمل كلمة legacy لكنها خارج contraction الحالي
+
+لا يُحذف تلقائيًا:
+
+- `src/lib/ai/runtime/backfill-legacy.ts`
+
+لأنه migration compatibility من `ai_configs` إلى multi-agent/provider connections، وليس customer notification fallback.
+
+كذلك:
+
+- `src/lib/messaging/legacy-system-templates.ts`
+
+يحتوي حاليًا `remittance.completed` المعزول لعدم وجود Remittance Domain. هذا ليس نفس legacy registry الخاص بالأدوات أو notification outbox، ولا يحذف قبل قرار Domain/deprecation مستقل.
+
+#### ترتيب Phase 5 عند فتح البوابة
+
+بعد إغلاق Phase 1:
+
+1. نقل `change_requests.list_pending@1` إلى native Domain/runtime.
+2. إعادة فحص consumers لـ`tool-registry.ts` و`legacy-bridge.ts`.
+3. حذف registry/bridge فقط إذا أصبحا بلا مستهلك.
+4. قياس legacy notification rows/functions المطلوبة للـrollback.
+5. إزالة runtime legacy claim branches فقط بعد ثبوت عدم الحاجة للrollback لكل Domain.
+6. أي DB contraction يتم عبر migration جديدة؛ migration history لا تُعدل ولا تُحذف.
+7. إبقاء `runtime-tool-compat` إلى أن تنتهي API/UI migration الخاصة به.
+
+**Phase 5 status يبقى PENDING.**
