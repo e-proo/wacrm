@@ -143,7 +143,7 @@
 
 ### Phase 4 — Domain-Owned System Templates
 
-**الحالة:** IN PROGRESS
+**الحالة:** COMPLETE
 
 الهدف:
 
@@ -1077,3 +1077,89 @@ Intents لا يملك نسخًا من `service_request.*`؛ هذه القوال�
 - `renderMessageTemplate` لكل system/account template وقت render.
 
 القاعدة الآن: أي secret reference، مباشر أو داخل conditional، يجب أن يكون موجودًا في `secretVariables`. لا تتغير القوالب الصحيحة التي تعلن secrets صراحة.
+
+
+### Phase 4 — Closure evidence
+
+تم إغلاق Phase 4 بعد نقل system-template ownership فعليًا إلى أصحابها، مع إبقاء resolver/override/storage contracts القائمة كما هي.
+
+#### Ownership النهائي
+
+- Coverage يملك:
+  - `src/lib/services/coverage/messages/templates.ts`
+  - `coverage.offer.approved`
+  - `coverage.request.approved`
+
+- FX V2 يملك:
+  - `src/lib/services/fx-v2/messages/templates.ts`
+  - `exchange_rate.quote.completed`
+  - `exchange_rate.trade.requested`
+  - `exchange_rate.trade.approved`
+  - `exchange_rate.trade.rejected`
+  - `exchange_rate.trade.completed`
+
+- Messaging Platform يحتفظ فقط بالقوالب العامة:
+  - `change_request.*`
+  - `service_request.*`
+
+- `remittance.completed` عُزل في:
+  - `src/lib/messaging/legacy-system-templates.ts`
+  - owner: `legacy-remittance`
+  ولا يعتبر هذا إنشاء Remittance Domain جديد.
+
+- Intents لا يكرر `service_request.*` داخل Domain؛ lifecycle copy العامة تبقى مملوكة لـMessaging.
+
+#### SystemTemplateRegistry
+
+أضيف:
+
+- `src/lib/messaging/system-template-registry.ts`
+- `src/lib/messaging/current-system-template-registry.ts`
+
+المسار الحالي:
+
+`Messaging generic defaults + Domain-owned template arrays + isolated legacy templates → SystemTemplateRegistry → resolver`
+
+الـresolver وbusiness-event message renderer وكل emergency/system fallback consumers يستخدمون lookup موحدًا من الـRegistry بدل قراءة `messaging/defaults.ts` مباشرة.
+
+تم حذف export التاريخي `SYSTEM_MESSAGE_TEMPLATES` بدل إبقاء alias يخفي consumers قديمة.
+
+#### Circular-dependency hardening
+
+أول composition كان يسحب `domain-catalog.ts` من داخل Messaging registry، ما أنشأ دورة تحميل عبر Domain runtime / Change Request notifications.
+
+تم الإصلاح بحيث current system-template registry يستورد template arrays الخفيفة فقط ولا يستورد Domain Catalog أو runtimes.
+
+اختبار composition يثبت في المقابل أن كل `BusinessDomainManifest.messageTemplates` الحالية موجودة في registry تحت owner المطابق، لمنع drift بين manifest والـresolver composition.
+
+#### الضمانات التي بقيت كما هي
+
+- **Account overrides:** resolver يفحص published account override قبل system template.
+- **Immutable revisions:** `message_template_revisions` و`message_template_publications` و`supabase-store.ts` لم تتغير.
+- **Locale fallback:** السلسلة الحالية باقية، ومنها `ar-YE → ar`.
+- **Emergency fallback:** Coverage / FX / Service Request / Business Event paths ما زالت ترجع إلى system أو emergency copy عند override غير صالح.
+- **Template safety:** required variables وmax length وsurface policies باقية.
+- **Secret policy:** أي `secret.*` مباشر أو داخل `{{#if secret.*}}` يجب أن يكون معلنًا في `secretVariables`.
+- **Duplicate safety:** registry يرفض duplicate template identity fail-closed.
+
+#### Verification evidence
+
+- Code head: `e49f43d1cef5fd538275c800efd255e2d7864f7a`
+- GitHub Actions CI run: `36257779887`
+- `npm run lint`: PASS
+- `npm run typecheck`: PASS
+- `npm test`: PASS
+- `npm run build`: PASS
+- Phase 4 لم تتطلب migration أو تغيير schema.
+
+#### حدود الإغلاق
+
+- لم يتم إنشاء Domain وهمي لـRemittance.
+- لم تُغير account template override APIs أو DB contracts.
+- لم تُنقل business calculations إلى Messaging.
+- Phase 1 live cutover gates المؤجلة تبقى كما هي.
+- Phase 5 لم يبدأ ضمن هذا الإغلاق.
+
+**نتيجة بوابة الخروج: PASS**
+
+system defaults لم تعد bucket مركزيًا لقوالب Coverage/FX، وإضافة/تعديل قالب Domain أصبحت تتم عند مالك الـDomain ثم تُركب عبر Registry موحد دون تعديل resolver logic.
