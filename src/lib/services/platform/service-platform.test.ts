@@ -1095,3 +1095,152 @@ describe('Phase 2 executable ownership contraction', () => {
     )
   })
 })
+
+
+describe('Phase 3 shared business primitive ownership', () => {
+  it('keeps Decimal configuration and money parsing in the shared primitive', () => {
+    const pricingDecimal = readFileSync(
+      new URL('../pricing/decimal.ts', import.meta.url),
+      'utf8',
+    )
+    const pricingEngine = readFileSync(
+      new URL('../pricing/engine.ts', import.meta.url),
+      'utf8',
+    )
+    const coverageSuggestions = readFileSync(
+      new URL('../coverage/suggestions.ts', import.meta.url),
+      'utf8',
+    )
+    const coverageChanges = readFileSync(
+      new URL('../coverage/change-executors.ts', import.meta.url),
+      'utf8',
+    )
+    const fxEngine = readFileSync(
+      new URL('../fx-v2/engine.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(pricingDecimal.trim()).toBe(
+      "export * from '@/lib/services/shared/money/decimal'",
+    )
+    expect(pricingEngine).toContain(
+      "@/lib/services/shared/money/decimal",
+    )
+    expect(pricingEngine).toContain(
+      "@/lib/services/shared/money/money-json",
+    )
+    expect(coverageSuggestions).toContain(
+      "@/lib/services/shared/money/decimal",
+    )
+    expect(coverageSuggestions).toContain(
+      "@/lib/services/shared/money/money-json",
+    )
+    expect(coverageSuggestions).not.toContain('Decimal.set(')
+    expect(coverageChanges).toContain(
+      "@/lib/services/shared/money/decimal",
+    )
+    expect(fxEngine).toContain(
+      "@/lib/services/shared/money/decimal",
+    )
+    expect(fxEngine).not.toContain('@/lib/services/pricing/decimal')
+  })
+
+  it('keeps one service-platform currency-code contract', () => {
+    const currencyCrud = readFileSync(
+      new URL('../currencies/crud.ts', import.meta.url),
+      'utf8',
+    )
+    const fxService = readFileSync(
+      new URL('../fx-v2/service.ts', import.meta.url),
+      'utf8',
+    )
+    const pricingRules = readFileSync(
+      new URL('../pricing-rules/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(currencyCrud).toContain(
+      "@/lib/services/shared/currencies/currency-code",
+    )
+    expect(currencyCrud).toContain(
+      'export { CURRENCY_CODE_PATTERN, normalizeCurrencyCode }',
+    )
+    expect(fxService).toContain(
+      "@/lib/services/shared/currencies/currency-code",
+    )
+    expect(pricingRules).toContain(
+      "@/lib/services/shared/currencies/currency-code",
+    )
+    expect(pricingRules).not.toContain('/^[A-Z_]{3,8}$/')
+  })
+
+  it('centralizes proposal idempotency composition and service revision conflict detection', () => {
+    const servicesRuntime = readFileSync(
+      new URL('../service-catalog/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+    const pricingRulesRuntime = readFileSync(
+      new URL('../pricing-rules/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+    const servicesChanges = readFileSync(
+      new URL('../service-catalog/change-executors.ts', import.meta.url),
+      'utf8',
+    )
+    const pricingRulesChanges = readFileSync(
+      new URL('../pricing-rules/change-executors.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(servicesRuntime).toContain('composeIdempotencyKey([')
+    expect(pricingRulesRuntime).toContain('composeIdempotencyKey([')
+    expect(servicesRuntime).not.toContain('.slice(\n          0,\n          1200')
+    expect(pricingRulesRuntime).not.toContain('.slice(\n          0,\n          1200')
+
+    expect(servicesChanges).toContain(
+      "@/lib/services/platform/version-conflict",
+    )
+    expect(pricingRulesChanges).toContain(
+      "@/lib/services/platform/version-conflict",
+    )
+    expect(servicesChanges).not.toContain(
+      "message.includes('SERVICE_VERSION_CHANGED')",
+    )
+    expect(pricingRulesChanges).not.toContain(
+      "message.includes('SERVICE_VERSION_CHANGED')",
+    )
+  })
+
+  it('maps trusted DomainErrors through generic tool and change-execution boundaries', () => {
+    const pricingEngine = readFileSync(
+      new URL('../pricing/engine.ts', import.meta.url),
+      'utf8',
+    )
+    const pricingRuntime = readFileSync(
+      new URL('../pricing/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+    const intentsRuntime = readFileSync(
+      new URL('../intents/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
+    const fxChanges = readFileSync(
+      new URL('../fx-v2/change-executors.ts', import.meta.url),
+      'utf8',
+    )
+    const pricingRulesChanges = readFileSync(
+      new URL('../pricing-rules/change-executors.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(pricingEngine).toContain('PricingError extends DomainError')
+    expect(pricingRuntime).toContain('describeDomainError(')
+    expect(intentsRuntime).toContain('describeDomainError(')
+    expect(fxChanges).toContain('mapDomainErrorToChangeExecution(')
+    expect(pricingRulesChanges).toContain(
+      'mapDomainErrorToChangeExecution(',
+    )
+    expect(fxChanges).not.toContain('instanceof FxServiceError')
+    expect(pricingRulesChanges).not.toContain('instanceof ServiceError')
+  })
+})
