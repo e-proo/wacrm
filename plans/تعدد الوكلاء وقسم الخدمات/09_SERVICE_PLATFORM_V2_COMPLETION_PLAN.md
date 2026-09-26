@@ -1375,3 +1375,80 @@ Phase 5 ما تزال `PENDING` لأن شرطها الصريح "لا تبدأ ق
 - إذا أصبحت TEST متعددة الحسابات يفشل runner ويطلب `WACRM_TEST_ACCOUNT_ID` صراحة بدل اختيار حساب عشوائي.
 - لا يتم اكتشاف contact/conversation تلقائيًا للـtransport؛ يجب تحديدهما يدويًا حتى لا يتم إرسال WhatsApp إلى جهة اتصال حقيقية بالخطأ.
 - `WACRM_TEST_META_APP_SECRET` أزيل من متطلبات هذا runner لأنه غير مستخدم في outbound cutover path.
+
+
+### Phase 1 — Gate A/B live closure evidence on TEST
+
+تم تنفيذ Gate A وGate B فعليًا على `wacrm test` بدون أي WhatsApp transport.
+
+#### Gate A — 4/4 shadow parity: PASS
+
+تم إنشاء أربع حالات Intents حقيقية عبر نفس العقود الأساسية:
+
+- `intents.decision.apply@1 → fulfilled`
+- `intents.decision.apply@1 → rejected`
+- `intents.decision.apply@1 → matched`
+- `intents.decision.apply@1 → clarifying`
+
+وتم ربط legacy rollback rows ثم تشغيل rendering parity على canonical `service_request.*` events.
+
+النتيجة الفعلية:
+
+- matched event types = `4/4`
+- evidence rows = `4`
+- blockers = `0`
+- missing event types = `[]`
+- pending event types = `[]`
+- legacy nonterminal = `0`
+- active nonterminal = `0`
+- readiness = `true`
+
+الأحداث المثبتة:
+
+- `service_request.approved`
+- `service_request.rejected`
+- `service_request.matched`
+- `service_request.needs_clarification`
+
+لم يتم إرسال أي رسالة WhatsApp أثناء Gate A.
+
+#### Gate B — controlled activation: PASS
+
+تم استدعاء guarded delivery control بعد نجاح readiness فقط.
+
+الحالة الحالية على TEST:
+
+- route = `service_request_customer_whatsapp`
+- mode = `active`
+- ready = `true`
+- blockers = `0`
+- nonterminal rows = `0`
+
+أي أن Intents customer WhatsApp route أصبحت تستخدم canonical active Business Event path للأحداث المستقبلية.
+
+#### Cleanup / safety
+
+- fixture قديم من محاولة bootstrap فاشلة أُلغي عبر `cancel_change_request`.
+- لا توجد fixture notifications معلقة.
+- لا توجد active business-event rows معلقة.
+- temporary Edge Functions المستخدمة حصريًا للمساعدة في parity أُعيد نشرها كـHTTP 410 inert functions مع `verify_jwt=true`.
+- محاولة GitHub one-shot التي لم تجد secrets أزيلت من الفرع، وأعيد workflow إلى manual-only.
+- لم يتم تشغيل Gate C أو إرسال WhatsApp حتى الآن.
+
+#### البوابة التالية
+
+**Gate C — active WhatsApp E2E: PENDING**
+
+يتطلب recipient حقيقي مخصص للاختبار حتى نثبت:
+
+`Intents decision → active business_event_outbox → projector/template → WhatsApp transport → sent`
+
+ثم نثبت أن إعادة المحاولة لا ترسل duplicate.
+
+بعد Gate C مباشرة:
+
+**Gate D — rollback: PENDING**
+
+وسيتم إرجاع route إلى `legacy` عبر guarded RPC والتأكد من عدم وجود `sending/reconciliation` أو duplicate.
+
+Phase 1 تبقى `IN PROGRESS` حتى نجاح Gate C ثم Gate D.
