@@ -1,6 +1,10 @@
 name: Service Platform Intents Cutover TEST
 
 on:
+  push:
+    branches: [refactor/service-platform-v2]
+    paths:
+      - '.github/cutover/intents-evidence-activation.trigger'
   workflow_dispatch:
     inputs:
       gate:
@@ -26,7 +30,7 @@ concurrency:
 
 jobs:
   intents-cutover:
-    name: Intents cutover — ${{ inputs.gate }}
+    name: Intents cutover — ${{ github.event_name == 'push' && 'auto-evidence-activate' || inputs.gate }}
     runs-on: ubuntu-latest
     environment: wacrm-test
     env:
@@ -36,6 +40,9 @@ jobs:
       WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID: ${{ vars.WACRM_TEST_ACCOUNT_ID }}
       WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID: ${{ vars.WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID }}
       WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID: ${{ vars.WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID }}
+      SUPABASE_TEST_ACCESS_TOKEN: ${{ secrets.SUPABASE_TEST_ACCESS_TOKEN }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_TEST_PROJECT_REF: pqirsnfupofhulmewakq
 
     steps:
       - uses: actions/checkout@v7
@@ -48,7 +55,51 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Resolve TEST Supabase backend credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${NEXT_PUBLIC_SUPABASE_URL:-}" ]]; then
+            echo "NEXT_PUBLIC_SUPABASE_URL=https://${SUPABASE_TEST_PROJECT_REF}.supabase.co" >> "$GITHUB_ENV"
+          fi
+
+          if [[ -n "${SUPABASE_SERVICE_ROLE_KEY:-}" ]]; then
+            echo "::add-mask::$SUPABASE_SERVICE_ROLE_KEY"
+            exit 0
+          fi
+
+          token="${SUPABASE_TEST_ACCESS_TOKEN:-${SUPABASE_ACCESS_TOKEN:-}}"
+          if [[ -z "$token" ]]; then
+            echo "No TEST service key or Supabase management access token is configured."
+            exit 1
+          fi
+
+          response="$(
+            curl --fail --silent --show-error               "https://api.supabase.com/v1/projects/${SUPABASE_TEST_PROJECT_REF}/api-keys?reveal=true"               --header "Authorization: Bearer $token"
+          )"
+
+          key="$(
+            API_KEYS_JSON="$response" node --input-type=module <<'NODE'
+          const rows = JSON.parse(process.env.API_KEYS_JSON ?? '[]')
+          if (!Array.isArray(rows)) throw new Error('SUPABASE_API_KEYS_RESPONSE_INVALID')
+          const selected =
+            rows.find((row) => row?.name === 'service_role') ??
+            rows.find((row) => row?.name === 'secret') ??
+            rows.find((row) => row?.type === 'secret')
+          const value = selected?.api_key
+          if (typeof value !== 'string' || !value.trim()) {
+            throw new Error('SUPABASE_TEST_BACKEND_KEY_NOT_FOUND')
+          }
+          process.stdout.write(value.trim())
+          NODE
+          )"
+
+          echo "::add-mask::$key"
+          echo "SUPABASE_SERVICE_ROLE_KEY=$key" >> "$GITHUB_ENV"
+
       - name: Validate TEST configuration and explicit confirmation
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
@@ -130,6 +181,20 @@ jobs:
             `WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID=${data[0].id}\n`,
           )
           NODE
+
+      - name: AUTO — Generate 4/4 shadow parity evidence
+        if: github.event_name == 'push'
+        env:
+          WACRM_INTENTS_CUTOVER_EVIDENCE_LIVE: '1'
+          WACRM_INTENTS_CUTOVER_EVIDENCE_CONFIRM: GENERATE_TEST_EVIDENCE
+        run: npm run test:intents-cutover-evidence-live
+
+      - name: AUTO — Activate controlled Intents route
+        if: github.event_name == 'push'
+        env:
+          WACRM_INTENTS_CUTOVER_ACTIVATE_LIVE: '1'
+          WACRM_INTENTS_CUTOVER_CONFIRM: ACTIVATE_TEST
+        run: npm run test:intents-cutover-control-live
 
       - name: Generate 4/4 shadow parity evidence
         if: inputs.gate == 'evidence'
