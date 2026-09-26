@@ -1230,10 +1230,8 @@ Secrets:
 - `WACRM_TEST_SUPABASE_URL`
 - `WACRM_TEST_SUPABASE_SERVICE_ROLE_KEY`
 - `WACRM_TEST_ENCRYPTION_KEY`
-- `WACRM_TEST_META_APP_SECRET`
-
 Variables:
-- `WACRM_TEST_ACCOUNT_ID`
+- `WACRM_TEST_ACCOUNT_ID` (اختياري إذا كان TEST يحتوي حسابًا واحدًا فقط)
 - `WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID` (للـtransport فقط)
 - `WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID` (للـtransport فقط)
 
@@ -1366,3 +1364,14 @@ Phase 5 ما تزال `PENDING` لأن شرطها الصريح "لا تبدأ ق
 7. إبقاء `runtime-tool-compat` إلى أن تنتهي API/UI migration الخاصة به.
 
 **Phase 5 status يبقى PENDING.**
+
+
+### Phase 1 — Live runner account discovery hardening
+
+تم تقليل إعداد GitHub Environment المطلوب:
+
+- `WACRM_TEST_ACCOUNT_ID` لم يعد إلزاميًا عندما تحتوي TEST حسابًا واحدًا فقط.
+- workflow يقرأ accounts بواسطة service role ويقبل الاكتشاف التلقائي فقط إذا كانت النتيجة حسابًا واحدًا بالضبط.
+- إذا أصبحت TEST متعددة الحسابات يفشل runner ويطلب `WACRM_TEST_ACCOUNT_ID` صراحة بدل اختيار حساب عشوائي.
+- لا يتم اكتشاف contact/conversation تلقائيًا للـtransport؛ يجب تحديدهما يدويًا حتى لا يتم إرسال WhatsApp إلى جهة اتصال حقيقية بالخطأ.
+- `WACRM_TEST_META_APP_SECRET` أزيل من متطلبات هذا runner لأنه غير مستخدم في outbound cutover path.

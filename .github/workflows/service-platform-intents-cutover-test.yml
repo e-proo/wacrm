@@ -33,7 +33,6 @@ jobs:
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.WACRM_TEST_SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.WACRM_TEST_SUPABASE_SERVICE_ROLE_KEY }}
       ENCRYPTION_KEY: ${{ secrets.WACRM_TEST_ENCRYPTION_KEY }}
-      META_APP_SECRET: ${{ secrets.WACRM_TEST_META_APP_SECRET }}
       WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID: ${{ vars.WACRM_TEST_ACCOUNT_ID }}
       WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID: ${{ vars.WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID }}
       WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID: ${{ vars.WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID }}
@@ -57,7 +56,6 @@ jobs:
           required=(
             NEXT_PUBLIC_SUPABASE_URL
             SUPABASE_SERVICE_ROLE_KEY
-            WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID
           )
 
           expected=''
@@ -96,6 +94,42 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Resolve TEST account
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID:-}" ]]; then
+            exit 0
+          fi
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          import { createClient } from '@supabase/supabase-js'
+
+          const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+          const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+          if (!url || !key) throw new Error('SUPABASE_TEST_ENV_REQUIRED')
+
+          const db = createClient(url, key)
+          const { data, error } = await db
+            .from('accounts')
+            .select('id')
+            .order('created_at', { ascending: true })
+            .limit(2)
+
+          if (error) throw error
+          if (!data || data.length !== 1) {
+            throw new Error(
+              'WACRM_TEST_ACCOUNT_ID_REQUIRED_WHEN_TEST_HAS_MULTIPLE_ACCOUNTS',
+            )
+          }
+
+          fs.appendFileSync(
+            process.env.GITHUB_ENV,
+            `WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID=${data[0].id}\n`,
+          )
+          NODE
 
       - name: Generate 4/4 shadow parity evidence
         if: inputs.gate == 'evidence'
