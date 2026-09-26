@@ -43,6 +43,17 @@ describe('current system template composition', () => {
     ).toBe('messaging')
   })
 
+  it('quarantines legacy business copy outside generic Messaging defaults', () => {
+    expect(
+      CURRENT_SYSTEM_TEMPLATE_REGISTRY.ownerOf({
+        key: 'remittance.completed',
+        audience: 'customer',
+        channel: 'whatsapp',
+        locale: 'ar',
+      }),
+    ).toBe('legacy-remittance')
+  })
+
   it('preserves the public system lookup used by resolver and emergency fallback', () => {
     expect(
       findSystemMessageTemplate({

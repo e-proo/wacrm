@@ -1018,7 +1018,7 @@ Intents لا يملك نسخًا من `service_request.*`؛ هذه القوال�
 
 - `change_request.*`
 - `service_request.*`
-- `remittance.completed` مؤقتًا لعدم وجود Remittance Domain مسجل حاليًا.
+- `remittance.completed` لم يعد داخل defaults العامة؛ عُزل في `legacy-system-templates.ts` ومسجل كـ`legacy-remittance` لأن Remittance Domain غير موجود حاليًا.
 
 لا يتم إنشاء Domain وهمي فقط لنقل قالب.
 
@@ -1034,3 +1034,18 @@ Intents لا يملك نسخًا من `service_request.*`؛ هذه القوال�
 - الـcurrent composed registry لا يُصدّر من messaging barrel لتجنب circular loading عبر Domain Catalog.
 
 لا migration مطلوبة في Phase 4A.
+
+
+### Phase 4B — Legacy template quarantine
+
+أثناء فحص شرط "القوالب العامة فقط في Messaging Platform" بقي `remittance.completed` كقالب business-specific بلا Domain مسجل.
+
+بدل إنشاء Remittance Domain خارج نطاق الخطة أو حذف قالب تاريخي:
+
+- نُقل القالب إلى `src/lib/messaging/legacy-system-templates.ts`.
+- يُسجل في `SystemTemplateRegistry` تحت owner واضح: `legacy-remittance`.
+- `messaging/defaults.ts` أصبح يحتوي فقط القوالب العامة للـMessaging/approval lifecycle.
+- resolver لا يعرف الفرق؛ lookup contract بقي واحدًا.
+- يمكن لـRemittance Domain مستقبليًا أن يتبنى المفتاح عبر registry migration دون تغيير transport/resolver.
+
+هذا عزل legacy وليس إعلانًا بأن Remittance أصبح Domain مكتملًا.
