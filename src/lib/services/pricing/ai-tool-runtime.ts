@@ -1,6 +1,7 @@
 import type { ModelToolExecutorRegistration } from '@/lib/ai/tools/platform/runtime-contracts'
 import type { ToolContext, ToolResult } from '@/lib/ai/tools/executors'
 import { previewServiceQuote } from '@/lib/services/domain-services'
+import { describeDomainError } from '@/lib/services/platform/domain-error'
 
 interface PricingCalculateQuoteArgs {
   service_id: string
@@ -33,21 +34,24 @@ export async function executePricingCalculateQuote(
     })
     return { ok: true, data: quote, safe_to_show: true }
   } catch (err) {
-    const code = (err as { code?: string }).code ?? 'QUOTE_FAILED'
-    const message = (err as { message?: string }).message ?? 'Quote failed.'
+    const mapped = describeDomainError(err, {
+      code: 'QUOTE_FAILED',
+      message: 'Quote failed.',
+      status: 500,
+    })
     const safeToShow = new Set([
       'SERVICE_NOT_FOUND',
       'SERVICE_NOT_ACTIVE',
       'NO_PRICING_RULE',
       'INVALID_RULE',
       'INVALID_INPUT',
-    ]).has(code)
+    ]).has(mapped.code)
     return {
       ok: false,
       data: null,
       safe_to_show: safeToShow,
-      code,
-      message,
+      code: mapped.code,
+      message: mapped.message,
     }
   }
 }

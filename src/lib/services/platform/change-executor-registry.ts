@@ -76,3 +76,12 @@ export class ChangeExecutorRegistry {
     return executor(context, change)
   }
 }
+
+
+export function mapDomainErrorToChangeExecution(
+  error: unknown,
+): DomainChangeExecutionError | null {
+  if (!(error instanceof DomainError)) return null
+  if (error instanceof DomainChangeExecutionError) return error
+  return new DomainChangeExecutionError(error.code, error.message, error.status)
+}

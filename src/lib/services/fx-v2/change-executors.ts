@@ -1,10 +1,10 @@
 import {
   decideFxTradeRequest,
-  FxServiceError,
   publishFxRateVersion,
 } from './service'
 import {
   DomainChangeExecutionError,
+  mapDomainErrorToChangeExecution,
   type ChangeExecutorRegistration,
 } from '@/lib/services/platform/change-executor-registry'
 
@@ -58,9 +58,8 @@ const publishRateExecutor: ChangeExecutorRegistration['executor'] = async (conte
       idempotent: published.idempotent,
     }
   } catch (error) {
-    if (error instanceof FxServiceError) {
-      throw new DomainChangeExecutionError(error.code, error.message, error.status)
-    }
+    const mapped = mapDomainErrorToChangeExecution(error)
+    if (mapped) throw mapped
     throw error
   }
 }
@@ -111,9 +110,8 @@ const decideTradeExecutor: ChangeExecutorRegistration['executor'] = async (conte
       idempotent: decided.idempotent,
     }
   } catch (error) {
-    if (error instanceof FxServiceError) {
-      throw new DomainChangeExecutionError(error.code, error.message, error.status)
-    }
+    const mapped = mapDomainErrorToChangeExecution(error)
+    if (mapped) throw mapped
     throw error
   }
 }

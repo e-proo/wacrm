@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { ServiceError } from '@/lib/services/domain-services'
 import { FxServiceError } from '@/lib/services/fx-v2/service'
-import { DomainChangeExecutionError } from './change-executor-registry'
-import { DomainError } from './domain-error'
+import {
+  DomainChangeExecutionError,
+  mapDomainErrorToChangeExecution,
+} from './change-executor-registry'
+import { DomainError, describeDomainError } from './domain-error'
+import { PricingError } from '@/lib/services/pricing/engine'
 
 describe('shared domain error primitive', () => {
   it('preserves domain-specific names, codes, messages, and default statuses', () => {
@@ -33,5 +37,47 @@ describe('shared domain error primitive', () => {
       message: 'change failed',
       status: 409,
     })
+  })
+})
+
+
+describe('domain error boundary mapping', () => {
+  it('describes only trusted DomainError instances and uses safe fallbacks otherwise', () => {
+    expect(
+      describeDomainError(new PricingError('INVALID_RULE', 'bad rule'), {
+        code: 'FALLBACK',
+        message: 'safe fallback',
+        status: 500,
+      }),
+    ).toEqual({
+      code: 'INVALID_RULE',
+      message: 'bad rule',
+      status: 400,
+    })
+
+    expect(
+      describeDomainError(new Error('database secret'), {
+        code: 'FALLBACK',
+        message: 'safe fallback',
+        status: 500,
+      }),
+    ).toEqual({
+      code: 'FALLBACK',
+      message: 'safe fallback',
+      status: 500,
+    })
+  })
+
+  it('maps any DomainError into the deterministic change-execution boundary', () => {
+    const mapped = mapDomainErrorToChangeExecution(
+      new ServiceError('INVALID_STATE', 'not allowed', 409),
+    )
+    expect(mapped).toBeInstanceOf(DomainChangeExecutionError)
+    expect(mapped).toMatchObject({
+      code: 'INVALID_STATE',
+      message: 'not allowed',
+      status: 409,
+    })
+    expect(mapDomainErrorToChangeExecution(new Error('boom'))).toBeNull()
   })
 })

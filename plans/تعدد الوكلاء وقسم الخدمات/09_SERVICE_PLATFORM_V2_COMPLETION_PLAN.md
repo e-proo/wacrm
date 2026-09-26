@@ -880,3 +880,35 @@ Services وPricing Rules يستخدمان نفس detector، لكن كل Domain �
 - `SERVICE_PRICING_VERSION_CONFLICT`
 
 وبذلك لم تنتقل business semantics إلى helper العام؛ انتقل فقط parsing المتكرر لعقد optimistic concurrency.
+
+
+### Phase 3C — Domain error mapping closure
+
+تم توحيد error boundary مع الإبقاء على business codes داخل كل Domain.
+
+#### DomainError
+
+`DomainError` أصبح المصدر المشترك الموثوق لـ:
+- code
+- message
+- status
+
+أضيف `describeDomainError(error, fallback)`.
+
+القصد الأمني: لا يتم الوثوق تلقائيًا في أي object يحمل `code/message`. فقط `DomainError` يمرر تفاصيله إلى boundary؛ الأخطاء العامة تستخدم fallback آمن حتى لا تتسرب رسائل DB/SDK بالخطأ.
+
+تم جعل `PricingError` يرث `DomainError` مثل:
+- `ServiceError`
+- `FxServiceError`
+- `IntentError`
+- `DomainChangeExecutionError`
+
+وبذلك تستخدم Pricing وIntents tool boundaries نفس mapper بدل casts يدوية إلى `{ code?, message? }`.
+
+#### Change execution mapping
+
+أضيف `mapDomainErrorToChangeExecution(error)` داخل change-executor registry.
+
+FX وPricing Rules لم يعودا يعتمدان على subclass محدد داخل executor؛ أي `DomainError` من خدمة الـDomain يُنقل إلى `DomainChangeExecutionError` مع الحفاظ على code/message/status.
+
+business codes نفسها لم تُنقل إلى shared layer.

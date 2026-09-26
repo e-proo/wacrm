@@ -9,6 +9,7 @@ import {
   type RoundingMode,
 } from '@/lib/services/pricing/engine'
 import { normalizeCurrencyCode } from '@/lib/services/shared/currencies/currency-code'
+import { describeDomainError } from '@/lib/services/platform/domain-error'
 
 export interface PricingRuleProposeServicePriceArgs {
   service_id: string
@@ -156,12 +157,17 @@ export async function executePricingRuleProposeServicePrice(
       },
     )
   } catch (err) {
+    const mapped = describeDomainError(err, {
+      code: 'INVALID_PRICING_FORMULA',
+      message: 'Invalid pricing formula.',
+      status: 400,
+    })
     return {
       ok: false,
       data: null,
       safe_to_show: false,
       code: 'INVALID_PRICING_FORMULA',
-      message: err instanceof Error ? err.message : 'Invalid pricing formula.',
+      message: mapped.message,
     }
   }
 

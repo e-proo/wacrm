@@ -1,10 +1,8 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import {
-  publishPricingRuleRaw,
-  ServiceError,
-} from '@/lib/services/pricing/rules-crud'
+import { publishPricingRuleRaw } from '@/lib/services/pricing/rules-crud'
 import {
   DomainChangeExecutionError,
+  mapDomainErrorToChangeExecution,
   type ChangeExecutorRegistration,
 } from '@/lib/services/platform/change-executor-registry'
 import {
@@ -110,9 +108,8 @@ const publish: ChangeExecutorRegistration['executor'] = async (context, change) 
       rule,
     }
   } catch (error) {
-    if (error instanceof ServiceError) {
-      throw new DomainChangeExecutionError(error.code, error.message, error.status)
-    }
+    const mapped = mapDomainErrorToChangeExecution(error)
+    if (mapped) throw mapped
     throw error
   }
 }

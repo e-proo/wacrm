@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { createChangeRequest } from '@/lib/ai/runtime/change-requests-service'
+import { describeDomainError } from '@/lib/services/platform/domain-error'
 import type { ModelToolExecutorRegistration } from '@/lib/ai/tools/platform/runtime-contracts'
 import type { ToolContext, ToolResult } from '@/lib/ai/tools/executors'
 import { listIntents, recordIntent } from './intents-service'
@@ -84,16 +85,17 @@ async function executeIntentsRecord(
 
     return { ok: true, data: result, safe_to_show: true }
   } catch (error) {
-    const code =
-      (error as { code?: string }).code ?? 'INTENT_RECORD_FAILED'
+    const mapped = describeDomainError(error, {
+      code: 'INTENT_RECORD_FAILED',
+      message: 'Could not record the observation.',
+      status: 500,
+    })
     return {
       ok: false,
       data: null,
-      safe_to_show: code !== 'INTENT_CREATE_FAILED',
-      code,
-      message:
-        (error as { message?: string }).message ??
-        'Could not record the observation.',
+      safe_to_show: mapped.code !== 'INTENT_CREATE_FAILED',
+      code: mapped.code,
+      message: mapped.message,
     }
   }
 }

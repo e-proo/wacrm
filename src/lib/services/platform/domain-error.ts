@@ -9,3 +9,24 @@ export class DomainError extends Error {
     this.status = status
   }
 }
+
+
+export interface DomainErrorDescriptor {
+  code: string
+  message: string
+  status: number
+}
+
+export function describeDomainError(
+  error: unknown,
+  fallback: DomainErrorDescriptor,
+): DomainErrorDescriptor {
+  if (error instanceof DomainError) {
+    return {
+      code: error.code,
+      message: error.message,
+      status: error.status,
+    }
+  }
+  return fallback
+}

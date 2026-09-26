@@ -1,5 +1,6 @@
 import { Decimal, formatDecimal, parseDecimal } from '@/lib/services/shared/money/decimal'
 import type { MoneyJson } from '@/lib/services/shared/money/money-json'
+import { DomainError } from '@/lib/services/platform/domain-error'
 
 // ============================================================
 // Pricing engine — pure functions over a service's published
@@ -277,11 +278,9 @@ export function calculateQuote(
   }
 }
 
-export class PricingError extends Error {
-  readonly code: string
-  constructor(code: string, message: string) {
-    super(message)
+export class PricingError extends DomainError {
+  constructor(code: string, message: string, status = 400) {
+    super(code, message, status)
     this.name = 'PricingError'
-    this.code = code
   }
 }
