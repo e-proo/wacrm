@@ -1030,7 +1030,7 @@ Intents لا يملك نسخًا من `service_request.*`؛ هذه القوال�
 - system template registration يرفض duplicate identities.
 - secret placeholders غير المعلنة تُرفض عند registration قبل render.
 - emergency fallback في Coverage/FX/Service Request/Change Request يستخدم الـcomposed registry الجديد.
-- `SYSTEM_MESSAGE_TEMPLATES` بقي alias توافق للقوالب العامة فقط؛ Domain templates لا تعود إلى الملف المركزي.
+- أزيل `SYSTEM_MESSAGE_TEMPLATES` القديم بالكامل بدل إبقاء alias قد يخفي مستهلكًا تاريخيًا؛ typecheck هو gate لكشف أي consumer متبقٍ.
 - الـcurrent composed registry لا يُصدّر من messaging barrel لتجنب circular loading عبر Domain Catalog.
 
 لا migration مطلوبة في Phase 4A.

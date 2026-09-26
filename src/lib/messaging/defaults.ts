@@ -152,8 +152,3 @@ export const GENERAL_SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinitio
   },
 ]
 
-/**
- * @deprecated Compatibility alias for messaging-owned generic defaults only.
- * Domain-owned templates are resolved through SystemTemplateRegistry.
- */
-export const SYSTEM_MESSAGE_TEMPLATES = GENERAL_SYSTEM_MESSAGE_TEMPLATES
