@@ -564,9 +564,7 @@ describe('Intents third-domain architectural acceptance', () => {
       'intents.decision.apply',
     ])
     expect(INTENTS_DOMAIN.events.map((event) => event.key)).toEqual(intentEvents)
-    expect(INTENTS_DOMAIN.messageTemplates.map((template) => template.key).sort()).toEqual(
-      [...intentEvents].sort(),
-    )
+    expect(INTENTS_DOMAIN.messageTemplates).toEqual([])
 
     expect(
       CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({

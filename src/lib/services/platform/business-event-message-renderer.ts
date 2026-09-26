@@ -1,4 +1,4 @@
-import { findSystemMessageTemplate } from '@/lib/messaging/defaults'
+import { findSystemMessageTemplate } from '@/lib/messaging/current-system-template-registry'
 import { renderMessageTemplate } from '@/lib/messaging/renderer'
 import { resolveMessageTemplate } from '@/lib/messaging/resolver'
 import type {
