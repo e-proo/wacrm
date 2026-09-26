@@ -120,7 +120,7 @@
 
 ### Phase 3 — Shared Business Primitives Closure
 
-**الحالة:** IN PROGRESS
+**الحالة:** COMPLETE
 
 الهدف:
 
@@ -912,3 +912,76 @@ Services وPricing Rules يستخدمان نفس detector، لكن كل Domain �
 FX وPricing Rules لم يعودا يعتمدان على subclass محدد داخل executor؛ أي `DomainError` من خدمة الـDomain يُنقل إلى `DomainChangeExecutionError` مع الحفاظ على code/message/status.
 
 business codes نفسها لم تُنقل إلى shared layer.
+
+
+### Phase 3 — Closure evidence
+
+تم إغلاق Phase 3 بعد إثبات كل primitive بالاستخدام الفعلي والاختبارات، وليس بمجرد نقل الملفات.
+
+#### Shared primitives المغلقة
+
+- Decimal parsing/validation:
+  - `src/lib/services/shared/money/decimal.ts`
+  - مستخدم فعليًا من Pricing وFX وCoverage.
+  - `pricing/decimal.ts` compatibility re-export فقط.
+  - لا `Decimal.set(...)` محلي داخل Coverage.
+
+- Money JSON contract:
+  - `src/lib/services/shared/money/money-json.ts`
+  - مستخدم في Pricing QuoteInput وCoverage suggestion result shapes.
+  - business semantics مثل commission/fee/principal بقيت داخل Domains.
+
+- Currency normalization:
+  - `src/lib/services/shared/currencies/currency-code.ts`
+  - مستخدم في Currency CRUD وFX وPricing Rules.
+  - يدعم historical/local codes مثل `YER_OLD`.
+  - لم يتم دمجه قسرًا مع UI helper القديم `src/lib/currency.ts`.
+
+- Idempotency:
+  - `normalizeIdempotencyKey`
+  - `composeIdempotencyKey`
+  - service/pricing proposals لم تعد تكرر تركيب المفتاح و`.slice(0,1200)`.
+  - الصيغة التاريخية بقيت كما هي عمدًا لحماية replay compatibility.
+
+- Optimistic/version conflicts:
+  - `src/lib/services/platform/version-conflict.ts`
+  - parsing/matching للـRPC markers مشترك.
+  - كل Domain يحتفظ بالـexternal business code/message الخاص به.
+
+- Domain error mapping:
+  - `DomainError` هو العقد المشترك لـcode/message/status.
+  - `PricingError` أصبح ضمن نفس hierarchy.
+  - `describeDomainError` يمنع تسريب رسائل generic DB/SDK ويستخدم fallback آمن.
+  - `mapDomainErrorToChangeExecution` يوحد نقل أخطاء الـDomain إلى deterministic change boundary.
+  - FX وPricing Rules لم يعودا يعتمدان على subclass-specific mapping داخل executors.
+
+#### Architecture contract
+
+أضيف contract test في:
+
+`src/lib/services/platform/service-platform.test.ts`
+
+ويمنع regressions التالية:
+
+- إعادة Decimal ownership إلى Pricing.
+- إعادة `Decimal.set` محليًا.
+- إعادة currency regex مكررة في Pricing Rules.
+- إعادة proposal `.slice(0,1200)` محليًا.
+- إعادة manual service-version marker parsing.
+- إعادة `instanceof FxServiceError/ServiceError` داخل change executors.
+
+#### Verification evidence
+
+- Code head: `47c7eee0b6c820f609d76d6833da597755dc96b1`
+- GitHub Actions CI run: `36256665379`
+- `npm run lint`: PASS
+- `npm run typecheck`: PASS
+- `npm test`: PASS
+- `npm run build`: PASS
+- Phase 3 لم تتطلب migration أو تغيير schema.
+
+**نتيجة بوابة الخروج: PASS**
+
+الخدمات لم تعد تحمل نسخًا مستقلة من primitives التي ثبت أنها مشتركة. الـDomain-specific rules بقيت داخل Domains ولم تُسحب إلى shared layer بلا مبرر.
+
+Phase 1 live cutover gates المؤجلة تبقى كما هي ولا تتغير نتيجة إغلاق Phase 3.
