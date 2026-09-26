@@ -8,6 +8,11 @@ import {
   DomainChangeExecutionError,
   type ChangeExecutorRegistration,
 } from '@/lib/services/platform/change-executor-registry'
+import {
+  SERVICE_REVISION_CONFLICT_MARKERS,
+  errorHasAnyMarker,
+  getErrorMessage,
+} from '@/lib/services/platform/version-conflict'
 
 const updateServiceExecutor: ChangeExecutorRegistration['executor'] = async (context, change) => {
   if (!change.targetId) {
@@ -89,11 +94,8 @@ const updateServiceExecutor: ChangeExecutorRegistration['executor'] = async (con
     },
   )
   if (error || !revisionId) {
-    const message = error?.message ?? 'Service change failed.'
-    if (
-      message.includes('SERVICE_VERSION_CHANGED') ||
-      message.includes('SERVICE_CURRENT_REVISION_CHANGED')
-    ) {
+    const message = getErrorMessage(error, 'Service change failed.')
+    if (errorHasAnyMarker(error, SERVICE_REVISION_CONFLICT_MARKERS)) {
       throw new DomainChangeExecutionError(
         'SERVICE_VERSION_CONFLICT',
         'The service changed after this proposal; review a fresh proposal.',

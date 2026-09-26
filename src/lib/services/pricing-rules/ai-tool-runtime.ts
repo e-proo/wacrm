@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { createChangeRequest } from '@/lib/ai/runtime/change-requests-service'
+import { composeIdempotencyKey } from '@/lib/services/platform/idempotency'
 import type { ModelToolExecutorRegistration } from '@/lib/ai/tools/platform/runtime-contracts'
 import type { ToolContext, ToolResult } from '@/lib/ai/tools/executors'
 import {
@@ -206,11 +207,12 @@ export async function executePricingRuleProposeServicePrice(
       targetId: null,
       intent: 'create_and_attach',
       proposedPayload,
-      idempotencyKey:
-        `service-price:${service.id}:v${service.version}:${fingerprint}`.slice(
-          0,
-          1200,
-        ),
+      idempotencyKey: composeIdempotencyKey([
+        'service-price',
+        service.id,
+        `v${service.version}`,
+        fingerprint,
+      ]),
       summary: `تغيير تسعير خدمة ${service.name} عبر قاعدة ${args.kind} جديدة بعد الاعتماد`,
       actorUserId: ctx.actorUserId,
     })

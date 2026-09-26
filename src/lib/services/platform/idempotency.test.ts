@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeIdempotencyKey } from './idempotency'
+import { composeIdempotencyKey, normalizeIdempotencyKey } from './idempotency'
 
 describe('normalizeIdempotencyKey', () => {
   it('preserves raw identity by default and trims only when explicitly requested', () => {
@@ -21,5 +21,34 @@ describe('normalizeIdempotencyKey', () => {
   it('allows callers to narrow the accepted length contract', () => {
     expect(normalizeIdempotencyKey('abcd', { minLength: 4, maxLength: 4 })).toBe('abcd')
     expect(normalizeIdempotencyKey('abc', { minLength: 4, maxLength: 4 })).toBeNull()
+  })
+})
+
+
+describe('composeIdempotencyKey', () => {
+  it('preserves the historical colon-separated proposal format', () => {
+    expect(
+      composeIdempotencyKey([
+        'service-update',
+        'service-1',
+        'v3',
+        '{"name":"Cash"}',
+      ]),
+    ).toBe('service-update:service-1:v3:{"name":"Cash"}')
+  })
+
+  it('preserves empty segments and applies the configured maximum length', () => {
+    expect(composeIdempotencyKey(['intent', 'id', '', 'decision'])).toBe(
+      'intent:id::decision',
+    )
+    expect(
+      composeIdempotencyKey(['prefix', 'abcdefgh'], { maxLength: 10 }),
+    ).toBe('prefix:abc')
+  })
+
+  it('rejects invalid maximum lengths', () => {
+    expect(() =>
+      composeIdempotencyKey(['x'], { maxLength: 0 }),
+    ).toThrow('IDEMPOTENCY_MAX_LENGTH_INVALID')
   })
 })

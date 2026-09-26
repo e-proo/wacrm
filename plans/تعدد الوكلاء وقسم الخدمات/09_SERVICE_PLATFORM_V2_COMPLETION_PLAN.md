@@ -842,3 +842,41 @@ Legacy ToolDefinition registry:
 `src/lib/currency.ts` لم يُدمج مع primitive الجديد، لأنه UI/deal-display helper أقدم وله fallback/list semantics مختلفة عن account-scoped service currency catalog. دمجه الآن سيخلط UI concerns مع business primitive.
 
 لا migration مطلوبة في Phase 3A.
+
+
+### Phase 3B — Idempotency + version conflict primitives
+
+تم توحيد نمطين متكررين مع الحفاظ على backward compatibility.
+
+#### Idempotency composition
+
+`src/lib/services/platform/idempotency.ts` يملك الآن بالإضافة إلى normalization:
+
+`composeIdempotencyKey(parts, { maxLength })`
+
+وهو يحافظ عمدًا على الصيغة التاريخية colon-separated ويستخدم maxLength=1200 افتراضيًا. لم يتم إدخال hash format جديد في هذه المرحلة حتى لا تتغير replay identity للمقترحات الموجودة بلا داعٍ.
+
+تم نقل:
+- `services.propose_update`
+- `pricing_rules.propose_service_price`
+
+من بناء النص + `.slice(0, 1200)` محليًا إلى primitive المشترك.
+
+#### Optimistic version conflicts
+
+أضيف:
+
+`src/lib/services/platform/version-conflict.ts`
+
+ويملك:
+- استخراج message آمن من error غير معروف.
+- matching عام لمجموعة markers.
+- markers المشتركة لعقد service revision concurrency:
+  - `SERVICE_VERSION_CHANGED`
+  - `SERVICE_CURRENT_REVISION_CHANGED`
+
+Services وPricing Rules يستخدمان نفس detector، لكن كل Domain ما زال يملك code/message الخارجي الخاص به:
+- `SERVICE_VERSION_CONFLICT`
+- `SERVICE_PRICING_VERSION_CONFLICT`
+
+وبذلك لم تنتقل business semantics إلى helper العام؛ انتقل فقط parsing المتكرر لعقد optimistic concurrency.

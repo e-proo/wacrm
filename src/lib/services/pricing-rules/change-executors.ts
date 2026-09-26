@@ -7,6 +7,11 @@ import {
   DomainChangeExecutionError,
   type ChangeExecutorRegistration,
 } from '@/lib/services/platform/change-executor-registry'
+import {
+  SERVICE_REVISION_CONFLICT_MARKERS,
+  errorHasAnyMarker,
+  getErrorMessage,
+} from '@/lib/services/platform/version-conflict'
 
 const createAndAttach: ChangeExecutorRegistration['executor'] = async (context, change) => {
   if (change.targetId) {
@@ -61,11 +66,8 @@ const createAndAttach: ChangeExecutorRegistration['executor'] = async (context, 
     },
   )
   if (error || !result) {
-    const message = error?.message ?? 'Service pricing change failed.'
-    if (
-      message.includes('SERVICE_VERSION_CHANGED') ||
-      message.includes('SERVICE_CURRENT_REVISION_CHANGED')
-    ) {
+    const message = getErrorMessage(error, 'Service pricing change failed.')
+    if (errorHasAnyMarker(error, SERVICE_REVISION_CONFLICT_MARKERS)) {
       throw new DomainChangeExecutionError(
         'SERVICE_PRICING_VERSION_CONFLICT',
         'The service changed after this pricing proposal; review and approve a fresh proposal.',

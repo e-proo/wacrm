@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { createChangeRequest } from '@/lib/ai/runtime/change-requests-service'
+import { composeIdempotencyKey } from '@/lib/services/platform/idempotency'
 import type { ModelToolExecutorRegistration } from '@/lib/ai/tools/platform/runtime-contracts'
 import type { ToolContext, ToolResult } from '@/lib/ai/tools/executors'
 import {
@@ -226,11 +227,12 @@ export async function executeServiceProposeUpdate(
       intent: 'update',
       expectedVersion: Number(service.version),
       proposedPayload: desired,
-      idempotencyKey:
-        `service-update:${args.service_id}:v${service.version}:${changeFingerprint}`.slice(
-          0,
-          1200,
-        ),
+      idempotencyKey: composeIdempotencyKey([
+        'service-update',
+        args.service_id,
+        `v${service.version}`,
+        changeFingerprint,
+      ]),
       summary: `تعديل خدمة ${service.name} وإنشاء نسخة منشورة جديدة بعد الاعتماد`,
       actorUserId: ctx.actorUserId,
     })
