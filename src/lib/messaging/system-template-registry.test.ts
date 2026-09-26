@@ -67,3 +67,14 @@ describe('SystemTemplateRegistry', () => {
     ).not.toThrow()
   })
 })
+
+
+describe('SystemTemplateRegistry secret conditionals', () => {
+  it('rejects undeclared secret conditionals before runtime rendering', () => {
+    expect(() =>
+      new SystemTemplateRegistry().register('unsafe-conditional', [
+        template({ body: '{{#if secret.pin}}hidden{{/if}}' }),
+      ]),
+    ).toThrow('SYSTEM_TEMPLATE_SECRET_NOT_DECLARED')
+  })
+})

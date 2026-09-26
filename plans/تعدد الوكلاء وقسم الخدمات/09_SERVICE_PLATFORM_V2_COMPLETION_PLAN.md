@@ -1065,3 +1065,15 @@ Intents لا يملك نسخًا من `service_request.*`؛ هذه القوال�
 - اختبار composition يمر على `CURRENT_BUSINESS_DOMAIN_MODULES` ويتأكد أن كل `domain.messageTemplates` مسجل في registry تحت owner المطابق.
 
 بهذا يبقى template resolution خفيفًا ولا يسحب AI/Change Request runtimes عند import.
+
+
+### Phase 4 — Secret conditional safety
+
+أثناء مراجعة template safety ظهر أن declaration policy كانت تتحقق من `{{secret.x}}` المباشر فقط، بينما conditional مثل `{{#if secret.x}}` يستطيع قراءة presence بدون المرور بنفس الفحص.
+
+تم توحيد السياسة في:
+
+- `SystemTemplateRegistry` عند registration.
+- `renderMessageTemplate` لكل system/account template وقت render.
+
+القاعدة الآن: أي secret reference، مباشر أو داخل conditional، يجب أن يكون موجودًا في `secretVariables`. لا تتغير القوالب الصحيحة التي تعلن secrets صراحة.

@@ -38,7 +38,13 @@ export function validateSystemTemplateDefinition(
   }
 
   const declaredSecrets = new Set(template.secretVariables ?? [])
-  for (const match of template.body.matchAll(/{{\s*secret\.([a-zA-Z0-9_.]+)\s*}}/g)) {
+  const directSecrets = [
+    ...template.body.matchAll(/{{\s*secret\.([a-zA-Z0-9_.]+)\s*}}/g),
+  ]
+  const conditionalSecrets = [
+    ...template.body.matchAll(/{{#if\s+secret\.([a-zA-Z0-9_.]+)}}/g),
+  ]
+  for (const match of [...directSecrets, ...conditionalSecrets]) {
     if (!declaredSecrets.has(match[1])) {
       throw new Error(
         'SYSTEM_TEMPLATE_SECRET_NOT_DECLARED:' + template.key + ':' + match[1],

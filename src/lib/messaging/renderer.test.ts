@@ -77,3 +77,31 @@ describe('renderMessageTemplate', () => {
     ).toThrow('exceeds 5 characters')
   })
 })
+
+
+describe('secret conditional policy', () => {
+  it('rejects undeclared secrets used only in conditionals', () => {
+    expect(() =>
+      renderMessageTemplate({
+        template: template({
+          body: '{{#if secret.pin}}مسموح{{/if}}',
+        }),
+        context,
+        secrets: { pin: '4321' },
+      }),
+    ).toThrow('Secret variable pin is referenced but not declared')
+  })
+
+  it('allows declared secrets in conditionals', () => {
+    expect(
+      renderMessageTemplate({
+        template: template({
+          body: '{{#if secret.pin}}مسموح{{/if}}',
+          secretVariables: ['pin'],
+        }),
+        context,
+        secrets: { pin: '4321' },
+      }),
+    ).toBe('مسموح')
+  })
+})

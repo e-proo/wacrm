@@ -79,8 +79,11 @@ function validateRequiredVariables(template: MessageTemplateDefinition, context:
 
 function validateSecretUsage(template: MessageTemplateDefinition): void {
   const declared = new Set(template.secretVariables ?? [])
-  const referenced = [...template.body.matchAll(/{{\s*secret\.([a-zA-Z0-9_.]+)\s*}}/g)]
-  for (const match of referenced) {
+  const direct = [...template.body.matchAll(/{{\s*secret\.([a-zA-Z0-9_.]+)\s*}}/g)]
+  const conditional = [
+    ...template.body.matchAll(/{{#if\s+secret\.([a-zA-Z0-9_.]+)}}/g),
+  ]
+  for (const match of [...direct, ...conditional]) {
     const secretKey = match[1]
     if (!declared.has(secretKey)) {
       throw new MessageTemplateError(
