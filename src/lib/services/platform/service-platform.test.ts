@@ -655,11 +655,7 @@ describe('Intents third-domain architectural acceptance', () => {
 
 
 describe('shared service primitives cleanup', () => {
-  it('uses the shared decimal parser for Coverage money validation and removes dead manual arithmetic', () => {
-    const coverageHandoff = readFileSync(
-      new URL('../../ai/tools/business-handoff.ts', import.meta.url),
-      'utf8',
-    )
+  it('uses the shared decimal primitive in FX and Coverage change execution', () => {
     const coverageExecutors = readFileSync(
       new URL('../../ai/tools/executors.ts', import.meta.url),
       'utf8',
@@ -668,40 +664,37 @@ describe('shared service primitives cleanup', () => {
       new URL('../fx-v2/engine.ts', import.meta.url),
       'utf8',
     )
-
-    expect(coverageHandoff).toContain(
-      "@/lib/services/shared/money/decimal",
-    )
-    expect(coverageHandoff).toContain(
-      'parseDecimal(amount, { rejectZero: true })',
-    )
-    expect(coverageHandoff).toContain('parseDecimal(rate)')
-    expect(coverageHandoff).not.toContain('const parsed = Number(amount)')
-    expect(coverageHandoff).not.toContain('const parsed = Number(rate)')
-    expect(coverageExecutors).not.toContain('executeCoverageProposeOffer')
-    expect(coverageExecutors).not.toContain('function addDecimalStrings')
-    expect(coverageExecutors).not.toContain('function negDecimalStrings')
-    expect(fxEngine).toContain(
-      "import { parseDecimal } from '@/lib/services/pricing/decimal'",
-    )
-
     const coverageChangeExecutors = readFileSync(
       new URL('../coverage/change-executors.ts', import.meta.url),
       'utf8',
     )
+
+    expect(coverageExecutors).not.toContain('executeCoverageProposeOffer')
+    expect(coverageExecutors).not.toContain('function addDecimalStrings')
+    expect(coverageExecutors).not.toContain('function negDecimalStrings')
+
+    expect(fxEngine).toContain(
+      "@/lib/services/shared/money/decimal",
+    )
+    expect(fxEngine).toContain(
+      'parseDecimal(value, { rejectZero: true })',
+    )
+    expect(fxEngine).not.toContain('@/lib/services/pricing/decimal')
+
     expect(coverageChangeExecutors).toContain(
-      "import { parseDecimal } from '@/lib/services/pricing/decimal'",
+      "@/lib/services/shared/money/decimal",
     )
     expect(coverageChangeExecutors).toContain(
-      "parseDecimal(payload.total_amount, { rejectZero: true })",
+      'parseDecimal(payload.total_amount, { rejectZero: true })',
     )
     expect(coverageChangeExecutors).toContain(
-      "parseDecimal(payload.requested_amount, { rejectZero: true })",
+      'parseDecimal(payload.requested_amount, { rejectZero: true })',
     )
-    expect(coverageChangeExecutors).not.toContain('Number(payload.requested_amount)')
+    expect(coverageChangeExecutors).not.toContain(
+      '@/lib/services/pricing/decimal',
+    )
   })
 })
-
 
 describe('Coverage legacy change-notification contraction', () => {
   it('uses a generic render-at-delivery marker instead of a Coverage renderer registry', () => {
