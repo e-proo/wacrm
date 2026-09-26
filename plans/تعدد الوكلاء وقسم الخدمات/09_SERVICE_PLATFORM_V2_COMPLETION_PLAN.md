@@ -1163,3 +1163,84 @@ Intents لا يملك نسخًا من `service_request.*`؛ هذه القوال�
 **نتيجة بوابة الخروج: PASS**
 
 system defaults لم تعد bucket مركزيًا لقوالب Coverage/FX، وإضافة/تعديل قالب Domain أصبحت تتم عند مالك الـDomain ثم تُركب عبر Registry موحد دون تعديل resolver logic.
+
+
+### Phase 1 — TEST environment verification and live-gate runner
+
+تمت مراجعة بيئة Supabase المسماة `wacrm test` مباشرة قبل بدء أي Phase 5 contraction.
+
+#### Schema verification
+
+المطبق فعليًا على TEST يشمل:
+
+- migration `107_intents_business_event_controlled_cutover`
+- migration `108_intents_business_event_ownership_scope`
+
+وتم التحقق read-only من:
+
+- `customer_intents_business_event_shadow` → enabled.
+- `customer_intents_business_event_zz_route` → enabled.
+- `inspect_intents_business_event_cutover_readiness(uuid)` موجودة.
+- `set_intents_business_event_delivery_mode(uuid,text)` موجودة.
+- RPCs/trigger functions تعمل كـ`SECURITY INVOKER`.
+- `service_role` يملك EXECUTE.
+- `anon` و`authenticated` لا يملكان EXECUTE.
+
+#### Readiness الحالية على TEST
+
+الحالة الحالية:
+
+- mode = `legacy`
+- ready = `false`
+- blockers = `0`
+- legacy_nonterminal = `0`
+- active_nonterminal = `0`
+- evidence_rows = `0`
+- matched_event_types = `0/4`
+
+سبب عدم الجاهزية الوحيد هو أن evidence الحقيقية للأنواع الأربعة لم تُولد بعد:
+
+- `service_request.approved`
+- `service_request.rejected`
+- `service_request.matched`
+- `service_request.needs_clarification`
+
+لا يجوز تعليم rows يدويًا بأنها `matched_legacy` أو تجاوز هذا gate.
+
+#### Live runner
+
+أضيف workflow يدوي فقط:
+
+`.github/workflows/service-platform-intents-cutover-test.yml`
+
+ويستخدم GitHub Environment باسم `wacrm-test`.
+
+الترتيب المقصود:
+
+1. `evidence` + confirmation `GENERATE_TEST_EVIDENCE`
+2. `activate` + confirmation `ACTIVATE_TEST`
+3. `transport` + confirmation `SEND_TEST_WHATSAPP`
+4. `rollback` + confirmation `ROLLBACK_TEST`
+
+`transport` وحده يحتاج test contact/conversation فعليين ويرسل WhatsApp واحدًا. Evidence لا تستخدم transport.
+
+Environment configuration المطلوبة:
+
+Secrets:
+- `WACRM_TEST_SUPABASE_URL`
+- `WACRM_TEST_SUPABASE_SERVICE_ROLE_KEY`
+- `WACRM_TEST_ENCRYPTION_KEY`
+- `WACRM_TEST_META_APP_SECRET`
+
+Variables:
+- `WACRM_TEST_ACCOUNT_ID`
+- `WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID` (للـtransport فقط)
+- `WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID` (للـtransport فقط)
+
+#### Vitest live-secret fix
+
+تم تعديل `vitest.config.ts` بحيث dummy `ENCRYPTION_KEY/META_APP_SECRET` تستخدم فقط في unit tests العادية.
+
+عند وجود opt-in live test (`WACRM_*_LIVE=1`) لا تقوم Vitest بالكتابة فوق البيئة الحقيقية. هذا ضروري خصوصًا لـWhatsApp transport E2E لأن access token المخزن في TEST يجب فكّه بمفتاح التشفير الحقيقي.
+
+**Phase 5 تبقى غير مبدوءة:** شرطها الصريح يتطلب إغلاق Phase 1 أولًا. لا يتم حذف `customer_intent_notifications` أو fallback/legacy claim path قبل نجاح evidence → activation → transport → rollback.
