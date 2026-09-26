@@ -1,29 +1,6 @@
 import type { MessageTemplateDefinition } from './types'
 
-const FX_TRADE_REQUIRED_VARIABLES = [
-  'entity.reference',
-  'data.pair',
-  'data.side_label',
-  'money.amount',
-  'money.currency',
-  'data.effective_rate',
-  'data.base_amount',
-  'data.base_currency',
-  'data.quote_amount',
-  'data.quote_currency',
-] as const
-
-const FX_TRADE_DETAIL_LINES = [
-  'المرجع: {{entity.reference}}',
-  'الزوج: {{data.pair}}',
-  'العملية: {{data.side_label}}',
-  'المبلغ المطلوب: {{money.amount}} {{money.currency}}',
-  'السعر الفعلي: {{data.effective_rate}} {{data.quote_currency}} لكل {{data.base_currency}}',
-  'المبلغ الأساسي: {{data.base_amount}} {{data.base_currency}}',
-  'المبلغ المقابل: {{data.quote_amount}} {{data.quote_currency}}',
-] as const
-
-export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
+export const GENERAL_SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
   {
     key: 'change_request.pending',
     audience: 'admin',
@@ -150,109 +127,13 @@ export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
     ].join('\n'),
     optionalVariables: ['entity.reference', 'service.name', 'data.summary'],
   },
-  {
-    key: 'coverage.offer.approved',
-    audience: 'customer',
-    channel: 'whatsapp',
-    locale: 'ar',
-    body: [
-      '✅ *تم اعتماد عرض التغطية الخاص بك*',
-      '{{#if entity.reference}}رقم العرض: {{entity.reference}}{{/if}}',
-      'المبلغ: {{money.amount}} {{money.currency}}',
-      'الدفع: {{data.pay_region}} — {{data.pay_method}}',
-      'الاستلام: {{data.receive_region}} — {{data.receive_method}}',
-      '{{#if money.commission}}{{data.commission_label}}: {{money.commission}} {{money.commission_currency}}{{/if}}',
-      '',
-      'أصبح العرض مسجلاً وجاهزًا للمعالجة.',
-    ].join('\n'),
-    requiredVariables: [
-      'money.amount',
-      'money.currency',
-      'data.pay_region',
-      'data.pay_method',
-      'data.receive_region',
-      'data.receive_method',
-    ],
-    optionalVariables: ['entity.reference', 'money.commission', 'money.commission_currency', 'data.commission_label'],
-  },
-  {
-    key: 'coverage.request.approved',
-    audience: 'customer',
-    channel: 'whatsapp',
-    locale: 'ar',
-    body: [
-      '✅ *تم اعتماد طلب التغطية الخاص بك*',
-      '{{#if entity.reference}}رقم الطلب: {{entity.reference}}{{/if}}',
-      'المبلغ: {{money.amount}} {{money.currency}}',
-      'الدفع: {{data.pay_region}} — {{data.pay_method}}',
-      'الاستلام: {{data.receive_region}} — {{data.receive_method}}',
-      '{{#if money.commission}}{{data.commission_label}}: {{money.commission}} {{money.commission_currency}}{{/if}}',
-      '',
-      'تم إدراج الطلب للمعالجة.',
-    ].join('\n'),
-    requiredVariables: [
-      'money.amount',
-      'money.currency',
-      'data.pay_region',
-      'data.pay_method',
-      'data.receive_region',
-      'data.receive_method',
-    ],
-    optionalVariables: ['entity.reference', 'money.commission', 'money.commission_currency', 'data.commission_label'],
-  },
-  {
-    key: 'exchange_rate.quote.completed',
-    audience: 'customer',
-    channel: 'whatsapp',
-    locale: 'ar',
-    body: [
-      '💱 *سعر الصرف*',
-      '{{data.base_currency}} / {{data.quote_currency}}',
-      'شراء: {{data.buy_rate}}',
-      'بيع: {{data.sell_rate}}',
-      '{{#if data.market_label}}السوق: {{data.market_label}}{{/if}}',
-      '{{#if data.rate_unit_label}}الوحدة: {{data.rate_unit_label}}{{/if}}',
-    ].join('\n'),
-    requiredVariables: ['data.base_currency', 'data.quote_currency', 'data.buy_rate', 'data.sell_rate'],
-    optionalVariables: ['data.market_label', 'data.rate_unit_label'],
-  },
-  {
-    key: 'exchange_rate.trade.requested',
-    audience: 'customer',
-    channel: 'whatsapp',
-    locale: 'ar',
-    body: ['🕓 تم استلام طلب الصرف وهو بانتظار مراجعة الإدارة.', ...FX_TRADE_DETAIL_LINES].join('\n'),
-    requiredVariables: FX_TRADE_REQUIRED_VARIABLES,
-  },
-  {
-    key: 'exchange_rate.trade.approved',
-    audience: 'customer',
-    channel: 'whatsapp',
-    locale: 'ar',
-    body: [
-      '✅ تم قبول طلب الصرف.',
-      'ستتواصل معك الإدارة في أقرب وقت لمتابعة التنفيذ.',
-      'تنبيه: الطلب لم يُسجل كمكتمل بعد.',
-      ...FX_TRADE_DETAIL_LINES,
-    ].join('\n'),
-    requiredVariables: FX_TRADE_REQUIRED_VARIABLES,
-  },
-  {
-    key: 'exchange_rate.trade.rejected',
-    audience: 'customer',
-    channel: 'whatsapp',
-    locale: 'ar',
-    body: ['⛔ تمت مراجعة طلب الصرف ولم يتم اعتماده.', ...FX_TRADE_DETAIL_LINES].join('\n'),
-    requiredVariables: FX_TRADE_REQUIRED_VARIABLES,
-  },
-  {
-    key: 'exchange_rate.trade.completed',
-    audience: 'customer',
-    channel: 'whatsapp',
-    locale: 'ar',
-    body: ['✅ تم إتمام عملية الصرف وتسجيلها كمكتملة.', ...FX_TRADE_DETAIL_LINES].join('\n'),
-    requiredVariables: FX_TRADE_REQUIRED_VARIABLES,
-  },
+
+
+
+
+
+
+
   {
     key: 'remittance.completed',
     audience: 'customer',
@@ -271,19 +152,8 @@ export const SYSTEM_MESSAGE_TEMPLATES: readonly MessageTemplateDefinition[] = [
   },
 ]
 
-export function findSystemMessageTemplate(input: {
-  key: string
-  audience: MessageTemplateDefinition['audience']
-  channel: MessageTemplateDefinition['channel']
-  locale: string
-}): MessageTemplateDefinition | null {
-  return (
-    SYSTEM_MESSAGE_TEMPLATES.find(
-      (template) =>
-        template.key === input.key &&
-        template.audience === input.audience &&
-        template.channel === input.channel &&
-        template.locale === input.locale,
-    ) ?? null
-  )
-}
+/**
+ * @deprecated Compatibility alias for messaging-owned generic defaults only.
+ * Domain-owned templates are resolved through SystemTemplateRegistry.
+ */
+export const SYSTEM_MESSAGE_TEMPLATES = GENERAL_SYSTEM_MESSAGE_TEMPLATES

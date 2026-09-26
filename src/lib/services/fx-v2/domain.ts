@@ -1,4 +1,3 @@
-import { SYSTEM_MESSAGE_TEMPLATES } from '@/lib/messaging/defaults'
 import {
   defineBusinessDomain,
   defineBusinessDomainRuntime,
@@ -7,19 +6,7 @@ import { FX_V2_MODEL_TOOL_EXECUTORS } from './ai-tool-runtime'
 import { FX_V2_EVENT_PROJECTORS } from './message-projectors'
 import { FX_V2_CHANGE_EXECUTORS } from './change-executors'
 import { FX_V2_TOOL_MANIFESTS } from './tool-manifests'
-
-const FX_TEMPLATE_KEYS = new Set([
-  'exchange_rate.quote.completed',
-  'exchange_rate.trade.requested',
-  'exchange_rate.trade.approved',
-  'exchange_rate.trade.rejected',
-  'exchange_rate.trade.completed',
-])
-
-const fxTemplates = SYSTEM_MESSAGE_TEMPLATES.filter((template) => FX_TEMPLATE_KEYS.has(template.key))
-if (fxTemplates.length !== FX_TEMPLATE_KEYS.size) {
-  throw new Error('FX V2 domain is missing one or more system message templates.')
-}
+import { FX_V2_MESSAGE_TEMPLATES } from './messages/templates'
 
 export const FX_V2_DOMAIN = defineBusinessDomain({
   key: 'exchange_rates',
@@ -93,7 +80,7 @@ export const FX_V2_DOMAIN = defineBusinessDomain({
       snapshotPolicy: 'immutable_subject_reference',
     },
   ],
-  messageTemplates: fxTemplates,
+  messageTemplates: FX_V2_MESSAGE_TEMPLATES,
 })
 
 export const FX_V2_RUNTIME = defineBusinessDomainRuntime({

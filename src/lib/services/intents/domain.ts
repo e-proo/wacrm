@@ -1,4 +1,3 @@
-import { SYSTEM_MESSAGE_TEMPLATES } from '@/lib/messaging/defaults'
 import {
   defineBusinessDomain,
   defineBusinessDomainRuntime,
@@ -8,21 +7,6 @@ import { INTENT_BUSINESS_EVENT_MANIFESTS } from './business-events'
 import { INTENTS_CHANGE_EXECUTORS } from './change-executors'
 import { INTENT_EVENT_PROJECTORS } from './message-projectors'
 import { INTENTS_TOOL_MANIFESTS } from './tool-manifests'
-
-const INTENT_TEMPLATE_KEYS = new Set([
-  'service_request.approved',
-  'service_request.rejected',
-  'service_request.matched',
-  'service_request.needs_clarification',
-  'service_request.completed',
-])
-
-const intentTemplates = SYSTEM_MESSAGE_TEMPLATES.filter((template) =>
-  INTENT_TEMPLATE_KEYS.has(template.key),
-)
-if (intentTemplates.length !== INTENT_TEMPLATE_KEYS.size) {
-  throw new Error('Intents domain is missing one or more system message templates.')
-}
 
 export const INTENTS_DOMAIN = defineBusinessDomain({
   key: 'intents',
@@ -57,7 +41,7 @@ export const INTENTS_DOMAIN = defineBusinessDomain({
     },
   ],
   events: INTENT_BUSINESS_EVENT_MANIFESTS,
-  messageTemplates: intentTemplates,
+  messageTemplates: [],
 })
 
 export const INTENTS_RUNTIME = defineBusinessDomainRuntime({

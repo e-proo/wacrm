@@ -1,5 +1,5 @@
 import { buildLocaleFallbackChain, buildMessageEventFallbackChain } from './catalog'
-import { findSystemMessageTemplate } from './defaults'
+import { findSystemMessageTemplate } from './current-system-template-registry'
 import type {
   MessageAudience,
   MessageChannel,

@@ -1,4 +1,3 @@
-import { SYSTEM_MESSAGE_TEMPLATES } from '@/lib/messaging/defaults'
 import {
   defineBusinessDomain,
   defineBusinessDomainRuntime,
@@ -8,18 +7,7 @@ import { COVERAGE_EVENT_PROJECTORS } from './message-projectors'
 import { COVERAGE_BUSINESS_EVENT_MANIFESTS } from './business-events'
 import { COVERAGE_CHANGE_EXECUTORS } from './change-executors'
 import { COVERAGE_TOOL_MANIFESTS } from './tool-manifests'
-
-const COVERAGE_TEMPLATE_KEYS = new Set([
-  'coverage.offer.approved',
-  'coverage.request.approved',
-])
-
-const coverageTemplates = SYSTEM_MESSAGE_TEMPLATES.filter((template) =>
-  COVERAGE_TEMPLATE_KEYS.has(template.key),
-)
-if (coverageTemplates.length !== COVERAGE_TEMPLATE_KEYS.size) {
-  throw new Error('Coverage domain is missing one or more system message templates.')
-}
+import { COVERAGE_MESSAGE_TEMPLATES } from './messages/templates'
 
 export const COVERAGE_DOMAIN = defineBusinessDomain({
   key: 'coverage',
@@ -58,7 +46,7 @@ export const COVERAGE_DOMAIN = defineBusinessDomain({
     },
   ],
   events: COVERAGE_BUSINESS_EVENT_MANIFESTS,
-  messageTemplates: coverageTemplates,
+  messageTemplates: COVERAGE_MESSAGE_TEMPLATES,
 })
 
 export const COVERAGE_RUNTIME = defineBusinessDomainRuntime({

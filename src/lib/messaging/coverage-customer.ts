@@ -1,5 +1,5 @@
 import { buildCoverageMessageContext, coverageMethodLabel, formatMessageNumber } from './domains'
-import { findSystemMessageTemplate } from './defaults'
+import { findSystemMessageTemplate } from './current-system-template-registry'
 import { renderMessageTemplate } from './renderer'
 import { resolveMessageTemplate } from './resolver'
 import type { MessageTemplateDefinition, TemplateOverrideStore } from './types'
