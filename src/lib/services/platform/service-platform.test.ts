@@ -1244,3 +1244,62 @@ describe('Phase 3 shared business primitive ownership', () => {
     expect(pricingRulesChanges).not.toContain('instanceof ServiceError')
   })
 })
+
+
+describe('Phase 4 domain-owned system templates', () => {
+  it('keeps business-domain copy out of messaging defaults', () => {
+    const defaults = readFileSync(
+      new URL('../../messaging/defaults.ts', import.meta.url),
+      'utf8',
+    )
+    const coverageDomain = readFileSync(
+      new URL('../coverage/domain.ts', import.meta.url),
+      'utf8',
+    )
+    const fxDomain = readFileSync(
+      new URL('../fx-v2/domain.ts', import.meta.url),
+      'utf8',
+    )
+    const intentsDomain = readFileSync(
+      new URL('../intents/domain.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(defaults).not.toContain("key: 'coverage.")
+    expect(defaults).not.toContain("key: 'exchange_rate.")
+    expect(defaults).toContain("key: 'service_request.approved'")
+    expect(defaults).toContain("key: 'change_request.pending'")
+
+    expect(coverageDomain).toContain('COVERAGE_MESSAGE_TEMPLATES')
+    expect(fxDomain).toContain('FX_V2_MESSAGE_TEMPLATES')
+    expect(coverageDomain).not.toContain('SYSTEM_MESSAGE_TEMPLATES')
+    expect(fxDomain).not.toContain('SYSTEM_MESSAGE_TEMPLATES')
+    expect(intentsDomain).toContain('messageTemplates: []')
+  })
+
+  it('routes system lookup through the composed registry, not defaults', () => {
+    const resolver = readFileSync(
+      new URL('../../messaging/resolver.ts', import.meta.url),
+      'utf8',
+    )
+    const coverageCustomer = readFileSync(
+      new URL('../../messaging/coverage-customer.ts', import.meta.url),
+      'utf8',
+    )
+    const fxCustomer = readFileSync(
+      new URL('../../messaging/fx-v2-customer.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(resolver).toContain(
+      "from './current-system-template-registry'",
+    )
+    expect(coverageCustomer).toContain(
+      "from './current-system-template-registry'",
+    )
+    expect(fxCustomer).toContain(
+      "from './current-system-template-registry'",
+    )
+    expect(resolver).not.toContain("from './defaults'")
+  })
+})

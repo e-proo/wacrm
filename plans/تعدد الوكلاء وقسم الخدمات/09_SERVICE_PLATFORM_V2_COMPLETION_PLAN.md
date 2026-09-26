@@ -143,7 +143,7 @@
 
 ### Phase 4 — Domain-Owned System Templates
 
-**الحالة:** PENDING
+**الحالة:** IN PROGRESS
 
 الهدف:
 
@@ -985,3 +985,52 @@ business codes نفسها لم تُنقل إلى shared layer.
 الخدمات لم تعد تحمل نسخًا مستقلة من primitives التي ثبت أنها مشتركة. الـDomain-specific rules بقيت داخل Domains ولم تُسحب إلى shared layer بلا مبرر.
 
 Phase 1 live cutover gates المؤجلة تبقى كما هي ولا تتغير نتيجة إغلاق Phase 3.
+
+
+### Phase 4A — Domain-owned defaults + SystemTemplateRegistry
+
+بدأت Phase 4 بإكمال ownership الموجود أصلًا في BusinessDomainManifest بدل إنشاء مسار رسائل جديد.
+
+تم إنشاء:
+
+- `src/lib/messaging/system-template-registry.ts`
+- `src/lib/messaging/current-system-template-registry.ts`
+
+المسار التشغيلي أصبح:
+
+`Domain templates + Messaging generic defaults → SystemTemplateRegistry → resolver`
+
+#### Domain ownership
+
+Coverage يملك الآن نصوصه في:
+
+`src/lib/services/coverage/messages/templates.ts`
+
+FX V2 يملك نصوصه في:
+
+`src/lib/services/fx-v2/messages/templates.ts`
+
+ولم تعد domain manifests تقوم بفلترة ملف `messaging/defaults.ts`.
+
+Intents لا يملك نسخًا من `service_request.*`؛ هذه القوالب lifecycle عامة وتبقى في Messaging Platform وفق المعمارية.
+
+#### ما بقي في Messaging Platform
+
+- `change_request.*`
+- `service_request.*`
+- `remittance.completed` مؤقتًا لعدم وجود Remittance Domain مسجل حاليًا.
+
+لا يتم إنشاء Domain وهمي فقط لنقل قالب.
+
+#### Safety / compatibility
+
+- account overrides لم تتغير وتبقى أول أولوية في resolver.
+- immutable revision store لم يتغير.
+- locale fallback لم يتغير.
+- system template registration يرفض duplicate identities.
+- secret placeholders غير المعلنة تُرفض عند registration قبل render.
+- emergency fallback في Coverage/FX/Service Request/Change Request يستخدم الـcomposed registry الجديد.
+- `SYSTEM_MESSAGE_TEMPLATES` بقي alias توافق للقوالب العامة فقط؛ Domain templates لا تعود إلى الملف المركزي.
+- الـcurrent composed registry لا يُصدّر من messaging barrel لتجنب circular loading عبر Domain Catalog.
+
+لا migration مطلوبة في Phase 4A.
