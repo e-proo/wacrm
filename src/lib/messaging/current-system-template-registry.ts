@@ -1,7 +1,8 @@
 import { GENERAL_SYSTEM_MESSAGE_TEMPLATES } from './defaults'
 import { LEGACY_SYSTEM_MESSAGE_TEMPLATES } from './legacy-system-templates'
 import { SystemTemplateRegistry } from './system-template-registry'
-import { CURRENT_BUSINESS_DOMAIN_MODULES } from '@/lib/services/platform/domain-catalog'
+import { COVERAGE_MESSAGE_TEMPLATES } from '@/lib/services/coverage/messages/templates'
+import { FX_V2_MESSAGE_TEMPLATES } from '@/lib/services/fx-v2/messages/templates'
 import type {
   MessageAudience,
   MessageChannel,
@@ -12,9 +13,9 @@ export const CURRENT_SYSTEM_TEMPLATE_REGISTRY = new SystemTemplateRegistry()
   .register('messaging', GENERAL_SYSTEM_MESSAGE_TEMPLATES)
   .register('legacy-remittance', LEGACY_SYSTEM_MESSAGE_TEMPLATES)
 
-for (const domain of CURRENT_BUSINESS_DOMAIN_MODULES) {
-  CURRENT_SYSTEM_TEMPLATE_REGISTRY.register(domain.key, domain.messageTemplates)
-}
+CURRENT_SYSTEM_TEMPLATE_REGISTRY
+  .register('coverage', COVERAGE_MESSAGE_TEMPLATES)
+  .register('exchange_rates', FX_V2_MESSAGE_TEMPLATES)
 
 export function findSystemMessageTemplate(input: {
   key: string

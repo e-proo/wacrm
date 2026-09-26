@@ -1049,3 +1049,19 @@ Intents لا يملك نسخًا من `service_request.*`؛ هذه القوال�
 - يمكن لـRemittance Domain مستقبليًا أن يتبنى المفتاح عبر registry migration دون تغيير transport/resolver.
 
 هذا عزل legacy وليس إعلانًا بأن Remittance أصبح Domain مكتملًا.
+
+
+### Phase 4 — Composition cycle hardening
+
+أثناء أول تشغيل كامل للـRegistry ظهر circular dependency لأن `current-system-template-registry.ts` كان يستورد `domain-catalog.ts`، بينما بعض Domain runtimes تصل إلى Change Request notifications التي تستورد Messaging.
+
+تم تصحيح composition بحيث:
+
+- current template registry لا يستورد runtime/domain catalog.
+- يسجل arrays الخفيفة المملوكة للـDomains مباشرة:
+  - `COVERAGE_MESSAGE_TEMPLATES`
+  - `FX_V2_MESSAGE_TEMPLATES`
+- BusinessDomain manifests تستخدم نفس arrays، فلا توجد نسخة نص ثانية.
+- اختبار composition يمر على `CURRENT_BUSINESS_DOMAIN_MODULES` ويتأكد أن كل `domain.messageTemplates` مسجل في registry تحت owner المطابق.
+
+بهذا يبقى template resolution خفيفًا ولا يسحب AI/Change Request runtimes عند import.

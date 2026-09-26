@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { CURRENT_BUSINESS_DOMAIN_MODULES } from '@/lib/services/platform/domain-catalog'
 import {
   CURRENT_SYSTEM_TEMPLATE_REGISTRY,
   findSystemMessageTemplate,
@@ -52,6 +53,21 @@ describe('current system template composition', () => {
         locale: 'ar',
       }),
     ).toBe('legacy-remittance')
+  })
+
+  it('covers every template declared by current BusinessDomain manifests', () => {
+    for (const domain of CURRENT_BUSINESS_DOMAIN_MODULES) {
+      for (const template of domain.messageTemplates) {
+        expect(
+          CURRENT_SYSTEM_TEMPLATE_REGISTRY.ownerOf({
+            key: template.key,
+            audience: template.audience,
+            channel: template.channel,
+            locale: template.locale,
+          }),
+        ).toBe(domain.key)
+      }
+    }
   })
 
   it('preserves the public system lookup used by resolver and emergency fallback', () => {
