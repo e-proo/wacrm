@@ -22,7 +22,7 @@ const noopResolver = (
 
 describe('Target resolver registry', () => {
   it('binds task types to same-domain resolvers without kernel branches', () => {
-    const module: AgentTaskModule = {
+    const taskModule: AgentTaskModule = {
       domain: 'coverage',
       taskTypes: [
         defineAgentTaskType({
@@ -60,7 +60,7 @@ describe('Target resolver registry', () => {
       ],
     }
 
-    const platform = buildAgentTaskPlatform([module])
+    const platform = buildAgentTaskPlatform([taskModule])
     expect(platform.taskTypes.get('coverage.sourcing', 1)?.domain).toBe(
       'coverage',
     )
@@ -70,7 +70,7 @@ describe('Target resolver registry', () => {
   })
 
   it('rejects a task type whose resolver is not registered', () => {
-    const module: AgentTaskModule = {
+    const taskModule: AgentTaskModule = {
       domain: 'coverage',
       taskTypes: [
         defineAgentTaskType({
@@ -106,7 +106,7 @@ describe('Target resolver registry', () => {
       targetResolvers: [],
     }
 
-    expect(() => buildAgentTaskPlatform([module])).toThrow(
+    expect(() => buildAgentTaskPlatform([taskModule])).toThrow(
       /unregistered target resolver/,
     )
   })
