@@ -34,10 +34,12 @@ function manifest(
     maxTargets: 10,
     completionPolicy: {
       key: 'coverage.sourcing_completion',
+      version: 1,
       config: {},
     },
     messagePolicy: {
       key: 'coverage.sourcing_message',
+      version: 1,
       config: {},
     },
     ...over,
@@ -54,7 +56,7 @@ describe('AgentTaskTypeManifest', () => {
     const issues = validateAgentTaskTypeManifest(
       manifest({
         targetResolver: 'services.customer_segment',
-        messagePolicy: { key: 'services.promotion_message', config: {} },
+        messagePolicy: { key: 'services.promotion_message', version: 1, config: {} },
       }),
     )
     expect(issues.map((issue) => issue.code)).toEqual(
@@ -104,10 +106,12 @@ describe('AgentTaskTypeRegistry', () => {
           allowedTools: [{ key: 'services.search', version: 1 }],
           completionPolicy: {
             key: 'services.promotion_completion',
+            version: 1,
             config: {},
           },
           messagePolicy: {
             key: 'services.promotion_message',
+            version: 1,
             config: {},
           },
         }),
@@ -124,10 +128,12 @@ describe('AgentTaskTypeRegistry', () => {
           allowedTools: [],
           completionPolicy: {
             key: 'future_domain.completion',
+            version: 1,
             config: {},
           },
           messagePolicy: {
             key: 'future_domain.message',
+            version: 1,
             config: {},
           },
         }),
