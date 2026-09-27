@@ -90,10 +90,17 @@ describe('Agent Execution Runtime', () => {
       new URL('./dispatch.ts', import.meta.url),
       'utf8',
     )
+    const worker = readFileSync(
+      new URL('./worker.ts', import.meta.url),
+      'utf8',
+    )
     const files = execution + '\n' + dispatch
 
     expect(execution).toContain("import { runAgentLoop")
+    expect(execution).not.toContain('engineSendText')
+    expect(dispatch).toContain('runClaimedAgentExecution')
     expect(dispatch).not.toContain("import { runAgentLoop")
+    expect(worker).toContain(".eq('run_mode', 'inbound')")
     expect(files).not.toContain('runOutboundAgentLoop')
   })
 })
