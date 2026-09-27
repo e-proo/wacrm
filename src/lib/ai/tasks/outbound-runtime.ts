@@ -138,6 +138,7 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
 
   const policy = CURRENT_AGENT_TASK_PLATFORM.outboundMessagePolicies.get(
     manifest.messagePolicy.key,
+    manifest.messagePolicy.version,
   )
   if (!policy || policy.domain !== manifest.domain) {
     return {
