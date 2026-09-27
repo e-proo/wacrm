@@ -247,6 +247,139 @@ BEGIN
     RAISE EXCEPTION 'Intents cutover mode RPC privileges are unsafe';
   END IF;
 
+  -- Agent Task / Outreach persistence foundation (109).
+  IF to_regclass('public.ai_agent_tasks') IS NULL
+     OR to_regclass('public.ai_agent_task_targets') IS NULL
+     OR to_regclass('public.ai_agent_task_events') IS NULL THEN
+    RAISE EXCEPTION 'Agent Task tables are missing — migration 109 did not apply';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_class
+    WHERE oid = 'public.ai_agent_tasks'::regclass
+      AND relrowsecurity
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_class
+    WHERE oid = 'public.ai_agent_task_targets'::regclass
+      AND relrowsecurity
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_class
+    WHERE oid = 'public.ai_agent_task_events'::regclass
+      AND relrowsecurity
+  ) THEN
+    RAISE EXCEPTION 'Agent Task RLS is not enabled on every task table';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'ai_agent_runs'
+      AND column_name = 'inbound_message_id'
+      AND is_nullable <> 'YES'
+  ) THEN
+    RAISE EXCEPTION 'ai_agent_runs.inbound_message_id must be nullable after migration 109';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'ai_agent_runs'
+      AND column_name = 'run_mode'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'ai_agent_runs'
+      AND column_name = 'task_id'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'ai_agent_runs'
+      AND column_name = 'task_target_id'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'ai_agent_runs'
+      AND column_name = 'trigger_type'
+  ) THEN
+    RAISE EXCEPTION 'Generic agent execution columns are missing from ai_agent_runs';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_indexes
+    WHERE schemaname = 'public'
+      AND tablename = 'ai_agent_runs'
+      AND indexname = 'ai_agent_runs_inbound_message_id_key'
+      AND indexdef ILIKE 'CREATE UNIQUE INDEX%'
+  ) THEN
+    RAISE EXCEPTION 'Inbound-message uniqueness invariant is missing after migration 109';
+  END IF;
+
+  IF to_regprocedure(
+    'public.create_agent_run(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'Legacy create_agent_run compatibility RPC is missing';
+  END IF;
+
+  IF to_regprocedure(
+    'public.create_agent_execution(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,text,uuid,uuid,text,text,text,text)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'create_agent_execution is missing — migration 109 did not apply';
+  END IF;
+
+  IF to_regprocedure(
+    'public.append_agent_task_event(uuid,uuid,uuid,uuid,text,text,text,jsonb)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'append_agent_task_event is missing — migration 109 did not apply';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.create_agent_execution(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,text,uuid,uuid,text,text,text,text)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.create_agent_execution(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,text,uuid,uuid,text,text,text,text)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.create_agent_execution(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,text,uuid,uuid,text,text,text,text)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'create_agent_execution privileges are unsafe';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.append_agent_task_event(uuid,uuid,uuid,uuid,text,text,text,jsonb)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.append_agent_task_event(uuid,uuid,uuid,uuid,text,text,text,jsonb)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.append_agent_task_event(uuid,uuid,uuid,uuid,text,text,text,jsonb)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'append_agent_task_event privileges are unsafe';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'ai_agent_task_events'
+      AND cmd IN ('INSERT', 'UPDATE', 'DELETE', 'ALL')
+  ) THEN
+    RAISE EXCEPTION 'ai_agent_task_events must remain append-only for authenticated clients';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
