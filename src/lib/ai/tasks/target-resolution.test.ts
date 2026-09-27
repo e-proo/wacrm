@@ -60,10 +60,12 @@ describe('Target resolver registry', () => {
           maxTargets: 10,
           completionPolicy: {
             key: 'coverage.sourcing_completion',
+            version: 1,
             config: {},
           },
           messagePolicy: {
             key: 'coverage.sourcing_message',
+            version: 1,
             config: {},
           },
         }),
@@ -111,10 +113,12 @@ describe('Target resolver registry', () => {
           maxTargets: 1,
           completionPolicy: {
             key: 'coverage.sourcing_completion',
+            version: 1,
             config: {},
           },
           messagePolicy: {
             key: 'coverage.sourcing_message',
+            version: 1,
             config: {},
           },
         }),
@@ -166,10 +170,12 @@ describe('Target resolver registry', () => {
           maxTargets: 10,
           completionPolicy: {
             key: 'coverage.sourcing_completion',
+            version: 1,
             config: {},
           },
           messagePolicy: {
             key: 'coverage.sourcing_message',
+            version: 1,
             config: {},
           },
         }),
