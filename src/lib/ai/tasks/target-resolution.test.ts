@@ -144,6 +144,57 @@ describe('Target resolver registry', () => {
   })
 
 
+  it('rejects task tool scopes that are not customer-plane model tools', () => {
+    const taskModule: AgentTaskModule = {
+      domain: 'coverage',
+      taskTypes: [
+        defineAgentTaskType({
+          key: 'coverage.sourcing',
+          version: 1,
+          domain: 'coverage',
+          title: 'Coverage sourcing',
+          description: 'Find bounded supplier candidates.',
+          requiredAgentCapabilities: ['coverage.sourcing'],
+          allowedChannels: ['whatsapp'],
+          targetResolver: 'coverage.supplier_candidates',
+          allowedTools: [
+            { key: 'coverage.admin_list_offers', version: 1 },
+          ],
+          requiredTaskApproval: 'task',
+          followupPolicy: {
+            maxFollowups: 0,
+            minimumIntervalMinutes: 0,
+            maximumIntervalMinutes: 0,
+            stopOnReply: true,
+            stopOnOptOut: true,
+            stopOnBusinessOutcome: true,
+          },
+          maxTargets: 1,
+          completionPolicy: {
+            key: 'coverage.sourcing_completion',
+            version: 1,
+            config: {},
+          },
+          messagePolicy: {
+            key: 'coverage.sourcing_message',
+            version: 1,
+            config: {},
+          },
+        }),
+      ],
+      targetResolvers: [
+        noopResolver('coverage.supplier_candidates', 'coverage'),
+      ],
+      outboundMessagePolicies: [
+        noopOutboundPolicy('coverage.sourcing_message', 'coverage'),
+      ],
+    }
+
+    expect(() => buildAgentTaskPlatform([taskModule])).toThrow(
+      /TASK_TOOL_CUSTOMER_PLANE_DENIED/,
+    )
+  })
+
   it('rejects a task type whose outbound policy is not registered', () => {
     const taskModule: AgentTaskModule = {
       domain: 'coverage',
