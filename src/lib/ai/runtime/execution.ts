@@ -63,7 +63,10 @@ export interface LoadExecutionRevisionInput {
 
 export type LoadExecutionRevisionResult =
   | { ok: true; revision: AiAgentRevision }
-  | { ok: false; error: 'REVISION_NOT_FOUND' }
+  | {
+      ok: false
+      error: 'REVISION_NOT_FOUND' | 'PROVIDER_CONNECTION_MISMATCH'
+    }
 
 export async function claimAgentExecution(input: {
   runId: string
@@ -91,7 +94,7 @@ export async function loadAgentExecutionRevision(
   const { data: revision, error } = await db
     .from('ai_agent_revisions')
     .select(
-      'id, agent_id, status, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id',
+      'id, agent_id, status, provider_connection_id, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id',
     )
     .eq('account_id', input.accountId)
     .eq('agent_id', input.agentId)
@@ -107,6 +110,7 @@ export async function loadAgentExecutionRevision(
     id: string
     agent_id: string
     status: string
+    provider_connection_id: string
     model: string
     system_prompt: string | null
     response_style: string
@@ -116,6 +120,11 @@ export async function loadAgentExecutionRevision(
     max_tool_rounds: number
     max_ai_replies_per_conversation: number
     handoff_human_member_id: string | null
+  }
+
+  if (raw.provider_connection_id !== input.providerConnectionId) {
+    console.error('[agent execution] frozen provider does not match revision')
+    return { ok: false, error: 'PROVIDER_CONNECTION_MISMATCH' }
   }
 
   return {
