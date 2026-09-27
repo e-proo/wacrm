@@ -364,3 +364,44 @@ export async function authorizeStoredAgentTask(
     allowedTools: authorization.allowedTools,
   }
 }
+
+
+/**
+ * Copy the exact frozen capability set from a published/superseded revision
+ * into a newly-created draft. The SQL replacement function rechecks that the
+ * destination revision is still a draft under row lock, so a concurrent
+ * publish cannot turn inheritance into a mutation of immutable history.
+ *
+ * Existing drafts are intentionally not overwritten by this helper: once a
+ * draft exists, its capability edits belong to that draft.
+ */
+export async function inheritAgentRevisionCapabilities(
+  db: SupabaseClient,
+  input: {
+    accountId: string
+    agentId: string
+    sourceRevisionId: string
+    targetRevisionId: string
+    actorUserId: string
+  },
+): Promise<number> {
+  const capabilities = await loadAgentRevisionCapabilities(db, {
+    accountId: input.accountId,
+    revisionId: input.sourceRevisionId,
+  })
+
+  if (capabilities.length === 0) return 0
+
+  const { data, error } = await db.rpc(
+    'replace_ai_agent_revision_capabilities',
+    {
+      p_account_id: input.accountId,
+      p_agent_id: input.agentId,
+      p_revision_id: input.targetRevisionId,
+      p_capabilities: [...capabilities],
+      p_granted_by: input.actorUserId,
+    },
+  )
+  if (error) throw error
+  return Number(data ?? 0) || 0
+}
