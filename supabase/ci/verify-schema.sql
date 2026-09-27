@@ -565,6 +565,64 @@ BEGIN
     RAISE EXCEPTION 'Authenticated clients must not mutate outbound reservations directly';
   END IF;
 
+  -- Agent Task Reply Correlation (113).
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid='public.ai_agent_task_targets'::regclass
+      AND conname='ai_agent_task_targets_status_check'
+      AND pg_get_constraintdef(oid) LIKE '%paused_for_human%'
+  ) THEN
+    RAISE EXCEPTION 'paused_for_human target status is missing';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid='public.ai_agent_runs'::regclass
+      AND conname='ai_agent_runs_source_shape_check'
+      AND pg_get_constraintdef(oid) LIKE '%task_reply%'
+  ) THEN
+    RAISE EXCEPTION 'task reply inbound run shape is missing';
+  END IF;
+
+  IF to_regprocedure(
+       'public.correlate_agent_task_inbound_reply(uuid,uuid,uuid,uuid,boolean)'
+     ) IS NULL
+     OR to_regprocedure(
+       'public.pause_agent_task_targets_for_human(uuid,uuid,text,text)'
+     ) IS NULL THEN
+    RAISE EXCEPTION 'Agent Task reply correlation RPC surface is incomplete';
+  END IF;
+
+  IF has_function_privilege(
+       'anon',
+       'public.correlate_agent_task_inbound_reply(uuid,uuid,uuid,uuid,boolean)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'authenticated',
+       'public.correlate_agent_task_inbound_reply(uuid,uuid,uuid,uuid,boolean)',
+       'EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'service_role',
+       'public.correlate_agent_task_inbound_reply(uuid,uuid,uuid,uuid,boolean)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'Agent Task reply correlation privileges are unsafe';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgrelid='public.conversations'::regclass
+      AND tgname='pause_agent_task_targets_on_assignment'
+      AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'Human-assignment Task Target pause trigger is missing';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
