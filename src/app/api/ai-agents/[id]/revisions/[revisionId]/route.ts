@@ -11,7 +11,7 @@
 
 import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -39,7 +39,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string; revisionId: string }> },
 ) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.read')
     const limit = checkRateLimit(
       `admin:aiRevisionGet:${ctx.userId}`,
       RATE_LIMITS.adminAction,
@@ -94,7 +94,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; revisionId: string }> },
 ) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.edit')
     const limit = checkRateLimit(
       `admin:aiRevisionPatch:${ctx.userId}`,
       RATE_LIMITS.adminAction,
@@ -233,7 +233,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; revisionId: string }> },
 ) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.edit')
     const limit = checkRateLimit(
       `admin:aiRevisionDelete:${ctx.userId}`,
       RATE_LIMITS.adminAction,
