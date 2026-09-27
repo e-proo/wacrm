@@ -194,6 +194,9 @@ export async function processAgentRunQueue(input: {
   const { data: candidates, error } = await db
     .from('ai_agent_runs')
     .select('id, account_id')
+    // Phase 4 keeps the recovery worker inbound-only. Phase 5 introduces the
+    // Task Orchestrator as the owner of outbound task execution.
+    .eq('run_mode', 'inbound')
     .eq('status', 'queued')
     .lte('available_at', new Date().toISOString())
     .order('available_at', { ascending: true })
