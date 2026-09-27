@@ -185,6 +185,7 @@ begin
 
   if v_run.id is null
      or v_run.run_mode<>'outbound'
+     or v_run.status<>'claimed'
      or v_run.task_id is null
      or v_run.task_target_id is null then
     return jsonb_build_object('reserved',false,'reason','run_not_outbound');
@@ -369,7 +370,9 @@ set search_path=public
 as $$
 declare
   v_row public.ai_agent_task_outbound_messages%rowtype;
-  v_task_status text;
+  v_task public.ai_agent_tasks%rowtype;
+  v_target public.ai_agent_task_targets%rowtype;
+  v_last_inbound_at timestamptz;
 begin
   if length(btrim(coalesce(p_worker_id,'')))=0 then
     raise exception 'AGENT_OUTBOUND_WORKER_ID_REQUIRED';
@@ -403,12 +406,13 @@ begin
     return jsonb_build_object('claimed',false,'reason',v_row.status);
   end if;
 
-  select status into v_task_status
+  select * into v_task
   from public.ai_agent_tasks
   where id=v_row.task_id
-    and account_id=v_row.account_id;
+    and account_id=v_row.account_id
+  for update;
 
-  if v_task_status='cancelled' then
+  if v_task.status='cancelled' then
     update public.ai_agent_task_outbound_messages
     set status='cancelled',error_code='TASK_CANCELLED'
     where id=v_row.id;
@@ -416,8 +420,64 @@ begin
     return jsonb_build_object('claimed',false,'reason','task_cancelled');
   end if;
 
-  if v_task_status<>'running' then
+  if v_task.id is null or v_task.status<>'running' then
     return jsonb_build_object('claimed',false,'reason','task_not_running');
+  end if;
+
+  select * into v_target
+  from public.ai_agent_task_targets
+  where id=v_row.task_target_id
+    and account_id=v_row.account_id
+    and task_id=v_row.task_id
+  for update;
+
+  if v_target.id is null or v_target.status<>'in_progress' then
+    return jsonb_build_object('claimed',false,'reason','target_not_in_progress');
+  end if;
+
+  if exists (
+    select 1
+    from public.ai_outreach_contact_controls as control
+    where control.account_id=v_row.account_id
+      and control.contact_id=v_target.contact_id
+      and control.channel=v_task.channel
+      and control.state in ('opted_out','blocked')
+      and (control.suppressed_until is null or control.suppressed_until>now())
+  ) then
+    update public.ai_agent_task_outbound_messages
+    set status='cancelled',error_code='TARGET_SUPPRESSED'
+    where id=v_row.id;
+
+    return jsonb_build_object('claimed',false,'reason','suppressed');
+  end if;
+
+  if v_row.message_kind='text' then
+    select max(message.created_at) into v_last_inbound_at
+    from public.messages as message
+    where message.conversation_id=v_target.conversation_id
+      and message.sender_type='customer';
+
+    if v_last_inbound_at is null
+       or v_last_inbound_at<now()-interval '24 hours' then
+      update public.ai_agent_task_outbound_messages
+      set status='failed',error_code='SESSION_WINDOW_CLOSED'
+      where id=v_row.id;
+
+      return jsonb_build_object('claimed',false,'reason','template_required');
+    end if;
+  elsif not exists (
+    select 1
+    from public.message_templates as template
+    where template.account_id=v_row.account_id
+      and template.name=v_row.template_name
+      and lower(coalesce(template.language,''))=lower(v_row.template_language)
+      and upper(coalesce(template.status,''))='APPROVED'
+  ) then
+    update public.ai_agent_task_outbound_messages
+    set status='failed',error_code='TEMPLATE_NOT_APPROVED'
+    where id=v_row.id;
+
+    return jsonb_build_object('claimed',false,'reason','template_not_approved');
   end if;
 
   update public.ai_agent_task_outbound_messages
