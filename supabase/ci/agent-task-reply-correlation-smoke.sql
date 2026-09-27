@@ -29,6 +29,8 @@ declare
   v_out_ambiguous_b uuid := gen_random_uuid();
   v_out_human uuid := gen_random_uuid();
   v_in_reply uuid := gen_random_uuid();
+  v_task_reply_response uuid := gen_random_uuid();
+  v_in_followup uuid := gen_random_uuid();
   v_in_ambiguous uuid := gen_random_uuid();
   v_human_local uuid := gen_random_uuid();
 
@@ -211,6 +213,37 @@ begin
   if v_result->>'reason'<>'existing'
      or v_replay_run_id<>v_run_id then
     raise exception 'reply correlation replay is not idempotent: %',v_result;
+  end if;
+
+  insert into public.messages(
+    id,conversation_id,sender_type,content_type,content_text,message_id,status
+  ) values (
+    v_task_reply_response,v_conv_reply,'bot','text',
+    'Task reply response','wamid.reply.agent-response','sent'
+  );
+
+  update public.ai_agent_runs
+  set status='succeeded',
+      completed_at=now(),
+      outbound_message_id=v_task_reply_response
+  where id=v_run_id;
+
+  insert into public.messages(
+    id,conversation_id,sender_type,content_type,content_text,message_id,status,
+    reply_to_message_id,created_at
+  ) values (
+    v_in_followup,v_conv_reply,'customer','text','Follow-up reply',
+    'wamid.reply.followup','delivered',v_task_reply_response,now()
+  );
+
+  v_result:=public.correlate_agent_task_inbound_reply(
+    v_account,v_conv_reply,v_in_followup,v_task_reply_response,false
+  );
+
+  if v_result->>'status'<>'matched'
+     or v_result->>'correlation_method'<>'reply_context'
+     or (v_result->>'task_target_id')::uuid<>v_target_reply then
+    raise exception 'multi-turn task reply correlation failed: %',v_result;
   end if;
 
   update public.ai_agent_tasks
