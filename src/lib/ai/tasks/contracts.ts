@@ -130,6 +130,7 @@ export interface AgentTaskFollowupPolicy {
  */
 export interface AgentTaskPolicyReference {
   key: string
+  version: number
   config: Readonly<Record<string, unknown>>
 }
 
@@ -273,6 +274,12 @@ export function validateAgentTaskTypeManifest(
     ['completionPolicy', manifest.completionPolicy],
     ['messagePolicy', manifest.messagePolicy],
   ] as const) {
+    if (!Number.isInteger(policy.version) || policy.version < 1) {
+      add(
+        'INVALID_POLICY_VERSION',
+        `${name} must use a positive exact policy version.`,
+      )
+    }
     if (!TASK_KEY_RE.test(policy.key)) {
       add(
         'INVALID_POLICY_KEY',
