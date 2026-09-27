@@ -760,8 +760,8 @@ describe('canonical legacy notification fallback contraction', () => {
 
 describe('exact-version runtime tool contraction', () => {
   it('resolves the frozen grant version directly instead of requiring the newest version', () => {
-    const dispatch = readFileSync(
-      new URL('../../ai/runtime/dispatch.ts', import.meta.url),
+    const toolExecution = readFileSync(
+      new URL('../../ai/runtime/tool-execution.ts', import.meta.url),
       'utf8',
     )
     const loop = readFileSync(
@@ -769,10 +769,10 @@ describe('exact-version runtime tool contraction', () => {
       'utf8',
     )
 
-    expect(dispatch).toContain(
+    expect(toolExecution).toContain(
       'getCurrentPlatformTool(invocation.toolKey, grantedVersion)',
     )
-    expect(dispatch).not.toContain('grantedVersion !== latestTool.version')
+    expect(toolExecution).not.toContain('grantedVersion !== latestTool.version')
     expect(loop).toContain('CURRENT_PLATFORM_REGISTRY.modelVisibleTools')
     expect(loop).toContain(
       'getCurrentPlatformTool(call.toolKey, grant.toolVersion)',
