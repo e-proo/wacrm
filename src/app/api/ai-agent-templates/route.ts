@@ -8,7 +8,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -17,7 +17,7 @@ import {
 
 export async function GET() {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.read')
     const limit = checkRateLimit(
       `admin:agentTemplates:${ctx.userId}`,
       RATE_LIMITS.adminAction,
