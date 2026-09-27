@@ -52,6 +52,10 @@ export interface ToolContext {
   simulation: boolean
   trustedAdminIdentityId: string | null
   trustedAdminCapabilities: ReadonlyArray<string>
+  /** Frozen Agent Revision capabilities for Task executions. */
+  agentCapabilities?: ReadonlyArray<string>
+  /** Exact Task Manifest tool scope; null/undefined means ordinary inbound. */
+  taskAllowedTools?: ReadonlyArray<{ key: string; version: number }> | null
   features: RuntimeFeaturePolicy
   agentPurpose: AgentPurpose
   /** Runtime-bound business identity. Models never choose these values. */
