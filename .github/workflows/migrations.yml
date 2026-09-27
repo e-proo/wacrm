@@ -74,6 +74,9 @@ jobs:
       # created above. The smoke file is one transactional DO statement:
       # failed assertions roll back automatically and successful fixtures
       # are explicitly removed before commit.
+      - name: Verify Agent Task platform behavior
+        run: supabase db query --local --file supabase/ci/agent-task-platform-smoke.sql
+
       - name: Verify Intents controlled cutover safety
         run: supabase db query --local --file supabase/ci/intents-cutover-smoke.sql
 
