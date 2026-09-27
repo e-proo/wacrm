@@ -48,6 +48,8 @@ export type RunStatus =
 
 export type RunPlane = 'admin' | 'customer'
 
+export type AgentRunMode = 'inbound' | 'outbound' | 'simulation'
+
 export type TrustedIdentityStatus =
   | 'pending_verification'
   | 'active'
@@ -168,13 +170,19 @@ export interface AiAgentRun {
   id: Uuid
   accountId: AccountId
   conversationId: Uuid
-  inboundMessageId: Uuid
+  inboundMessageId: Uuid | null
   aiAgentId: Uuid
   agentRevisionId: Uuid
   providerConnectionId: Uuid
   routeId: Uuid | null
   routeReason: string | null
   plane: RunPlane
+  runMode: AgentRunMode
+  taskId: Uuid | null
+  taskTargetId: Uuid | null
+  triggerType: string
+  triggerRef: string | null
+  counterpartyRole: string | null
   status: RunStatus
   attemptCount: number
   availableAt: string
