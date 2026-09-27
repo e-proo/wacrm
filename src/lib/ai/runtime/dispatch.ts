@@ -414,8 +414,15 @@ async function executeAgentRun(
       await markRun(db, args.accountId, runId, 'failed', 'REPLY_SLOT_LOST')
       return 'failed'
     }
+  } else if (decision.taskReply) {
+    console.info(
+      '[ai dispatch] task reply uses task limits run=' + runId.slice(0, 8),
+    )
   } else {
-    console.info('[ai dispatch] admin plane bypasses customer reply cap run=' + runId.slice(0, 8))
+    console.info(
+      '[ai dispatch] admin plane bypasses customer reply cap run=' +
+        runId.slice(0, 8),
+    )
   }
 
   const trustedAdmin =
