@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   inheritedGrantAllowedForPurpose,
   planeForAgentPurpose,
+  trustClassForAgentPurpose,
 } from './tool-grant-plane-policy'
 
 const grant = (tool_key: string, tool_version: number, permission: string) => ({
@@ -14,7 +15,24 @@ describe('tool grant plane inheritance policy', () => {
   it('maps fixed agent purposes to their runtime planes', () => {
     expect(planeForAgentPurpose('customer_support')).toBe('customer')
     expect(planeForAgentPurpose('admin_operations')).toBe('admin')
-    expect(planeForAgentPurpose('custom')).toBeNull()
+    expect(planeForAgentPurpose('custom')).toBe('customer')
+  })
+
+  it('keeps custom agents external/customer-safe by default', () => {
+    expect(trustClassForAgentPurpose('customer_support')).toBe('external')
+    expect(trustClassForAgentPurpose('custom')).toBe('external')
+    expect(trustClassForAgentPurpose('admin_operations')).toBe('admin')
+
+    expect(
+      inheritedGrantAllowedForPurpose(
+        grant('change_requests.list_pending', 1, 'read'),
+        'custom',
+      ),
+    ).toMatchObject({
+      allowed: false,
+      plane: 'customer',
+      reason: 'plane_mismatch',
+    })
   })
 
   it('keeps tools shared by customer and admin planes', () => {
