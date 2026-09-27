@@ -47,12 +47,43 @@ export function listCurrentToolDefinitions(): ReadonlyArray<ToolDefinition> {
   return CURRENT_PLATFORM_REGISTRY.listTools().map(platformManifestToToolDefinition)
 }
 
+/**
+ * Builder-facing projection. Authoritative EXECUTE handlers are platform
+ * internals and must never appear as grants an administrator can hand to a
+ * model, even if a future registry entry is accidentally projected through
+ * the legacy ToolDefinition compatibility shape.
+ */
+export function listBuilderToolDefinitions(): ReadonlyArray<ToolDefinition> {
+  return CURRENT_PLATFORM_REGISTRY
+    .listTools()
+    .filter(isBuilderExposedManifest)
+    .map(platformManifestToToolDefinition)
+}
+
+export function getBuilderToolDefinition(
+  key: string,
+  version?: number,
+): ToolDefinition | null {
+  const manifest = getCurrentPlatformTool(key, version)
+  return manifest && isBuilderExposedManifest(manifest)
+    ? platformManifestToToolDefinition(manifest)
+    : null
+}
+
 export function getCurrentToolDefinition(
   key: string,
   version?: number,
 ): ToolDefinition | null {
   const manifest = getCurrentPlatformTool(key, version)
   return manifest ? platformManifestToToolDefinition(manifest) : null
+}
+
+function isBuilderExposedManifest(manifest: PlatformToolManifest): boolean {
+  return (
+    manifest.modelExposed &&
+    !manifest.serverOnly &&
+    manifest.permission !== 'execute'
+  )
 }
 
 function compactArgumentSchema(
