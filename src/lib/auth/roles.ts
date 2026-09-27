@@ -107,3 +107,44 @@ export function canDeleteAccount(role: AccountRole): boolean {
 export function canTransferOwnership(role: AccountRole): boolean {
   return role === "owner";
 }
+
+
+/**
+ * Fine-grained agent-management capabilities used by the builder/API.
+ *
+ * The account schema currently stores roles, not per-member capability rows,
+ * so this mapping is the role ceiling for V1. Sensitive publish/proposal-grant
+ * capabilities are owner-only; ordinary agent administration remains admin+
+ * for backward compatibility.
+ */
+export const AGENT_MANAGEMENT_CAPABILITIES = [
+  "agents.read",
+  "agents.create",
+  "agents.edit",
+  "agents.publish",
+  "agents.pause",
+  "agents.manage_routes",
+  "agents.assign_knowledge",
+  "agents.grant_read_tools",
+  "agents.grant_proposal_tools",
+  "agents.manage_budgets",
+  "agents.manage_tasks",
+  "agents.manage_outreach",
+] as const;
+
+export type AgentManagementCapability =
+  (typeof AGENT_MANAGEMENT_CAPABILITIES)[number];
+
+const OWNER_ONLY_AGENT_CAPABILITIES = new Set<AgentManagementCapability>([
+  "agents.publish",
+  "agents.grant_proposal_tools",
+]);
+
+export function hasAgentManagementCapability(
+  role: AccountRole,
+  capability: AgentManagementCapability,
+): boolean {
+  if (capability === "agents.read") return hasMinRole(role, "viewer");
+  if (OWNER_ONLY_AGENT_CAPABILITIES.has(capability)) return role === "owner";
+  return hasMinRole(role, "admin");
+}
