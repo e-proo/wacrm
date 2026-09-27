@@ -132,10 +132,11 @@ describe("capability predicates", () => {
 
 
 describe("agent management capabilities", () => {
-  it("allows read access to every account member role", () => {
-    for (const role of ACCOUNT_ROLES) {
-      expect(hasAgentManagementCapability(role, "agents.read")).toBe(true);
-    }
+  it("keeps agent configuration reads at the existing admin+ boundary", () => {
+    expect(hasAgentManagementCapability("owner", "agents.read")).toBe(true);
+    expect(hasAgentManagementCapability("admin", "agents.read")).toBe(true);
+    expect(hasAgentManagementCapability("agent", "agents.read")).toBe(false);
+    expect(hasAgentManagementCapability("viewer", "agents.read")).toBe(false);
   });
 
   it("keeps ordinary builder administration at admin+", () => {
