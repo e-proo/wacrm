@@ -38,18 +38,12 @@ export async function correlateInboundTaskReply(input: {
   const db = supabaseAdmin()
   const policy = await loadAccountRuntimePolicy(db, input.accountId)
 
-  if (
-    policy.killSwitch ||
-    !policy.multiAgentEnabled ||
-    !policy.recoveryWorkerEnabled
-  ) {
+  if (policy.killSwitch || !policy.multiAgentEnabled) {
     return {
       status: 'disabled',
       reason: policy.killSwitch
         ? 'account_kill_switch'
-        : !policy.multiAgentEnabled
-          ? 'account_multi_agent_disabled'
-          : 'recovery_worker_disabled',
+        : 'account_multi_agent_disabled',
       signal: null,
       candidateCount: null,
       pausedTargets: null,
