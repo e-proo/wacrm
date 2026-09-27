@@ -18,6 +18,7 @@ describe('Task Orchestrator', () => {
 
     expect(source).toContain("rpc('claim_next_agent_task'")
     expect(source).toContain("rpc('claim_next_agent_task_target'")
+    expect(source).toContain('materializeCurrentTaskTargets')
     expect(source).toContain("rpc('create_claimed_agent_task_execution'")
     expect(source).not.toContain('engineSendText')
     expect(source).not.toContain('meta-send')
