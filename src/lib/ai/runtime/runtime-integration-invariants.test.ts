@@ -30,9 +30,12 @@ describe('multi-agent runtime integration invariants', () => {
     expect(localizedAdminFallback('ما هي التغطيات')).toContain('وكيل الإدارة')
   })
 
-  it('bypasses customer reply slots for admin and wires human handoff', () => {
+  it('bypasses customer reply slots for admin/task replies and wires human handoff', () => {
     const dispatch = readFileSync(new URL('./dispatch.ts', import.meta.url), 'utf8')
-    expect(dispatch).toContain("if (decision.plane === 'customer')")
+    expect(dispatch).toContain(
+      "if (decision.plane === 'customer' && !decision.taskReply)",
+    )
+    expect(dispatch).toContain('task reply uses task limits')
     expect(dispatch).toContain('admin plane bypasses customer reply cap')
     expect(dispatch).toContain('applyAgentHumanHandoff')
     expect(dispatch).toContain('localizedHandoffAcknowledgement')
@@ -58,7 +61,9 @@ describe('multi-agent runtime integration invariants', () => {
     const humanGate = router.indexOf('if (ctx.hasHumanAssignee)')
     expect(adminGate).toBeGreaterThan(-1)
     expect(humanGate).toBeGreaterThan(-1)
+    const taskGate = router.indexOf('if (ctx.taskReply)')
     expect(adminGate).toBeLessThan(humanGate)
+    expect(taskGate).toBeGreaterThan(humanGate)
     expect(router).toContain("plane: 'admin'")
     expect(router).toContain('admin_identity_no_admin_route')
     expect(router).toContain('admin_route_target_not_published')
