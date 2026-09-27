@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { validateAgentRevisionForPublish } from '@/lib/ai/runtime/builder-service'
 import { PublishError } from '@/lib/ai/runtime/agents-service'
@@ -10,7 +10,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string; revisionId: string }> },
 ) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.publish')
     const limit = checkRateLimit(`admin:agentRevisionPublish:${ctx.userId}`, RATE_LIMITS.adminAction)
     if (!limit.success) return rateLimitResponse(limit)
     const { id, revisionId } = await params
