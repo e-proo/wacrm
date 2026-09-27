@@ -12,7 +12,7 @@
 
 import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -65,7 +65,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.edit')
     const limit = checkRateLimit(
       `admin:aiRevisionsFork:${ctx.userId}`,
       RATE_LIMITS.adminAction,
