@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PauseError, resumeAgent } from './agents-service'
+import { resumeAgent } from './agents-service'
 
 function makeClient(publishedRevisionCount: number) {
   let agentRead = true
@@ -80,7 +80,7 @@ describe('resumeAgent', () => {
         agentId: 'agent-1',
         actorUserId: 'user-1',
       }),
-    ).rejects.toMatchObject<Partial<PauseError>>({
+    ).rejects.toMatchObject({
       code: 'AGENT_NOT_PUBLISHED',
       status: 409,
     })
