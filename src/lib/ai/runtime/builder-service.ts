@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import { analyzeRouteConflicts } from './route-conflicts'
+import { planeForAgentPurpose } from './tool-grant-plane-policy'
 
 export interface PublishCheck {
   path: string
@@ -76,12 +77,7 @@ export async function validateAgentRevisionForPublish(
     if (!member) checks.push({ path: 'revision.handoff_human_member_id', code: 'HANDOFF_MEMBER_INVALID', message: 'The configured handoff teammate is not a member of this account.', severity: 'error' })
   }
 
-  const expectedPlane =
-    agent?.purpose === 'admin_operations'
-      ? 'admin'
-      : agent?.purpose === 'customer_support'
-        ? 'customer'
-        : null
+  const expectedPlane = agent ? planeForAgentPurpose(agent.purpose) : null
 
   for (const grant of grantsRes.data ?? []) {
     const row = grant as { tool_key: string; tool_version: number; permission: string }
