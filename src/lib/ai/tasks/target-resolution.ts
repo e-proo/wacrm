@@ -110,12 +110,12 @@ export function buildAgentTaskPlatform(modules: readonly AgentTaskModule[]): {
   const taskTypes = new AgentTaskTypeRegistry()
   const targetResolvers = new AgentTaskTargetResolverRegistry()
 
-  for (const module of modules) {
-    for (const taskType of module.taskTypes) {
-      taskTypes.register(module.domain, taskType)
+  for (const taskModule of modules) {
+    for (const taskType of taskModule.taskTypes) {
+      taskTypes.register(taskModule.domain, taskType)
     }
-    for (const resolver of module.targetResolvers) {
-      targetResolvers.register(module.domain, resolver)
+    for (const resolver of taskModule.targetResolvers) {
+      targetResolvers.register(taskModule.domain, resolver)
     }
   }
 
