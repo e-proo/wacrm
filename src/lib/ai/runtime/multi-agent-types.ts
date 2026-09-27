@@ -13,6 +13,16 @@ export type Uuid = string
 
 export type AgentPurpose = 'customer_support' | 'admin_operations' | 'custom'
 
+/**
+ * Security posture of an agent identity. V1 keeps runtime planes as
+ * customer/admin, but trust class is deliberately separate from purpose so a
+ * future business-role name cannot silently widen privileges.
+ *
+ * Custom agents are external by default until an explicit persisted trust
+ * assignment exists in a later migration.
+ */
+export type AgentTrustClass = 'external' | 'admin' | 'internal'
+
 export type AgentStatus = 'draft' | 'active' | 'paused' | 'archived'
 
 export type RevisionStatus = 'draft' | 'published' | 'superseded' | 'rejected'
