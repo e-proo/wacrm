@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../admin-client'
 import { loadAccountRuntimePolicy } from '../runtime/runtime-policy'
 import { materializeCurrentTaskTargets } from './current-platform'
+import { sweepAgentTaskOutboundReservations } from './outbound-runtime'
 
 export interface AgentTaskSweepResult {
   tasksRecovered: number
@@ -10,6 +11,10 @@ export interface AgentTaskSweepResult {
 
 export interface AgentTaskWorkerResult {
   swept: AgentTaskSweepResult
+  outboundSwept: {
+    requiresReconciliation: number
+    cancelled: number
+  }
   scannedTasks: number
   claimedTasks: number
   claimedTargets: number
@@ -91,7 +96,10 @@ export async function processAgentTaskQueue(input: {
 
   const db = supabaseAdmin()
   const limit = normalizeAgentTaskWorkerLimit(input.limit)
-  const swept = await sweepAgentTaskClaims()
+  const [swept, outboundSwept] = await Promise.all([
+    sweepAgentTaskClaims(),
+    sweepAgentTaskOutboundReservations(),
+  ])
 
   let scannedTasks = 0
   let claimedTasks = 0
@@ -236,6 +244,7 @@ export async function processAgentTaskQueue(input: {
 
   return {
     swept,
+    outboundSwept,
     scannedTasks,
     claimedTasks,
     claimedTargets,
