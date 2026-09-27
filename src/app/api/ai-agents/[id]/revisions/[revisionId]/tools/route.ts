@@ -23,11 +23,14 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
-import { getCurrentToolDefinition, listCurrentToolDefinitions } from '@/lib/ai/tools/platform/runtime-tool-compat'
+import {
+  getBuilderToolDefinition,
+  listBuilderToolDefinitions,
+} from '@/lib/ai/tools/platform/runtime-tool-compat'
 
 interface GrantInput {
   tool_key: string
-  permission: 'read' | 'propose' | 'execute'
+  permission: 'read' | 'propose'
   constraints?: Record<string, unknown>
 }
 
@@ -63,7 +66,7 @@ export async function GET(
       .eq('agent_revision_id', revisionId)
     if (error) throw error
     return NextResponse.json({
-      registry: listCurrentToolDefinitions(),
+      registry: listBuilderToolDefinitions(),
       grants: grants ?? [],
       revisionStatus: (revision as { status: string }).status,
     })
@@ -117,14 +120,14 @@ export async function PUT(
     const seen = new Set<string>()
     const rows: Array<Record<string, unknown>> = []
     for (const g of grants) {
-      const tool = getCurrentToolDefinition(g.tool_key)
+      const tool = getBuilderToolDefinition(g.tool_key)
       if (!tool) {
         return NextResponse.json(
           { error: `Tool not registered: ${g.tool_key}`, code: 'UNKNOWN_TOOL' },
           { status: 400 },
         )
       }
-      if (!['read', 'propose', 'execute'].includes(g.permission)) {
+      if (!['read', 'propose'].includes(g.permission)) {
         return NextResponse.json(
           { error: `Bad permission for ${g.tool_key}: ${g.permission}` },
           { status: 400 },
