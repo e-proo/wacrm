@@ -7,6 +7,7 @@ import {
   type AgentTaskTargetResolver,
 } from './target-resolution'
 import { defineAgentTaskType } from './contracts'
+import type { AgentTaskOutboundMessagePolicy } from './outbound-policy'
 
 const noopResolver = (
   key: string,
@@ -17,6 +18,18 @@ const noopResolver = (
   domain,
   async resolve() {
     return []
+  },
+})
+
+const noopOutboundPolicy = (
+  key: string,
+  domain: string,
+): AgentTaskOutboundMessagePolicy => ({
+  key,
+  version: 1,
+  domain,
+  async prepare() {
+    return { kind: 'text', text: 'hello' }
   },
 })
 
@@ -57,6 +70,9 @@ describe('Target resolver registry', () => {
       ],
       targetResolvers: [
         noopResolver('coverage.supplier_candidates', 'coverage'),
+      ],
+      outboundMessagePolicies: [
+        noopOutboundPolicy('coverage.sourcing_message', 'coverage'),
       ],
     }
 
@@ -104,6 +120,9 @@ describe('Target resolver registry', () => {
         }),
       ],
       targetResolvers: [],
+      outboundMessagePolicies: [
+        noopOutboundPolicy('coverage.sourcing_message', 'coverage'),
+      ],
     }
 
     expect(() => buildAgentTaskPlatform([taskModule])).toThrow(
@@ -118,6 +137,52 @@ describe('Target resolver registry', () => {
         noopResolver('coverage.supplier_candidates', 'coverage'),
       ),
     ).toThrow(/domain ownership mismatch/)
+  })
+
+
+  it('rejects a task type whose outbound policy is not registered', () => {
+    const taskModule: AgentTaskModule = {
+      domain: 'coverage',
+      taskTypes: [
+        defineAgentTaskType({
+          key: 'coverage.sourcing',
+          version: 1,
+          domain: 'coverage',
+          title: 'Coverage sourcing',
+          description: 'Find bounded supplier candidates.',
+          requiredAgentCapabilities: ['coverage.sourcing'],
+          allowedChannels: ['whatsapp'],
+          targetResolver: 'coverage.supplier_candidates',
+          allowedTools: [],
+          requiredTaskApproval: 'task',
+          followupPolicy: {
+            maxFollowups: 1,
+            minimumIntervalMinutes: 60,
+            maximumIntervalMinutes: 1440,
+            stopOnReply: true,
+            stopOnOptOut: true,
+            stopOnBusinessOutcome: true,
+          },
+          maxTargets: 10,
+          completionPolicy: {
+            key: 'coverage.sourcing_completion',
+            config: {},
+          },
+          messagePolicy: {
+            key: 'coverage.sourcing_message',
+            config: {},
+          },
+        }),
+      ],
+      targetResolvers: [
+        noopResolver('coverage.supplier_candidates', 'coverage'),
+      ],
+      outboundMessagePolicies: [],
+    }
+
+    expect(() => buildAgentTaskPlatform([taskModule])).toThrow(
+      /unregistered outbound message policy/,
+    )
   })
 })
 
