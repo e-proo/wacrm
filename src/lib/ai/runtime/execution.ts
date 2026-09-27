@@ -1,5 +1,7 @@
 import { supabaseAdmin } from '../admin-client'
 import type { ChatMessage } from '../types'
+import { CURRENT_AGENT_TASK_PLATFORM } from '../tasks/current-platform'
+import { authorizeStoredAgentTask } from '../tasks/capability-policy'
 import { runAgentLoop, type AgentLoopResult } from './agent-loop'
 import type {
   AiAgentRevision,
@@ -246,6 +248,40 @@ export async function runClaimedAgentExecution(input: {
     (agentRes.data as { purpose: string }).purpose,
   ) as AgentPurpose
 
+  let taskPolicy:
+    | {
+        capabilities: readonly string[]
+        allowedTools: readonly { key: string; version: number }[]
+      }
+    | null = null
+
+  if (context.taskId) {
+    const authorization = await authorizeStoredAgentTask(db, {
+      taskId: context.taskId,
+      taskTypes: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
+    })
+
+    if (!authorization.ok) {
+      console.warn(
+        `[agent execution] task policy denied task=${context.taskId.slice(0, 8)} code=${authorization.code}`,
+      )
+      return failedExecution(authorization.code)
+    }
+
+    if (
+      authorization.task.accountId !== context.accountId ||
+      authorization.task.agentId !== context.agentId ||
+      authorization.task.agentRevisionId !== context.revisionId
+    ) {
+      return failedExecution('TASK_EXECUTION_CONTEXT_MISMATCH')
+    }
+
+    taskPolicy = {
+      capabilities: authorization.capabilities,
+      allowedTools: authorization.allowedTools,
+    }
+  }
+
   const loop = await runAgentLoop({
     accountId: context.accountId,
     runId: context.runId,
@@ -260,6 +296,8 @@ export async function runClaimedAgentExecution(input: {
     channel: context.channel,
     trustedAdminIdentityId: input.trustedAdminIdentityId ?? null,
     trustedAdminCapabilities: input.trustedAdminCapabilities ?? [],
+    agentCapabilities: taskPolicy?.capabilities ?? [],
+    taskAllowedTools: taskPolicy?.allowedTools ?? null,
     simulation: context.mode === 'simulation',
   })
 
