@@ -2,6 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '../admin-client'
 import type { AgentTaskTypeManifest } from './contracts'
 import { AgentTaskTypeRegistry } from './registry'
+import {
+  AgentTaskOutboundPolicyRegistry,
+  type AgentTaskOutboundMessagePolicy,
+} from './outbound-policy'
 
 export interface AgentTaskTargetCandidate {
   contactId: string
@@ -61,6 +65,7 @@ export interface AgentTaskModule {
   domain: string
   taskTypes: readonly AgentTaskTypeManifest[]
   targetResolvers: readonly AgentTaskTargetResolver[]
+  outboundMessagePolicies: readonly AgentTaskOutboundMessagePolicy[]
 }
 
 const KEY_RE = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/
@@ -106,9 +111,11 @@ export class AgentTaskTargetResolverRegistry {
 export function buildAgentTaskPlatform(modules: readonly AgentTaskModule[]): {
   taskTypes: AgentTaskTypeRegistry
   targetResolvers: AgentTaskTargetResolverRegistry
+  outboundMessagePolicies: AgentTaskOutboundPolicyRegistry
 } {
   const taskTypes = new AgentTaskTypeRegistry()
   const targetResolvers = new AgentTaskTargetResolverRegistry()
+  const outboundMessagePolicies = new AgentTaskOutboundPolicyRegistry()
 
   for (const taskModule of modules) {
     for (const taskType of taskModule.taskTypes) {
@@ -116,6 +123,9 @@ export function buildAgentTaskPlatform(modules: readonly AgentTaskModule[]): {
     }
     for (const resolver of taskModule.targetResolvers) {
       targetResolvers.register(taskModule.domain, resolver)
+    }
+    for (const policy of taskModule.outboundMessagePolicies) {
+      outboundMessagePolicies.register(taskModule.domain, policy)
     }
   }
 
@@ -131,9 +141,21 @@ export function buildAgentTaskPlatform(modules: readonly AgentTaskModule[]): {
         `Task type ${taskType.key}@${taskType.version} cannot bind cross-domain resolver ${resolver.key}.`,
       )
     }
+
+    const outboundPolicy = outboundMessagePolicies.get(taskType.messagePolicy.key)
+    if (!outboundPolicy) {
+      throw new Error(
+        `Task type ${taskType.key}@${taskType.version} references unregistered outbound message policy ${taskType.messagePolicy.key}.`,
+      )
+    }
+    if (outboundPolicy.domain !== taskType.domain) {
+      throw new Error(
+        `Task type ${taskType.key}@${taskType.version} cannot bind cross-domain outbound policy ${outboundPolicy.key}.`,
+      )
+    }
   }
 
-  return { taskTypes, targetResolvers }
+  return { taskTypes, targetResolvers, outboundMessagePolicies }
 }
 
 export function parseAgentTaskEligibilityPolicy(
