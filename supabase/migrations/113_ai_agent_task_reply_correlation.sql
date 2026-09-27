@@ -42,7 +42,11 @@ alter table public.ai_agent_runs
       run_mode = 'inbound'
       and inbound_message_id is not null
       and (
-        (task_id is null and task_target_id is null)
+        (
+          task_id is null
+          and task_target_id is null
+          and trigger_type <> 'task_reply'
+        )
         or
         (
           task_id is not null
@@ -86,6 +90,7 @@ create index if not exists ai_agent_task_targets_reply_lookup_idx
       'preparing',
       'contacted',
       'awaiting_reply',
+      'replied',
       'in_progress'
     );
 
@@ -103,31 +108,27 @@ declare
   r record;
   v_count integer := 0;
 begin
+  -- Match the transport lock order: reservation -> run -> target. This avoids
+  -- a target-first / reservation-first deadlock with
+  -- claim_agent_task_outbound_message().
   for r in
-    update public.ai_agent_task_targets as target
-       set status='paused_for_human',
-           next_action_at=null,
-           available_at=now(),
-           claimed_by=null,
-           lease_expires_at=null,
-           failure_code=null
-     where target.account_id=p_account_id
-       and target.conversation_id=p_conversation_id
-       and target.status in (
-         'candidate',
-         'eligible',
-         'queued',
-         'preparing',
-         'sending',
-         'contacted',
-         'awaiting_reply',
-         'replied',
-         'in_progress'
-       )
-    returning target.id, target.task_id
+    select target.id, target.task_id
+    from public.ai_agent_task_targets as target
+    where target.account_id=p_account_id
+      and target.conversation_id=p_conversation_id
+      and target.status in (
+        'candidate',
+        'eligible',
+        'queued',
+        'preparing',
+        'sending',
+        'contacted',
+        'awaiting_reply',
+        'replied',
+        'in_progress'
+      )
+    order by target.created_at, target.id
   loop
-    v_count := v_count + 1;
-
     update public.ai_agent_task_outbound_messages
        set status='cancelled',
            claimed_by=null,
@@ -157,19 +158,45 @@ begin
            and outbound.status='sending'
        );
 
-    perform public.append_agent_task_event(
-      p_account_id,
-      r.task_id,
-      r.id,
-      null,
-      'target.paused_for_human',
-      'service',
-      nullif(p_actor_id,''),
-      jsonb_build_object(
-        'conversation_id',p_conversation_id,
-        'reason',coalesce(p_reason,'human_takeover')
-      )
-    );
+    update public.ai_agent_task_targets as target
+       set status='paused_for_human',
+           next_action_at=null,
+           available_at=now(),
+           claimed_by=null,
+           lease_expires_at=null,
+           failure_code=null
+     where target.id=r.id
+       and target.account_id=p_account_id
+       and target.task_id=r.task_id
+       and target.status in (
+         'candidate',
+         'eligible',
+         'queued',
+         'preparing',
+         'sending',
+         'contacted',
+         'awaiting_reply',
+         'replied',
+         'in_progress'
+       );
+
+    if found then
+      v_count := v_count + 1;
+
+      perform public.append_agent_task_event(
+        p_account_id,
+        r.task_id,
+        r.id,
+        null,
+        'target.paused_for_human',
+        'service',
+        nullif(p_actor_id,''),
+        jsonb_build_object(
+          'conversation_id',p_conversation_id,
+          'reason',coalesce(p_reason,'human_takeover')
+        )
+      );
+    end if;
   end loop;
 
   return v_count;
@@ -534,6 +561,7 @@ begin
         'preparing',
         'contacted',
         'awaiting_reply',
+        'replied',
         'in_progress'
       )
       and target.last_outbound_message_id is not null
@@ -547,6 +575,16 @@ begin
             and outbound.task_target_id=target.id
             and outbound.local_message_id=p_reply_to_message_id
             and outbound.status='sent'
+        )
+        or exists (
+          select 1
+          from public.ai_agent_runs as prior_reply
+          where prior_reply.account_id=target.account_id
+            and prior_reply.task_id=target.task_id
+            and prior_reply.task_target_id=target.id
+            and prior_reply.trigger_type='task_reply'
+            and prior_reply.status='succeeded'
+            and prior_reply.outbound_message_id=p_reply_to_message_id
         )
       );
 
@@ -572,6 +610,7 @@ begin
         'preparing',
         'contacted',
         'awaiting_reply',
+        'replied',
         'in_progress'
       )
       and target.last_outbound_message_id is not null;
