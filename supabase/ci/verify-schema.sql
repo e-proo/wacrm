@@ -447,6 +447,62 @@ BEGIN
     RAISE EXCEPTION 'create_claimed_agent_task_execution privileges are unsafe';
   END IF;
 
+  -- Agent Target Resolution / Eligibility (111).
+  IF to_regclass('public.ai_outreach_contact_controls') IS NULL THEN
+    RAISE EXCEPTION 'ai_outreach_contact_controls is missing';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_class
+    WHERE oid='public.ai_outreach_contact_controls'::regclass
+      AND relrowsecurity
+  ) THEN
+    RAISE EXCEPTION 'ai_outreach_contact_controls RLS is disabled';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public'
+      AND table_name='ai_agent_task_targets'
+      AND column_name='resolver_key'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public'
+      AND table_name='ai_agent_task_targets'
+      AND column_name='resolver_version'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public'
+      AND table_name='ai_agent_task_targets'
+      AND column_name='eligibility_snapshot'
+  ) THEN
+    RAISE EXCEPTION 'Target resolver audit columns are missing';
+  END IF;
+
+  IF to_regprocedure(
+    'public.materialize_agent_task_contact_target(uuid,uuid,text,text,integer,uuid[],uuid[],integer,integer,integer,text)'
+  ) IS NULL THEN
+    RAISE EXCEPTION 'materialize_agent_task_contact_target is missing';
+  END IF;
+
+  IF has_function_privilege(
+       'anon',
+       'public.materialize_agent_task_contact_target(uuid,uuid,text,text,integer,uuid[],uuid[],integer,integer,integer,text)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'authenticated',
+       'public.materialize_agent_task_contact_target(uuid,uuid,text,text,integer,uuid[],uuid[],integer,integer,integer,text)',
+       'EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'service_role',
+       'public.materialize_agent_task_contact_target(uuid,uuid,text,text,integer,uuid[],uuid[],integer,integer,integer,text)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'Target materialization RPC privileges are unsafe';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
