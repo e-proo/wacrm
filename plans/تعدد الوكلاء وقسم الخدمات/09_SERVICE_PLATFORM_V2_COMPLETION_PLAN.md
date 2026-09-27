@@ -1452,3 +1452,35 @@ Phase 5 ما تزال `PENDING` لأن شرطها الصريح "لا تبدأ ق
 وسيتم إرجاع route إلى `legacy` عبر guarded RPC والتأكد من عدم وجود `sending/reconciliation` أو duplicate.
 
 Phase 1 تبقى `IN PROGRESS` حتى نجاح Gate C ثم Gate D.
+
+
+### Phase 1 — Gate C blocked by Meta API access restriction
+
+تمت محاولة تجهيز Gate C على TEST recipient باسم `Pro Codar`.
+
+التحقق الفعلي أثبت:
+
+- `WACRM_TEST_ENCRYPTION_KEY` الموجود في GitHub Environment صحيح من حيث الشكل ويتم تحميله بنجاح داخل Actions.
+- WhatsApp access token المخزن في `wacrm test.whatsapp_config` قابل لفك التشفير بالمفتاح الصحيح.
+- الاتصال المباشر الحالي إلى Meta فشل على endpointين مستقلين:
+  - phone metadata: HTTP 400
+  - WABA `subscribed_apps`: HTTP 400
+- رسالة Meta في الحالتين: `API access blocked.`
+- الحالة المحلية القديمة ما زالت:
+  - `status=connected`
+  - `registered_at` موجود
+  - `subscribed_apps_at` موجود
+  - `last_registration_error=null`
+  وهذه timestamps تاريخية وليست إثباتًا أن Meta access ما زال فعالًا حاليًا.
+- آخر inbound موجود فعليًا في TEST:
+  - Pro Codar: 2026-09-24 01:08 UTC
+  - admin contact: 2026-09-24 01:09 UTC
+- الرسائل الجديدة التي أُرسلت يدويًا لم تظهر في database ولم يظهر webhook POST في runtime log.
+
+الاستنتاج التشغيلي:
+
+Gate C لا يمكن اعتباره فشلًا في Intents أو Business Event delivery حاليًا؛ Meta تمنع Graph API access على التكامل الحالي. يجب أولًا إزالة restriction / إعادة صلاحية التطبيق أو Business Portfolio أو token permissions، ثم إعادة فحص callback URL وWhatsApp webhook subscription قبل إعادة Gate C.
+
+تم تعطيل Edge Function التشخيصية المؤقتة وإزالة workflow التشخيصي المؤقت من الفرع بعد جمع evidence.
+
+**Phase 1 تبقى IN PROGRESS.**
