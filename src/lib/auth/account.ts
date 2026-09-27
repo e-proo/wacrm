@@ -29,7 +29,13 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
-import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
+import {
+  hasAgentManagementCapability,
+  hasMinRole,
+  isAccountRole,
+  type AccountRole,
+  type AgentManagementCapability,
+} from "./roles";
 
 // ------------------------------------------------------------
 // Errors
@@ -186,5 +192,30 @@ export async function requireRole(min: AccountRole): Promise<AccountContext> {
       `This action requires the '${min}' role or higher`,
     );
   }
+  return ctx;
+}
+
+
+/**
+ * Enforce one fine-grained agent-management capability against an already
+ * resolved account context. Keeping this separate from role hierarchy prevents
+ * builder routes from treating every admin action as equivalent.
+ */
+export function assertAgentCapability(
+  ctx: Pick<AccountContext, "role">,
+  capability: AgentManagementCapability,
+): void {
+  if (!hasAgentManagementCapability(ctx.role, capability)) {
+    throw new ForbiddenError(
+      `This action requires the '${capability}' capability`,
+    );
+  }
+}
+
+export async function requireAgentCapability(
+  capability: AgentManagementCapability,
+): Promise<AccountContext> {
+  const ctx = await getCurrentAccount();
+  assertAgentCapability(ctx, capability);
   return ctx;
 }
