@@ -80,6 +80,9 @@ jobs:
       - name: Verify Agent Task orchestrator behavior
         run: supabase db query --local --file supabase/ci/agent-task-orchestrator-smoke.sql
 
+      - name: Verify Agent Target resolution behavior
+        run: supabase db query --local --file supabase/ci/agent-target-resolution-smoke.sql
+
       - name: Verify Intents controlled cutover safety
         run: supabase db query --local --file supabase/ci/intents-cutover-smoke.sql
 
