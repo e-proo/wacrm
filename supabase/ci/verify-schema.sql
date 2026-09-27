@@ -623,6 +623,52 @@ BEGIN
     RAISE EXCEPTION 'Human-assignment Task Target pause trigger is missing';
   END IF;
 
+  -- Agent Outbound Capabilities (114).
+  IF to_regclass('public.ai_agent_revision_capabilities') IS NULL THEN
+    RAISE EXCEPTION 'Agent Revision capability table is missing';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_class
+    WHERE oid='public.ai_agent_revision_capabilities'::regclass
+      AND relrowsecurity
+  ) THEN
+    RAISE EXCEPTION 'Agent Revision capability table RLS is disabled';
+  END IF;
+
+  IF to_regprocedure(
+       'public.replace_ai_agent_revision_capabilities(uuid,uuid,uuid,jsonb,uuid)'
+     ) IS NULL
+     OR to_regprocedure(
+       'public.fail_claimed_agent_task_policy(uuid,text,text)'
+     ) IS NULL THEN
+    RAISE EXCEPTION 'Outbound capability/task-policy RPC surface is incomplete';
+  END IF;
+
+  IF has_function_privilege(
+       'anon',
+       'public.replace_ai_agent_revision_capabilities(uuid,uuid,uuid,jsonb,uuid)',
+       'EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'authenticated',
+       'public.replace_ai_agent_revision_capabilities(uuid,uuid,uuid,jsonb,uuid)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'authenticated',
+       'public.fail_claimed_agent_task_policy(uuid,text,text)',
+       'EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'service_role',
+       'public.fail_claimed_agent_task_policy(uuid,text,text)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'Outbound capability/task-policy RPC privileges are unsafe';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
