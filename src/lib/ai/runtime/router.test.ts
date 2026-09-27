@@ -213,6 +213,84 @@ describe('routeInboundMessage', () => {
     expect(decision).toEqual({ action: 'skip', reason: 'conversation_handoff' })
   })
 
+  it('routes a correlated task reply to the task frozen revision before normal routes', () => {
+    const decision = routeInboundMessage(
+      baseCtx({
+        taskReply: {
+          runId: 'run-task-reply',
+          taskId: 'task-1',
+          taskTargetId: 'target-1',
+          agentId: 'agent-frozen',
+          revisionId: 'rev-frozen',
+          providerConnectionId: 'conn-frozen',
+          counterpartyRole: 'supplier',
+          correlationMethod: 'reply_context',
+        },
+      }),
+      baseLookup(),
+    )
+
+    expect(decision.action).toBe('route')
+    if (decision.action === 'route') {
+      expect(decision.agentId).toBe('agent-frozen')
+      expect(decision.revisionId).toBe('rev-frozen')
+      expect(decision.providerConnectionId).toBe('conn-frozen')
+      expect(decision.reason).toBe('task_reply:reply_context')
+      expect(decision.taskReply?.taskTargetId).toBe('target-1')
+    }
+  })
+
+  it('keeps trusted admin routing above a correlated task reply', () => {
+    const lookup = baseLookup()
+    lookup.trustedIdentities = [
+      identity({ normalizedAddress: '967777123456' }),
+    ]
+
+    const decision = routeInboundMessage(
+      baseCtx({
+        taskReply: {
+          runId: 'run-task-reply',
+          taskId: 'task-1',
+          taskTargetId: 'target-1',
+          agentId: 'agent-frozen',
+          revisionId: 'rev-frozen',
+          providerConnectionId: 'conn-frozen',
+          counterpartyRole: 'supplier',
+          correlationMethod: 'reply_context',
+        },
+      }),
+      lookup,
+    )
+
+    expect(decision.action).toBe('route')
+    if (decision.action === 'route') {
+      expect(decision.plane).toBe('admin')
+      expect(decision.agentId).toBe('agent-admin')
+      expect(decision.taskReply).toBeUndefined()
+    }
+  })
+
+  it('keeps human takeover above a correlated task reply', () => {
+    const decision = routeInboundMessage(
+      baseCtx({
+        hasHumanAssignee: true,
+        taskReply: {
+          runId: 'run-task-reply',
+          taskId: 'task-1',
+          taskTargetId: 'target-1',
+          agentId: 'agent-frozen',
+          revisionId: 'rev-frozen',
+          providerConnectionId: 'conn-frozen',
+          counterpartyRole: 'supplier',
+          correlationMethod: 'single_active_target',
+        },
+      }),
+      baseLookup(),
+    )
+
+    expect(decision).toEqual({ action: 'skip', reason: 'human_takeover' })
+  })
+
   it('routes to the explicitly-assigned agent', () => {
     const decision = routeInboundMessage(
       baseCtx({
