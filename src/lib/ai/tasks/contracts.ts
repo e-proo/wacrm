@@ -52,6 +52,57 @@ export interface AgentTask {
   correlationId: string
   createdBy: Uuid | null
   createdAt: string
+  updatedAt: string
+  availableAt: string
+  attemptCount: number
+  leaseExpiresAt: string | null
+  claimedBy: string | null
+}
+
+export const AGENT_TASK_TARGET_STATUSES = [
+  'candidate',
+  'eligible',
+  'queued',
+  'preparing',
+  'sending',
+  'contacted',
+  'awaiting_reply',
+  'replied',
+  'in_progress',
+  'completed',
+  'skipped',
+  'failed',
+  'opted_out',
+  'exhausted',
+] as const
+export type AgentTaskTargetStatus =
+  (typeof AGENT_TASK_TARGET_STATUSES)[number]
+
+export interface AgentTaskTarget {
+  id: Uuid
+  accountId: string
+  taskId: Uuid
+  contactId: Uuid | null
+  entityType: string | null
+  entityId: Uuid | null
+  counterpartyRole: string
+  status: AgentTaskTargetStatus
+  conversationId: Uuid | null
+  attemptCount: number
+  lastAttemptAt: string | null
+  nextActionAt: string | null
+  availableAt: string
+  leaseExpiresAt: string | null
+  claimedBy: string | null
+  firstContactedAt: string | null
+  repliedAt: string | null
+  completedAt: string | null
+  lastOutboundMessageId: Uuid | null
+  skipReason: string | null
+  failureCode: string | null
+  idempotencyKey: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface AgentTaskAllowedTool {
