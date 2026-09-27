@@ -22,6 +22,7 @@ import type {
   AiAgentRevision,
   RoutingDecision,
   RoutingSnapshot,
+  TaskReplyRoutingSignal,
   TrustedAdminIdentity,
   Uuid,
 } from './multi-agent-types'
@@ -69,6 +70,7 @@ export interface MultiAgentPreCheckArgs {
   inboxId?: string | null
   tags?: ReadonlyArray<string>
   language?: string | null
+  taskReply?: TaskReplyRoutingSignal | null
 }
 
 export async function shouldRouteToMultiAgent(
@@ -93,6 +95,7 @@ export async function shouldRouteToMultiAgent(
         inboxId: args.inboxId ?? null,
         tags: args.tags ?? [],
         language: args.language ?? null,
+        taskReply: args.taskReply ?? null,
       },
       snapshot,
     )
@@ -145,6 +148,7 @@ export interface DispatchInboundArgs {
   inboxId?: string | null
   tags?: ReadonlyArray<string>
   language?: string | null
+  taskReply?: TaskReplyRoutingSignal | null
 }
 
 export interface DispatchInboundResult {
@@ -195,6 +199,7 @@ export async function dispatchInboundToAiAgent(
         inboxId: args.inboxId ?? null,
         tags: args.tags ?? [],
         language: args.language ?? null,
+        taskReply: args.taskReply ?? null,
       },
       snapshot,
     )
@@ -233,6 +238,12 @@ async function createAgentRunRow(
   args: DispatchInboundArgs,
   decision: Extract<RoutingDecision, { action: 'route' }>,
 ): Promise<Uuid | null> {
+  if (decision.taskReply) {
+    // Reply correlation already created the run atomically with the target
+    // transition. Reuse that durable row instead of racing create_agent_run.
+    return decision.taskReply.runId
+  }
+
   const db = supabaseAdmin()
   const { data, error } = await db.rpc('create_agent_run', {
     p_account_id: args.accountId,
@@ -265,7 +276,7 @@ export async function resumeQueuedAgentRun(
   const { data: run, error: runError } = await db
     .from('ai_agent_runs')
     .select(
-      'id, account_id, conversation_id, inbound_message_id, ai_agent_id, agent_revision_id, provider_connection_id, route_id, route_reason, plane, status, run_mode',
+      'id, account_id, conversation_id, inbound_message_id, ai_agent_id, agent_revision_id, provider_connection_id, route_id, route_reason, plane, status, run_mode, task_id, task_target_id, trigger_type, trigger_ref, counterparty_role',
     )
     .eq('id', runId)
     .maybeSingle()
@@ -303,6 +314,22 @@ export async function resumeQueuedAgentRun(
     : { data: null, error: null }
   if (contactError) throw contactError
 
+  const taskReply: TaskReplyRoutingSignal | undefined =
+    run.trigger_type === 'task_reply' &&
+    run.task_id &&
+    run.task_target_id
+      ? {
+          runId: run.id,
+          taskId: run.task_id,
+          taskTargetId: run.task_target_id,
+          agentId: run.ai_agent_id,
+          revisionId: run.agent_revision_id,
+          providerConnectionId: run.provider_connection_id,
+          counterpartyRole: run.counterparty_role ?? 'task_counterparty',
+          correlationMethod: run.trigger_ref ?? 'durable_worker_resume',
+        }
+      : undefined
+
   const decision: Extract<RoutingDecision, { action: 'route' }> = {
     action: 'route',
     plane: run.plane as 'admin' | 'customer',
@@ -311,6 +338,7 @@ export async function resumeQueuedAgentRun(
     providerConnectionId: run.provider_connection_id,
     reason: run.route_reason ?? 'durable_worker_resume',
     routeId: run.route_id,
+    ...(taskReply ? { taskReply } : {}),
   }
   return executeAgentRun(
     {
@@ -323,6 +351,7 @@ export async function resumeQueuedAgentRun(
       hasHumanAssignee: Boolean(conversationRes.data.assigned_agent_id),
       multiAgentEnabled: true,
       workerId,
+      taskReply,
     },
     runId,
     decision,
@@ -367,9 +396,10 @@ async function executeAgentRun(
     return 'failed'
   }
 
-  // Preserve the existing customer reply-cap semantics. Outbound tasks receive
-  // their own target/task limits in the Task Orchestrator, not here.
-  if (decision.plane === 'customer') {
+  // Preserve the existing customer reply-cap semantics for ordinary inbound
+  // support. A correlated Task reply belongs to the Task Platform and is
+  // bounded by target/task attempt + follow-up policies instead.
+  if (decision.plane === 'customer' && !decision.taskReply) {
     const { data: slot, error: slotErr } = await db.rpc('claim_ai_reply_slot', {
       conversation_id: args.conversationId,
       max_replies: revision.maxAiRepliesPerConversation ?? 3,
@@ -405,10 +435,12 @@ async function executeAgentRun(
     revisionId: decision.revisionId,
     conversationId: args.conversationId,
     contactId: args.contactId,
-    taskId: null,
-    taskTargetId: null,
+    taskId: decision.taskReply?.taskId ?? null,
+    taskTargetId: decision.taskReply?.taskTargetId ?? null,
     plane: decision.plane,
-    counterpartyRole: decision.plane === 'admin' ? 'administrator' : 'customer',
+    counterpartyRole:
+      decision.taskReply?.counterpartyRole ??
+      (decision.plane === 'admin' ? 'administrator' : 'customer'),
     channel: 'whatsapp',
     sourceMessageId: args.inboundMessageId,
   }
