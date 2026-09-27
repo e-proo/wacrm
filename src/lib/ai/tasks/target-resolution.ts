@@ -6,6 +6,7 @@ import {
   AgentTaskOutboundPolicyRegistry,
   type AgentTaskOutboundMessagePolicy,
 } from './outbound-policy'
+import { validateTaskManifestToolPolicy } from './capability-policy'
 
 export interface AgentTaskTargetCandidate {
   contactId: string
@@ -130,6 +131,13 @@ export function buildAgentTaskPlatform(modules: readonly AgentTaskModule[]): {
   }
 
   for (const taskType of taskTypes.list()) {
+    const toolPolicyIssues = validateTaskManifestToolPolicy(taskType)
+    if (toolPolicyIssues.length > 0) {
+      throw new Error(
+        `Task type ${taskType.key}@${taskType.version} has invalid tool policy: ${toolPolicyIssues.join('; ')}`,
+      )
+    }
+
     const resolver = targetResolvers.get(taskType.targetResolver)
     if (!resolver) {
       throw new Error(
