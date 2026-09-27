@@ -503,6 +503,68 @@ BEGIN
     RAISE EXCEPTION 'Target materialization RPC privileges are unsafe';
   END IF;
 
+  -- Agent Task Outbound Messaging Policy (112).
+  IF to_regclass('public.ai_agent_task_outbound_messages') IS NULL THEN
+    RAISE EXCEPTION 'ai_agent_task_outbound_messages is missing';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_class
+    WHERE oid='public.ai_agent_task_outbound_messages'::regclass
+      AND relrowsecurity
+  ) THEN
+    RAISE EXCEPTION 'ai_agent_task_outbound_messages RLS is disabled';
+  END IF;
+
+  IF to_regprocedure(
+    'public.reserve_agent_task_outbound_message(uuid,text,integer,text,text,text,text,jsonb,integer,integer,integer,boolean)'
+  ) IS NULL
+     OR to_regprocedure(
+       'public.claim_agent_task_outbound_message(uuid,text,integer)'
+     ) IS NULL
+     OR to_regprocedure(
+       'public.complete_agent_task_outbound_message(uuid,text,uuid,text,integer,integer)'
+     ) IS NULL
+     OR to_regprocedure(
+       'public.mark_agent_task_outbound_reconciliation(uuid,text,text,text)'
+     ) IS NULL
+     OR to_regprocedure(
+       'public.fail_agent_task_outbound_run(uuid,text,integer)'
+     ) IS NULL
+     OR to_regprocedure(
+       'public.sweep_agent_task_outbound_messages(timestamptz)'
+     ) IS NULL THEN
+    RAISE EXCEPTION 'Agent Task outbound messaging RPC surface is incomplete';
+  END IF;
+
+  IF has_function_privilege(
+       'anon',
+       'public.reserve_agent_task_outbound_message(uuid,text,integer,text,text,text,text,jsonb,integer,integer,integer,boolean)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'authenticated',
+       'public.reserve_agent_task_outbound_message(uuid,text,integer,text,text,text,text,jsonb,integer,integer,integer,boolean)',
+       'EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'service_role',
+       'public.reserve_agent_task_outbound_message(uuid,text,integer,text,text,text,text,jsonb,integer,integer,integer,boolean)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'Outbound reservation RPC privileges are unsafe';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname='public'
+      AND tablename='ai_agent_task_outbound_messages'
+      AND cmd IN ('INSERT','UPDATE','DELETE','ALL')
+  ) THEN
+    RAISE EXCEPTION 'Authenticated clients must not mutate outbound reservations directly';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
