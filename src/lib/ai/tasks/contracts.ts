@@ -101,6 +101,9 @@ export interface AgentTaskTarget {
   skipReason: string | null
   failureCode: string | null
   idempotencyKey: string
+  resolverKey: string | null
+  resolverVersion: number | null
+  eligibilitySnapshot: Readonly<Record<string, unknown>>
   createdAt: string
   updatedAt: string
 }
