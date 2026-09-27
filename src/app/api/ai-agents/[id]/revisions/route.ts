@@ -2,8 +2,8 @@
 // POST /api/ai-agents/[id]/revisions — fork the PUBLISHED
 //      revision into a new editable DRAFT (idempotent: returns
 //      the existing draft when there is one). Copies settings,
-//      compatible tool grants and knowledge assignments so old
-//      cross-plane grants never contaminate a new draft.
+//      compatible tool grants, frozen agent capabilities, and knowledge
+//      assignments so old cross-plane grants never contaminate a new draft.
 //
 // Admin+ only. Published/superseded revisions stay immutable —
 // all editing happens on the draft, then publish swaps the
@@ -23,6 +23,7 @@ import {
   type AgentPurpose,
   type InheritedToolGrant,
 } from '@/lib/ai/runtime/tool-grant-plane-policy'
+import { inheritAgentRevisionCapabilities } from '@/lib/ai/tasks/capability-policy'
 
 async function removeIncompatibleDraftGrants(
   db: SupabaseClient,
@@ -202,6 +203,7 @@ export async function POST(
     // published rows stay immutable, but only grants compatible with this
     // agent purpose/plane are inherited by the new editable draft.
     let copiedGrants = 0
+    let copiedCapabilities = 0
     let droppedIncompatibleGrants = 0
     if (publishedId) {
       const { data: grantRows, error: gReadErr } = await db
@@ -233,6 +235,14 @@ export async function POST(
         }
       }
 
+      copiedCapabilities = await inheritAgentRevisionCapabilities(db, {
+        accountId: ctx.accountId,
+        agentId: id,
+        sourceRevisionId: publishedId,
+        targetRevisionId: revisionId,
+        actorUserId: ctx.userId,
+      })
+
       const { data: assignRows, error: aReadErr } = await db
         .from('ai_agent_knowledge_assignments')
         .select('knowledge_chunk_id, priority, enabled')
@@ -256,6 +266,7 @@ export async function POST(
     return NextResponse.json({
       revisionId,
       copiedGrants,
+      copiedCapabilities,
       droppedIncompatibleGrants,
     })
   } catch (err) {
