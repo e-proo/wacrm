@@ -5,7 +5,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -22,7 +22,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.edit')
     const limit = checkRateLimit(
       `admin:aiAgentPatch:${ctx.userId}`,
       RATE_LIMITS.adminAction,
