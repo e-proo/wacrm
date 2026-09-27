@@ -8,7 +8,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -18,7 +18,7 @@ import { analyzeRouteConflicts } from '@/lib/ai/runtime/route-conflicts'
 
 export async function POST() {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.manage_routes')
     const limit = checkRateLimit(
       `admin:routeConflicts:${ctx.userId}`,
       RATE_LIMITS.adminAction,
