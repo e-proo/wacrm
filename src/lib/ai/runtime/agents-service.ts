@@ -346,7 +346,10 @@ async function mutateAgentStatus(
       409,
     )
   }
-  if (!agentRowHasPublishedRevision(db, accountId, agentId) && next === 'active') {
+  if (
+    next === 'active' &&
+    !(await agentRowHasPublishedRevision(db, accountId, agentId))
+  ) {
     throw new PauseError(
       'AGENT_NOT_PUBLISHED',
       'Cannot activate an agent with no published revision.',
@@ -383,7 +386,7 @@ async function agentRowHasPublishedRevision(
   accountId: AccountId,
   agentId: Uuid,
 ): Promise<boolean> {
-  const { data, error } = await db
+  const { count, error } = await db
     .from('ai_agent_revisions')
     .select('id', { head: true, count: 'exact' })
     .eq('account_id', accountId)
@@ -391,6 +394,5 @@ async function agentRowHasPublishedRevision(
     .eq('status', 'published')
     .limit(1)
   if (error) throw error
-  return (data as unknown as { length?: number }) != null
-    && ((data as unknown as { length: number }).length ?? 0) > 0
+  return (count ?? 0) > 0
 }
