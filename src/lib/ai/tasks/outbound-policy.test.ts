@@ -23,7 +23,7 @@ describe('AgentTaskOutboundPolicyRegistry', () => {
       'coverage',
       policy(),
     )
-    expect(registry.get('coverage.sourcing_message')?.domain).toBe('coverage')
+    expect(registry.get('coverage.sourcing_message', 1)?.domain).toBe('coverage')
   })
 
   it('rejects cross-domain ownership', () => {
@@ -35,11 +35,13 @@ describe('AgentTaskOutboundPolicyRegistry', () => {
     ).toThrow(/domain ownership mismatch/)
   })
 
-  it('rejects duplicate policy keys', () => {
+  it('allows multiple versions but rejects a duplicate exact policy version', () => {
     const registry = new AgentTaskOutboundPolicyRegistry().register(
       'coverage',
       policy(),
     )
+    registry.register('coverage', { ...policy(), version: 2 })
+    expect(registry.get('coverage.sourcing_message', 2)?.version).toBe(2)
     expect(() => registry.register('coverage', policy())).toThrow(/Duplicate/)
   })
 })
