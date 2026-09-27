@@ -133,7 +133,7 @@ begin
   insert into public.message_templates (
     user_id,account_id,name,category,language,body_text,status
   ) values (
-    v_user,v_account,'coverage_supplier_request','UTILITY','en_US',
+    v_user,v_account,'coverage_supplier_request','Utility','en_US',
     'Please quote coverage for {{1}}.','APPROVED'
   );
 
