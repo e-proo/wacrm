@@ -17,7 +17,11 @@
 // ============================================================
 
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import {
+  assertAgentCapability,
+  requireAgentCapability,
+  toErrorResponse,
+} from '@/lib/auth/account'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -39,7 +43,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string; revisionId: string }> },
 ) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.read')
     const limit = checkRateLimit(
       `admin:aiRevisionTools:${ctx.userId}`,
       RATE_LIMITS.adminAction,
@@ -80,7 +84,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; revisionId: string }> },
 ) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.grant_read_tools')
     const limit = checkRateLimit(
       `admin:aiRevisionToolsPut:${ctx.userId}`,
       RATE_LIMITS.adminAction,
@@ -115,6 +119,10 @@ export async function PUT(
     const grants = body.grants ?? []
     if (!Array.isArray(grants)) {
       return NextResponse.json({ error: 'grants must be an array' }, { status: 400 })
+    }
+
+    if (grants.some((grant) => grant.permission === 'propose')) {
+      assertAgentCapability(ctx, 'agents.grant_proposal_tools')
     }
 
     const seen = new Set<string>()
