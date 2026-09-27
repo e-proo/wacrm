@@ -12,7 +12,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -30,7 +30,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string; action: string }> },
 ) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.pause')
 
     const limit = checkRateLimit(
       `admin:aiAgentState:${ctx.userId}`,
