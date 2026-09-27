@@ -69,6 +69,7 @@ export const AGENT_TASK_TARGET_STATUSES = [
   'awaiting_reply',
   'replied',
   'in_progress',
+  'paused_for_human',
   'completed',
   'skipped',
   'failed',
