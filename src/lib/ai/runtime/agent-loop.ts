@@ -40,6 +40,10 @@ export interface AgentLoopInput {
   channel: 'whatsapp'
   trustedAdminIdentityId: string | null
   trustedAdminCapabilities: ReadonlyArray<string>
+  /** Frozen Agent Revision capabilities used only for Task executions. */
+  agentCapabilities?: ReadonlyArray<string>
+  /** Exact Task Manifest tool scope. Null keeps ordinary inbound behavior. */
+  taskAllowedTools?: ReadonlyArray<{ key: string; version: number }> | null
   simulation?: boolean
 }
 
@@ -151,12 +155,37 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         permission: grant.permission,
       })),
     })
+    const taskToolScope = input.taskAllowedTools
+      ? new Set(
+          input.taskAllowedTools.map(
+            (tool) => `${tool.key}@${tool.version}`,
+          ),
+        )
+      : null
+    const taskCapabilitySet = new Set(input.agentCapabilities ?? [])
+
     const offeredTools =
       maxRounds > 0 && policy.nativeToolsEnabled
-        ? platformVisibleTools.filter(
-            (manifest) =>
-              manifest.permission !== 'propose' || policy.proposalToolsEnabled,
-          )
+        ? platformVisibleTools.filter((manifest) => {
+            if (
+              manifest.permission === 'propose' &&
+              !policy.proposalToolsEnabled
+            ) {
+              return false
+            }
+
+            if (!taskToolScope) return true
+
+            if (
+              !taskToolScope.has(`${manifest.key}@${manifest.version}`)
+            ) {
+              return false
+            }
+
+            return manifest.requiredCapabilities.every((capability) =>
+              taskCapabilitySet.has(capability),
+            )
+          })
         : []
 
     if (input.plane === 'admin') {
@@ -440,6 +469,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             simulation: input.simulation === true,
             trustedAdminIdentityId: input.trustedAdminIdentityId,
             trustedAdminCapabilities: input.trustedAdminCapabilities,
+            agentCapabilities: input.agentCapabilities ?? [],
+            taskAllowedTools: input.taskAllowedTools ?? null,
             agentPurpose: input.agentPurpose,
             contactId: input.contactId,
             conversationId: input.conversationId,
