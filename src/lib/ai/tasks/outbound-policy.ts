@@ -68,16 +68,17 @@ export class AgentTaskOutboundPolicyRegistry {
         `Outbound policy ${policy.key} must use its domain namespace ${policy.domain}.`,
       )
     }
-    if (this.policies.has(policy.key)) {
-      throw new Error(`Duplicate outbound message policy: ${policy.key}`)
+    const id = `${policy.key}@${policy.version}`
+    if (this.policies.has(id)) {
+      throw new Error(`Duplicate outbound message policy: ${id}`)
     }
 
-    this.policies.set(policy.key, Object.freeze({ ...policy }))
+    this.policies.set(id, Object.freeze({ ...policy }))
     return this
   }
 
-  get(key: string): AgentTaskOutboundMessagePolicy | null {
-    return this.policies.get(key) ?? null
+  get(key: string, version: number): AgentTaskOutboundMessagePolicy | null {
+    return this.policies.get(`${key}@${version}`) ?? null
   }
 
   list(): readonly AgentTaskOutboundMessagePolicy[] {
