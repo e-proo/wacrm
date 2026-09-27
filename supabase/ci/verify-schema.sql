@@ -380,6 +380,73 @@ BEGIN
     RAISE EXCEPTION 'ai_agent_task_events must remain append-only for authenticated clients';
   END IF;
 
+  -- Agent Task Orchestrator durability (110).
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='ai_agent_tasks'
+      AND column_name='available_at' AND is_nullable='NO'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='ai_agent_tasks'
+      AND column_name='lease_expires_at'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='ai_agent_tasks'
+      AND column_name='claimed_by'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='ai_agent_task_targets'
+      AND column_name='available_at' AND is_nullable='NO'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='ai_agent_task_targets'
+      AND column_name='lease_expires_at'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='ai_agent_task_targets'
+      AND column_name='claimed_by'
+  ) THEN
+    RAISE EXCEPTION 'Agent Task Orchestrator lease/scheduling columns are missing';
+  END IF;
+
+  IF to_regprocedure('public.claim_next_agent_task(text,integer)') IS NULL
+     OR to_regprocedure('public.claim_next_agent_task_target(uuid,text,integer)') IS NULL
+     OR to_regprocedure('public.release_agent_task_claim(uuid,text,integer)') IS NULL
+     OR to_regprocedure('public.create_claimed_agent_task_execution(uuid,uuid,text)') IS NULL
+     OR to_regprocedure('public.retry_agent_task_target_claim(uuid,uuid,text,text,integer)') IS NULL
+     OR to_regprocedure('public.schedule_agent_task_target(uuid,uuid,timestamptz,text)') IS NULL
+     OR to_regprocedure('public.pause_agent_task(uuid,uuid,text)') IS NULL
+     OR to_regprocedure('public.resume_agent_task(uuid,uuid,text)') IS NULL
+     OR to_regprocedure('public.cancel_agent_task(uuid,uuid,text)') IS NULL
+     OR to_regprocedure('public.sweep_agent_task_claims(timestamptz)') IS NULL THEN
+    RAISE EXCEPTION 'Agent Task Orchestrator RPC surface is incomplete';
+  END IF;
+
+  IF has_function_privilege(
+       'anon','public.claim_next_agent_task(text,integer)','EXECUTE'
+     )
+     OR has_function_privilege(
+       'authenticated','public.claim_next_agent_task(text,integer)','EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'service_role','public.claim_next_agent_task(text,integer)','EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'claim_next_agent_task privileges are unsafe';
+  END IF;
+
+  IF has_function_privilege(
+       'anon',
+       'public.create_claimed_agent_task_execution(uuid,uuid,text)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'authenticated',
+       'public.create_claimed_agent_task_execution(uuid,uuid,text)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'create_claimed_agent_task_execution privileges are unsafe';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
