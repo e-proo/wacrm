@@ -15,6 +15,10 @@ export interface ToolAuthorizationContext {
   agentPurpose: AgentPurpose
   trustedAdminIdentityId: string | null
   trustedAdminCapabilities: ReadonlyArray<string>
+  /** Frozen Agent Revision capabilities, populated for Task executions. */
+  agentCapabilities?: ReadonlyArray<string>
+  /** Exact Task Manifest tool scope; absent for ordinary inbound execution. */
+  taskAllowedTools?: ReadonlyArray<{ key: string; version: number }> | null
   features: RuntimeFeaturePolicy
 }
 
@@ -49,6 +53,31 @@ export function authorizeToolInvocation(input: {
   }
   if (!manifest.allowedPlanes.includes(context.plane)) {
     return deny('TOOL_PLANE_DENIED', `Tool "${tool.key}" is not allowed on this plane.`)
+  }
+
+  if (context.taskAllowedTools) {
+    const exactTaskTool = context.taskAllowedTools.some(
+      (allowed) =>
+        allowed.key === manifest.key &&
+        allowed.version === manifest.version,
+    )
+    if (!exactTaskTool) {
+      return deny(
+        'TASK_TOOL_SCOPE_DENIED',
+        `Tool "${tool.key}@${tool.version}" is outside this task type's allowed tool scope.`,
+      )
+    }
+
+    const agentCapabilitySet = new Set(context.agentCapabilities ?? [])
+    const missingAgentCapability = manifest.requiredCapabilities.find(
+      (capability) => !agentCapabilitySet.has(capability),
+    )
+    if (missingAgentCapability) {
+      return deny(
+        'AGENT_CAPABILITY_DENIED',
+        `Agent revision lacks capability "${missingAgentCapability}" required by "${tool.key}".`,
+      )
+    }
   }
 
   // No model is ever allowed a direct write. Mutating operations must be
