@@ -216,6 +216,17 @@ export interface AiAgentRunEvent {
  * `route` decision into an `ai_agent_runs` row + a worker
  * dispatch; a `skip` decision is the documented no-op path.
  */
+export interface TaskReplyRoutingSignal {
+  runId: Uuid
+  taskId: Uuid
+  taskTargetId: Uuid
+  agentId: Uuid
+  revisionId: Uuid
+  providerConnectionId: Uuid
+  counterpartyRole: string
+  correlationMethod: string
+}
+
 export type RoutingDecision =
   | {
       action: 'route'
@@ -225,6 +236,11 @@ export type RoutingDecision =
       providerConnectionId: Uuid
       reason: string
       routeId: Uuid | null
+      /**
+       * Server-generated task-reply provenance. When present the durable run
+       * already exists and must be reused instead of creating a second row.
+       */
+      taskReply?: TaskReplyRoutingSignal
     }
   | { action: 'skip'; reason: string }
 
@@ -245,6 +261,11 @@ export interface RoutingContext {
   tags?: ReadonlyArray<string>
   /** Conservative runtime language signal; null means unknown. */
   language?: string | null
+  /**
+   * Server-generated signal from durable Agent Task reply correlation.
+   * Trusted-admin and human-takeover gates still outrank this signal.
+   */
+  taskReply?: TaskReplyRoutingSignal | null
 }
 
 export interface RoutingSnapshot {
