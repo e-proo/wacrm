@@ -4,6 +4,10 @@ import { sweepAgentRuns } from './recovery'
 import { resumeQueuedAgentRun } from './dispatch'
 import { executeApprovedChangeRequest } from './change-request-executor'
 import { deliverCustomerOutcomeNotifications } from './customer-notification-delivery'
+import {
+  processAgentTaskQueue,
+  type AgentTaskWorkerResult,
+} from '../tasks/orchestrator'
 
 export interface AgentWorkerResult {
   swept: { scanned: number; reaped: number }
@@ -14,6 +18,7 @@ export interface AgentWorkerResult {
   failed: number
   notifications: NotificationWorkerResult
   changeRequests: ChangeRequestWorkerResult
+  tasks: AgentTaskWorkerResult
 }
 
 
@@ -190,6 +195,10 @@ export async function processAgentRunQueue(input: {
   const limit = Math.max(1, Math.min(input.limit ?? 20, 100))
   const changeRequests = await processApprovedChangeRequests({ limit })
   const notifications = await processCustomerIntentNotifications({ limit })
+  const tasks = await processAgentTaskQueue({
+    workerId: input.workerId,
+    limit,
+  })
   const swept = await sweepAgentRuns(db)
   const { data: candidates, error } = await db
     .from('ai_agent_runs')
@@ -233,5 +242,6 @@ export async function processAgentRunQueue(input: {
     failed,
     notifications,
     changeRequests,
+    tasks,
   }
 }
