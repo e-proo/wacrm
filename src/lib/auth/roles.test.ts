@@ -8,6 +8,7 @@ import {
   canSendMessages,
   canTransferOwnership,
   canViewOnly,
+  hasAgentManagementCapability,
   hasMinRole,
   isAccountRole,
   roleRank,
@@ -126,5 +127,45 @@ describe("capability predicates", () => {
     expect(canTransferOwnership("admin")).toBe(false);
     expect(canTransferOwnership("agent")).toBe(false);
     expect(canTransferOwnership("viewer")).toBe(false);
+  });
+});
+
+
+describe("agent management capabilities", () => {
+  it("allows read access to every account member role", () => {
+    for (const role of ACCOUNT_ROLES) {
+      expect(hasAgentManagementCapability(role, "agents.read")).toBe(true);
+    }
+  });
+
+  it("keeps ordinary builder administration at admin+", () => {
+    for (const capability of [
+      "agents.create",
+      "agents.edit",
+      "agents.pause",
+      "agents.manage_routes",
+      "agents.assign_knowledge",
+      "agents.grant_read_tools",
+      "agents.manage_budgets",
+      "agents.manage_tasks",
+      "agents.manage_outreach",
+    ] as const) {
+      expect(hasAgentManagementCapability("owner", capability)).toBe(true);
+      expect(hasAgentManagementCapability("admin", capability)).toBe(true);
+      expect(hasAgentManagementCapability("agent", capability)).toBe(false);
+      expect(hasAgentManagementCapability("viewer", capability)).toBe(false);
+    }
+  });
+
+  it("reserves publish and proposal-tool grants for owners", () => {
+    for (const capability of [
+      "agents.publish",
+      "agents.grant_proposal_tools",
+    ] as const) {
+      expect(hasAgentManagementCapability("owner", capability)).toBe(true);
+      expect(hasAgentManagementCapability("admin", capability)).toBe(false);
+      expect(hasAgentManagementCapability("agent", capability)).toBe(false);
+      expect(hasAgentManagementCapability("viewer", capability)).toBe(false);
+    }
   });
 });
