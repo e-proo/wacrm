@@ -25,10 +25,11 @@ import type {
 //   2. Human takeover / paused  → skip.
 //   3. Multi-agent disabled     → skip (caller should fall back
 //                                  to the legacy ai_configs path).
-//   4. Explicit assignment      → assigned agent's published rev.
-//   5. Highest-priority active  → matching rule's agent.
-//   6. Default route            → default agent for channel.
-//   7. No path                  → skip with reason.
+//   4. Correlated Task reply    → task's frozen agent revision.
+//   5. Explicit assignment      → assigned agent's published rev.
+//   6. Highest-priority active  → matching rule's agent.
+//   7. Default route            → default agent for channel.
+//   8. No path                  → skip with reason.
 //
 // All skip paths return a stable `reason` so the caller can log
 // it; never throw — a routing decision is expected to be cheap.
@@ -97,7 +98,29 @@ export function routeInboundMessage(
   }
 
   // ------------------------------------------------------------
-  // (4) Explicit assignment (if still active + published).
+  // (4) Correlated Agent Task reply.
+  //
+  // The signal is produced server-side by an atomic DB correlation RPC.
+  // It deliberately carries the frozen task revision rather than resolving
+  // the agent's current published revision: long-running tasks must continue
+  // with the exact revision they started with. Admin/human gates above still
+  // own the message first.
+  // ------------------------------------------------------------
+  if (ctx.taskReply) {
+    return {
+      action: 'route',
+      plane: 'customer',
+      agentId: ctx.taskReply.agentId,
+      revisionId: ctx.taskReply.revisionId,
+      providerConnectionId: ctx.taskReply.providerConnectionId,
+      reason: `task_reply:${ctx.taskReply.correlationMethod}`,
+      routeId: null,
+      taskReply: ctx.taskReply,
+    }
+  }
+
+  // ------------------------------------------------------------
+  // (5) Explicit assignment (if still active + published).
   // ------------------------------------------------------------
   if (ctx.conversationAiState?.assignedAiAgentId) {
     const assigned = findActiveAgent(
@@ -118,7 +141,7 @@ export function routeInboundMessage(
   }
 
   // ------------------------------------------------------------
-  // (5 + 6) Rule match (highest priority wins), then default.
+  // (6 + 7) Rule match (highest priority wins), then default.
   // ------------------------------------------------------------
   const rule = pickRule(ctx, lookup.routes, lookup.agents)
   if (rule) return rule
