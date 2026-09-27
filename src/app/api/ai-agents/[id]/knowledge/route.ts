@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 
 interface RouteContext { params: Promise<{ id: string }> }
@@ -35,7 +35,7 @@ async function loadLatestRevision(
 
 export async function GET(_request: Request, { params }: RouteContext) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.read')
     const limit = checkRateLimit(`admin:agentKnowledge:${ctx.userId}`, RATE_LIMITS.adminAction)
     if (!limit.success) return rateLimitResponse(limit)
     const { id: agentId } = await params
@@ -95,7 +95,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
 
 export async function PUT(request: Request, { params }: RouteContext) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.assign_knowledge')
     const limit = checkRateLimit(`admin:agentKnowledgeWrite:${ctx.userId}`, RATE_LIMITS.adminAction)
     if (!limit.success) return rateLimitResponse(limit)
     const { id: agentId } = await params
@@ -145,7 +145,7 @@ export async function POST(_request: Request, { params }: RouteContext) {
   // Explicit admin shortcut: assign all ACTIVE KBs eligible for this agent.
   // This is not a runtime fallback; the result is persisted on the draft.
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.assign_knowledge')
     const limit = checkRateLimit(`admin:agentKnowledgeSync:${ctx.userId}`, RATE_LIMITS.adminAction)
     if (!limit.success) return rateLimitResponse(limit)
     const { id: agentId } = await params
