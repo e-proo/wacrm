@@ -23,6 +23,7 @@ import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
+import { correlateInboundTaskReply } from '@/lib/ai/tasks/reply-correlation'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -737,15 +738,41 @@ async function processMessage(
     return
   }
 
-  // Replayed delivery: the message already exists, so acknowledge it as a
-  // no-op. Returning here is what keeps a retry from double-bumping unread,
-  // re-advancing flows, re-firing automations, re-invoking AI handling, and
-  // re-dispatching public webhooks (issue #367).
-  if (!insertedRows || insertedRows.length === 0) {
+  // Replayed delivery remains a no-op for unread counts, flows,
+  // automations, public webhook fan-out, and ordinary AI handling. We retain
+  // the persisted message id long enough to recover one durable Task-reply
+  // correlation if a previous invocation crashed after INSERT but before the
+  // correlation RPC. That RPC is itself idempotent on inbound_message_id.
+  const isInboundReplay = !insertedRows || insertedRows.length === 0
+  let inboundMessageId: string | null =
+    insertedRows?.[0]?.id ?? null
+
+  if (isInboundReplay) {
     console.info(
-      '[webhook] duplicate inbound message ignored (idempotent replay):',
-      message.id
+      '[webhook] duplicate inbound message seen (idempotent replay):',
+      message.id,
     )
+
+    const { data: persistedInbound, error: persistedInboundError } =
+      await supabaseAdmin()
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', conversation.id)
+        .eq('message_id', message.id)
+        .maybeSingle()
+
+    if (persistedInboundError || !persistedInbound?.id) {
+      console.error(
+        '[webhook] duplicate inbound message could not be reloaded:',
+        persistedInboundError,
+      )
+      return
+    }
+    inboundMessageId = persistedInbound.id as string
+  }
+
+  if (!inboundMessageId) {
+    console.error('[webhook] inbound message id missing after persistence')
     return
   }
 
@@ -756,28 +783,26 @@ async function processMessage(
   // both reads see the same value and write the same increment, losing one
   // (issue #369). The RPC increments in a single UPDATE and refreshes the
   // last-message summary in the same statement.
-  const { error: convError } = await supabaseAdmin().rpc(
-    'bump_conversation_on_inbound',
-    {
-      p_conversation_id: conversation.id,
-      p_last_message_text: contentText || `[${message.type}]`,
+  if (!isInboundReplay) {
+    const { error: convError } = await supabaseAdmin().rpc(
+      'bump_conversation_on_inbound',
+      {
+        p_conversation_id: conversation.id,
+        p_last_message_text: contentText || `[${message.type}]`,
+      },
+    )
+
+    if (convError) {
+      console.error('Error updating conversation:', convError)
     }
-  )
 
-  if (convError) {
-    console.error('Error updating conversation:', convError)
+    // A customer writing again re-opens the thread (issue #409).
+    await reopenClosedConversation(supabaseAdmin(), conversation)
+
+    // If this contact was a recent broadcast recipient, flag the reply
+    // so the broadcast's replied_count advances.
+    await flagBroadcastReplyIfAny(accountId, contactRecord.id)
   }
-
-  // A customer writing again re-opens the thread (issue #409). Kept as a
-  // separate conditional statement rather than a `status` field on the
-  // update above so the write can be gated on the row's CURRENT status in
-  // SQL — see the helper for why that matters.
-  await reopenClosedConversation(supabaseAdmin(), conversation)
-
-  // If this contact was a recent broadcast recipient, flag the reply
-  // so the broadcast's `replied_count` advances (via the aggregate
-  // trigger installed in migration 003).
-  await flagBroadcastReplyIfAny(accountId, contactRecord.id)
 
   // SECURITY BOUNDARY: resolve the sender plane before ANY customer Flow,
   // Automation, or legacy auto-reply sees the message. A verified admin
@@ -797,6 +822,9 @@ async function processMessage(
   }
 
   if (trustedAdminIdentity) {
+    // A replay must never re-execute administrator commands or generation.
+    if (isInboundReplay) return
+
     const adminText = contentText ?? message.text?.body ?? ''
     const multiAgent = process.env.MULTI_AGENT_ENABLED === 'true'
     console.info(
@@ -806,7 +834,7 @@ async function processMessage(
     const changeCommand = await handleAdminChangeCommand({
       accountId,
       identity: trustedAdminIdentity,
-      inboundMessageId: insertedRows[0].id,
+      inboundMessageId,
       text: adminText,
     })
     if (changeCommand.handled) {
@@ -833,7 +861,7 @@ async function processMessage(
       await dispatchInboundToAiAgent({
         accountId,
         conversationId: conversation.id,
-        inboundMessageId: insertedRows[0].id,
+        inboundMessageId,
         contactId: contactRecord.id,
         configOwnerUserId,
         senderAddress: normalizedSenderAddress,
@@ -854,6 +882,117 @@ async function processMessage(
     })
     return
   }
+
+  // ============================================================
+  // Agent Task reply correlation.
+  //
+  // Trusted-admin ownership has already been resolved above. This layer is
+  // generic: it knows only task/target/message provenance, never Coverage or
+  // Services semantics. A unique match creates/reuses the durable inbound
+  // task-reply run atomically before dispatch.
+  // ============================================================
+  const multiAgentEnabled = process.env.MULTI_AGENT_ENABLED === 'true'
+  let taskCorrelation:
+    | Awaited<ReturnType<typeof correlateInboundTaskReply>>
+    | null = null
+
+  if (multiAgentEnabled) {
+    try {
+      taskCorrelation = await correlateInboundTaskReply({
+        accountId,
+        conversationId: conversation.id,
+        inboundMessageId,
+        replyToMessageId: replyToInternalId,
+        hasHumanAssignee: Boolean(conversation.assigned_agent_id),
+      })
+    } catch (err) {
+      console.error('[task reply] correlation failed closed:', err)
+
+      // Correlation errors must not fall through to a different AI agent and
+      // answer a message that may belong to an active Task target.
+      if (!isInboundReplay) {
+        await dispatchWebhookEvent(
+          supabaseAdmin(),
+          accountId,
+          'message.received',
+          {
+            conversation_id: conversation.id,
+            contact_id: contactRecord.id,
+            whatsapp_message_id: message.id,
+            content_type: contentType,
+            text: contentText,
+          },
+        )
+      }
+      return
+    }
+  }
+
+  if (taskCorrelation?.status === 'matched' && taskCorrelation.signal) {
+    const dispatched = await dispatchInboundToAiAgent({
+      accountId,
+      conversationId: conversation.id,
+      inboundMessageId,
+      contactId: contactRecord.id,
+      configOwnerUserId,
+      senderAddress: normalizedSenderAddress,
+      hasHumanAssignee: Boolean(conversation.assigned_agent_id),
+      multiAgentEnabled: true,
+      workerId: isInboundReplay ? 'webhook-task-replay' : 'webhook-task-reply',
+      taskReply: taskCorrelation.signal,
+    })
+
+    console.info(
+      `[ai gate] path=task-reply queued=${dispatched.queued} reason=${dispatched.decision.reason}`,
+    )
+
+    if (!isInboundReplay) {
+      await dispatchWebhookEvent(
+        supabaseAdmin(),
+        accountId,
+        'message.received',
+        {
+          conversation_id: conversation.id,
+          contact_id: contactRecord.id,
+          whatsapp_message_id: message.id,
+          content_type: contentType,
+          text: contentText,
+        },
+      )
+    }
+    return
+  }
+
+  if (
+    taskCorrelation?.status === 'ambiguous' ||
+    taskCorrelation?.status === 'correlated_unroutable' ||
+    taskCorrelation?.status === 'inbound_already_routed'
+  ) {
+    console.warn(
+      `[task reply] fail-closed status=${taskCorrelation.status} reason=${taskCorrelation.reason}`,
+    )
+
+    if (!isInboundReplay) {
+      await dispatchWebhookEvent(
+        supabaseAdmin(),
+        accountId,
+        'message.received',
+        {
+          conversation_id: conversation.id,
+          contact_id: contactRecord.id,
+          whatsapp_message_id: message.id,
+          content_type: contentType,
+          text: contentText,
+        },
+      )
+    }
+    return
+  }
+
+  // An ordinary Meta replay never re-enters Flows/Automations/legacy AI.
+  // The only replay recovery permitted above is the idempotent Task
+  // correlation path.
+  if (isInboundReplay) return
 
   // ============================================================
   // Flow runner dispatch.
@@ -999,7 +1138,7 @@ async function processMessage(
       await dispatchInboundToAiAgent({
         accountId,
         conversationId: conversation.id,
-        inboundMessageId: insertedRows[0].id,
+        inboundMessageId,
         contactId: contactRecord.id,
         configOwnerUserId,
         senderAddress: normalizePhone(senderPhone),
