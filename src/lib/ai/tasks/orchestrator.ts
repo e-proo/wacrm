@@ -1,6 +1,10 @@
 import { supabaseAdmin } from '../admin-client'
 import { loadAccountRuntimePolicy } from '../runtime/runtime-policy'
-import { materializeCurrentTaskTargets } from './current-platform'
+import {
+  CURRENT_AGENT_TASK_PLATFORM,
+  materializeCurrentTaskTargets,
+} from './current-platform'
+import { authorizeStoredAgentTask } from './capability-policy'
 import { sweepAgentTaskOutboundReservations } from './outbound-runtime'
 
 export interface AgentTaskSweepResult {
@@ -153,6 +157,33 @@ export async function processAgentTaskQueue(input: {
     ) {
       skippedByPolicy += 1
       await releaseTaskClaim(db, taskId, input.workerId, 60)
+      continue
+    }
+
+    const taskAuthorization = await authorizeStoredAgentTask(db, {
+      taskId,
+      taskTypes: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
+    })
+
+    if (!taskAuthorization.ok) {
+      skippedByPolicy += 1
+      const failedTask = await db.rpc('fail_claimed_agent_task_policy', {
+        p_task_id: taskId,
+        p_worker_id: input.workerId,
+        p_error_code: taskAuthorization.code,
+      })
+      if (failedTask.error) {
+        failed += 1
+        console.error(
+          '[task orchestrator] task policy failure transition failed:',
+          failedTask.error,
+        )
+        await releaseTaskClaim(db, taskId, input.workerId, 60)
+      } else {
+        console.warn(
+          `[task orchestrator] task policy denied task=${taskId.slice(0, 8)} code=${taskAuthorization.code}`,
+        )
+      }
       continue
     }
 
