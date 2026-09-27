@@ -223,6 +223,8 @@ export async function executeTool(
       agentPurpose: ctx.agentPurpose,
       trustedAdminIdentityId: ctx.trustedAdminIdentityId,
       trustedAdminCapabilities: ctx.trustedAdminCapabilities,
+      agentCapabilities: ctx.agentCapabilities ?? [],
+      taskAllowedTools: ctx.taskAllowedTools ?? null,
       features: ctx.features,
     },
   })
