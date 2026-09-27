@@ -1040,7 +1040,12 @@ describe('native-tool template seeding compatibility', () => {
       "getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'",
     )
     expect(route).toContain('.map((key) => getCurrentPlatformTool(key))')
-    expect(route).toContain('tool.modelExposed && !tool.serverOnly')
+    expect(route).toContain('tool.modelExposed')
+    expect(route).toContain('!tool.serverOnly')
+    expect(route).toContain("tool.permission !== 'execute'")
+    expect(route).toContain(
+      "tool.permission !== 'propose' || ctx.canGrantProposalTools",
+    )
     expect(route).toContain('permission: tool.permission')
     expect(route).not.toContain('getRegisteredTool')
     expect(route).not.toContain(
