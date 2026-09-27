@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
-import { listCurrentToolDefinitions } from '@/lib/ai/tools/platform/runtime-tool-compat'
+import { listBuilderToolDefinitions } from '@/lib/ai/tools/platform/runtime-tool-compat'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.read')
     const limit = checkRateLimit(`admin:agentTools:${ctx.userId}`, RATE_LIMITS.adminAction)
     if (!limit.success) return rateLimitResponse(limit)
     const { id } = await params
@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .eq('agent_id', id)
       .order('revision_number', { ascending: false })
     if (error) throw error
-    return NextResponse.json({ registry: listCurrentToolDefinitions(), revisions: data ?? [] })
+    return NextResponse.json({ registry: listBuilderToolDefinitions(), revisions: data ?? [] })
   } catch (err) {
     return toErrorResponse(err)
   }
