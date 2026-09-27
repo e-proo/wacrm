@@ -142,7 +142,10 @@ export function buildAgentTaskPlatform(modules: readonly AgentTaskModule[]): {
       )
     }
 
-    const outboundPolicy = outboundMessagePolicies.get(taskType.messagePolicy.key)
+    const outboundPolicy = outboundMessagePolicies.get(
+      taskType.messagePolicy.key,
+      taskType.messagePolicy.version,
+    )
     if (!outboundPolicy) {
       throw new Error(
         `Task type ${taskType.key}@${taskType.version} references unregistered outbound message policy ${taskType.messagePolicy.key}.`,
