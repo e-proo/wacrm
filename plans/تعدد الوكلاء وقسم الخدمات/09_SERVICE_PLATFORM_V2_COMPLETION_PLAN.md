@@ -25,10 +25,15 @@
 - Event projector registry.
 - FX customer WhatsApp cutover مفعّل في TEST.
 - Coverage customer WhatsApp cutover مفعّل في TEST.
-- Intents موجود كـDomain ثالث حقيقي ويصدر canonical Business Events في shadow mode.
-- migration history في TEST وصل حتى 106.
+- Intents موجود كـDomain ثالث حقيقي ويصدر canonical Business Events.
+- Intents Gate A (4/4 parity) نجحت على TEST.
+- Intents Gate B (controlled activation) نجحت على TEST، والمسار الحالي `service_request_customer_whatsapp` في وضع `active` و`ready=true`.
+- Gate C (active WhatsApp E2E) متوقف مؤقتًا بسبب قيد خارجي في Meta يعيد `API access blocked`.
+- Phase 2 وPhase 3 وPhase 4 مغلقة رسميًا.
+- Phase 5 لم تبدأ، وما زال شرطها إغلاق Phase 1 أولًا.
+- migration history المرتبط بهذا cutover في TEST وصل حتى 108.
 
-المتبقي ليس إعادة بناء المنصة، بل إغلاق مسارات الانتقال والـlegacy المتبقية.
+المتبقي ليس إعادة بناء المنصة، بل إغلاق Gate C/Gate D للـIntents ثم تنفيذ legacy contraction والقبول النهائي.
 
 ---
 
@@ -36,7 +41,7 @@
 
 ### Phase 1 — Intents / Service Requests General Outbox Cutover
 
-**الحالة:** IN PROGRESS
+**الحالة:** IN PROGRESS — PAUSED AT GATE C (EXTERNAL META BLOCKER)
 
 الهدف:
 
@@ -85,6 +90,98 @@
 - إرسال أحداث مستقبلية عبر active path ينجح دون duplicate WhatsApp.
 - rollback test يثبت إمكانية العودة.
 - بعد نجاح rollback يمكن إعادة activation للتجربة المستمرة.
+
+---
+
+### Phase 1 — Pause / Resume Checkpoint — 2026-09-27
+
+هذه هي **نقطة الاستئناف الرسمية** أثناء معالجة قيد Meta/Instagram خارج المستودع.
+
+#### الحالة المثبتة قبل التوقف
+
+- Branch: `refactor/service-platform-v2`.
+- Gate A: **PASS** — parity = `4/4`.
+- Gate B: **PASS** — `service_request_customer_whatsapp = active`.
+- Readiness: `true`.
+- Blockers: `0`.
+- Legacy nonterminal: `0`.
+- Active nonterminal: `0`.
+- TEST recipient المختار لـGate C: `Pro Codar`.
+- لم يتم اعتماد Gate C لأن WhatsApp/Meta integration نفسه متوقف قبل delivery.
+- لم يتم تنفيذ Gate D rollback بعد.
+- Phase 5 **لم تبدأ**.
+
+#### الدليل على أن العائق خارجي عن Service Platform
+
+تم فك WhatsApp access token المخزن في `wacrm test` بنجاح باستخدام `WACRM_TEST_ENCRYPTION_KEY` الموجود في GitHub Environment `wacrm-test`.
+
+بعد فك التوكن، أعادت Meta على endpointين مستقلين:
+
+- phone metadata → `HTTP 400 / API access blocked`
+- WABA `subscribed_apps` → `HTTP 400 / API access blocked`
+
+كما أن الرسائل اليدوية الجديدة من `Pro Codar` ومن جهة الإدارة لم تنتج:
+
+- webhook POST جديد في runtime log.
+- inbound message جديد في TEST.
+
+آخر inbound فعلي موجود في TEST قبل التوقف كان في 2026-09-24.
+
+الاستنتاج: لا نغيّر Intents/Business Event architecture لمعالجة هذه الحالة. يجب أولًا رفع قيد Meta/Instagram/Business account أو استعادة صلاحية Meta API.
+
+#### خطوات الاستئناف بعد إصلاح Meta
+
+نفذ بالترتيب، ولا تتجاوز خطوة فاشلة:
+
+1. تحقق أن Meta API عاد يعمل:
+   - phone metadata succeeds.
+   - WABA `subscribed_apps` succeeds ويحتوي التطبيق.
+2. تحقق من Callback URL والاشتراك في webhook field `messages`.
+3. أرسل inbound message من `Pro Codar` وتأكد من:
+   - ظهور `POST /api/whatsapp/webhook 200`.
+   - وصول inbound message إلى TEST.
+4. نفذ Gate C:
+   - أنشئ Intent outcome جديدًا عبر active path.
+   - تأكد من `business_event_outbox → projector/template → engineSendText → Meta`.
+   - تأكد من وجود رسالة واحدة فقط.
+   - أعد replay/claim للتحقق أن idempotency تمنع duplicate.
+5. نفذ Gate D rollback عبر guarded cutover control.
+6. تحقق بعد rollback من:
+   - no `sending`.
+   - no `requires_reconciliation`.
+   - no duplicate.
+7. إذا كان TEST سيواصل التجربة على المنصة الجديدة، أعد activation بعد إثبات rollback.
+8. حدّث هذه الوثيقة إلى `Phase 1 = COMPLETE`.
+9. ابدأ Phase 5 فقط بعد ذلك.
+
+#### حدود العمل المتوازي على قسم الذكاء الاصطناعي
+
+يمكن تطوير وتحسين قسم AI بالتوازي أثناء انتظار إصلاح Meta، لكن يجب اعتبار حالة Phase 1 الحالية invariant محفوظًا.
+
+أي تعديل AI لا علاقة له بالـcutover يمكن أن يستمر بشكل طبيعي، مع CI المعتاد.
+
+أما إذا لمس العمل أيًا من الأسطح التالية، فيجب إعادة تقييم Phase 1 قبل اعتباره مكتملًا:
+
+- `src/lib/ai/runtime/customer-notification-delivery.ts`
+- `src/lib/services/platform/business-event-delivery.ts`
+- `src/lib/services/intents/`
+- `src/app/api/whatsapp/webhook/route.ts`
+- `src/app/api/whatsapp/config/`
+- `src/lib/automations/meta-send.ts`
+- `src/lib/whatsapp/encryption.ts`
+- `src/lib/ai/runtime/tool-registry.ts`
+- `src/lib/ai/tools/platform/legacy-bridge.ts`
+- migrations `107` و`108` أو أي migration جديدة تغيّر cutover contracts.
+
+وأثناء العمل المتوازي:
+
+- لا تغيّر route `service_request_customer_whatsapp` يدويًا.
+- لا تنفذ rollback قبل استئناف Gate C.
+- لا تحذف `customer_intent_notifications` أو legacy fallback.
+- لا تبدأ Phase 5 contraction.
+- لا تغيّر `ENCRYPTION_KEY` المستخدم للتوكن الحالي.
+- إذا احتاج إصلاح Meta إلى Access Token جديد، أعد حفظه باستخدام نفس `ENCRYPTION_KEY`.
+- لا تعتبر timestamps القديمة `registered_at/subscribed_apps_at` إثباتًا حيًا؛ أعد فحص Meta عند الاستئناف.
 
 ---
 
@@ -259,12 +356,12 @@ Phase 6  Full acceptance
 - [x] تطبيق migration 107 على `wacrm test`.
 - [x] اكتشاف cross-domain events من Coverage ومنع احتسابها أو تفعيلها عبر migration 108.
 - [x] تطبيق migration 108 على `wacrm test`.
-- [ ] جمع parity evidence للأحداث الأربعة. الحالة الحالية: 0/4 matched، ولا توجد blockers بعد ownership hardening.
-- [ ] readiness = true. الحالة الحالية على TEST: `mode=legacy`, `ready=false`, `blockers=0`, `legacy_nonterminal=0`, `active_nonterminal=0`.
-- [ ] activation test.
-- [ ] active delivery E2E.
-- [ ] rollback test.
-- [ ] إعادة activation بعد إثبات rollback إذا كان TEST سيستمر على المسار الجديد.
+- [x] جمع parity evidence للأحداث الأربعة على TEST: `4/4 matched`.
+- [x] readiness = true على TEST: `mode=active`, `ready=true`, `blockers=0`, `legacy_nonterminal=0`, `active_nonterminal=0`.
+- [x] controlled activation test.
+- [ ] active delivery E2E عبر WhatsApp. **PAUSED:** Meta يعيد حاليًا `HTTP 400 / API access blocked` قبل وصول webhook أو transport E2E.
+- [ ] rollback test بعد نجاح Gate C.
+- [ ] تحديد الوضع النهائي بعد rollback: إعادة `active` إذا كان TEST سيستمر على المسار الجديد، ثم إعلان Phase 1 `COMPLETE`.
 
 يتم تحديث هذه القائمة مع تقدم التنفيذ، دون تغيير معايير القبول لتلائم النتيجة.
 
