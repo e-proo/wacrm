@@ -162,13 +162,11 @@ begin
   end if;
 
   v_error_code:=left(
-    upper(
-      regexp_replace(
-        coalesce(nullif(btrim(p_error_code),''),'TASK_POLICY_DENIED'),
-        '[^A-Z0-9_]+',
-        '_',
-        'g'
-      )
+    regexp_replace(
+      upper(coalesce(nullif(btrim(p_error_code),''),'TASK_POLICY_DENIED')),
+      '[^A-Z0-9_]+',
+      '_',
+      'g'
     ),
     80
   );
