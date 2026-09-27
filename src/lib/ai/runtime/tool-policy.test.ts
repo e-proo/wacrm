@@ -124,6 +124,70 @@ describe('authorizeToolInvocation', () => {
     })).toEqual({ ok: true })
   })
 
+  it('denies a globally granted tool that is outside the active Task scope', () => {
+    const result = authorizeToolInvocation({
+      tool,
+      permission: 'read',
+      args: { id_or_code: 'svc' },
+      constraints: {},
+      context: {
+        plane: 'customer',
+        channel: 'whatsapp',
+        simulation: false,
+        agentPurpose: 'custom',
+        trustedAdminIdentityId: null,
+        trustedAdminCapabilities: [],
+        agentCapabilities: ['services.read'],
+        taskAllowedTools: [{ key: 'coverage.get_rates', version: 1 }],
+        features,
+      },
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'TASK_TOOL_SCOPE_DENIED',
+    })
+  })
+
+  it('requires the frozen Agent capability for a Task-scoped tool', () => {
+    const base = {
+      plane: 'customer' as const,
+      channel: 'whatsapp' as const,
+      simulation: false,
+      agentPurpose: 'custom' as const,
+      trustedAdminIdentityId: null,
+      trustedAdminCapabilities: [],
+      taskAllowedTools: [{ key: 'services.get', version: 1 }],
+      features,
+    }
+
+    expect(
+      authorizeToolInvocation({
+        tool,
+        permission: 'read',
+        args: { id_or_code: 'svc' },
+        constraints: {},
+        context: { ...base, agentCapabilities: [] },
+      }),
+    ).toMatchObject({
+      ok: false,
+      code: 'AGENT_CAPABILITY_DENIED',
+    })
+
+    expect(
+      authorizeToolInvocation({
+        tool,
+        permission: 'read',
+        args: { id_or_code: 'svc' },
+        constraints: {},
+        context: {
+          ...base,
+          agentCapabilities: ['services.read'],
+        },
+      }),
+    ).toEqual({ ok: true })
+  })
+
   it('keeps service pricing mutations off the customer plane', () => {
     const pricingTool: ToolDefinition = {
       key: 'pricing_rules.propose_service_price', version: 1, description: 'test',
