@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server'
-import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/account'
+import {
+  getCurrentAccount,
+  requireAgentCapability,
+  toErrorResponse,
+} from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 
 async function assertRevisionOwnership(input: {
@@ -25,7 +29,7 @@ export async function GET(
 ) {
   try {
     const { id, revisionId } = await params
-    const ctx = await getCurrentAccount()
+    const ctx = await requireAgentCapability('agents.read')
     const revision = await assertRevisionOwnership({
       supabase: ctx.supabase,
       accountId: ctx.accountId,
@@ -52,7 +56,7 @@ export async function PUT(
 ) {
   try {
     const { id, revisionId } = await params
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.assign_knowledge')
     const limit = checkRateLimit(`ai-agent-kb-assign:${ctx.userId}`, RATE_LIMITS.adminAction)
     if (!limit.success) return rateLimitResponse(limit)
     const revision = await assertRevisionOwnership({
