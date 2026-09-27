@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../admin-client'
 import { loadAccountRuntimePolicy } from '../runtime/runtime-policy'
+import { materializeCurrentTaskTargets } from './current-platform'
 
 export interface AgentTaskSweepResult {
   tasksRecovered: number
@@ -13,6 +14,7 @@ export interface AgentTaskWorkerResult {
   claimedTasks: number
   claimedTargets: number
   createdRuns: number
+  materializedTargets: number
   deferredTasks: number
   skippedByPolicy: number
   failed: number
@@ -95,6 +97,7 @@ export async function processAgentTaskQueue(input: {
   let claimedTasks = 0
   let claimedTargets = 0
   let createdRuns = 0
+  let materializedTargets = 0
   let deferredTasks = 0
   let skippedByPolicy = 0
   let failed = 0
@@ -156,10 +159,38 @@ export async function processAgentTaskQueue(input: {
       continue
     }
 
-    const targetId =
+    let targetId =
       typeof targetClaim.data === 'string' && targetClaim.data
         ? targetClaim.data
         : null
+
+    if (!targetId) {
+      try {
+        const resolution = await materializeCurrentTaskTargets(taskId)
+        materializedTargets += resolution.accepted
+
+        if (resolution.accepted > 0) {
+          const retryClaim = await db.rpc('claim_next_agent_task_target', {
+            p_task_id: taskId,
+            p_worker_id: input.workerId,
+            p_lease_secs: 180,
+          })
+          if (retryClaim.error) throw retryClaim.error
+          targetId =
+            typeof retryClaim.data === 'string' && retryClaim.data
+              ? retryClaim.data
+              : null
+        }
+      } catch (resolutionError) {
+        failed += 1
+        console.error(
+          '[task orchestrator] deterministic target resolution failed:',
+          resolutionError,
+        )
+        await releaseTaskClaim(db, taskId, input.workerId, 60)
+        continue
+      }
+    }
 
     if (!targetId) {
       deferredTasks += 1
@@ -209,6 +240,7 @@ export async function processAgentTaskQueue(input: {
     claimedTasks,
     claimedTargets,
     createdRuns,
+    materializedTargets,
     deferredTasks,
     skippedByPolicy,
     failed,
