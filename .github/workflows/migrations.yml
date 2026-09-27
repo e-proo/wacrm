@@ -77,6 +77,9 @@ jobs:
       - name: Verify Agent Task platform behavior
         run: supabase db query --local --file supabase/ci/agent-task-platform-smoke.sql
 
+      - name: Verify Agent Task orchestrator behavior
+        run: supabase db query --local --file supabase/ci/agent-task-orchestrator-smoke.sql
+
       - name: Verify Intents controlled cutover safety
         run: supabase db query --local --file supabase/ci/intents-cutover-smoke.sql
 
