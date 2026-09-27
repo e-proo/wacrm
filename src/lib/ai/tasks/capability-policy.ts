@@ -4,6 +4,7 @@ import type {
   AgentTaskAllowedTool,
   AgentTaskTypeManifest,
 } from './contracts'
+import type { AgentTaskTypeRegistry } from './registry'
 
 export const PLATFORM_AGENT_CAPABILITIES = [
   'agent_tasks.read',
@@ -41,6 +42,8 @@ export type AgentTaskExecutionAuthorization =
         | 'TASK_TYPE_NOT_REGISTERED'
         | 'AGENT_CAPABILITY_MISSING'
         | 'TASK_TOOL_POLICY_INVALID'
+        | 'TASK_CHANNEL_DENIED'
+        | 'TASK_NOT_RUNNING'
       message: string
       missingCapabilities?: readonly string[]
     }
@@ -225,4 +228,139 @@ export async function loadAgentRevisionToolGrants(
       })
     }),
   )
+}
+
+
+export type StoredAgentTaskAuthorization =
+  | {
+      ok: true
+      task: {
+        id: string
+        accountId: string
+        agentId: string
+        agentRevisionId: string
+        taskType: string
+        taskTypeVersion: number
+        channel: 'whatsapp'
+      }
+      manifest: AgentTaskTypeManifest
+      capabilities: readonly string[]
+      allowedTools: readonly AgentTaskAllowedTool[]
+    }
+  | {
+      ok: false
+      code:
+        | 'TASK_NOT_FOUND'
+        | 'TASK_TYPE_NOT_REGISTERED'
+        | 'TASK_CHANNEL_DENIED'
+        | 'TASK_NOT_RUNNING'
+        | 'AGENT_CAPABILITY_MISSING'
+        | 'TASK_TOOL_POLICY_INVALID'
+      message: string
+      missingCapabilities?: readonly string[]
+    }
+
+/**
+ * Re-check a durable task against its frozen Agent Revision immediately before
+ * deterministic target/model work. This is intentionally server-side and
+ * registry-driven so manually inserted rows cannot bypass the task contract.
+ */
+export async function authorizeStoredAgentTask(
+  db: SupabaseClient,
+  input: {
+    taskId: string
+    taskTypes: AgentTaskTypeRegistry
+  },
+): Promise<StoredAgentTaskAuthorization> {
+  const { data, error } = await db
+    .from('ai_agent_tasks')
+    .select(
+      'id, account_id, agent_id, agent_revision_id, task_type, task_type_version, channel, status',
+    )
+    .eq('id', input.taskId)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) {
+    return {
+      ok: false,
+      code: 'TASK_NOT_FOUND',
+      message: 'Agent Task not found.',
+    }
+  }
+
+  const row = data as {
+    id: string
+    account_id: string
+    agent_id: string
+    agent_revision_id: string
+    task_type: string
+    task_type_version: number
+    channel: 'whatsapp'
+    status: string
+  }
+
+  if (row.status !== 'running') {
+    return {
+      ok: false,
+      code: 'TASK_NOT_RUNNING',
+      message: `Agent Task is not running (status=${row.status}).`,
+    }
+  }
+
+  const manifest = input.taskTypes.get(
+    row.task_type,
+    row.task_type_version,
+  )
+  if (!manifest) {
+    return {
+      ok: false,
+      code: 'TASK_TYPE_NOT_REGISTERED',
+      message:
+        `Task Type ${row.task_type}@${row.task_type_version} is not registered.`,
+    }
+  }
+
+  if (!manifest.allowedChannels.includes(row.channel)) {
+    return {
+      ok: false,
+      code: 'TASK_CHANNEL_DENIED',
+      message:
+        `Task Type ${manifest.key}@${manifest.version} does not allow channel ${row.channel}.`,
+    }
+  }
+
+  const [revisionCapabilities, revisionToolGrants] = await Promise.all([
+    loadAgentRevisionCapabilities(db, {
+      accountId: row.account_id,
+      revisionId: row.agent_revision_id,
+    }),
+    loadAgentRevisionToolGrants(db, {
+      accountId: row.account_id,
+      revisionId: row.agent_revision_id,
+    }),
+  ])
+
+  const authorization = authorizeAgentRevisionForTask({
+    manifest,
+    revisionCapabilities,
+    revisionToolGrants,
+  })
+  if (!authorization.ok) return authorization
+
+  return {
+    ok: true,
+    task: {
+      id: row.id,
+      accountId: row.account_id,
+      agentId: row.agent_id,
+      agentRevisionId: row.agent_revision_id,
+      taskType: row.task_type,
+      taskTypeVersion: row.task_type_version,
+      channel: row.channel,
+    },
+    manifest,
+    capabilities: authorization.capabilities,
+    allowedTools: authorization.allowedTools,
+  }
 }
