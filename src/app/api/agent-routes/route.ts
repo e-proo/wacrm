@@ -12,7 +12,7 @@
 // ============================================================
 
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -22,7 +22,7 @@ import type { AiAgentRoute, RouteConditions } from '@/lib/ai/runtime/multi-agent
 
 export async function GET() {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.read')
 
     const limit = checkRateLimit(
       `admin:agentRoutesList:${ctx.userId}`,
@@ -66,7 +66,7 @@ const VALID_KINDS = new Set(['rule', 'default', 'admin'])
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.manage_routes')
 
     const limit = checkRateLimit(
       `admin:agentRouteCreate:${ctx.userId}`,
