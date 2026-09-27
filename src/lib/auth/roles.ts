@@ -144,7 +144,9 @@ export function hasAgentManagementCapability(
   role: AccountRole,
   capability: AgentManagementCapability,
 ): boolean {
-  if (capability === "agents.read") return hasMinRole(role, "viewer");
   if (OWNER_ONLY_AGENT_CAPABILITIES.has(capability)) return role === "owner";
+  // Preserve the pre-capability API boundary: agent administration, including
+  // configuration reads, was admin+. Explicit per-member grants can safely
+  // relax this later without broadening access by accident today.
   return hasMinRole(role, "admin");
 }
