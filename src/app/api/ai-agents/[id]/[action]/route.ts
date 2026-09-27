@@ -21,6 +21,7 @@ import {
 import {
   archiveAgent,
   pauseAgent,
+  PauseError,
   PublishError,
   resumeAgent,
 } from '@/lib/ai/runtime/agents-service'
@@ -60,7 +61,7 @@ export async function POST(
         return NextResponse.json({ agent })
       }
     } catch (innerErr) {
-      if (innerErr instanceof PublishError) {
+      if (innerErr instanceof PublishError || innerErr instanceof PauseError) {
         return NextResponse.json(
           { error: innerErr.message, code: innerErr.code },
           { status: innerErr.status },
