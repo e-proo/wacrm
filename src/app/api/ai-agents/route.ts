@@ -14,7 +14,12 @@
 
 import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import {
+  assertAgentCapability,
+  requireAgentCapability,
+  toErrorResponse,
+} from '@/lib/auth/account'
+import { hasAgentManagementCapability } from '@/lib/auth/roles'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -29,7 +34,7 @@ import {
 
 export async function GET() {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.read')
 
     const limit = checkRateLimit(
       `admin:aiAgentsList:${ctx.userId}`,
@@ -106,7 +111,11 @@ interface CreateRevisionBody {
 // ------------------------------------------------------------
 async function createAgentFromTemplate(
   db: SupabaseClient,
-  ctx: { accountId: string; userId: string },
+  ctx: {
+    accountId: string
+    userId: string
+    canGrantProposalTools: boolean
+  },
   body: CreateRevisionBody,
 ): Promise<NextResponse> {
   if (!body.templateId || !body.name) {
@@ -267,7 +276,11 @@ async function createAgentFromTemplate(
     .map((key) => getCurrentPlatformTool(key))
     .filter(
       (tool): tool is NonNullable<typeof tool> =>
-        tool !== null && tool.modelExposed && !tool.serverOnly,
+        tool !== null &&
+        tool.modelExposed &&
+        !tool.serverOnly &&
+        tool.permission !== 'execute' &&
+        (tool.permission !== 'propose' || ctx.canGrantProposalTools),
     )
   if (grants.length > 0) {
     await db.from('ai_agent_tool_grants').insert(
@@ -296,7 +309,7 @@ async function createAgentFromTemplate(
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireAgentCapability('agents.create')
 
     const limit = checkRateLimit(
       `admin:aiAgentRevise:${ctx.userId}`,
@@ -315,10 +328,21 @@ export async function POST(request: Request) {
     if (body.templateId) {
       return await createAgentFromTemplate(
         ctx.supabase,
-        { accountId: ctx.accountId, userId: ctx.userId },
+        {
+          accountId: ctx.accountId,
+          userId: ctx.userId,
+          canGrantProposalTools: hasAgentManagementCapability(
+            ctx.role,
+            'agents.grant_proposal_tools',
+          ),
+        },
         body,
       )
     }
+
+    // The legacy existing-agent path auto-publishes the new revision, so it
+    // must not bypass the explicit publish capability.
+    assertAgentCapability(ctx, 'agents.publish')
 
     if (!body.agentId) {
       return NextResponse.json(
