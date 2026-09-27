@@ -2,17 +2,16 @@
 import { supabaseAdmin } from '../admin-client'
 import { loadConversationAiState, loadRoutingSnapshotAdmin } from './repositories'
 import { routeInboundMessage } from './router'
-import { runAgentLoop } from './agent-loop'
 import { engineSendText } from '@/lib/automations/meta-send'
 import { deliverActiveBusinessEventNotifications } from '@/lib/services/platform/business-event-delivery'
-import type { ChatMessage } from '../types'
-import type { ToolContext, ToolResult } from '../tools/executors'
-import { recordToolAttempt } from './tool-attempt-audit'
-import { executeCurrentPlatformTool } from '../tools/platform/current-executor-registry'
-import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import { loadAccountRuntimePolicy } from './runtime-policy'
-import { authorizeToolInvocation } from './tool-policy'
 import { canonicalizeE164 } from './phone-e164'
+import {
+  claimAgentExecution,
+  loadAgentExecutionRevision,
+  runClaimedAgentExecution,
+  type AgentExecutionContext,
+} from './execution'
 import {
   applyAgentHumanHandoff,
   localizedAdminFallback,
@@ -24,7 +23,6 @@ import type {
   RoutingDecision,
   RoutingSnapshot,
   TrustedAdminIdentity,
-  ToolGrantPermission,
   Uuid,
 } from './multi-agent-types'
 
@@ -267,7 +265,7 @@ export async function resumeQueuedAgentRun(
   const { data: run, error: runError } = await db
     .from('ai_agent_runs')
     .select(
-      'id, account_id, conversation_id, inbound_message_id, ai_agent_id, agent_revision_id, provider_connection_id, route_id, route_reason, plane, status',
+      'id, account_id, conversation_id, inbound_message_id, ai_agent_id, agent_revision_id, provider_connection_id, route_id, route_reason, plane, status, run_mode',
     )
     .eq('id', runId)
     .maybeSingle()
@@ -275,6 +273,7 @@ export async function resumeQueuedAgentRun(
   if (!run) return 'lost'
   if (run.status === 'succeeded') return 'succeeded'
   if (run.status !== 'queued' && run.status !== 'claimed') return 'lost'
+  if (run.run_mode !== 'inbound' || !run.inbound_message_id) return 'lost'
 
   const [conversationRes, configRes, snapshot] = await Promise.all([
     db
@@ -340,133 +339,40 @@ async function executeAgentRun(
   workerId: string,
 ): Promise<'succeeded' | 'handoff' | 'failed' | 'lost'> {
   const db = supabaseAdmin()
-  const claimed = await db.rpc('claim_agent_run', {
-    p_run_id: runId,
-    p_claimed_by: workerId,
-    // Lease must comfortably exceed AI_REQUEST_TIMEOUT_MS (default
-    // 30s; reasoning models are configured to 120s) — a lease that
-    // expires mid-run lets the recovery worker reclaim the run and
-    // duplicate an in-flight provider call.
-    p_lease_secs: 300,
-  })
-  if (claimed.error) {
-    console.error('[ai dispatch] claim_agent_run failed:', claimed.error)
-    return 'lost'
-  }
-  if (claimed.data !== 'claimed') {
+
+  const claim = await claimAgentExecution({ runId, workerId, leaseSeconds: 300 })
+  if (claim !== 'claimed') {
     console.info('[ai dispatch] claim lost (another worker?) run=' + runId.slice(0, 8))
     return 'lost'
   }
   console.info('[ai dispatch] claimed run=' + runId.slice(0, 8))
 
-  // Load the frozen revision snapshot for this run. No join: the
-  // purpose comes from the routing snapshot via the caller (the two
-  // tables share TWO FKs, so an embedded ai_agents(...) is ambiguous
-  // to PostgREST — PGRST201).
-  const { data: revision, error: revErr } = await db
-    .from('ai_agent_revisions')
-    .select(
-      'id, agent_id, status, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id',
-    )
-    .eq('id', decision.revisionId)
-    .maybeSingle()
-  if (revErr || !revision) {
-    console.error('[ai dispatch] revision load failed:', revErr)
-    await markRun(db, args.accountId, runId, 'failed', 'REVISION_NOT_FOUND')
-    return 'failed'
-  }
-  // Map the snake_case row onto the camelCase revision type
-  // EXPLICITLY. A blind `as AiAgentRevision` cast silently yields
-  // undefined for maxToolRounds => the tool loop executed ZERO
-  // rounds => 'failed' with no error (this exact bug).
-  const rawRev = revision as {
-    id: string
-    agent_id: string
-    status: string
-    model: string
-    system_prompt: string | null
-    response_style: string
-    language_policy: string
-    temperature: number | null
-    max_output_tokens: number | null
-    max_tool_rounds: number
-    max_ai_replies_per_conversation: number
-    handoff_human_member_id: string | null
-  }
-  const rev: AiAgentRevision = {
-    id: rawRev.id,
+  const revisionResult = await loadAgentExecutionRevision({
     accountId: args.accountId,
-    agentId: rawRev.agent_id ?? decision.agentId,
-    revisionNumber: 0,
-    status: (rawRev.status as AiAgentRevision['status']) ?? 'published',
+    agentId: decision.agentId,
+    revisionId: decision.revisionId,
     providerConnectionId: decision.providerConnectionId,
-    model: rawRev.model,
-    systemPrompt: rawRev.system_prompt,
-    responseStyle: (rawRev.response_style as AiAgentRevision['responseStyle']) ?? 'balanced',
-    languagePolicy: rawRev.language_policy ?? 'auto',
-    temperature: rawRev.temperature ?? null,
-    maxOutputTokens: rawRev.max_output_tokens ?? null,
-    maxToolRounds: rawRev.max_tool_rounds ?? 0,
-    maxAiRepliesPerConversation: rawRev.max_ai_replies_per_conversation ?? 3,
-    handoffHumanMemberId: rawRev.handoff_human_member_id ?? null,
-    settings: {},
-    createdAt: '',
-    publishedAt: null,
-    publishedBy: null,
-    rejectionReason: null,
-  }
-  console.info(
-    `[ai dispatch] revision=${rev.id.slice(0, 8)} model=${rev.model} rounds=${rev.maxToolRounds} prompt=${rev.systemPrompt ? rev.systemPrompt.length + 'ch' : 'empty'}`,
-  )
-
-  // Conversation history for grounding. NOTE the real column
-  // names: sender_type ('customer'|'agent'|'bot') and content_text
-  // — NOT role/content. bot+agent senders map to 'assistant'.
-  const { data: convMsgs, error: msgErr } = await db
-    .from('messages')
-    .select('sender_type, content_text, created_at')
-    .eq('conversation_id', args.conversationId)
-    .order('created_at', { ascending: true })
-  if (msgErr) {
-    console.error('[ai dispatch] messages load failed:', msgErr)
-    await markRun(db, args.accountId, runId, 'failed', 'MESSAGES_LOAD_FAILED')
+  })
+  if (!revisionResult.ok) {
+    await markRun(db, args.accountId, runId, 'failed', revisionResult.error)
     return 'failed'
   }
-  const history: ChatMessage[] = (convMsgs ?? [])
-    .slice(-20)
-    .map((m) => {
-      const r = m as { sender_type: string; content_text: string | null }
-      return {
-        role: (r.sender_type === 'customer' ? 'user' : 'assistant') as ChatMessage['role'],
-        content: String(r.content_text ?? ''),
-      }
-    })
-    .filter((m) => m.content.trim().length > 0)
-  const agentPurpose =
-    snapshot.agents.find(
-      (entry: { agent: { id: string; purpose: string } }) =>
-        entry.agent.id === decision.agentId,
-    )?.agent.purpose ?? 'custom'
-  console.info(
-    `[ai dispatch] history=${history.length} msgs, purpose=${agentPurpose}`,
-  )
+  const revision = revisionResult.revision
 
-  // The send needs an audit identity — fail BEFORE claiming a
-  // reply slot or marking succeeded.
+  // Sending is inbound-entrypoint policy, not part of the generic execution
+  // runtime. Fail before generation if this channel cannot audit a send.
   if (!args.configOwnerUserId) {
     console.error('[ai dispatch] no configOwnerUserId — cannot send')
     await markRun(db, args.accountId, runId, 'failed', 'NO_CONFIG_OWNER')
     return 'failed'
   }
 
-  // Customer conversations share the same atomic reply cap as the legacy
-  // auto-reply path. Trusted-admin traffic is a separate operational plane:
-  // identity/capability/budget gates apply, but customer reply history cannot
-  // silence an administrator.
+  // Preserve the existing customer reply-cap semantics. Outbound tasks receive
+  // their own target/task limits in the Task Orchestrator, not here.
   if (decision.plane === 'customer') {
     const { data: slot, error: slotErr } = await db.rpc('claim_ai_reply_slot', {
       conversation_id: args.conversationId,
-      max_replies: rev.maxAiRepliesPerConversation ?? 3,
+      max_replies: revision.maxAiRepliesPerConversation ?? 3,
     })
     if (slotErr) {
       console.error('[ai dispatch] claim_ai_reply_slot failed:', slotErr)
@@ -482,47 +388,45 @@ async function executeAgentRun(
     console.info('[ai dispatch] admin plane bypasses customer reply cap run=' + runId.slice(0, 8))
   }
 
-  const loop = await runAgentLoop({
+  const trustedAdmin =
+    decision.plane === 'admin'
+      ? snapshot.trustedIdentities.find(
+          (identity) =>
+            identity.status === 'active' &&
+            identity.normalizedAddress === canonicalizeE164(args.senderAddress),
+        ) ?? null
+      : null
+
+  const context: AgentExecutionContext = {
     accountId: args.accountId,
     runId,
+    mode: 'inbound',
     agentId: decision.agentId,
-    agentPurpose: agentPurpose as 'customer_support' | 'admin_operations' | 'custom',
-    revision: rev,
-    messages: history,
-    contactId: args.contactId,
+    revisionId: decision.revisionId,
     conversationId: args.conversationId,
-    sourceMessageId: args.inboundMessageId,
+    contactId: args.contactId,
+    taskId: null,
+    taskTargetId: null,
     plane: decision.plane,
+    counterpartyRole: decision.plane === 'admin' ? 'administrator' : 'customer',
     channel: 'whatsapp',
-    trustedAdminIdentityId:
-      decision.plane === 'admin'
-        ? snapshot.trustedIdentities.find(
-            (identity) =>
-              identity.status === 'active' &&
-              identity.normalizedAddress === canonicalizeE164(args.senderAddress),
-          )?.id ?? null
-        : null,
-    trustedAdminCapabilities:
-      decision.plane === 'admin'
-        ? snapshot.trustedIdentities.find(
-            (identity) =>
-              identity.status === 'active' &&
-              identity.normalizedAddress === canonicalizeE164(args.senderAddress),
-          )?.allowedCapabilities ?? []
-        : [],
+    sourceMessageId: args.inboundMessageId,
+  }
+
+  const execution = await runClaimedAgentExecution({
+    context,
+    revision,
+    trustedAdminIdentityId: trustedAdmin?.id ?? null,
+    trustedAdminCapabilities: trustedAdmin?.allowedCapabilities ?? [],
   })
-  console.info(
-    `[ai dispatch] loop=${loop.status} tools=${loop.toolCalls.length} text=${loop.text ? loop.text.length + 'ch' : 'null'}`,
-  )
 
   // Proposal tools may commit customer-facing business events transactionally
   // before the model produces its final reply. Flush only events correlated to
-  // this run so customer lifecycle messages are delivered promptly without
-  // draining unrelated account work or introducing domain-specific branches.
+  // this run so the durable business event remains the authoritative response.
   let correlatedBusinessEventMessageId: string | null = null
   if (
     decision.plane === 'customer' &&
-    loop.toolCalls.some((call) => call.ok)
+    execution.toolCalls.some((call) => call.ok)
   ) {
     try {
       const delivery = await deliverActiveBusinessEventNotifications({
@@ -540,17 +444,13 @@ async function executeAgentRun(
         correlatedBusinessEventMessageId = delivery.lastLocalMessageId
       }
     } catch (deliveryError) {
-      // Business state and its durable event are already committed. A
-      // best-effort synchronous flush must never roll back or fail the AI run;
-      // the background worker remains the durable recovery path.
       console.error('[ai dispatch] correlated business event delivery failed:', deliveryError)
     }
   }
 
-  const latestInbound =
-    [...history].reverse().find((message) => message.role === 'user')?.content ?? ''
+  const latestInbound = execution.latestUserMessage
 
-  if (loop.status === 'handoff' && decision.plane === 'customer') {
+  if (execution.status === 'needs_human' && decision.plane === 'customer') {
     const summary = `AI handoff after customer message: ${latestInbound}`
     try {
       const handoff = await applyAgentHumanHandoff({
@@ -559,7 +459,7 @@ async function executeAgentRun(
         runId,
         conversationId: args.conversationId,
         contactId: args.contactId,
-        targetUserId: rev.handoffHumanMemberId,
+        targetUserId: revision.handoffHumanMemberId,
         summary,
       })
       console.info(
@@ -592,18 +492,21 @@ async function executeAgentRun(
   // A trusted administrator is already the human authority. Model-level
   // customer handoff semantics must never turn an admin message into silence.
   const effectiveText =
-    loop.status === 'handoff' && decision.plane === 'admin'
-      ? loop.text || localizedAdminFallback(latestInbound)
-      : loop.text
+    execution.status === 'needs_human' && decision.plane === 'admin'
+      ? execution.customerMessage || localizedAdminFallback(latestInbound)
+      : execution.customerMessage
 
-  if (loop.status === 'failed' || !effectiveText) {
-    await markRun(db, args.accountId, runId, 'failed', loop.error ?? 'EMPTY_REPLY')
+  if (execution.status === 'failed' || !effectiveText) {
+    await markRun(
+      db,
+      args.accountId,
+      runId,
+      'failed',
+      execution.error ?? 'EMPTY_REPLY',
+    )
     return 'failed'
   }
 
-  // If a durable customer-facing business event was already sent for this
-  // exact run, it is the authoritative acknowledgement. Do not follow it with
-  // a second model-written message that repeats the same lifecycle outcome.
   if (correlatedBusinessEventMessageId) {
     const { data: completed, error: completeErr } = await db
       .from('ai_agent_runs')
@@ -611,8 +514,8 @@ async function executeAgentRun(
         status: 'succeeded',
         completed_at: new Date().toISOString(),
         outbound_message_id: correlatedBusinessEventMessageId,
-        input_tokens: loop.inputTokens,
-        output_tokens: loop.outputTokens,
+        input_tokens: execution.usage.inputTokens,
+        output_tokens: execution.usage.outputTokens,
         error_code: null,
       })
       .eq('id', runId)
@@ -629,9 +532,6 @@ async function executeAgentRun(
     return 'succeeded'
   }
 
-  // LIVE SEND via the shared engine channel (service-role scoped,
-  // account-verified contact + WhatsApp config). The send helper reserves a
-  // unique local messages row keyed by this run BEFORE talking to Meta.
   console.info('[ai dispatch] sending reply via WhatsApp...')
   let sent: Awaited<ReturnType<typeof engineSendText>>
   try {
@@ -649,16 +549,14 @@ async function executeAgentRun(
     return 'failed'
   }
 
-  // Only Meta success + durable local message persistence can make the run
-  // succeeded. outbound_message_id stores messages.id (UUID), never wamid.
   const { data: completed, error: completeErr } = await db
     .from('ai_agent_runs')
     .update({
       status: 'succeeded',
       completed_at: new Date().toISOString(),
       outbound_message_id: sent.local_message_id,
-      input_tokens: loop.inputTokens,
-      output_tokens: loop.outputTokens,
+      input_tokens: execution.usage.inputTokens,
+      output_tokens: execution.usage.outputTokens,
       error_code: null,
     })
     .eq('id', runId)
@@ -673,6 +571,7 @@ async function executeAgentRun(
 
   return 'succeeded'
 }
+
 
 async function markRun(
   db: ReturnType<typeof supabaseAdmin>,
@@ -715,270 +614,8 @@ async function markRun(
 // whether it can echo the message verbatim to the customer.
 // ------------------------------------------------------------
 
-export interface ToolInvocation {
-  toolKey: string
-  /** Permission the model claims it needs. Must be 'read' for
-   *  every tool Phase 3 ships. */
-  permission: ToolGrantPermission
-  args: Record<string, unknown>
-  /** Round number in the agent's loop, starting at 1. */
-  round: number
-}
-
-export interface ToolExecutionOutcome {
-  toolKey: string
-  round: number
-  result: ToolResult
-  toolFound: boolean
-  granted: boolean
-  roundsExhausted: boolean
-}
-
-export async function executeTool(
-  ctx: ToolContext & { revision: AiAgentRevision | null },
-  invocation: ToolInvocation,
-): Promise<ToolExecutionOutcome> {
-  const baseOutcome = {
-    toolKey: invocation.toolKey,
-    round: invocation.round,
-  }
-
-  const audit = async (input: {
-    status: 'accepted' | 'denied' | 'succeeded' | 'failed'
-    errorCode?: string
-    toolVersion?: number
-    durationMs?: number
-  }) => recordToolAttempt({
-    accountId: ctx.accountId,
-    runId: ctx.runId,
-    agentId: ctx.agentId ?? null,
-    revisionId: ctx.revisionId ?? ctx.revision?.id ?? null,
-    toolKey: invocation.toolKey,
-    toolVersion: input.toolVersion ?? 1,
-    round: invocation.round,
-    permission: invocation.permission,
-    status: input.status,
-    errorCode: input.errorCode,
-    args: invocation.args,
-    durationMs: input.durationMs,
-  })
-
-  // Tool-round cap is enforced from the revision (maxToolRounds).
-  const maxRounds = ctx.revision?.maxToolRounds ?? 0
-  if (maxRounds === 0) {
-    await audit({ status: 'denied', errorCode: 'TOOL_ROUNDS_DISABLED' })
-    return {
-      ...baseOutcome,
-      result: {
-        ok: false,
-        data: null,
-        safe_to_show: true,
-        code: 'TOOL_ROUNDS_DISABLED',
-        message:
-          'This agent does not have tool rounds enabled. Reschedule or ask a human.',
-      },
-      toolFound: false,
-      granted: false,
-      roundsExhausted: true,
-    }
-  }
-  if (invocation.round > maxRounds) {
-    await audit({ status: 'denied', errorCode: 'TOOL_ROUNDS_EXHAUSTED' })
-    return {
-      ...baseOutcome,
-      result: {
-        ok: false,
-        data: null,
-        safe_to_show: true,
-        code: 'TOOL_ROUNDS_EXHAUSTED',
-        message: 'Tool rounds exhausted.',
-      },
-      toolFound: false,
-      granted: false,
-      roundsExhausted: true,
-    }
-  }
-
-  const latestTool = getCurrentPlatformTool(invocation.toolKey)
-  if (!latestTool) {
-    await audit({ status: 'denied', errorCode: 'UNKNOWN_TOOL' })
-    return {
-      ...baseOutcome,
-      result: {
-        ok: false,
-        data: null,
-        safe_to_show: true,
-        code: 'UNKNOWN_TOOL',
-        message: `Tool "${invocation.toolKey}" is not registered.`,
-      },
-      toolFound: false,
-      granted: false,
-      roundsExhausted: false,
-    }
-  }
-
-  // DENY BY DEFAULT — the RUNNING REVISION must carry a grant for
-  // this exact tool and exact frozen version. A newer registered version must
-  // not invalidate a still-registered historical grant.
-  const grantedLvl = ctx.grants?.[invocation.toolKey]
-  if (!grantedLvl) {
-    await audit({
-      status: 'denied',
-      errorCode: 'TOOL_NOT_GRANTED',
-      toolVersion: latestTool.version,
-    })
-    return {
-      ...baseOutcome,
-      result: {
-        ok: false,
-        data: null,
-        safe_to_show: true,
-        code: 'TOOL_NOT_GRANTED',
-        message: `Tool "${invocation.toolKey}" is not part of this assistant's capabilities.`,
-      },
-      toolFound: true,
-      granted: false,
-      roundsExhausted: false,
-    }
-  }
-
-  const grantedVersion = ctx.grantVersions?.[invocation.toolKey]
-  const tool =
-    grantedVersion == null
-      ? null
-      : getCurrentPlatformTool(invocation.toolKey, grantedVersion)
-  if (!tool) {
-    await audit({
-      status: 'denied',
-      errorCode: 'TOOL_VERSION_MISMATCH',
-      toolVersion: grantedVersion ?? latestTool.version,
-    })
-    return {
-      ...baseOutcome,
-      result: {
-        ok: false,
-        data: null,
-        safe_to_show: true,
-        code: 'TOOL_VERSION_MISMATCH',
-        message: `Tool "${invocation.toolKey}" grant is stale.`,
-      },
-      toolFound: true,
-      granted: false,
-      roundsExhausted: false,
-    }
-  }
-
-  const RANK: Record<ToolGrantPermission, number> = {
-    read: 1,
-    propose: 2,
-    execute: 3,
-  }
-  if (RANK[invocation.permission] > RANK[grantedLvl]) {
-    await audit({
-      status: 'denied',
-      errorCode: 'TOOL_GRANT_LEVEL_DENIED',
-      toolVersion: tool.version,
-    })
-    return {
-      ...baseOutcome,
-      result: {
-        ok: false,
-        data: null,
-        safe_to_show: true,
-        code: 'TOOL_GRANT_LEVEL_DENIED',
-        message: `Tool "${invocation.toolKey}" is granted at level "${grantedLvl}", not "${invocation.permission}".`,
-      },
-      toolFound: true,
-      granted: false,
-      roundsExhausted: false,
-    }
-  }
-
-  if (tool.permission !== invocation.permission) {
-    await audit({
-      status: 'denied',
-      errorCode: 'TOOL_PERMISSION_DENIED',
-      toolVersion: latestTool.version,
-    })
-    return {
-      ...baseOutcome,
-      result: {
-        ok: false,
-        data: null,
-        safe_to_show: true,
-        code: 'TOOL_PERMISSION_DENIED',
-        message: `Tool "${invocation.toolKey}" cannot be used with permission "${invocation.permission}".`,
-      },
-      toolFound: true,
-      granted: false,
-      roundsExhausted: false,
-    }
-  }
-
-  const policy = authorizeToolInvocation({
-    tool,
-    permission: invocation.permission,
-    args: invocation.args,
-    constraints: ctx.grantConstraints?.[invocation.toolKey] ?? {},
-    context: {
-      plane: ctx.plane,
-      channel: ctx.channel,
-      simulation: ctx.simulation,
-      agentPurpose: ctx.agentPurpose,
-      trustedAdminIdentityId: ctx.trustedAdminIdentityId,
-      trustedAdminCapabilities: ctx.trustedAdminCapabilities,
-      features: ctx.features,
-    },
-  })
-  if (!policy.ok) {
-    await audit({ status: 'denied', errorCode: policy.code, toolVersion: tool.version })
-    return {
-      ...baseOutcome,
-      result: {
-        ok: false,
-        data: null,
-        safe_to_show: true,
-        code: policy.code,
-        message: policy.message,
-      },
-      toolFound: true,
-      granted: false,
-      roundsExhausted: false,
-    }
-  }
-
-  const startedAt = Date.now()
-  let result: ToolResult
-  try {
-    result = await executeCurrentPlatformTool(ctx, tool, invocation.args)
-  } catch (err) {
-    console.error(
-      `[ai dispatch] tool ${invocation.toolKey} crashed:`,
-      err,
-    )
-    result = {
-      ok: false,
-      data: null,
-      safe_to_show: false,
-      code: 'TOOL_INTERNAL_ERROR',
-      message: 'Tool execution failed unexpectedly.',
-    }
-  }
-
-  await audit({
-    status: result.ok ? 'succeeded' : 'failed',
-    errorCode: result.ok ? undefined : result.code,
-    toolVersion: tool.version,
-    durationMs: Date.now() - startedAt,
-  })
-  return {
-    ...baseOutcome,
-    result,
-    toolFound: true,
-    granted: true,
-    roundsExhausted: false,
-  }
-}
+export { executeTool } from './tool-execution'
+export type { ToolInvocation, ToolExecutionOutcome } from './tool-execution'
 
 // ------------------------------------------------------------
 // Re-exports
