@@ -89,6 +89,9 @@ jobs:
       - name: Verify Agent Task reply correlation
         run: supabase db query --local --file supabase/ci/agent-task-reply-correlation-smoke.sql
 
+      - name: Verify Agent Outbound capabilities
+        run: supabase db query --local --file supabase/ci/agent-outbound-capabilities-smoke.sql
+
       - name: Verify Intents controlled cutover safety
         run: supabase db query --local --file supabase/ci/intents-cutover-smoke.sql
 
