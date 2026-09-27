@@ -420,9 +420,9 @@ begin
   where account_id=v_account;
 
   delete from public.ai_agent_task_outbound_messages where account_id=v_account;
+  delete from public.ai_agent_task_events where account_id=v_account;
   delete from public.ai_agent_run_events where account_id=v_account;
   delete from public.ai_agent_runs where account_id=v_account;
-  delete from public.ai_agent_task_events where account_id=v_account;
   delete from public.ai_agent_task_targets where account_id=v_account;
   delete from public.ai_agent_tasks where account_id=v_account;
   delete from public.ai_outreach_contact_controls where account_id=v_account;
