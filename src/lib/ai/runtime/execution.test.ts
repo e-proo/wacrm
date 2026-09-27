@@ -97,6 +97,8 @@ describe('Agent Execution Runtime', () => {
     const files = execution + '\n' + dispatch
 
     expect(execution).toContain("import { runAgentLoop")
+    expect(execution).toContain('authorizeStoredAgentTask')
+    expect(execution).toContain('taskAllowedTools')
     expect(execution).not.toContain('engineSendText')
     expect(dispatch).toContain('runClaimedAgentExecution')
     expect(dispatch).not.toContain("import { runAgentLoop")
