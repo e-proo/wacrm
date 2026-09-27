@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AgentTaskTypeManifest } from './contracts'
 import {
   authorizeAgentRevisionForTask,
   BASE_OUTBOUND_AGENT_CAPABILITIES,
+  inheritAgentRevisionCapabilities,
   PLATFORM_AGENT_CAPABILITIES,
   validateTaskManifestToolPolicy,
 } from './capability-policy'
@@ -182,5 +183,92 @@ describe('Agent Task capability policy', () => {
       ),
     )
     expect(rawSend).toEqual([])
+  })
+})
+
+
+describe('Agent Revision capability inheritance', () => {
+  it('copies the exact published capability set into a new draft through the atomic RPC', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: 3, error: null })
+    const db = {
+      from(table: string) {
+        expect(table).toBe('ai_agent_revision_capabilities')
+        return {
+          select() {
+            return this
+          },
+          eq() {
+            return this
+          },
+          order() {
+            return Promise.resolve({
+              data: [
+                { capability: 'agent_tasks.read' },
+                { capability: 'contacts.target_read' },
+                { capability: 'outreach.start' },
+              ],
+              error: null,
+            })
+          },
+        }
+      },
+      rpc,
+    }
+
+    await expect(
+      inheritAgentRevisionCapabilities(db as never, {
+        accountId: 'acc-1',
+        agentId: 'agent-1',
+        sourceRevisionId: 'rev-published',
+        targetRevisionId: 'rev-draft',
+        actorUserId: 'user-1',
+      }),
+    ).resolves.toBe(3)
+
+    expect(rpc).toHaveBeenCalledWith(
+      'replace_ai_agent_revision_capabilities',
+      {
+        p_account_id: 'acc-1',
+        p_agent_id: 'agent-1',
+        p_revision_id: 'rev-draft',
+        p_capabilities: [
+          'agent_tasks.read',
+          'contacts.target_read',
+          'outreach.start',
+        ],
+        p_granted_by: 'user-1',
+      },
+    )
+  })
+
+  it('does not invoke the replacement RPC when the source has no capabilities', async () => {
+    const rpc = vi.fn()
+    const db = {
+      from() {
+        return {
+          select() {
+            return this
+          },
+          eq() {
+            return this
+          },
+          order() {
+            return Promise.resolve({ data: [], error: null })
+          },
+        }
+      },
+      rpc,
+    }
+
+    await expect(
+      inheritAgentRevisionCapabilities(db as never, {
+        accountId: 'acc-1',
+        agentId: 'agent-1',
+        sourceRevisionId: 'rev-published',
+        targetRevisionId: 'rev-draft',
+        actorUserId: 'user-1',
+      }),
+    ).resolves.toBe(0)
+    expect(rpc).not.toHaveBeenCalled()
   })
 })
