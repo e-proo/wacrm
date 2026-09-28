@@ -98,7 +98,8 @@ describe('Coverage sourcing Agent Task', () => {
       reserved_amount: '0',
       fulfilled_amount: '0',
       currency: 'SAR',
-      attributes: requestAttributes(),
+      attributes:
+        requestAttributes() as unknown as Record<string, unknown>,
       status: 'active',
     }
 
@@ -141,17 +142,16 @@ describe('Coverage sourcing Agent Task', () => {
   })
 
   it('prioritizes currently active supplier history before old terminal history', () => {
-    expect(
-      supplierHistorySortKey({
-        status: 'active',
-        created_at: '2026-09-20T00:00:00.000Z',
-      }),
-    ).toBeLessThan(
-      supplierHistorySortKey({
-        status: 'fulfilled',
-        created_at: '2026-09-28T00:00:00.000Z',
-      }),
-    )
+    const activeKey = supplierHistorySortKey({
+      status: 'active',
+      created_at: '2026-09-20T00:00:00.000Z',
+    })
+    const fulfilledKey = supplierHistorySortKey({
+      status: 'fulfilled',
+      created_at: '2026-09-28T00:00:00.000Z',
+    })
+
+    expect(activeKey.localeCompare(fulfilledKey)).toBeLessThan(0)
   })
 
   it('prepares a template-only initial outreach without requester identity or supplier internals', async () => {
