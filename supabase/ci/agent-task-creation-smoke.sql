@@ -20,6 +20,10 @@ begin
   from public.profiles
   where user_id=v_user;
 
+  insert into public.ai_runtime_policies(account_id)
+  values (v_account)
+  on conflict (account_id) do nothing;
+
   insert into public.ai_provider_connections(
     id,account_id,name,preset_id,protocol,api_root,
     encrypted_api_key,connection_fingerprint,status
