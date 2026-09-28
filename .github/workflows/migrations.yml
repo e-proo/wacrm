@@ -95,6 +95,9 @@ jobs:
       - name: Verify Agent Builder V2 persistence
         run: supabase db query --local --file supabase/ci/agent-builder-v2-smoke.sql
 
+      - name: Verify generic Agent Task creation
+        run: supabase db query --local --file supabase/ci/agent-task-creation-smoke.sql
+
       - name: Verify Intents controlled cutover safety
         run: supabase db query --local --file supabase/ci/intents-cutover-smoke.sql
 
