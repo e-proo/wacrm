@@ -2,7 +2,15 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import { analyzeRouteConflicts } from './route-conflicts'
 import { planeForAgentPurpose } from './tool-grant-plane-policy'
-import { validateBuilderPublishPolicy } from '../tasks/builder-policy'
+import {
+  isAgentBuilderV2Configuration,
+  validateBuilderV2Configuration,
+} from '../tasks/builder-v2'
+import {
+  loadAgentRevisionCapabilities,
+  type AgentRevisionToolGrant,
+} from '../tasks/capability-policy'
+import { CURRENT_AGENT_TASK_PLATFORM } from '../tasks/current-platform'
 
 export interface PublishCheck {
   path: string
@@ -23,7 +31,7 @@ export async function validateAgentRevisionForPublish(
 ): Promise<PublishValidationResult> {
   const checks: PublishCheck[] = []
   const { accountId, agentId, revisionId } = input
-  const [agentRes, revisionRes, connectionsRes, grantsRes, routesRes, identitiesRes, budgetsRes] =
+  const [agentRes, revisionRes, connectionsRes, grantsRes, routesRes, identitiesRes, budgetsRes, revisionCapabilities] =
     await Promise.all([
       db.from('ai_agents').select('id, status, purpose, published_revision_id').eq('account_id', accountId).eq('id', agentId).maybeSingle(),
       db.from('ai_agent_revisions').select('id, agent_id, status, provider_connection_id, model, max_tool_rounds, handoff_human_member_id, operational_mode, outreach_policy').eq('account_id', accountId).eq('id', revisionId).maybeSingle(),
@@ -32,6 +40,7 @@ export async function validateAgentRevisionForPublish(
       db.from('ai_agent_routes').select('id, account_id, agent_id, name, channel, route_kind, priority, is_active, conditions, stop_processing, created_at, updated_at').eq('account_id', accountId),
       db.from('trusted_admin_identities').select('id', { head: true, count: 'exact' }).eq('account_id', accountId).eq('status', 'active').limit(1),
       db.from('ai_agent_budget_policies').select('id').eq('account_id', accountId).eq('is_active', true),
+      loadAgentRevisionCapabilities(db, { accountId, revisionId }),
     ])
   if (agentRes.error) throw agentRes.error
   if (revisionRes.error) throw revisionRes.error
@@ -70,17 +79,77 @@ export async function validateAgentRevisionForPublish(
   if (agent?.purpose === 'admin_operations' && revision && revision.max_tool_rounds < 1) checks.push({ path: 'revision.max_tool_rounds', code: 'ADMIN_TOOL_ROUNDS_REQUIRED', message: 'Admin operations agents require at least one tool round so they can read authoritative business data.', severity: 'error' })
   if (agent?.purpose === 'customer_support' && revision && !revision.handoff_human_member_id) checks.push({ path: 'revision.handoff_human_member_id', code: 'HANDOFF_MEMBER_REQUIRED', message: 'Customer support agents require a human handoff teammate.', severity: 'error' })
   if (revision) {
-    const builderPolicyError = validateBuilderPublishPolicy({
+    const rawPolicy = revision.outreach_policy ?? {}
+    const configCandidate = {
       operationalMode: revision.operational_mode ?? 'reactive',
-      outreachPolicy: revision.outreach_policy ?? {},
-    })
-    if (builderPolicyError) {
+      bindings:
+        rawPolicy &&
+        typeof rawPolicy === 'object' &&
+        !Array.isArray(rawPolicy)
+          ? rawPolicy.bindings ?? []
+          : null,
+    }
+
+    if (!isAgentBuilderV2Configuration(configCandidate)) {
       checks.push({
         path: 'revision.outreach_policy',
-        code: 'INVALID_OUTREACH_POLICY',
-        message: builderPolicyError,
+        code: 'INVALID_BUILDER_V2_CONFIGURATION',
+        message: 'Builder V2 configuration has an invalid persisted shape.',
         severity: 'error',
       })
+    } else {
+      const revisionToolGrants: AgentRevisionToolGrant[] = (
+        grantsRes.data ?? []
+      ).map((row) => ({
+        toolKey: row.tool_key as string,
+        toolVersion: row.tool_version as number,
+        permission: row.permission as AgentRevisionToolGrant['permission'],
+      }))
+      const builderValidation = validateBuilderV2Configuration({
+        config: configCandidate,
+        registry: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
+        revisionToolGrants,
+      })
+      for (const issue of builderValidation.issues) {
+        checks.push({
+          path: `revision.outreach_policy.${issue.path}`,
+          code: issue.code,
+          message: issue.message,
+          severity: 'error',
+        })
+      }
+
+      if (configCandidate.operationalMode !== 'reactive') {
+        const actualCapabilities = new Set(revisionCapabilities)
+        const missingCapabilities = builderValidation.capabilities.filter(
+          (capability) => !actualCapabilities.has(capability),
+        )
+        const requiredCapabilities = new Set(builderValidation.capabilities)
+        const staleCapabilities = revisionCapabilities.filter(
+          (capability) => !requiredCapabilities.has(capability),
+        )
+
+        if (missingCapabilities.length > 0) {
+          checks.push({
+            path: 'revision.capabilities',
+            code: 'AGENT_CAPABILITY_MISSING',
+            message:
+              'Builder V2 configuration requires missing capabilities: ' +
+              missingCapabilities.join(', '),
+            severity: 'error',
+          })
+        }
+        if (staleCapabilities.length > 0) {
+          checks.push({
+            path: 'revision.capabilities',
+            code: 'AGENT_CAPABILITY_SET_STALE',
+            message:
+              'Builder V2 capabilities must be resaved after task/tool changes. Stale capabilities: ' +
+              staleCapabilities.join(', '),
+            severity: 'error',
+          })
+        }
+      }
     }
   }
   if (revision?.handoff_human_member_id) {
