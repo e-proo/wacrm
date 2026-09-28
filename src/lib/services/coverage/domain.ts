@@ -15,7 +15,7 @@ export const COVERAGE_DOMAIN = defineBusinessDomain({
   title: 'Coverage',
   description:
     'Coverage marketplace domain: directional reads, customer proposals, admin operational reads, and deterministic approved offer/request creation.',
-  capabilities: ['coverage.read', 'coverage.propose'],
+  capabilities: ['coverage.read', 'coverage.propose', 'coverage.sourcing'],
   tools: COVERAGE_TOOL_MANIFESTS,
   changeActions: [
     {
