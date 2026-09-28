@@ -3,6 +3,7 @@ import { defineAgentTaskType } from './contracts'
 import { AgentTaskTypeRegistry } from './registry'
 import {
   defaultBuilderTaskBinding,
+  isAgentBuilderV2Configuration,
   listBuilderTaskTypes,
   validateBuilderV2Configuration,
 } from './builder-v2'
@@ -45,6 +46,32 @@ function registry() {
 }
 
 describe('Agent Builder V2 task configuration', () => {
+  it('accepts the canonical persisted configuration shape and rejects legacy/malformed payloads', () => {
+    const manifest = registry().get('services.promotion', 1)!
+    const binding = defaultBuilderTaskBinding(manifest)
+
+    expect(
+      isAgentBuilderV2Configuration({
+        operationalMode: 'outbound',
+        bindings: [binding],
+      }),
+    ).toBe(true)
+
+    expect(
+      isAgentBuilderV2Configuration({
+        operationalMode: 'outbound',
+        taskTypes: [{ key: 'services.promotion', version: 1 }],
+      }),
+    ).toBe(false)
+
+    expect(
+      isAgentBuilderV2Configuration({
+        operationalMode: 'outbound',
+        bindings: [{ ...binding, maxTargets: '50' }],
+      }),
+    ).toBe(false)
+  })
+
   it('lists only registered Task Types', () => {
     const types = listBuilderTaskTypes(registry())
     expect(types).toHaveLength(1)
