@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../admin-client'
 import { loadAccountRuntimePolicy } from '../runtime/runtime-policy'
 import {
   CURRENT_AGENT_TASK_PLATFORM,
+  evaluateCurrentTaskCompletion,
   materializeCurrentTaskTargets,
 } from './current-platform'
 import { authorizeStoredAgentTask } from './capability-policy'
@@ -25,6 +26,7 @@ export interface AgentTaskWorkerResult {
   createdRuns: number
   materializedTargets: number
   deferredTasks: number
+  policyFinalizedTasks: number
   skippedByPolicy: number
   failed: number
 }
@@ -111,6 +113,7 @@ export async function processAgentTaskQueue(input: {
   let createdRuns = 0
   let materializedTargets = 0
   let deferredTasks = 0
+  let policyFinalizedTasks = 0
   let skippedByPolicy = 0
   let failed = 0
 
@@ -232,8 +235,30 @@ export async function processAgentTaskQueue(input: {
     }
 
     if (!targetId) {
-      deferredTasks += 1
-      await releaseTaskClaim(db, taskId, input.workerId, 30)
+      try {
+        const completion = await evaluateCurrentTaskCompletion(taskId)
+        if (completion.finalized) {
+          policyFinalizedTasks += 1
+          continue
+        }
+
+        deferredTasks += 1
+        await releaseTaskClaim(
+          db,
+          taskId,
+          input.workerId,
+          completion.reason === 'coverage_targets_still_actionable'
+            ? 300
+            : 30,
+        )
+      } catch (completionError) {
+        failed += 1
+        console.error(
+          '[task orchestrator] completion policy evaluation failed:',
+          completionError,
+        )
+        await releaseTaskClaim(db, taskId, input.workerId, 60)
+      }
       continue
     }
 
@@ -282,6 +307,7 @@ export async function processAgentTaskQueue(input: {
     createdRuns,
     materializedTargets,
     deferredTasks,
+    policyFinalizedTasks,
     skippedByPolicy,
     failed,
   }
