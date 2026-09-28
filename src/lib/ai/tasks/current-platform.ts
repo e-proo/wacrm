@@ -4,6 +4,7 @@ import {
   materializeRegisteredTaskTargets,
   type AgentTaskModule,
 } from './target-resolution'
+import { evaluateRegisteredTaskCompletion } from './completion-policy'
 
 /**
  * Single composition root for the Agent Task Platform.
@@ -24,5 +25,16 @@ export async function materializeCurrentTaskTargets(taskId: string) {
     taskId,
     taskTypes: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
     targetResolvers: CURRENT_AGENT_TASK_PLATFORM.targetResolvers,
+  })
+}
+
+
+export async function evaluateCurrentTaskCompletion(taskId: string) {
+  const { supabaseAdmin } = await import('../admin-client')
+  return evaluateRegisteredTaskCompletion({
+    db: supabaseAdmin(),
+    taskId,
+    taskTypes: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
+    completionPolicies: CURRENT_AGENT_TASK_PLATFORM.completionPolicies,
   })
 }
