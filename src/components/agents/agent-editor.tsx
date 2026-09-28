@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getToolCategoryLabel, getToolPermissionLabel, getToolUiText } from '@/lib/ai/ui/platform-i18n';
 import { getAgentAdminUiText, localizeAgentApiError, localizePublishCheck } from '@/lib/ai/ui/agent-admin-i18n';
+import { AgentOutreachBuilder } from './agent-outreach-builder';
 // ============================================================
 // Agent editor — the production control surface for one agent
 // revision (always a DRAFT; published revisions are immutable).
@@ -932,6 +933,12 @@ export function AgentEditor(props: AgentEditorProps) {
             {t('saveBudget')}
           </Button>
         </section>
+
+        <AgentOutreachBuilder
+          agentId={agentId}
+          revisionId={revisionId}
+          onChanged={onChanged}
+        />
 
         {/* test cases */}
         <section className="space-y-2">
