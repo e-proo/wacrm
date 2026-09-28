@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../admin-client'
 import type { ChatMessage } from '../types'
 import { CURRENT_AGENT_TASK_PLATFORM } from '../tasks/current-platform'
 import { authorizeStoredAgentTask } from '../tasks/capability-policy'
+import type { AgentTaskTargetOutcomeObservation } from '../tasks/target-outcome-observation'
 import { runAgentLoop, type AgentLoopResult } from './agent-loop'
 import type {
   AiAgentRevision,
@@ -45,7 +46,7 @@ export type AgentExecutionStatus =
 export interface AgentExecutionResult {
   status: AgentExecutionStatus
   customerMessage: string | null
-  taskOutcome: Readonly<Record<string, unknown>> | null
+  taskOutcome: AgentTaskTargetOutcomeObservation | null
   nextActionHint: string | null
   toolCalls: AgentLoopResult['toolCalls']
   usage: {
