@@ -242,6 +242,8 @@ export type StoredAgentTaskAuthorization =
         taskType: string
         taskTypeVersion: number
         channel: 'whatsapp'
+        objective: string
+        taskContext: Readonly<Record<string, unknown>>
       }
       manifest: AgentTaskTypeManifest
       capabilities: readonly string[]
@@ -275,7 +277,7 @@ export async function authorizeStoredAgentTask(
   const { data, error } = await db
     .from('ai_agent_tasks')
     .select(
-      'id, account_id, agent_id, agent_revision_id, task_type, task_type_version, channel, status',
+      'id, account_id, agent_id, agent_revision_id, task_type, task_type_version, channel, status, objective, task_context',
     )
     .eq('id', input.taskId)
     .maybeSingle()
@@ -298,6 +300,8 @@ export async function authorizeStoredAgentTask(
     task_type_version: number
     channel: 'whatsapp'
     status: string
+    objective: string
+    task_context: Record<string, unknown> | null
   }
 
   if (row.status !== 'running') {
@@ -358,6 +362,8 @@ export async function authorizeStoredAgentTask(
       taskType: row.task_type,
       taskTypeVersion: row.task_type_version,
       channel: row.channel,
+      objective: row.objective,
+      taskContext: Object.freeze({ ...(row.task_context ?? {}) }),
     },
     manifest,
     capabilities: authorization.capabilities,
