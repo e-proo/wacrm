@@ -144,6 +144,43 @@ begin
     raise exception 'generic task creation duplicated a replay';
   end if;
 
+  update public.ai_agent_tasks
+  set status='running',
+      started_at=now()
+  where id=v_task;
+
+  if not public.finalize_agent_task_by_policy(
+    v_task,
+    'partially_completed',
+    'coverage.sourcing_completion',
+    1,
+    'smoke_no_more_targets',
+    '{"remainingAmount":"50000"}'::jsonb
+  ) then
+    raise exception 'generic Task policy finalizer did not transition running task';
+  end if;
+
+  if not exists (
+    select 1
+    from public.ai_agent_tasks
+    where id=v_task
+      and status='partially_completed'
+      and completed_at is not null
+  ) then
+    raise exception 'generic Task policy finalizer persisted wrong state';
+  end if;
+
+  if not exists (
+    select 1
+    from public.ai_agent_task_events
+    where account_id=v_account
+      and task_id=v_task
+      and event_type='task.partially_completed'
+      and payload->>'reason'='smoke_no_more_targets'
+  ) then
+    raise exception 'generic Task policy finalizer event is missing';
+  end if;
+
   update public.ai_agent_revisions
   set status='superseded'
   where id=v_revision;
@@ -184,6 +221,24 @@ begin
         raise;
       end if;
   end;
+
+  if has_function_privilege(
+       'anon',
+       'public.finalize_agent_task_by_policy(uuid,text,text,integer,text,jsonb)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.finalize_agent_task_by_policy(uuid,text,text,integer,text,jsonb)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.finalize_agent_task_by_policy(uuid,text,text,integer,text,jsonb)',
+       'EXECUTE'
+     ) then
+    raise exception 'generic Task policy finalizer privileges are unsafe';
+  end if;
 
   if has_function_privilege(
        'anon',
