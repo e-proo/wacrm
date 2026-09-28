@@ -726,6 +726,30 @@ BEGIN
   END IF;
 
   IF to_regprocedure(
+       'public.finalize_agent_task_by_policy(uuid,text,text,integer,text,jsonb)'
+     ) IS NULL THEN
+    RAISE EXCEPTION 'Generic Task completion-policy finalizer is missing';
+  END IF;
+
+  IF has_function_privilege(
+       'anon',
+       'public.finalize_agent_task_by_policy(uuid,text,text,integer,text,jsonb)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'authenticated',
+       'public.finalize_agent_task_by_policy(uuid,text,text,integer,text,jsonb)',
+       'EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'service_role',
+       'public.finalize_agent_task_by_policy(uuid,text,text,integer,text,jsonb)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'Generic Task completion-policy finalizer privileges are unsafe';
+  END IF;
+
+  IF to_regprocedure(
        'public.create_ai_agent_task(uuid,text,integer,uuid,uuid,text,text,text,jsonb,jsonb,text,integer,integer,jsonb,timestamptz,text,text,uuid)'
      ) IS NULL THEN
     RAISE EXCEPTION 'Generic Agent Task creation RPC is missing';
