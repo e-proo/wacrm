@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server'
 import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { CURRENT_AGENT_TASK_PLATFORM } from '@/lib/ai/tasks/current-platform'
-
-const TARGET_SCOPE_KINDS = [
-  'segments',
-  'tags',
-  'service_relationship',
-  'regions',
-  'predefined_filter',
-  'domain_selector',
-] as const
+import {
+  BUILDER_APPROVAL_MODES,
+  BUILDER_OPERATIONAL_MODES,
+  BUILDER_TARGET_SCOPE_KINDS,
+} from '@/lib/ai/tasks/builder-policy'
 
 function manifests() {
   return CURRENT_AGENT_TASK_PLATFORM.taskTypes.list().map((manifest) => ({
@@ -32,9 +28,9 @@ export async function GET() {
     await requireAgentCapability('agents.read')
     return NextResponse.json({
       taskTypes: manifests(),
-      targetScopeKinds: TARGET_SCOPE_KINDS,
-      approvalModes: ['none', 'task', 'batch'],
-      operationalModes: ['reactive', 'outbound', 'both'],
+      targetScopeKinds: BUILDER_TARGET_SCOPE_KINDS,
+      approvalModes: BUILDER_APPROVAL_MODES,
+      operationalModes: BUILDER_OPERATIONAL_MODES,
     })
   } catch (err) {
     return toErrorResponse(err)
