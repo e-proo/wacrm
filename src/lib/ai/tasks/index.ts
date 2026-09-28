@@ -8,3 +8,5 @@ export * from './outbound-runtime'
 export * from './outbound-delivery'
 export * from './reply-correlation'
 export * from './capability-policy'
+
+export * from './builder-v2'
