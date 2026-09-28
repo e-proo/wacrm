@@ -24,6 +24,7 @@ import {
   type InheritedToolGrant,
 } from '@/lib/ai/runtime/tool-grant-plane-policy'
 import { inheritAgentRevisionCapabilities } from '@/lib/ai/tasks/capability-policy'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
 
 async function removeIncompatibleDraftGrants(
   db: SupabaseClient,
@@ -235,13 +236,16 @@ export async function POST(
         }
       }
 
-      copiedCapabilities = await inheritAgentRevisionCapabilities(db, {
+      copiedCapabilities = await inheritAgentRevisionCapabilities(
+        supabaseAdmin(),
+        {
         accountId: ctx.accountId,
         agentId: id,
         sourceRevisionId: publishedId,
         targetRevisionId: revisionId,
         actorUserId: ctx.userId,
-      })
+        },
+      )
 
       const { data: assignRows, error: aReadErr } = await db
         .from('ai_agent_knowledge_assignments')
