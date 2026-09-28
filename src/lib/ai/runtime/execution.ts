@@ -252,6 +252,10 @@ export async function runClaimedAgentExecution(input: {
     | {
         capabilities: readonly string[]
         allowedTools: readonly { key: string; version: number }[]
+        taskType: string
+        taskTypeVersion: number
+        objective: string
+        taskContext: Readonly<Record<string, unknown>>
       }
     | null = null
 
@@ -279,6 +283,10 @@ export async function runClaimedAgentExecution(input: {
     taskPolicy = {
       capabilities: authorization.capabilities,
       allowedTools: authorization.allowedTools,
+      taskType: authorization.task.taskType,
+      taskTypeVersion: authorization.task.taskTypeVersion,
+      objective: authorization.task.objective,
+      taskContext: authorization.task.taskContext,
     }
   }
 
@@ -298,6 +306,15 @@ export async function runClaimedAgentExecution(input: {
     trustedAdminCapabilities: input.trustedAdminCapabilities ?? [],
     agentCapabilities: taskPolicy?.capabilities ?? [],
     taskAllowedTools: taskPolicy?.allowedTools ?? null,
+    taskExecutionContext: taskPolicy
+      ? {
+          taskType: taskPolicy.taskType,
+          taskTypeVersion: taskPolicy.taskTypeVersion,
+          objective: taskPolicy.objective,
+          counterpartyRole: context.counterpartyRole ?? null,
+          data: taskPolicy.taskContext,
+        }
+      : null,
     simulation: context.mode === 'simulation',
   })
 
