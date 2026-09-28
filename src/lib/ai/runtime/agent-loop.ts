@@ -22,6 +22,11 @@ import {
 } from './coverage-leg-wording-guard'
 import { requiresFreshFxRate } from './fx-current-rate-guard'
 import type { AiAgentRevision, RunPlane, ToolGrantPermission } from './multi-agent-types'
+import {
+  AGENT_TASK_TARGET_OUTCOME_OBSERVATION_TOOL,
+  parseAgentTaskTargetOutcomeObservation,
+  type AgentTaskTargetOutcomeObservation,
+} from '../tasks/target-outcome-observation'
 
 // Native structured-tool agent loop. There is intentionally no parser for
 // ```tool blocks: provider prose can never become executable instructions.
@@ -65,6 +70,7 @@ export interface AgentLoopResult {
   handoffRequested: boolean
   inputTokens: number
   outputTokens: number
+  taskOutcome?: AgentTaskTargetOutcomeObservation | null
   error?: string
 }
 
@@ -175,7 +181,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       : null
     const taskCapabilitySet = new Set(input.agentCapabilities ?? [])
 
-    const offeredTools =
+    const platformOfferedTools =
       maxRounds > 0 && policy.nativeToolsEnabled
         ? platformVisibleTools.filter((manifest) => {
             if (
@@ -198,6 +204,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             )
           })
         : []
+
+    const canObserveTaskTargetOutcome =
+      maxRounds > 0 &&
+      policy.nativeToolsEnabled &&
+      input.plane === 'customer' &&
+      input.simulation !== true &&
+      Boolean(input.taskExecutionContext) &&
+      Boolean(input.sourceMessageId)
+
+    const offeredTools = canObserveTaskTargetOutcome
+      ? [
+          ...platformOfferedTools,
+          AGENT_TASK_TARGET_OUTCOME_OBSERVATION_TOOL,
+        ]
+      : platformOfferedTools
 
     if (input.plane === 'admin') {
       const hiddenCount = Object.keys(grants).length - offeredTools.length
@@ -322,6 +343,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     let finalText: string | null = null
     let handoffRequested = false
     let hasAuthoritativeReadResult = false
+    let taskOutcome: AgentTaskTargetOutcomeObservation | null = null
+    let successfulProposal = false
     const rounds = Math.max(maxRounds, 1)
 
     const recoverAfterAuthoritativeRead = async () => {
@@ -433,6 +456,102 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       messages.push({ role: 'assistant_tool', content: parsed.text, calls: turn.toolCalls })
       for (const call of turn.toolCalls) {
+        if (
+          call.toolKey ===
+          AGENT_TASK_TARGET_OUTCOME_OBSERVATION_TOOL.key
+        ) {
+          const checked = validateToolArguments(
+            AGENT_TASK_TARGET_OUTCOME_OBSERVATION_TOOL,
+            call.args,
+          )
+          const observed =
+            checked.ok && checked.value
+              ? parseAgentTaskTargetOutcomeObservation(checked.value)
+              : null
+
+          if (!observed) {
+            auditCalls.push({
+              toolKey: call.toolKey,
+              round,
+              ok: false,
+            })
+            messages.push({
+              role: 'tool',
+              callId: call.id,
+              toolKey: call.toolKey,
+              content: JSON.stringify({
+                ok: false,
+                code: 'INVALID_TASK_TARGET_OUTCOME',
+                message:
+                  checked.error ??
+                  'Task target outcome observation is invalid.',
+              }),
+            })
+            continue
+          }
+
+          if (successfulProposal) {
+            auditCalls.push({
+              toolKey: call.toolKey,
+              round,
+              ok: false,
+            })
+            messages.push({
+              role: 'tool',
+              callId: call.id,
+              toolKey: call.toolKey,
+              content: JSON.stringify({
+                ok: false,
+                code: 'TASK_TARGET_OUTCOME_CONFLICTS_WITH_PROPOSAL',
+                message:
+                  'A successful proposal already exists for this turn; do not report a decline/unavailable outcome.',
+              }),
+            })
+            continue
+          }
+
+          if (
+            taskOutcome &&
+            taskOutcome.outcome !== observed.outcome
+          ) {
+            auditCalls.push({
+              toolKey: call.toolKey,
+              round,
+              ok: false,
+            })
+            messages.push({
+              role: 'tool',
+              callId: call.id,
+              toolKey: call.toolKey,
+              content: JSON.stringify({
+                ok: false,
+                code: 'TASK_TARGET_OUTCOME_CONFLICT',
+                message:
+                  'Conflicting target outcomes were reported in the same turn.',
+              }),
+            })
+            continue
+          }
+
+          taskOutcome = observed
+          auditCalls.push({
+            toolKey: call.toolKey,
+            round,
+            ok: true,
+          })
+          messages.push({
+            role: 'tool',
+            callId: call.id,
+            toolKey: call.toolKey,
+            content: JSON.stringify({
+              ok: true,
+              accepted: true,
+              outcome: observed.outcome,
+            }),
+          })
+          continue
+        }
+
         const grant = grants[call.toolKey]
         const tool = grant
           ? getCurrentPlatformTool(call.toolKey, grant.toolVersion)
@@ -523,6 +642,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         if (call.toolKey === 'exchange_rates.get_current' && outcome.result.ok) {
           fxRateSatisfied = true
         }
+        if (grant.permission === 'propose' && outcome.result.ok) {
+          successfulProposal = true
+          taskOutcome = null
+        }
         if (
           grant.permission === 'read' &&
           outcome.result.ok &&
@@ -579,6 +702,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       handoffRequested,
       inputTokens,
       outputTokens,
+      taskOutcome,
     }
   } catch (err) {
     console.error('[agent loop] failed:', err)
@@ -590,7 +714,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   function failed(error: string): AgentLoopResult {
     return {
       status: 'failed', text: null, toolCalls: auditCalls,
-      handoffRequested: false, inputTokens, outputTokens, error,
+      handoffRequested: false, inputTokens, outputTokens,
+      taskOutcome: null, error,
     }
   }
 }
