@@ -216,10 +216,11 @@ begin
   end if;
 
   insert into public.messages(
-    id,conversation_id,sender_type,content_type,content_text,message_id,status
+    id,conversation_id,sender_type,content_type,content_text,message_id,status,
+    ai_agent_run_id
   ) values (
     v_task_reply_response,v_conv_reply,'bot','text',
-    'Task reply response','wamid.reply.agent-response','sent'
+    'Task reply response','wamid.reply.agent-response','sent',v_run_id
   );
 
   if not public.complete_agent_task_reply_turn(
