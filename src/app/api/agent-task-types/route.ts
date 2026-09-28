@@ -2,86 +2,111 @@ import { NextResponse } from 'next/server'
 import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { CURRENT_AGENT_TASK_PLATFORM } from '@/lib/ai/tasks/current-platform'
 import {
-  BUILDER_APPROVAL_MODES,
-  BUILDER_OPERATIONAL_MODES,
-  BUILDER_TARGET_SCOPE_KINDS,
-} from '@/lib/ai/tasks/builder-policy'
+  defaultBuilderTaskBinding,
+  isAgentBuilderV2Configuration,
+  listBuilderTaskTypes,
+  validateBuilderV2Configuration,
+} from '@/lib/ai/tasks/builder-v2'
 
-function manifests() {
-  return CURRENT_AGENT_TASK_PLATFORM.taskTypes.list().map((manifest) => ({
-    key: manifest.key,
-    version: manifest.version,
-    domain: manifest.domain,
-    title: manifest.title,
-    description: manifest.description,
-    requiredAgentCapabilities: manifest.requiredAgentCapabilities,
-    allowedChannels: manifest.allowedChannels,
-    requiredTaskApproval: manifest.requiredTaskApproval,
-    maxTargets: manifest.maxTargets,
-    followupPolicy: manifest.followupPolicy,
-    allowedTools: manifest.allowedTools,
-  }))
+function catalog() {
+  return listBuilderTaskTypes(CURRENT_AGENT_TASK_PLATFORM.taskTypes).map(
+    (taskType) => {
+      const manifest = CURRENT_AGENT_TASK_PLATFORM.taskTypes.get(
+        taskType.key,
+        taskType.version,
+      )
+      return {
+        ...taskType,
+        defaultBinding: manifest
+          ? defaultBuilderTaskBinding(manifest)
+          : null,
+      }
+    },
+  )
 }
 
 export async function GET() {
   try {
     await requireAgentCapability('agents.read')
-    return NextResponse.json({
-      taskTypes: manifests(),
-      targetScopeKinds: BUILDER_TARGET_SCOPE_KINDS,
-      approvalModes: BUILDER_APPROVAL_MODES,
-      operationalModes: BUILDER_OPERATIONAL_MODES,
-    })
+    return NextResponse.json({ taskTypes: catalog() })
   } catch (err) {
     return toErrorResponse(err)
   }
 }
 
 /**
- * Builder dry-run preview. This endpoint is intentionally side-effect free:
- * it does not create tasks/targets/runs, reserve outbound effects, or call
- * WhatsApp. Domain target resolution remains owned by an actual Task dry-run.
+ * Builder dry-run preview. This endpoint is deliberately side-effect free.
+ * It validates the exact registered Task Type bindings and returns deterministic
+ * upper-bound estimates, but it never materializes targets, creates Agent Runs,
+ * reserves outbound effects, mutates business data, or sends WhatsApp.
+ *
+ * Concrete selected/skipped targets and generated message samples become
+ * available only when a domain Task Type supplies its deterministic resolver
+ * and simulation runtime (Coverage in Phase 11, Services in Phase 12).
  */
 export async function POST(request: Request) {
   try {
     await requireAgentCapability('agents.read')
-    const body = (await request.json().catch(() => ({}))) as {
-      taskTypes?: Array<{ key?: string; version?: number }>
-      maxTargets?: number
+    const body = await request.json().catch(() => null)
+    if (!isAgentBuilderV2Configuration(body)) {
+      return NextResponse.json(
+        {
+          error: 'Builder V2 configuration has an invalid shape.',
+          code: 'INVALID_BUILDER_V2_CONFIGURATION',
+        },
+        { status: 400 },
+      )
     }
-    const registry = CURRENT_AGENT_TASK_PLATFORM.taskTypes
-    const selected = (body.taskTypes ?? []).map((item) => {
-      const key = String(item.key ?? '')
-      const version = Number(item.version ?? 0)
-      const manifest = registry.get(key, version)
-      return manifest
-        ? {
-            key: manifest.key,
-            version: manifest.version,
-            title: manifest.title,
-            tools: manifest.allowedTools,
-            maxTargets: manifest.maxTargets,
-          }
-        : { key, version, unavailable: true as const }
+
+    const validation = validateBuilderV2Configuration({
+      config: body,
+      registry: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
+      revisionToolGrants: [],
     })
-    const warnings = selected
-      .filter((item) => 'unavailable' in item)
-      .map((item) => `Task Type ${item.key}@${item.version} is not registered.`)
+
+    const selectedTaskTypes = body.bindings.map((binding) => {
+      const manifest = CURRENT_AGENT_TASK_PLATFORM.taskTypes.get(
+        binding.taskType,
+        binding.taskTypeVersion,
+      )
+      return {
+        key: binding.taskType,
+        version: binding.taskTypeVersion,
+        title: manifest?.title ?? binding.taskType,
+        maxTargets: binding.maxTargets,
+        maxFollowups: binding.maxFollowups,
+        allowedTools: manifest?.allowedTools ?? [],
+      }
+    })
+
+    const estimatedSendCount = body.bindings.reduce(
+      (total, binding) =>
+        total + binding.maxTargets * (1 + binding.maxFollowups),
+      0,
+    )
 
     return NextResponse.json({
       dryRun: true,
       sideEffects: false,
+      validation: {
+        ok: validation.ok,
+        issues: validation.issues,
+      },
+      selectedTaskTypes,
       selectedTargets: [],
       skippedTargets: [],
       skippedReasons: [],
       sampleGeneratedMessages: [],
       toolsCalled: [],
       estimatedCost: null,
-      estimatedSendCount: 0,
-      selectedTaskTypes: selected,
-      requestedMaxTargets: Number.isFinite(body.maxTargets) ? body.maxTargets : null,
-      policyWarnings: warnings,
-      note: 'Target selection and message generation require a concrete Task dry-run; this Builder preview never sends or mutates business data.',
+      estimatedSendCount,
+      policyWarnings: validation.issues.map((issue) => ({
+        code: issue.code,
+        message: issue.message,
+        path: issue.path,
+      })),
+      note:
+        'This Builder preview performs no target resolution or message generation. Domain simulations add those details without sending or mutating business data.',
     })
   } catch (err) {
     return toErrorResponse(err)
