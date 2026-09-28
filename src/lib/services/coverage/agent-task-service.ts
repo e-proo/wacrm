@@ -93,11 +93,12 @@ export async function startCoverageSourcingTask(
     !runtimePolicy.multiAgentEnabled ||
     !runtimePolicy.recoveryWorkerEnabled ||
     !runtimePolicy.nativeToolsEnabled ||
-    !runtimePolicy.proposalToolsEnabled
+    !runtimePolicy.proposalToolsEnabled ||
+    !runtimePolicy.outboundTaskDeliveryEnabled
   ) {
     throw new CoverageSourcingTaskError(
       'COVERAGE_SOURCING_RUNTIME_NOT_READY',
-      'The account AI runtime is not enabled for durable proposal-based Agent Tasks.',
+      'The account AI runtime is not enabled for live durable proposal-based Agent Tasks.',
     )
   }
 
