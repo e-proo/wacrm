@@ -19,7 +19,7 @@ import {
 } from '@/lib/rate-limit'
 
 export const REVISION_SELECT =
-  'id, account_id, agent_id, revision_number, status, provider_connection_id, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id, settings, created_at, published_at, rejection_reason'
+  'id, account_id, agent_id, revision_number, status, provider_connection_id, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id, operational_mode, outreach_policy, settings, created_at, published_at, rejection_reason'
 
 interface UpdateBody {
   providerConnectionId?: string | null
@@ -32,6 +32,8 @@ interface UpdateBody {
   maxToolRounds?: number
   maxAiRepliesPerConversation?: number
   handoffHumanMemberId?: string | null
+  operationalMode?: 'reactive' | 'outbound' | 'both'
+  outreachPolicy?: Record<string, unknown>
 }
 
 export async function GET(
@@ -203,6 +205,23 @@ export async function PATCH(
     }
     if (body.handoffHumanMemberId !== undefined) {
       update.handoff_human_member_id = body.handoffHumanMemberId === '' ? null : body.handoffHumanMemberId
+    }
+
+    if (body.operationalMode !== undefined) {
+      if (!['reactive', 'outbound', 'both'].includes(body.operationalMode)) {
+        return NextResponse.json({ error: 'operationalMode must be reactive, outbound or both', code: 'INVALID_OPERATIONAL_MODE' }, { status: 400 })
+      }
+      update.operational_mode = body.operationalMode
+    }
+    if (body.outreachPolicy !== undefined) {
+      if (!body.outreachPolicy || Array.isArray(body.outreachPolicy) || typeof body.outreachPolicy !== 'object') {
+        return NextResponse.json({ error: 'outreachPolicy must be an object', code: 'INVALID_OUTREACH_POLICY' }, { status: 400 })
+      }
+      const encoded = JSON.stringify(body.outreachPolicy)
+      if (encoded.length > 32000) {
+        return NextResponse.json({ error: 'outreachPolicy is too large', code: 'OUTREACH_POLICY_TOO_LARGE' }, { status: 400 })
+      }
+      update.outreach_policy = body.outreachPolicy
     }
 
     if (Object.keys(update).length === 0) {
