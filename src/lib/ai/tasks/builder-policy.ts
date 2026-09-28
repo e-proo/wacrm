@@ -43,7 +43,11 @@ export function validateBuilderOutreachPolicy(
         return 'Invalid Task Type selection'
       }
       const row = item as { key?: unknown; version?: unknown }
-      if (typeof row.key !== 'string' || !Number.isInteger(row.version)) {
+      if (
+        typeof row.key !== 'string' ||
+        typeof row.version !== 'number' ||
+        !Number.isInteger(row.version)
+      ) {
         return 'Invalid Task Type selection'
       }
       if (!CURRENT_AGENT_TASK_PLATFORM.taskTypes.get(row.key, Number(row.version))) {
