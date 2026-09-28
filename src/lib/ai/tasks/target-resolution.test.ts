@@ -8,6 +8,7 @@ import {
 } from './target-resolution'
 import { defineAgentTaskType } from './contracts'
 import type { AgentTaskOutboundMessagePolicy } from './outbound-policy'
+import type { AgentTaskCompletionPolicy } from './completion-policy'
 
 const noopResolver = (
   key: string,
@@ -30,6 +31,18 @@ const noopOutboundPolicy = (
   domain,
   async prepare() {
     return { kind: 'text', text: 'hello' }
+  },
+})
+
+const noopCompletionPolicy = (
+  key: string,
+  domain: string,
+): AgentTaskCompletionPolicy => ({
+  key,
+  version: 1,
+  domain,
+  async evaluate() {
+    return { status: 'continue', reason: 'test' }
   },
 })
 
@@ -75,6 +88,9 @@ describe('Target resolver registry', () => {
       ],
       outboundMessagePolicies: [
         noopOutboundPolicy('coverage.sourcing_message', 'coverage'),
+      ],
+      completionPolicies: [
+        noopCompletionPolicy('coverage.sourcing_completion', 'coverage'),
       ],
     }
 
@@ -126,6 +142,9 @@ describe('Target resolver registry', () => {
       targetResolvers: [],
       outboundMessagePolicies: [
         noopOutboundPolicy('coverage.sourcing_message', 'coverage'),
+      ],
+      completionPolicies: [
+        noopCompletionPolicy('coverage.sourcing_completion', 'coverage'),
       ],
     }
 
@@ -188,6 +207,9 @@ describe('Target resolver registry', () => {
       outboundMessagePolicies: [
         noopOutboundPolicy('coverage.sourcing_message', 'coverage'),
       ],
+      completionPolicies: [
+        noopCompletionPolicy('coverage.sourcing_completion', 'coverage'),
+      ],
     }
 
     expect(() => buildAgentTaskPlatform([taskModule])).toThrow(
@@ -235,6 +257,9 @@ describe('Target resolver registry', () => {
         noopResolver('coverage.supplier_candidates', 'coverage'),
       ],
       outboundMessagePolicies: [],
+      completionPolicies: [
+        noopCompletionPolicy('coverage.sourcing_completion', 'coverage'),
+      ],
     }
 
     expect(() => buildAgentTaskPlatform([taskModule])).toThrow(
