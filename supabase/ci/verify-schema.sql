@@ -684,6 +684,59 @@ BEGIN
     RAISE EXCEPTION 'Agent Revision capability granted_by index is missing';
   END IF;
 
+  -- Coverage Sourcing Agent + generic Task creation (118-120).
+  IF to_regprocedure(
+       'public.reconcile_coverage_sourcing_offer_task()'
+     ) IS NULL THEN
+    RAISE EXCEPTION 'Coverage sourcing business-outcome reconciler is missing';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgrelid='public.coverage_offers'::regclass
+      AND tgname='coverage_offers_agent_task_outcome'
+      AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'Coverage sourcing business-outcome trigger is missing';
+  END IF;
+
+  IF to_regprocedure(
+       'public.create_ai_agent_task(uuid,text,integer,uuid,uuid,text,text,text,jsonb,jsonb,text,integer,integer,jsonb,timestamptz,text,text,uuid)'
+     ) IS NULL THEN
+    RAISE EXCEPTION 'Generic Agent Task creation RPC is missing';
+  END IF;
+
+  IF has_function_privilege(
+       'anon',
+       'public.create_ai_agent_task(uuid,text,integer,uuid,uuid,text,text,text,jsonb,jsonb,text,integer,integer,jsonb,timestamptz,text,text,uuid)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'authenticated',
+       'public.create_ai_agent_task(uuid,text,integer,uuid,uuid,text,text,text,jsonb,jsonb,text,integer,integer,jsonb,timestamptz,text,text,uuid)',
+       'EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'service_role',
+       'public.create_ai_agent_task(uuid,text,integer,uuid,uuid,text,text,text,jsonb,jsonb,text,integer,integer,jsonb,timestamptz,text,text,uuid)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'Generic Agent Task creation RPC privileges are unsafe';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema='public'
+      AND table_name='ai_runtime_policies'
+      AND column_name='outbound_task_delivery_enabled'
+      AND is_nullable='NO'
+      AND column_default='false'
+  ) THEN
+    RAISE EXCEPTION 'Fail-closed outbound Task delivery gate is missing';
+  END IF;
+
   RAISE NOTICE 'schema verification passed';
 END
 $$;
