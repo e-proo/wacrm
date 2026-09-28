@@ -12,7 +12,6 @@ import type {
 } from '@/lib/ai/tasks/outbound-policy'
 import {
   normalizeCoverageAttributes,
-  readCoverageAttributes,
   type CoverageAttributes,
   type CoverageMethod,
 } from './attributes'
