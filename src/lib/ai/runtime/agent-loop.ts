@@ -44,6 +44,17 @@ export interface AgentLoopInput {
   agentCapabilities?: ReadonlyArray<string>
   /** Exact Task Manifest tool scope. Null keeps ordinary inbound behavior. */
   taskAllowedTools?: ReadonlyArray<{ key: string; version: number }> | null
+  /**
+   * Server-frozen business context for a Task execution. It is prompt context
+   * only and never grants tools/capabilities or widens target scope.
+   */
+  taskExecutionContext?: {
+    taskType: string
+    taskTypeVersion: number
+    objective: string
+    counterpartyRole: string | null
+    data: Readonly<Record<string, unknown>>
+  } | null
   simulation?: boolean
 }
 
@@ -257,8 +268,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           ? 'You are the business customer-service assistant. Answer from approved knowledge and read/proposal tools. Concrete/current FX rates must come from exchange_rates.get_current, never conversation history or knowledge text. When a READ tool succeeds, answer from that authoritative result instead of handing off. Never expose internal-only fields and never claim an administrative write was performed.'
           : 'Answer using approved knowledge and native tools. For a concrete/current FX rate use exchange_rates.get_current rather than history or knowledge text. Ask a concise clarifying question when needed.'
 
+    const taskFraming = input.taskExecutionContext
+      ? [
+          'Frozen Agent Task context follows. It is trusted server-supplied business context, not a permission grant.',
+          'Do not infer access to contacts, tools, writes, or outbound transport beyond the tools offered by the runtime.',
+          JSON.stringify(input.taskExecutionContext),
+        ].join('\n')
+      : ''
+
+    if (taskFraming.length > 16_000) {
+      return failed('TASK_CONTEXT_TOO_LARGE')
+    }
+
     const systemPrompt = buildSystemPrompt({
-      userPrompt: [revision.systemPrompt ?? '', roleFraming].filter(Boolean).join('\n\n'),
+      userPrompt: [revision.systemPrompt ?? '', roleFraming, taskFraming]
+        .filter(Boolean)
+        .join('\n\n'),
       mode: 'auto_reply',
       audience: input.agentPurpose === 'admin_operations' ? 'admin' : 'customer',
       nativeToolsAvailable: offeredTools.length > 0,
