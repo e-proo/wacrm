@@ -54,4 +54,33 @@ describe('Agent Builder V2 policy', () => {
       'Invalid approval mode',
     )
   })
+
+  it('rejects unsafe or malformed outbound limits', () => {
+    expect(
+      validateBuilderOutreachPolicy({ limits: { maxTargets: 0 } }),
+    ).toBe('limits.maxTargets must be a positive integer')
+    expect(
+      validateBuilderOutreachPolicy({ limits: { maxAttempts: '3' } }),
+    ).toBe('limits.maxAttempts must be a positive integer')
+    expect(
+      validateBuilderOutreachPolicy({ limits: { dailyBudget: Infinity } }),
+    ).toBe('limits.dailyBudget must be a non-negative finite number')
+    expect(
+      validateBuilderOutreachPolicy({ limits: { workingHours: '9-5' } }),
+    ).toBe('limits.workingHours must use HH:MM-HH:MM')
+  })
+
+  it('rejects ungoverned extra limit keys', () => {
+    expect(
+      validateBuilderOutreachPolicy({ limits: { sendEverything: true } }),
+    ).toBe('Unknown outbound limit: sendEverything')
+  })
+
+  it('validates target-scope parameter shape', () => {
+    expect(
+      validateBuilderOutreachPolicy({
+        targetScope: { kind: 'tags', values: ['', 'vip'] },
+      }),
+    ).toBe('Target scope values must be non-empty strings')
+  })
 })
