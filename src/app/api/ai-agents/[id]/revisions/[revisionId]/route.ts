@@ -13,9 +13,13 @@ import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import {
-  BUILDER_OPERATIONAL_MODES,
-  validateBuilderOutreachPolicy,
-} from '@/lib/ai/tasks/builder-policy'
+  isAgentBuilderV2Configuration,
+  validateBuilderV2Configuration,
+  type AgentOperationalMode,
+} from '@/lib/ai/tasks/builder-v2'
+import type { AgentRevisionToolGrant } from '@/lib/ai/tasks/capability-policy'
+import { CURRENT_AGENT_TASK_PLATFORM } from '@/lib/ai/tasks/current-platform'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -74,7 +78,7 @@ async function loadDraft(
 ) {
   const { data: revision, error } = await ctx.supabase
     .from('ai_agent_revisions')
-    .select('id, status, provider_connection_id, model')
+    .select('id, status, provider_connection_id, model, operational_mode, outreach_policy')
     .eq('account_id', ctx.accountId)
     .eq('agent_id', agentId)
     .eq('id', revisionId)
@@ -118,7 +122,118 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
     }
 
-    const current = draftRevision as { provider_connection_id: string | null; model: string | null }
+    const current = draftRevision as {
+      provider_connection_id: string | null
+      model: string | null
+      operational_mode: AgentOperationalMode
+      outreach_policy: Record<string, unknown> | null
+    }
+
+    const builderUpdateRequested =
+      body.operationalMode !== undefined || body.outreachPolicy !== undefined
+
+    if (builderUpdateRequested) {
+      const mixedUpdate = Object.entries(body).some(
+        ([key, value]) =>
+          value !== undefined &&
+          key !== 'operationalMode' &&
+          key !== 'outreachPolicy',
+      )
+      if (mixedUpdate) {
+        return NextResponse.json(
+          {
+            error: 'Builder V2 settings must be saved separately from model/revision settings.',
+            code: 'BUILDER_SETTINGS_MUST_BE_SAVED_SEPARATELY',
+          },
+          { status: 400 },
+        )
+      }
+
+      const operationalMode =
+        body.operationalMode ?? current.operational_mode ?? 'reactive'
+      const rawPolicy = body.outreachPolicy ?? current.outreach_policy ?? {}
+      const rawBindings =
+        rawPolicy &&
+        typeof rawPolicy === 'object' &&
+        !Array.isArray(rawPolicy)
+          ? rawPolicy.bindings ?? []
+          : null
+
+      const configCandidate = {
+        operationalMode,
+        bindings: rawBindings,
+      }
+      if (!isAgentBuilderV2Configuration(configCandidate)) {
+        return NextResponse.json(
+          {
+            error: 'Builder V2 configuration has an invalid shape.',
+            code: 'INVALID_BUILDER_V2_CONFIGURATION',
+          },
+          { status: 400 },
+        )
+      }
+
+      const { data: grantRows, error: grantError } = await ctx.supabase
+        .from('ai_agent_tool_grants')
+        .select('tool_key, tool_version, permission')
+        .eq('account_id', ctx.accountId)
+        .eq('agent_revision_id', revisionId)
+      if (grantError) throw grantError
+
+      const revisionToolGrants: AgentRevisionToolGrant[] = (grantRows ?? []).map(
+        (row) => ({
+          toolKey: row.tool_key as string,
+          toolVersion: row.tool_version as number,
+          permission: row.permission as AgentRevisionToolGrant['permission'],
+        }),
+      )
+      const validation = validateBuilderV2Configuration({
+        config: configCandidate,
+        registry: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
+        revisionToolGrants,
+      })
+      if (!validation.ok) {
+        return NextResponse.json(
+          {
+            error: 'Builder V2 configuration failed validation.',
+            code: 'BUILDER_V2_VALIDATION_FAILED',
+            checks: validation.issues,
+          },
+          { status: 409 },
+        )
+      }
+
+      const normalizedPolicy = { bindings: configCandidate.bindings }
+      const { error: saveError } = await supabaseAdmin().rpc(
+        'update_ai_agent_builder_v2_config',
+        {
+          p_account_id: ctx.accountId,
+          p_agent_id: id,
+          p_revision_id: revisionId,
+          p_operational_mode: configCandidate.operationalMode,
+          p_outreach_policy: normalizedPolicy,
+          p_capabilities: [...validation.capabilities],
+          p_actor_user_id: ctx.userId,
+        },
+      )
+      if (saveError) throw saveError
+
+      const { data: updatedRevision, error: reloadError } = await ctx.supabase
+        .from('ai_agent_revisions')
+        .select(REVISION_SELECT)
+        .eq('account_id', ctx.accountId)
+        .eq('agent_id', id)
+        .eq('id', revisionId)
+        .single()
+      if (reloadError) throw reloadError
+
+      return NextResponse.json({
+        revision: updatedRevision,
+        builder: {
+          capabilities: validation.capabilities,
+        },
+      })
+    }
     const effectiveConnectionId = body.providerConnectionId !== undefined
       ? (body.providerConnectionId === '' ? null : body.providerConnectionId)
       : current.provider_connection_id
@@ -209,27 +324,6 @@ export async function PATCH(
     }
     if (body.handoffHumanMemberId !== undefined) {
       update.handoff_human_member_id = body.handoffHumanMemberId === '' ? null : body.handoffHumanMemberId
-    }
-
-    if (body.operationalMode !== undefined) {
-      if (!BUILDER_OPERATIONAL_MODES.includes(body.operationalMode)) {
-        return NextResponse.json({ error: 'operationalMode must be reactive, outbound or both', code: 'INVALID_OPERATIONAL_MODE' }, { status: 400 })
-      }
-      update.operational_mode = body.operationalMode
-    }
-    if (body.outreachPolicy !== undefined) {
-      if (!body.outreachPolicy || Array.isArray(body.outreachPolicy) || typeof body.outreachPolicy !== 'object') {
-        return NextResponse.json({ error: 'outreachPolicy must be an object', code: 'INVALID_OUTREACH_POLICY' }, { status: 400 })
-      }
-      const policyError = validateBuilderOutreachPolicy(body.outreachPolicy)
-      if (policyError) {
-        return NextResponse.json({ error: policyError, code: 'INVALID_OUTREACH_POLICY' }, { status: 400 })
-      }
-      const encoded = JSON.stringify(body.outreachPolicy)
-      if (encoded.length > 32000) {
-        return NextResponse.json({ error: 'outreachPolicy is too large', code: 'OUTREACH_POLICY_TOO_LARGE' }, { status: 400 })
-      }
-      update.outreach_policy = body.outreachPolicy
     }
 
     if (Object.keys(update).length === 0) {
