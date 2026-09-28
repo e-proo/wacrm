@@ -79,13 +79,17 @@ function validateLimits(raw: unknown): string | null {
 
   if (
     limits.maxTargets !== undefined &&
-    (!Number.isInteger(limits.maxTargets) || Number(limits.maxTargets) < 1)
+    (typeof limits.maxTargets !== 'number' ||
+      !Number.isInteger(limits.maxTargets) ||
+      limits.maxTargets < 1)
   ) {
     return 'limits.maxTargets must be a positive integer'
   }
   if (
     limits.maxAttempts !== undefined &&
-    (!Number.isInteger(limits.maxAttempts) || Number(limits.maxAttempts) < 1)
+    (typeof limits.maxAttempts !== 'number' ||
+      !Number.isInteger(limits.maxAttempts) ||
+      limits.maxAttempts < 1)
   ) {
     return 'limits.maxAttempts must be a positive integer'
   }
