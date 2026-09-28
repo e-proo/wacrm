@@ -251,12 +251,14 @@ export async function loadCoverageSourcingTaskContext(
 export function buildCoverageSupplierCandidates(
   request: CoverageRequestRow,
   offerRows: readonly CoverageOfferHistoryRow[],
+  allowedRegionIds: readonly string[] = [],
 ): AgentTaskTargetCandidate[] {
   const normalizedRequest = normalizeCoverageAttributes(request.attributes)
   if (!normalizedRequest.ok) {
     throw new Error('COVERAGE_SOURCING_REQUEST_ATTRIBUTES_INVALID')
   }
   const requestAttributes = normalizedRequest.normalized
+  const regionScope = new Set(allowedRegionIds)
   const candidates: AgentTaskTargetCandidate[] = []
 
   for (const row of offerRows) {
@@ -265,10 +267,19 @@ export function buildCoverageSupplierCandidates(
 
     const normalizedOffer = normalizeCoverageAttributes(row.attributes)
     if (!normalizedOffer.ok) continue
+    const offerAttributes = normalizedOffer.normalized
     if (
       !coverageOfferMatchesSourcingRequest(
         requestAttributes,
-        normalizedOffer.normalized,
+        offerAttributes,
+      )
+    ) {
+      continue
+    }
+    if (
+      regionScope.size > 0 &&
+      ![offerAttributes.pay_region_id, offerAttributes.receive_region_id].some(
+        (regionId) => regionId !== null && regionScope.has(regionId),
       )
     ) {
       continue
@@ -331,9 +342,24 @@ export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
 
     if (offersError) throw offersError
 
+    const coverageRegionIds = context.targetPolicy.coverageRegionIds
+    const allowedRegionIds =
+      coverageRegionIds === undefined
+        ? []
+        : Array.isArray(coverageRegionIds) &&
+            coverageRegionIds.length <= 100 &&
+            coverageRegionIds.every(
+              (value) => typeof value === 'string' && UUID_RE.test(value),
+            )
+          ? [...new Set(coverageRegionIds as string[])]
+          : (() => {
+              throw new Error('COVERAGE_SOURCING_REGION_SCOPE_INVALID')
+            })()
+
     return buildCoverageSupplierCandidates(
       request,
       (offerRows ?? []) as CoverageOfferHistoryRow[],
+      allowedRegionIds,
     )
   },
 }
