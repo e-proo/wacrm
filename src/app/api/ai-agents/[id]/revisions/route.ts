@@ -239,11 +239,11 @@ export async function POST(
       copiedCapabilities = await inheritAgentRevisionCapabilities(
         supabaseAdmin(),
         {
-        accountId: ctx.accountId,
-        agentId: id,
-        sourceRevisionId: publishedId,
-        targetRevisionId: revisionId,
-        actorUserId: ctx.userId,
+          accountId: ctx.accountId,
+          agentId: id,
+          sourceRevisionId: publishedId,
+          targetRevisionId: revisionId,
+          actorUserId: ctx.userId,
         },
       )
 
