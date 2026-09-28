@@ -202,7 +202,7 @@ begin
        'public.replace_ai_agent_revision_capabilities(uuid,uuid,uuid,jsonb,uuid)',
        'EXECUTE'
      )
-     or not has_function_privilege(
+     or has_function_privilege(
        'authenticated',
        'public.replace_ai_agent_revision_capabilities(uuid,uuid,uuid,jsonb,uuid)',
        'EXECUTE'
@@ -213,6 +213,16 @@ begin
        'EXECUTE'
      ) then
     raise exception 'capability replace RPC privileges are unsafe';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_indexes
+    where schemaname='public'
+      and tablename='ai_agent_revision_capabilities'
+      and indexname='ai_agent_revision_capabilities_granted_by_idx'
+  ) then
+    raise exception 'capability granted_by covering index is missing';
   end if;
 
   if has_function_privilege(
