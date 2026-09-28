@@ -12,6 +12,7 @@ import {
   runClaimedAgentExecution,
   type AgentExecutionContext,
 } from './execution'
+import { evaluateCurrentTaskCompletion } from '../tasks/current-platform'
 import {
   applyAgentHumanHandoff,
   localizedAdminFallback,
@@ -458,6 +459,52 @@ async function executeAgentRun(
     trustedAdminIdentityId: trustedAdmin?.id ?? null,
     trustedAdminCapabilities: trustedAdmin?.allowedCapabilities ?? [],
   })
+
+  if (decision.taskReply && execution.taskOutcome) {
+    const outcomeState = await db.rpc('record_agent_task_target_outcome', {
+      p_run_id: runId,
+      p_outcome: execution.taskOutcome.outcome,
+      p_detail: execution.taskOutcome.detail,
+    })
+
+    if (outcomeState.error || outcomeState.data !== true) {
+      console.error(
+        '[ai dispatch] task target outcome persistence failed:',
+        outcomeState.error,
+      )
+
+      const paused = await db.rpc('pause_agent_task_targets_for_human', {
+        p_account_id: args.accountId,
+        p_conversation_id: args.conversationId,
+        p_actor_id: 'task-outcome-state-guard',
+        p_reason: 'task_target_outcome_persist_failed',
+      })
+      if (paused.error) {
+        console.error(
+          '[ai dispatch] task outcome fail-closed pause failed:',
+          paused.error,
+        )
+      }
+
+      await markRun(
+        db,
+        args.accountId,
+        runId,
+        'failed',
+        'TASK_TARGET_OUTCOME_PERSIST_FAILED',
+      )
+      return 'failed'
+    }
+
+    try {
+      await evaluateCurrentTaskCompletion(decision.taskReply.taskId)
+    } catch (completionError) {
+      console.error(
+        '[ai dispatch] task completion policy evaluation after target outcome failed:',
+        completionError,
+      )
+    }
+  }
 
   // Proposal tools may commit customer-facing business events transactionally
   // before the model produces its final reply. Flush only events correlated to
