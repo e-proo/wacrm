@@ -595,6 +595,30 @@ BEGIN
     RAISE EXCEPTION 'Agent Task reply correlation RPC surface is incomplete';
   END IF;
 
+  IF to_regprocedure(
+       'public.complete_agent_task_reply_turn(uuid,uuid)'
+     ) IS NULL THEN
+    RAISE EXCEPTION 'Task reply turn completion RPC is missing';
+  END IF;
+
+  IF has_function_privilege(
+       'anon',
+       'public.complete_agent_task_reply_turn(uuid,uuid)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'authenticated',
+       'public.complete_agent_task_reply_turn(uuid,uuid)',
+       'EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'service_role',
+       'public.complete_agent_task_reply_turn(uuid,uuid)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'Task reply turn completion RPC privileges are unsafe';
+  END IF;
+
   IF has_function_privilege(
        'anon',
        'public.correlate_agent_task_inbound_reply(uuid,uuid,uuid,uuid,boolean)',
