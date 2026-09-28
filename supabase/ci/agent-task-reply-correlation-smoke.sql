@@ -222,6 +222,24 @@ begin
     'Task reply response','wamid.reply.agent-response','sent'
   );
 
+  if not public.complete_agent_task_reply_turn(
+    v_run_id,
+    v_task_reply_response
+  ) then
+    raise exception 'task reply response did not persist target state';
+  end if;
+
+  if not exists (
+    select 1
+    from public.ai_agent_task_targets
+    where id=v_target_reply
+      and status='awaiting_reply'
+      and last_outbound_message_id=v_task_reply_response
+      and next_action_at is null
+  ) then
+    raise exception 'task reply response did not transition target to awaiting_reply';
+  end if;
+
   update public.ai_agent_runs
   set status='succeeded',
       completed_at=now(),
@@ -351,6 +369,24 @@ begin
       and last_outbound_message_id=v_human_local
   ) then
     raise exception 'late send completion overwrote paused_for_human';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.complete_agent_task_reply_turn(uuid,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.complete_agent_task_reply_turn(uuid,uuid)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.complete_agent_task_reply_turn(uuid,uuid)',
+       'EXECUTE'
+     ) then
+    raise exception 'task reply completion RPC privileges are unsafe';
   end if;
 
   if has_function_privilege(
