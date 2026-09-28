@@ -242,6 +242,38 @@ export async function loadCoverageSourcingTaskContext(
   }
 }
 
+export function buildCoverageSupplierCandidates(
+  request: CoverageRequestRow,
+  offerRows: readonly CoverageOfferHistoryRow[],
+): AgentTaskTargetCandidate[] {
+  const requestAttributes = readCoverageAttributes(request.attributes)
+  const candidates: AgentTaskTargetCandidate[] = []
+
+  for (const row of offerRows) {
+    if (row.provider_contact_id === request.requester_contact_id) continue
+    if (!UUID_RE.test(row.provider_contact_id)) continue
+
+    const offerAttributes = readCoverageAttributes(row.attributes)
+    if (
+      !coverageOfferMatchesSourcingRequest(
+        requestAttributes,
+        offerAttributes,
+      )
+    ) {
+      continue
+    }
+
+    candidates.push({
+      contactId: row.provider_contact_id,
+      counterpartyRole: 'coverage_supplier',
+      sortKey:
+        supplierHistorySortKey(row) + ':' + row.provider_contact_id,
+    })
+  }
+
+  return candidates
+}
+
 export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
   key: 'coverage.supplier_candidates',
   version: 1,
@@ -270,8 +302,6 @@ export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
     }
     if (!(positiveRemaining(request) > 0)) return []
 
-    const requestAttributes = readCoverageAttributes(request.attributes)
-
     const queryLimit = Math.max(
       20,
       Math.min(context.maxCandidates * 10, 1000),
@@ -290,29 +320,10 @@ export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
 
     if (offersError) throw offersError
 
-    const candidates: AgentTaskTargetCandidate[] = []
-    for (const raw of offerRows ?? []) {
-      const row = raw as CoverageOfferHistoryRow
-      if (!UUID_RE.test(row.provider_contact_id)) continue
-      const offerAttributes = readCoverageAttributes(row.attributes)
-      if (
-        !coverageOfferMatchesSourcingRequest(
-          requestAttributes,
-          offerAttributes,
-        )
-      ) {
-        continue
-      }
-
-      candidates.push({
-        contactId: row.provider_contact_id,
-        counterpartyRole: 'coverage_supplier',
-        sortKey:
-          supplierHistorySortKey(row) + ':' + row.provider_contact_id,
-      })
-    }
-
-    return candidates
+    return buildCoverageSupplierCandidates(
+      request,
+      (offerRows ?? []) as CoverageOfferHistoryRow[],
+    )
   },
 }
 
@@ -333,10 +344,13 @@ function contextString(
 ): string {
   const request = context.taskContext.request
   if (!request || typeof request !== 'object' || Array.isArray(request)) {
-    return ''
+    throw new Error('COVERAGE_SOURCING_REQUEST_SNAPSHOT_REQUIRED')
   }
   const value = (request as Record<string, unknown>)[key]
-  return typeof value === 'string' ? value : ''
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error('COVERAGE_SOURCING_REQUEST_SNAPSHOT_INVALID')
+  }
+  return value.trim()
 }
 
 export const COVERAGE_SOURCING_MESSAGE_POLICY: AgentTaskOutboundMessagePolicy = {
