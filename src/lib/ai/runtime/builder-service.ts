@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import { analyzeRouteConflicts } from './route-conflicts'
 import { planeForAgentPurpose } from './tool-grant-plane-policy'
+import { validateBuilderPublishPolicy } from '../tasks/builder-policy'
 
 export interface PublishCheck {
   path: string
@@ -25,7 +26,7 @@ export async function validateAgentRevisionForPublish(
   const [agentRes, revisionRes, connectionsRes, grantsRes, routesRes, identitiesRes, budgetsRes] =
     await Promise.all([
       db.from('ai_agents').select('id, status, purpose, published_revision_id').eq('account_id', accountId).eq('id', agentId).maybeSingle(),
-      db.from('ai_agent_revisions').select('id, agent_id, status, provider_connection_id, model, max_tool_rounds, handoff_human_member_id').eq('account_id', accountId).eq('id', revisionId).maybeSingle(),
+      db.from('ai_agent_revisions').select('id, agent_id, status, provider_connection_id, model, max_tool_rounds, handoff_human_member_id, operational_mode, outreach_policy').eq('account_id', accountId).eq('id', revisionId).maybeSingle(),
       db.from('ai_provider_connections').select('id, status').eq('account_id', accountId),
       db.from('ai_agent_tool_grants').select('tool_key, tool_version, permission').eq('account_id', accountId).eq('agent_revision_id', revisionId),
       db.from('ai_agent_routes').select('id, account_id, agent_id, name, channel, route_kind, priority, is_active, conditions, stop_processing, created_at, updated_at').eq('account_id', accountId),
@@ -50,6 +51,8 @@ export async function validateAgentRevisionForPublish(
     model: string
     max_tool_rounds: number
     handoff_human_member_id: string | null
+    operational_mode: string
+    outreach_policy: Record<string, unknown> | null
   } | null
   const selectedConnection = revision?.provider_connection_id
     ? (connectionsRes.data ?? []).find((row) => row.id === revision.provider_connection_id)
@@ -66,6 +69,20 @@ export async function validateAgentRevisionForPublish(
   if (revision && revision.max_tool_rounds < 0) checks.push({ path: 'revision.max_tool_rounds', code: 'INVALID_TOOL_ROUNDS', message: 'Tool rounds cannot be negative.', severity: 'error' })
   if (agent?.purpose === 'admin_operations' && revision && revision.max_tool_rounds < 1) checks.push({ path: 'revision.max_tool_rounds', code: 'ADMIN_TOOL_ROUNDS_REQUIRED', message: 'Admin operations agents require at least one tool round so they can read authoritative business data.', severity: 'error' })
   if (agent?.purpose === 'customer_support' && revision && !revision.handoff_human_member_id) checks.push({ path: 'revision.handoff_human_member_id', code: 'HANDOFF_MEMBER_REQUIRED', message: 'Customer support agents require a human handoff teammate.', severity: 'error' })
+  if (revision) {
+    const builderPolicyError = validateBuilderPublishPolicy({
+      operationalMode: revision.operational_mode ?? 'reactive',
+      outreachPolicy: revision.outreach_policy ?? {},
+    })
+    if (builderPolicyError) {
+      checks.push({
+        path: 'revision.outreach_policy',
+        code: 'INVALID_OUTREACH_POLICY',
+        message: builderPolicyError,
+        severity: 'error',
+      })
+    }
+  }
   if (revision?.handoff_human_member_id) {
     const { data: member, error: memberError } = await db
       .from('profiles')
