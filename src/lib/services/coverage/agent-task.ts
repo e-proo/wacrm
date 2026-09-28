@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { defineAgentTaskType } from '@/lib/ai/tasks/contracts'
+import type { AgentTaskCompletionPolicy } from '@/lib/ai/tasks/completion-policy'
 import type {
   AgentTaskModule,
   AgentTaskTargetCandidate,
@@ -430,9 +431,143 @@ export const COVERAGE_SOURCING_MESSAGE_POLICY: AgentTaskOutboundMessagePolicy = 
   },
 }
 
+
+export const COVERAGE_SOURCING_COMPLETION_POLICY: AgentTaskCompletionPolicy = {
+  key: 'coverage.sourcing_completion',
+  version: 1,
+  domain: 'coverage',
+
+  async evaluate(db, context) {
+    const coverageRequestId = parseCoverageSourcingRequestId(
+      context.taskContext,
+    )
+
+    const { data: request, error: requestError } = await db
+      .from('coverage_requests')
+      .select(
+        'id, requested_amount, reserved_amount, fulfilled_amount, status',
+      )
+      .eq('account_id', context.accountId)
+      .eq('id', coverageRequestId)
+      .maybeSingle()
+    if (requestError) throw requestError
+
+    if (!request) {
+      return {
+        status: 'failed',
+        reason: 'coverage_request_not_found',
+        payload: { coverageRequestId },
+      }
+    }
+
+    const requestRow = request as {
+      requested_amount: string | number
+      reserved_amount: string | number
+      fulfilled_amount: string | number
+      status: string
+    }
+    const remaining = Math.max(
+      Number(requestRow.requested_amount) -
+        Number(requestRow.reserved_amount ?? 0) -
+        Number(requestRow.fulfilled_amount ?? 0),
+      0,
+    )
+
+    if (
+      remaining <= 0 ||
+      requestRow.status === 'fully_reserved' ||
+      requestRow.status === 'fulfilled'
+    ) {
+      return {
+        status: 'completed',
+        reason: 'coverage_request_satisfied',
+        payload: {
+          coverageRequestId,
+          remainingAmount: String(remaining),
+          requestStatus: requestRow.status,
+        },
+      }
+    }
+
+    if (
+      requestRow.status === 'cancelled' ||
+      requestRow.status === 'expired'
+    ) {
+      return {
+        status: 'cancelled',
+        reason: 'coverage_request_terminal',
+        payload: {
+          coverageRequestId,
+          requestStatus: requestRow.status,
+        },
+      }
+    }
+
+    const { data: targets, error: targetError } = await db
+      .from('ai_agent_task_targets')
+      .select('status')
+      .eq('account_id', context.accountId)
+      .eq('task_id', context.taskId)
+    if (targetError) throw targetError
+
+    const statuses = (targets ?? []).map(
+      (target) => (target as { status: string }).status,
+    )
+    const actionable = new Set([
+      'candidate',
+      'eligible',
+      'queued',
+      'preparing',
+      'sending',
+      'contacted',
+      'awaiting_reply',
+      'replied',
+      'in_progress',
+    ])
+    const actionableCount = statuses.filter((status) =>
+      actionable.has(status),
+    ).length
+
+    if (actionableCount > 0) {
+      return {
+        status: 'continue',
+        reason: 'coverage_targets_still_actionable',
+        payload: {
+          coverageRequestId,
+          remainingAmount: String(remaining),
+          actionableTargets: actionableCount,
+        },
+      }
+    }
+
+    const completedTargets = statuses.filter(
+      (status) => status === 'completed',
+    ).length
+    const humanTargets = statuses.filter(
+      (status) => status === 'paused_for_human',
+    ).length
+
+    return {
+      status: 'partially_completed',
+      reason:
+        statuses.length === 0
+          ? 'no_supplier_candidates'
+          : 'supplier_targets_exhausted',
+      payload: {
+        coverageRequestId,
+        remainingAmount: String(remaining),
+        targetCount: statuses.length,
+        completedTargets,
+        humanTargets,
+      },
+    }
+  },
+}
+
 export const COVERAGE_SOURCING_TASK_MODULE: AgentTaskModule = {
   domain: 'coverage',
   taskTypes: [COVERAGE_SOURCING_TASK_TYPE],
   targetResolvers: [COVERAGE_SUPPLIER_CANDIDATE_RESOLVER],
   outboundMessagePolicies: [COVERAGE_SOURCING_MESSAGE_POLICY],
+  completionPolicies: [COVERAGE_SOURCING_COMPLETION_POLICY],
 }
