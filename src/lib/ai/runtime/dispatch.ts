@@ -588,6 +588,44 @@ async function executeAgentRun(
     return 'failed'
   }
 
+  if (decision.taskReply) {
+    const taskReplyState = await db.rpc('complete_agent_task_reply_turn', {
+      p_run_id: runId,
+      p_local_message_id: sent.local_message_id,
+    })
+    if (taskReplyState.error || taskReplyState.data !== true) {
+      console.error(
+        '[ai dispatch] task reply target state persistence failed:',
+        taskReplyState.error,
+      )
+
+      // A reply already left the transport boundary. Fail closed by pausing
+      // this conversation's Task Targets so the orchestrator cannot emit a
+      // second automated follow-up from stale state.
+      const paused = await db.rpc('pause_agent_task_targets_for_human', {
+        p_account_id: args.accountId,
+        p_conversation_id: args.conversationId,
+        p_actor_id: 'task-reply-state-guard',
+        p_reason: 'task_reply_state_persist_failed',
+      })
+      if (paused.error) {
+        console.error(
+          '[ai dispatch] task reply fail-closed pause failed:',
+          paused.error,
+        )
+      }
+
+      await markRun(
+        db,
+        args.accountId,
+        runId,
+        'failed',
+        'TASK_REPLY_STATE_PERSIST_FAILED',
+      )
+      return 'failed'
+    }
+  }
+
   const { data: completed, error: completeErr } = await db
     .from('ai_agent_runs')
     .update({
