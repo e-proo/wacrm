@@ -12,7 +12,10 @@
 import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
-import { CURRENT_AGENT_TASK_PLATFORM } from '@/lib/ai/tasks/current-platform'
+import {
+  BUILDER_OPERATIONAL_MODES,
+  validateBuilderOutreachPolicy,
+} from '@/lib/ai/tasks/builder-policy'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -35,38 +38,6 @@ interface UpdateBody {
   handoffHumanMemberId?: string | null
   operationalMode?: 'reactive' | 'outbound' | 'both'
   outreachPolicy?: Record<string, unknown>
-}
-
-const OUTREACH_SCOPE_KINDS = new Set([
-  'segments', 'tags', 'service_relationship', 'regions', 'predefined_filter', 'domain_selector',
-])
-
-function validateOutreachPolicy(policy: Record<string, unknown>): string | null {
-  const taskTypes = policy.taskTypes
-  if (taskTypes !== undefined) {
-    if (!Array.isArray(taskTypes)) return 'outreachPolicy.taskTypes must be an array'
-    for (const item of taskTypes) {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return 'Invalid Task Type selection'
-      const row = item as { key?: unknown; version?: unknown }
-      if (typeof row.key !== 'string' || !Number.isInteger(row.version)) return 'Invalid Task Type selection'
-      if (!CURRENT_AGENT_TASK_PLATFORM.taskTypes.get(row.key, Number(row.version))) {
-        return `Task Type ${row.key}@${row.version} is not registered`
-      }
-    }
-  }
-
-  const targetScope = policy.targetScope
-  if (targetScope !== undefined) {
-    if (!targetScope || typeof targetScope !== 'object' || Array.isArray(targetScope)) return 'Invalid target scope'
-    const kind = (targetScope as { kind?: unknown }).kind
-    if (typeof kind !== 'string' || !OUTREACH_SCOPE_KINDS.has(kind)) return 'Target scope must use a registered Builder scope kind'
-  }
-
-  const approvalMode = policy.approvalMode
-  if (approvalMode !== undefined && !['none', 'task', 'batch'].includes(String(approvalMode))) {
-    return 'Invalid approval mode'
-  }
-  return null
 }
 
 export async function GET(
@@ -241,7 +212,7 @@ export async function PATCH(
     }
 
     if (body.operationalMode !== undefined) {
-      if (!['reactive', 'outbound', 'both'].includes(body.operationalMode)) {
+      if (!BUILDER_OPERATIONAL_MODES.includes(body.operationalMode)) {
         return NextResponse.json({ error: 'operationalMode must be reactive, outbound or both', code: 'INVALID_OPERATIONAL_MODE' }, { status: 400 })
       }
       update.operational_mode = body.operationalMode
@@ -250,7 +221,7 @@ export async function PATCH(
       if (!body.outreachPolicy || Array.isArray(body.outreachPolicy) || typeof body.outreachPolicy !== 'object') {
         return NextResponse.json({ error: 'outreachPolicy must be an object', code: 'INVALID_OUTREACH_POLICY' }, { status: 400 })
       }
-      const policyError = validateOutreachPolicy(body.outreachPolicy)
+      const policyError = validateBuilderOutreachPolicy(body.outreachPolicy)
       if (policyError) {
         return NextResponse.json({ error: policyError, code: 'INVALID_OUTREACH_POLICY' }, { status: 400 })
       }
