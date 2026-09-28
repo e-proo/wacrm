@@ -83,6 +83,83 @@ const UUID_RE =
 const KEY_RE = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/
 const HHMM_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/
 
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isTargetScopeShape(value: unknown): value is AgentBuilderTargetScope {
+  if (!isRecord(value)) return false
+  if (!isStringArray(value.requiredTagIds)) return false
+  if (!isStringArray(value.excludedTagIds)) return false
+  if (!isStringArray(value.serviceIds)) return false
+  if (!isStringArray(value.regionIds)) return false
+
+  const selector = value.domainSelector
+  if (selector === null) return true
+  if (!isRecord(selector)) return false
+  return (
+    typeof selector.key === 'string' &&
+    isRecord(selector.params)
+  )
+}
+
+function isWorkingHoursShape(
+  value: unknown,
+): value is AgentBuilderWorkingHours {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.enabled === 'boolean' &&
+    typeof value.timezone === 'string' &&
+    Array.isArray(value.weekdays) &&
+    value.weekdays.every(isNumber) &&
+    typeof value.start === 'string' &&
+    typeof value.end === 'string'
+  )
+}
+
+function isTaskBindingShape(value: unknown): value is AgentBuilderTaskBinding {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.taskType === 'string' &&
+    isNumber(value.taskTypeVersion) &&
+    isTargetScopeShape(value.targetScope) &&
+    isNumber(value.maxTargets) &&
+    isNumber(value.maxAttemptsPerTarget) &&
+    isNumber(value.maxFollowups) &&
+    isNumber(value.cooldownMinutes) &&
+    isNumber(value.maxNewContactsPerHour) &&
+    isNumber(value.maxContactsPerAgentPerDay) &&
+    isWorkingHoursShape(value.workingHours) &&
+    isNumber(value.dailyMessageBudget) &&
+    isNumber(value.dailyTokenBudget) &&
+    BUILDER_APPROVAL_MODES_FOR_SHAPE.has(String(value.approvalMode))
+  )
+}
+
+const BUILDER_APPROVAL_MODES_FOR_SHAPE = new Set(['none', 'task', 'batch'])
+
+export function isAgentBuilderV2Configuration(
+  value: unknown,
+): value is AgentBuilderV2Configuration {
+  if (!isRecord(value)) return false
+  return (
+    AGENT_OPERATIONAL_MODES.includes(
+      value.operationalMode as AgentOperationalMode,
+    ) &&
+    Array.isArray(value.bindings) &&
+    value.bindings.every(isTaskBindingShape)
+  )
+}
+
 export function listBuilderTaskTypes(
   registry: AgentTaskTypeRegistry,
 ): readonly AgentBuilderTaskTypeView[] {
