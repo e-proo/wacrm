@@ -108,25 +108,29 @@ describe('Coverage sourcing Agent Task', () => {
       [
         {
           provider_contact_id: REQUESTER,
-          attributes: matchingOfferAttributes(),
+          attributes:
+            matchingOfferAttributes() as unknown as Record<string, unknown>,
           status: 'active',
           created_at: '2026-09-28T00:00:00.000Z',
         },
         {
           provider_contact_id: SUPPLIER_A,
-          attributes: requestAttributes(),
+          attributes:
+            requestAttributes() as unknown as Record<string, unknown>,
           status: 'active',
           created_at: '2026-09-28T00:00:00.000Z',
         },
         {
           provider_contact_id: SUPPLIER_A,
-          attributes: matchingOfferAttributes(),
+          attributes:
+            matchingOfferAttributes() as unknown as Record<string, unknown>,
           status: 'fulfilled',
           created_at: '2026-09-27T00:00:00.000Z',
         },
         {
           provider_contact_id: SUPPLIER_B,
-          attributes: matchingOfferAttributes(),
+          attributes:
+            matchingOfferAttributes() as unknown as Record<string, unknown>,
           status: 'active',
           created_at: '2026-09-26T00:00:00.000Z',
         },
