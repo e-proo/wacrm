@@ -11,6 +11,7 @@ import type {
   AgentTaskOutboundPolicyContext,
 } from '@/lib/ai/tasks/outbound-policy'
 import {
+  normalizeCoverageAttributes,
   readCoverageAttributes,
   type CoverageAttributes,
   type CoverageMethod,
@@ -237,7 +238,13 @@ export async function loadCoverageSourcingTaskContext(
       requestedAmount: String(request.requested_amount),
       remainingAmount: String(remaining),
       currency: request.currency,
-      attributes: readCoverageAttributes(request.attributes),
+      attributes: (() => {
+        const normalized = normalizeCoverageAttributes(request.attributes)
+        if (!normalized.ok) {
+          throw new Error('COVERAGE_SOURCING_REQUEST_ATTRIBUTES_INVALID')
+        }
+        return normalized.normalized
+      })(),
     },
   }
 }
@@ -246,18 +253,23 @@ export function buildCoverageSupplierCandidates(
   request: CoverageRequestRow,
   offerRows: readonly CoverageOfferHistoryRow[],
 ): AgentTaskTargetCandidate[] {
-  const requestAttributes = readCoverageAttributes(request.attributes)
+  const normalizedRequest = normalizeCoverageAttributes(request.attributes)
+  if (!normalizedRequest.ok) {
+    throw new Error('COVERAGE_SOURCING_REQUEST_ATTRIBUTES_INVALID')
+  }
+  const requestAttributes = normalizedRequest.normalized
   const candidates: AgentTaskTargetCandidate[] = []
 
   for (const row of offerRows) {
     if (row.provider_contact_id === request.requester_contact_id) continue
     if (!UUID_RE.test(row.provider_contact_id)) continue
 
-    const offerAttributes = readCoverageAttributes(row.attributes)
+    const normalizedOffer = normalizeCoverageAttributes(row.attributes)
+    if (!normalizedOffer.ok) continue
     if (
       !coverageOfferMatchesSourcingRequest(
         requestAttributes,
-        offerAttributes,
+        normalizedOffer.normalized,
       )
     ) {
       continue
