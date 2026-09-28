@@ -8,6 +8,10 @@ import {
   processAgentTaskQueue,
   type AgentTaskWorkerResult,
 } from '../tasks/orchestrator'
+import {
+  processAgentTaskOutboundRunQueue,
+  type AgentTaskOutboundWorkerResult,
+} from '../tasks/outbound-worker'
 
 export interface AgentWorkerResult {
   swept: { scanned: number; reaped: number }
@@ -19,6 +23,7 @@ export interface AgentWorkerResult {
   notifications: NotificationWorkerResult
   changeRequests: ChangeRequestWorkerResult
   tasks: AgentTaskWorkerResult
+  outboundTasks: AgentTaskOutboundWorkerResult
 }
 
 
@@ -199,6 +204,10 @@ export async function processAgentRunQueue(input: {
     workerId: input.workerId,
     limit,
   })
+  const outboundTasks = await processAgentTaskOutboundRunQueue({
+    workerId: input.workerId,
+    limit,
+  })
   const swept = await sweepAgentRuns(db)
   const { data: candidates, error } = await db
     .from('ai_agent_runs')
@@ -243,5 +252,6 @@ export async function processAgentRunQueue(input: {
     notifications,
     changeRequests,
     tasks,
+    outboundTasks,
   }
 }
