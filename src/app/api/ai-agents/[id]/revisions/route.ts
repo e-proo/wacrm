@@ -128,7 +128,7 @@ export async function POST(
       const { data: prev, error: prevErr } = await db
         .from('ai_agent_revisions')
         .select(
-          'revision_number, provider_connection_id, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id, settings',
+          'revision_number, provider_connection_id, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id, operational_mode, outreach_policy, settings',
         )
         .eq('account_id', ctx.accountId)
         .eq('id', publishedId)
@@ -186,6 +186,10 @@ export async function POST(
           (source?.max_ai_replies_per_conversation as number) ?? 3,
         handoff_human_member_id:
           (source?.handoff_human_member_id as string | null) ?? null,
+        operational_mode:
+          (source?.operational_mode as string) ?? 'reactive',
+        outreach_policy:
+          (source?.outreach_policy as Record<string, unknown>) ?? {},
         settings: (source?.settings as Record<string, unknown>) ?? {},
         created_by: ctx.userId,
       })
