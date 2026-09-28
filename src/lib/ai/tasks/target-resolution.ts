@@ -7,6 +7,10 @@ import {
   type AgentTaskOutboundMessagePolicy,
 } from './outbound-policy'
 import { validateTaskManifestToolPolicy } from './capability-policy'
+import {
+  AgentTaskCompletionPolicyRegistry,
+  type AgentTaskCompletionPolicy,
+} from './completion-policy'
 
 export interface AgentTaskTargetCandidate {
   contactId: string
@@ -67,6 +71,7 @@ export interface AgentTaskModule {
   taskTypes: readonly AgentTaskTypeManifest[]
   targetResolvers: readonly AgentTaskTargetResolver[]
   outboundMessagePolicies: readonly AgentTaskOutboundMessagePolicy[]
+  completionPolicies: readonly AgentTaskCompletionPolicy[]
 }
 
 const KEY_RE = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/
@@ -113,10 +118,12 @@ export function buildAgentTaskPlatform(modules: readonly AgentTaskModule[]): {
   taskTypes: AgentTaskTypeRegistry
   targetResolvers: AgentTaskTargetResolverRegistry
   outboundMessagePolicies: AgentTaskOutboundPolicyRegistry
+  completionPolicies: AgentTaskCompletionPolicyRegistry
 } {
   const taskTypes = new AgentTaskTypeRegistry()
   const targetResolvers = new AgentTaskTargetResolverRegistry()
   const outboundMessagePolicies = new AgentTaskOutboundPolicyRegistry()
+  const completionPolicies = new AgentTaskCompletionPolicyRegistry()
 
   for (const taskModule of modules) {
     for (const taskType of taskModule.taskTypes) {
@@ -127,6 +134,9 @@ export function buildAgentTaskPlatform(modules: readonly AgentTaskModule[]): {
     }
     for (const policy of taskModule.outboundMessagePolicies) {
       outboundMessagePolicies.register(taskModule.domain, policy)
+    }
+    for (const policy of taskModule.completionPolicies) {
+      completionPolicies.register(taskModule.domain, policy)
     }
   }
 
@@ -164,9 +174,29 @@ export function buildAgentTaskPlatform(modules: readonly AgentTaskModule[]): {
         `Task type ${taskType.key}@${taskType.version} cannot bind cross-domain outbound policy ${outboundPolicy.key}.`,
       )
     }
+
+    const completionPolicy = completionPolicies.get(
+      taskType.completionPolicy.key,
+      taskType.completionPolicy.version,
+    )
+    if (!completionPolicy) {
+      throw new Error(
+        `Task type ${taskType.key}@${taskType.version} references unregistered completion policy ${taskType.completionPolicy.key}.`,
+      )
+    }
+    if (completionPolicy.domain !== taskType.domain) {
+      throw new Error(
+        `Task type ${taskType.key}@${taskType.version} cannot bind cross-domain completion policy ${completionPolicy.key}.`,
+      )
+    }
   }
 
-  return { taskTypes, targetResolvers, outboundMessagePolicies }
+  return {
+    taskTypes,
+    targetResolvers,
+    outboundMessagePolicies,
+    completionPolicies,
+  }
 }
 
 export function parseAgentTaskEligibilityPolicy(
