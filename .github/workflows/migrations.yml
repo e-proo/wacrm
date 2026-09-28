@@ -98,6 +98,9 @@ jobs:
       - name: Verify generic Agent Task creation
         run: supabase db query --local --file supabase/ci/agent-task-creation-smoke.sql
 
+      - name: Verify Coverage sourcing business outcome
+        run: supabase db query --local --file supabase/ci/coverage-sourcing-agent-smoke.sql
+
       - name: Verify Intents controlled cutover safety
         run: supabase db query --local --file supabase/ci/intents-cutover-smoke.sql
 
