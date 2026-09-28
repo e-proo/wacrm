@@ -174,7 +174,7 @@ export function mapAgentLoopToExecutionResult(
   return {
     status,
     customerMessage: loop.text,
-    taskOutcome: null,
+    taskOutcome: loop.taskOutcome ?? null,
     nextActionHint: null,
     toolCalls: loop.toolCalls,
     usage: {
