@@ -651,8 +651,13 @@ BEGIN
        'public.replace_ai_agent_revision_capabilities(uuid,uuid,uuid,jsonb,uuid)',
        'EXECUTE'
      )
-     OR NOT has_function_privilege(
+     OR has_function_privilege(
        'authenticated',
+       'public.replace_ai_agent_revision_capabilities(uuid,uuid,uuid,jsonb,uuid)',
+       'EXECUTE'
+     )
+     OR NOT has_function_privilege(
+       'service_role',
        'public.replace_ai_agent_revision_capabilities(uuid,uuid,uuid,jsonb,uuid)',
        'EXECUTE'
      )
@@ -667,6 +672,16 @@ BEGIN
        'EXECUTE'
      ) THEN
     RAISE EXCEPTION 'Outbound capability/task-policy RPC privileges are unsafe';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_indexes
+    WHERE schemaname='public'
+      AND tablename='ai_agent_revision_capabilities'
+      AND indexname='ai_agent_revision_capabilities_granted_by_idx'
+  ) THEN
+    RAISE EXCEPTION 'Agent Revision capability granted_by index is missing';
   END IF;
 
   RAISE NOTICE 'schema verification passed';
