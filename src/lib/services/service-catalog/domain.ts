@@ -12,7 +12,7 @@ export const SERVICES_DOMAIN = defineBusinessDomain({
   title: 'Service Catalog',
   description:
     'Service discovery, matching, revision proposals, and deterministic approved service revision publication.',
-  capabilities: ['services.read', 'services.propose'],
+  capabilities: ['services.read', 'services.propose', 'services.promotion'],
   tools: SERVICES_TOOL_MANIFESTS,
   changeActions: [
     {
