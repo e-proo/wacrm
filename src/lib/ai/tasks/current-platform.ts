@@ -1,4 +1,5 @@
 import { COVERAGE_SOURCING_TASK_MODULE } from '@/lib/services/coverage/agent-task'
+import { SERVICE_PROMOTION_TASK_MODULE } from '@/lib/services/service-catalog/agent-task'
 import {
   buildAgentTaskPlatform,
   materializeRegisteredTaskTargets,
@@ -14,6 +15,7 @@ import { evaluateRegisteredTaskCompletion } from './completion-policy'
  */
 export const CURRENT_AGENT_TASK_MODULES: readonly AgentTaskModule[] = [
   COVERAGE_SOURCING_TASK_MODULE,
+  SERVICE_PROMOTION_TASK_MODULE,
 ]
 
 export const CURRENT_AGENT_TASK_PLATFORM = buildAgentTaskPlatform(
