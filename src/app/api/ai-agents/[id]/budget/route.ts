@@ -10,7 +10,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const { id } = await params
     const { data, error } = await ctx.supabase
       .from('ai_agent_budget_policies')
-      .select('id, agent_id, period, max_runs, max_input_tokens, max_output_tokens, soft_threshold, hard_action, fallback_agent_id, is_active, created_at, updated_at')
+      .select('id, agent_id, period, max_runs, max_input_tokens, max_output_tokens, max_messages, max_estimated_provider_cost_micros, soft_threshold, hard_action, fallback_agent_id, is_active, created_at, updated_at')
       .eq('account_id', ctx.accountId)
       .or(`agent_id.eq.${id},agent_id.is.null`)
       .order('period', { ascending: true })
@@ -32,6 +32,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       maxRuns?: number
       maxInputTokens?: number
       maxOutputTokens?: number
+      maxMessages?: number | null
+      maxEstimatedProviderCostMicros?: number | null
       softThreshold?: number
       hardAction?: 'handoff' | 'pause' | 'cheaper_agent'
       fallbackAgentId?: string | null
@@ -47,13 +49,16 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         max_runs: body.maxRuns ?? 1000,
         max_input_tokens: body.maxInputTokens ?? 1000000,
         max_output_tokens: body.maxOutputTokens ?? 500000,
+        max_messages: body.maxMessages ?? null,
+        max_estimated_provider_cost_micros:
+          body.maxEstimatedProviderCostMicros ?? null,
         soft_threshold: body.softThreshold ?? 0.8,
         hard_action: body.hardAction ?? 'handoff',
         fallback_agent_id: body.fallbackAgentId ?? null,
         is_active: body.isActive ?? true,
         created_by: ctx.userId,
       }, { onConflict: 'account_id,agent_id,period' })
-      .select('id, agent_id, period, max_runs, max_input_tokens, max_output_tokens, soft_threshold, hard_action, fallback_agent_id, is_active, created_at, updated_at')
+      .select('id, agent_id, period, max_runs, max_input_tokens, max_output_tokens, max_messages, max_estimated_provider_cost_micros, soft_threshold, hard_action, fallback_agent_id, is_active, created_at, updated_at')
       .single()
     if (error) throw error
     return NextResponse.json({ policy: data })
