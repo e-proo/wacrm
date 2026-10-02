@@ -69,7 +69,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
   const { data: reservation, error: reservationError } = await db
     .from('ai_agent_task_outbound_messages')
     .select(
-      'id, account_id, task_id, task_target_id, status, message_kind, candidate_text, template_name, template_language, template_params, idempotency_key, local_message_id, whatsapp_message_id',
+      'id, account_id, task_id, task_target_id, run_id, status, message_kind, candidate_text, template_name, template_language, template_params, idempotency_key, local_message_id, whatsapp_message_id',
     )
     .eq('id', input.reservationId)
     .maybeSingle()
@@ -89,6 +89,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
     account_id: string
     task_id: string
     task_target_id: string
+    run_id: string
     status: string
     message_kind: 'text' | 'template'
     candidate_text: string | null
@@ -284,6 +285,8 @@ export async function deliverAgentTaskOutboundReservation(input: {
       scopeType: 'channel',
       scopeKey: 'whatsapp',
       outcome: 'success',
+      runId: row.run_id,
+      taskId: row.task_id,
     })
 
     const { data: completed, error: completionError } = await db.rpc(
@@ -318,6 +321,8 @@ export async function deliverAgentTaskOutboundReservation(input: {
         scopeKey: 'whatsapp',
         outcome: 'failure',
         errorCode: circuitErrorCode(error),
+        runId: row.run_id,
+        taskId: row.task_id,
       })
     }
     const { error: reconciliationError } = await db.rpc(
