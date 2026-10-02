@@ -1179,3 +1179,183 @@ begin
   end if;
 end
 $$;
+
+
+-- Agent Task server-only / authenticated-admin function surface (136-138).
+do $$
+declare
+  v_def text;
+begin
+  if has_function_privilege(
+       'anon',
+       'public.append_agent_run_event(uuid,uuid,text,text,text,jsonb)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.append_agent_run_event(uuid,uuid,text,text,text,jsonb)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.claim_next_agent_run(text,integer)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.claim_next_agent_run(text,integer)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.claim_ai_reply_slot(uuid,integer)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.claim_ai_reply_slot(uuid,integer)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.create_customer_intent(uuid,uuid,uuid,text,text,text,jsonb,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.create_customer_intent(uuid,uuid,uuid,text,text,text,jsonb,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.append_service_activity_event(uuid,text,uuid,text,text,text,jsonb)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.append_service_activity_event(uuid,text,uuid,text,text,text,jsonb)',
+       'EXECUTE'
+     ) then
+    raise exception 'Server-only Agent runtime RPC is exposed to a client role';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.apply_service_agent_change(uuid,uuid,uuid,bigint,uuid,text,text,text,jsonb,uuid,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.apply_service_agent_change(uuid,uuid,uuid,bigint,uuid,text,text,text,jsonb,uuid,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.apply_service_pricing_change(uuid,uuid,uuid,bigint,uuid,text,text,text,text,numeric,numeric,text,jsonb,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.apply_service_pricing_change(uuid,uuid,uuid,bigint,uuid,text,text,text,text,numeric,numeric,text,jsonb,uuid)',
+       'EXECUTE'
+     ) then
+    raise exception 'Approved Service change executor RPC is exposed to a client role';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.create_change_request(uuid,text,uuid,text,jsonb,bigint,text,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.create_change_request(uuid,text,uuid,text,jsonb,bigint,text,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.approve_change_request(uuid,uuid,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.approve_change_request(uuid,uuid,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.match_customer_intent(uuid,uuid,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.match_customer_intent(uuid,uuid,uuid)',
+       'EXECUTE'
+     ) then
+    raise exception 'Legacy Agent mutation RPC is exposed to a client role';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.publish_ai_agent_revision_atomic(uuid,uuid,uuid,bigint,uuid)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'authenticated',
+       'public.publish_ai_agent_revision_atomic(uuid,uuid,uuid,bigint,uuid)',
+       'EXECUTE'
+     ) then
+    raise exception 'Atomic publish grants do not match authenticated-admin contract';
+  end if;
+
+  select pg_get_functiondef(
+    'public.publish_ai_agent_revision_atomic(uuid,uuid,uuid,bigint,uuid)'::regprocedure
+  ) into v_def;
+  if position('IS_ACCOUNT_MEMBER(P_ACCOUNT_ID, ''ADMIN'')' in upper(v_def))=0 then
+    raise exception 'Atomic publish lost its internal admin authorization';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.replace_ai_agent_knowledge_base_assignments(uuid,uuid,jsonb,uuid)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'authenticated',
+       'public.replace_ai_agent_knowledge_base_assignments(uuid,uuid,jsonb,uuid)',
+       'EXECUTE'
+     ) then
+    raise exception 'KB assignment grants do not match authenticated-admin contract';
+  end if;
+
+  select pg_get_functiondef(
+    'public.replace_ai_agent_knowledge_base_assignments(uuid,uuid,jsonb,uuid)'::regprocedure
+  ) into v_def;
+  if position('IS_ACCOUNT_MEMBER(P_ACCOUNT_ID, ''ADMIN'')' in upper(v_def))=0 then
+    raise exception 'KB assignment replacement lost its internal admin authorization';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.guard_ai_agent_kb_assignment_draft()',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.guard_ai_agent_kb_assignment_draft()',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.notify_customer_intent_forwarded()',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.notify_customer_intent_forwarded()',
+       'EXECUTE'
+     ) then
+    raise exception 'Trigger-only Agent/Intent function is directly client-executable';
+  end if;
+end
+$$;
