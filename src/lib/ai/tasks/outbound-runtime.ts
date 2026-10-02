@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../admin-client'
+import { recordRuntimeCircuitEvent } from '../runtime/circuit-breaker'
 import { CURRENT_AGENT_TASK_PLATFORM } from './current-platform'
 import {
   assertValidOutboundMessageCandidate,
@@ -190,6 +191,17 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
   if (error) throw error
 
   const decision = normalizeReservationDecision(data)
+
+  if (!decision.reserved) {
+    await recordRuntimeCircuitEvent({
+      accountId: runRow.account_id,
+      scopeType: 'task_type',
+      scopeKey: taskRow.task_type + '@' + taskRow.task_type_version,
+      outcome: 'rejection',
+      errorCode: decision.reason,
+    })
+  }
+
   return {
     status: decision.reserved ? 'reserved' : 'denied',
     candidate,
