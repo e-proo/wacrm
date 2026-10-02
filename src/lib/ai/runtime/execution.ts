@@ -4,6 +4,10 @@ import { CURRENT_AGENT_TASK_PLATFORM } from '../tasks/current-platform'
 import { authorizeStoredAgentTask } from '../tasks/capability-policy'
 import type { AgentTaskTargetOutcomeObservation } from '../tasks/target-outcome-observation'
 import { runAgentLoop, type AgentLoopResult } from './agent-loop'
+import {
+  assertRuntimeCircuitClosed,
+  RuntimeCircuitOpenError,
+} from './circuit-breaker'
 import type {
   AiAgentRevision,
   AgentPurpose,
@@ -288,6 +292,27 @@ export async function runClaimedAgentExecution(input: {
       taskTypeVersion: authorization.task.taskTypeVersion,
       objective: authorization.task.objective,
       taskContext: authorization.task.taskContext,
+    }
+  }
+
+  if (taskPolicy) {
+    try {
+      await assertRuntimeCircuitClosed({
+        accountId: context.accountId,
+        scopeType: 'task_type',
+        scopeKey:
+          taskPolicy.taskType + '@' + taskPolicy.taskTypeVersion,
+      })
+      await assertRuntimeCircuitClosed({
+        accountId: context.accountId,
+        scopeType: 'channel',
+        scopeKey: context.channel,
+      })
+    } catch (error) {
+      if (error instanceof RuntimeCircuitOpenError) {
+        return failedExecution(error.code)
+      }
+      throw error
     }
   }
 
