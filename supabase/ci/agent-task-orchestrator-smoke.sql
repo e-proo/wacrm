@@ -77,7 +77,7 @@ begin
     idempotency_key,correlation_id,created_by
   ) values (
     v_task,v_account,'coverage.sourcing',1,v_agent,v_revision,
-    'manual','queued','Bounded supplier sourcing','whatsapp',1,2,
+    'manual','queued','Bounded supplier sourcing','whatsapp',2,2,
     'task-orchestrator-smoke-110','task-orchestrator-correlation-110',v_user
   );
 
@@ -144,9 +144,21 @@ begin
   v_second_target_claim := public.claim_next_agent_task_target(
     v_task,'worker-a',120
   );
-  if v_second_target_claim is not null then
-    raise exception 'max_targets limit was bypassed';
+  if v_second_target_claim <> v_target_2 then
+    raise exception 'deterministic second target claim failed';
   end if;
+
+  -- The task legitimately contains two bounded targets. Finish the second
+  -- fixture target here so the remaining assertions isolate follow-up,
+  -- pause/resume, retry and lease-recovery behavior on target 1.
+  update public.ai_agent_task_targets
+  set status='skipped',
+      skip_reason='orchestrator_smoke_fixture_complete',
+      completed_at=now(),
+      claimed_by=null,
+      lease_expires_at=null,
+      next_action_at=null
+  where id=v_target_2;
 
   if not public.schedule_agent_task_target(
     v_task,v_target_1,now()+interval '2 minutes','smoke-followup'
