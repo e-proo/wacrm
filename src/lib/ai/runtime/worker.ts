@@ -12,6 +12,10 @@ import {
   processAgentTaskOutboundRunQueue,
   type AgentTaskOutboundWorkerResult,
 } from '../tasks/outbound-worker'
+import {
+  processAgentTaskTriggerQueue,
+  type AgentTaskTriggerWorkerResult,
+} from '../tasks/trigger-worker'
 
 export interface AgentWorkerResult {
   swept: { scanned: number; reaped: number }
@@ -22,6 +26,7 @@ export interface AgentWorkerResult {
   failed: number
   notifications: NotificationWorkerResult
   changeRequests: ChangeRequestWorkerResult
+  taskTriggers: AgentTaskTriggerWorkerResult
   tasks: AgentTaskWorkerResult
   outboundTasks: AgentTaskOutboundWorkerResult
 }
@@ -200,6 +205,10 @@ export async function processAgentRunQueue(input: {
   const limit = Math.max(1, Math.min(input.limit ?? 20, 100))
   const changeRequests = await processApprovedChangeRequests({ limit })
   const notifications = await processCustomerIntentNotifications({ limit })
+  const taskTriggers = await processAgentTaskTriggerQueue({
+    workerId: input.workerId + ':task-triggers',
+    limit,
+  })
   const tasks = await processAgentTaskQueue({
     workerId: input.workerId,
     limit,
@@ -251,6 +260,7 @@ export async function processAgentRunQueue(input: {
     failed,
     notifications,
     changeRequests,
+    taskTriggers,
     tasks,
     outboundTasks,
   }
