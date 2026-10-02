@@ -247,6 +247,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
       })
       localMessageId = sent.local_message_id
       whatsappMessageId = sent.whatsapp_message_id
+      transportSucceeded = true
     } else {
       if (!row.template_name || !row.template_language) {
         throw new Error('AGENT_OUTBOUND_RESERVED_TEMPLATE_MISSING')
@@ -262,6 +263,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
         params: normalizeTemplateParams(row.template_params),
       })
       whatsappMessageId = sent.whatsapp_message_id
+      transportSucceeded = true
 
       const { data: localMessage, error: localMessageError } = await db
         .from('messages')
