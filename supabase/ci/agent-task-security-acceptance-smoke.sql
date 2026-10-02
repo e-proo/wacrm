@@ -285,6 +285,52 @@ begin
     raise exception 'Target concurrency guard is incomplete';
   end if;
 
+  if has_function_privilege(
+       'anon',
+       'public.create_customer_intent(uuid,uuid,uuid,text,text,text,jsonb,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.create_customer_intent(uuid,uuid,uuid,text,text,text,jsonb,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.claim_ai_reply_slot(uuid,integer)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.claim_ai_reply_slot(uuid,integer)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.create_change_request(uuid,text,uuid,text,jsonb,bigint,text,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.create_change_request(uuid,text,uuid,text,jsonb,bigint,text,text,uuid)',
+       'EXECUTE'
+     ) then
+    raise exception 'Client role can execute a server-only/legacy Agent mutation RPC';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.publish_ai_agent_revision_atomic(uuid,uuid,uuid,bigint,uuid)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'authenticated',
+       'public.publish_ai_agent_revision_atomic(uuid,uuid,uuid,bigint,uuid)',
+       'EXECUTE'
+     ) then
+    raise exception 'Authenticated Agent publish surface is misconfigured';
+  end if;
+
   raise notice 'Agent Task security acceptance smoke passed';
 end
 $$;
