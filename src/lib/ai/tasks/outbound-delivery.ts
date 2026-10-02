@@ -227,6 +227,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
     }
   }
 
+  let transportSucceeded = false
   try {
     let localMessageId: string
     let whatsappMessageId: string
@@ -275,6 +276,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
       localMessageId = localMessage.id
     }
 
+    transportSucceeded = true
     await recordRuntimeCircuitEvent({
       accountId: row.account_id,
       scopeType: 'channel',
@@ -307,13 +309,15 @@ export async function deliverAgentTaskOutboundReservation(input: {
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
-    await recordRuntimeCircuitEvent({
-      accountId: row.account_id,
-      scopeType: 'channel',
-      scopeKey: 'whatsapp',
-      outcome: 'failure',
-      errorCode: circuitErrorCode(error),
-    })
+    if (!transportSucceeded) {
+      await recordRuntimeCircuitEvent({
+        accountId: row.account_id,
+        scopeType: 'channel',
+        scopeKey: 'whatsapp',
+        outcome: 'failure',
+        errorCode: circuitErrorCode(error),
+      })
+    }
     const { error: reconciliationError } = await db.rpc(
       'mark_agent_task_outbound_reconciliation',
       {
