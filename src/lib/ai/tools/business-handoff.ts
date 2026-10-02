@@ -122,6 +122,7 @@ export async function executeCoverageProposeOfferIntegrated(ctx: ToolContext, ar
         ...(args.deal_date ? { deal_date: args.deal_date } : {}) },
       idempotencyKey: `coverage-offer:${bound.sourceMessageId}:${args.service_id}`,
       summary: `اعتماد عرض تغطية ${args.total_amount} ${args.currency}`, actorUserId: ctx.actorUserId,
+      sourceRunId: ctx.runId,
     })
     await linkIntentToChangeRequest({ accountId: ctx.accountId, intentId, changeRequestId: cr.id })
     return { ok: true, data: { intent: { intent_id: intentId, status: 'forwarded_to_admin' }, change_request: { id: cr.id, code: cr.code, confirmation_code: cr.confirmationCode, status: cr.status } }, safe_to_show: true }
@@ -157,6 +158,7 @@ export async function executeCoverageProposeRequest(ctx: ToolContext, args: Cove
         ...(args.deal_date ? { deal_date: args.deal_date } : {}), ...(args.expires_at ? { expires_at: args.expires_at } : {}) },
       idempotencyKey: `coverage-request:${bound.sourceMessageId}:${args.service_id}`,
       summary: `اعتماد طلب تغطية ${args.requested_amount} ${args.currency}`, actorUserId: ctx.actorUserId,
+      sourceRunId: ctx.runId,
     })
     await linkIntentToChangeRequest({ accountId: ctx.accountId, intentId, changeRequestId: cr.id })
     return { ok: true, data: { intent: { intent_id: intentId, status: 'forwarded_to_admin' }, change_request: { id: cr.id, code: cr.code, confirmation_code: cr.confirmationCode, status: cr.status } }, safe_to_show: true }
