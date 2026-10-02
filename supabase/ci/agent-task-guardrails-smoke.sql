@@ -2,7 +2,7 @@ begin;
 
 do $$
 declare
-  v_user uuid := '00000000-0000-4000-8000-000000000127';
+  v_user uuid;
   v_account uuid;
   v_connection uuid := gen_random_uuid();
   v_agent uuid := gen_random_uuid();
@@ -22,16 +22,11 @@ declare
   v_target_guarded boolean := false;
   v_message_guarded boolean := false;
 begin
-  insert into auth.users(id,email,raw_user_meta_data)
-  values (
-    v_user,
-    'agent-task-guardrails-smoke@example.test',
-    '{"full_name":"Agent Task Guardrails Smoke"}'::jsonb
-  );
-
-  select account_id into strict v_account
-  from public.profiles
-  where user_id=v_user;
+  select profile.user_id, profile.account_id
+    into strict v_user, v_account
+  from public.profiles as profile
+  order by profile.created_at asc
+  limit 1;
 
   insert into public.ai_provider_connections(
     id,account_id,name,preset_id,protocol,api_root,
