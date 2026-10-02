@@ -221,6 +221,7 @@ export async function executePricingRuleProposeServicePrice(
       ]),
       summary: `تغيير تسعير خدمة ${service.name} عبر قاعدة ${args.kind} جديدة بعد الاعتماد`,
       actorUserId: ctx.actorUserId,
+      sourceRunId: ctx.runId,
     })
 
     return {
