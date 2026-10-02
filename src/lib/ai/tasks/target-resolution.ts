@@ -467,6 +467,9 @@ function targetScopeGuardReason(error: unknown): string | null {
         : String(error ?? '')
   const upper = text.toUpperCase()
   const codes = [
+    'AGENT_TASK_TARGET_LIMIT_EXCEEDED',
+    'AGENT_ACCOUNT_HOURLY_TARGET_LIMIT_EXCEEDED',
+    'AGENT_DAILY_TARGET_LIMIT_EXCEEDED',
     'AGENT_TASK_TYPE_DISABLED',
     'AGENT_TASK_TYPE_DAILY_TARGET_LIMIT_EXCEEDED',
     'AGENT_CHANNEL_DISABLED',
