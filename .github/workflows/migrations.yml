@@ -101,6 +101,9 @@ jobs:
       - name: Verify Agent Task scheduling and Business Event triggers
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-trigger-smoke.sql
 
+      - name: Seed shared Agent Task account fixture
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-shared-account-fixture.sql
+
       - name: Verify Agent Task budgets and abuse protection
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-guardrails-smoke.sql
 
