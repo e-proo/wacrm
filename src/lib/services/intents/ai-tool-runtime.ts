@@ -57,7 +57,6 @@ async function executeIntentsRecord(
       // service_intent/create change request carries no executable decision.
       escalateToAdmin: false,
       actorUserId: ctx.actorUserId,
-      sourceRunId: ctx.runId,
     })
 
     if (args.escalate_to_admin) {
