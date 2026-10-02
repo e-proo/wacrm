@@ -896,3 +896,128 @@ begin
   end if;
 end
 $$;
+
+
+-- Agent Task budgets / abuse protection (127-128).
+do $$
+begin
+  if to_regclass('public.ai_provider_model_cost_rates') is null
+     or to_regclass('public.ai_agent_scope_controls') is null
+     or to_regclass('public.ai_agent_circuit_breakers') is null then
+    raise exception 'Phase 14 guardrail tables are missing';
+  end if;
+
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema='public'
+      and table_name='ai_runtime_policies'
+      and column_name='daily_message_budget'
+  ) or not exists (
+    select 1 from information_schema.columns
+    where table_schema='public'
+      and table_name='ai_runtime_policies'
+      and column_name='daily_estimated_provider_cost_micros'
+  ) or not exists (
+    select 1 from information_schema.columns
+    where table_schema='public'
+      and table_name='ai_agent_budget_policies'
+      and column_name='max_messages'
+  ) or not exists (
+    select 1 from information_schema.columns
+    where table_schema='public'
+      and table_name='ai_agent_budget_policies'
+      and column_name='max_estimated_provider_cost_micros'
+  ) then
+    raise exception 'Phase 14 budget columns are incomplete';
+  end if;
+
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema='public'
+      and table_name='ai_agent_runs'
+      and column_name='provider_cost_micros'
+  ) or not exists (
+    select 1 from information_schema.columns
+    where table_schema='public'
+      and table_name='ai_agent_runs'
+      and column_name='provider_cost_rate_snapshot'
+  ) then
+    raise exception 'Agent run provider-cost audit columns are missing';
+  end if;
+
+  if to_regprocedure(
+       'public.check_ai_agent_circuit_breaker(uuid,text,text)'
+     ) is null
+     or to_regprocedure(
+       'public.record_ai_agent_circuit_event(uuid,text,text,text,text)'
+     ) is null
+     or to_regprocedure(
+       'public.reserve_ai_agent_runtime_budget(uuid,uuid,integer,integer)'
+     ) is null then
+    raise exception 'Phase 14 RPC surface is incomplete';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.check_ai_agent_circuit_breaker(uuid,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.check_ai_agent_circuit_breaker(uuid,text,text)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.check_ai_agent_circuit_breaker(uuid,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.record_ai_agent_circuit_event(uuid,text,text,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.record_ai_agent_circuit_event(uuid,text,text,text,text)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.record_ai_agent_circuit_event(uuid,text,text,text,text)',
+       'EXECUTE'
+     ) then
+    raise exception 'Phase 14 circuit RPC privileges are unsafe';
+  end if;
+
+  if not exists (
+    select 1 from pg_class
+    where oid='public.ai_provider_model_cost_rates'::regclass
+      and relrowsecurity
+  ) or not exists (
+    select 1 from pg_class
+    where oid='public.ai_agent_scope_controls'::regclass
+      and relrowsecurity
+  ) or not exists (
+    select 1 from pg_class
+    where oid='public.ai_agent_circuit_breakers'::regclass
+      and relrowsecurity
+  ) then
+    raise exception 'Phase 14 guardrail RLS is not enabled';
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger
+    where tgrelid='public.ai_agent_task_targets'::regclass
+      and tgname='ai_agent_task_targets_scope_guard'
+      and not tgisinternal
+  ) or not exists (
+    select 1 from pg_trigger
+    where tgrelid='public.ai_agent_task_outbound_messages'::regclass
+      and tgname='ai_agent_task_outbound_message_budget_guard'
+      and not tgisinternal
+  ) then
+    raise exception 'Phase 14 enforcement triggers are missing';
+  end if;
+end
+$$;
