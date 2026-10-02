@@ -3,6 +3,11 @@ import { recordToolAttempt } from './tool-attempt-audit'
 import { executeCurrentPlatformTool } from '../tools/platform/current-executor-registry'
 import { getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import { authorizeToolInvocation } from './tool-policy'
+import {
+  assertRuntimeCircuitClosed,
+  recordRuntimeCircuitEvent,
+  RuntimeCircuitOpenError,
+} from './circuit-breaker'
 import type {
   AiAgentRevision,
   ToolGrantPermission,
@@ -245,6 +250,37 @@ export async function executeTool(
     }
   }
 
+  const toolCircuitKey = tool.key + '@' + tool.version
+  try {
+    await assertRuntimeCircuitClosed({
+      accountId: ctx.accountId,
+      scopeType: 'tool',
+      scopeKey: toolCircuitKey,
+    })
+  } catch (error) {
+    if (error instanceof RuntimeCircuitOpenError) {
+      await audit({
+        status: 'denied',
+        errorCode: error.code,
+        toolVersion: tool.version,
+      })
+      return {
+        ...baseOutcome,
+        result: {
+          ok: false,
+          data: null,
+          safe_to_show: true,
+          code: error.code,
+          message: 'This tool is temporarily paused after repeated failures.',
+        },
+        toolFound: true,
+        granted: true,
+        roundsExhausted: false,
+      }
+    }
+    throw error
+  }
+
   const startedAt = Date.now()
   let result: ToolResult
   try {
@@ -268,6 +304,14 @@ export async function executeTool(
     errorCode: result.ok ? undefined : result.code,
     toolVersion: tool.version,
     durationMs: Date.now() - startedAt,
+  })
+
+  await recordRuntimeCircuitEvent({
+    accountId: ctx.accountId,
+    scopeType: 'tool',
+    scopeKey: toolCircuitKey,
+    outcome: result.ok ? 'success' : 'failure',
+    errorCode: result.ok ? null : result.code,
   })
   return {
     ...baseOutcome,
