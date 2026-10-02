@@ -343,7 +343,18 @@ export async function materializeRegisteredTaskTargets(input: {
         p_idempotency_key: idempotencyKey,
       },
     )
-    if (materializeError) throw materializeError
+    if (materializeError) {
+      const guardReason = targetScopeGuardReason(materializeError)
+      if (!guardReason) throw materializeError
+      decisions.push({
+        contactId: candidate.contactId,
+        accepted: false,
+        reason: guardReason,
+        targetId: null,
+        conversationId: null,
+      })
+      continue
+    }
 
     const decision = normalizeDecision(candidate.contactId, data)
     decisions.push(decision)
@@ -444,4 +455,24 @@ function parseInteger(
     throw new Error(`TARGET_ELIGIBILITY_${field.toUpperCase()}_INVALID`)
   }
   return value
+}
+
+
+function targetScopeGuardReason(error: unknown): string | null {
+  const text =
+    error && typeof error === 'object' && 'message' in error
+      ? String((error as { message?: unknown }).message ?? '')
+      : error instanceof Error
+        ? error.message
+        : String(error ?? '')
+  const upper = text.toUpperCase()
+  const codes = [
+    'AGENT_TASK_TYPE_DISABLED',
+    'AGENT_TASK_TYPE_DAILY_TARGET_LIMIT_EXCEEDED',
+    'AGENT_CHANNEL_DISABLED',
+    'AGENT_CHANNEL_DAILY_TARGET_LIMIT_EXCEEDED',
+  ] as const
+
+  const code = codes.find((candidate) => upper.includes(candidate))
+  return code ? code.toLowerCase() : null
 }
