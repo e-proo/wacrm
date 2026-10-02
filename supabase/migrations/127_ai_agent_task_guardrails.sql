@@ -302,6 +302,7 @@ set search_path=public
 as $$
 declare
   v_policy public.ai_runtime_policies%rowtype;
+  v_policy_found boolean := false;
   v_run public.ai_agent_runs%rowtype;
   v_task public.ai_agent_tasks%rowtype;
   v_agent_status text;
@@ -382,8 +383,9 @@ begin
   select * into v_policy
   from public.ai_runtime_policies
   where account_id=p_account_id;
+  v_policy_found:=found;
 
-  if found then
+  if v_policy_found then
     if v_policy.kill_switch then return 'AI_KILL_SWITCH'; end if;
     if not v_policy.multi_agent_enabled then return 'MULTI_AGENT_DISABLED'; end if;
 
@@ -504,7 +506,8 @@ begin
     )::bigint;
   end if;
 
-  if found and v_policy.daily_estimated_provider_cost_micros is not null then
+  if v_policy_found
+     and v_policy.daily_estimated_provider_cost_micros is not null then
     v_cost_limit_required:=true;
   end if;
 
@@ -561,7 +564,7 @@ begin
     and expires_at>now()
     and run_id<>p_run_id;
 
-  if found then
+  if v_policy_found then
     if v_policy.daily_input_token_budget is not null
        and v_input+v_reserved_input+greatest(p_estimated_input_tokens,0)
          >v_policy.daily_input_token_budget then
