@@ -313,6 +313,7 @@ export async function executeTool(
       scopeKey: toolCircuitKey,
       outcome: result.ok ? 'success' : 'failure',
       errorCode: result.ok ? null : result.code,
+      runId: ctx.runId,
     })
   }
   return {
