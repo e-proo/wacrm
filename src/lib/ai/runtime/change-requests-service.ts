@@ -24,6 +24,7 @@ export interface ChangeRequestRow {
   approved_identity_id: string | null
   approved_message_id: string | null
   approved_run_id: string | null
+  source_run_id: string | null
   rejected_by: string | null
   rejected_at: string | null
   executed_at: string | null
@@ -43,6 +44,7 @@ export interface CreateChangeRequestInput {
   idempotencyKey: string
   summary?: string | null
   actorUserId: string | null
+  sourceRunId?: string | null
 }
 
 export interface CreateChangeRequestResult {
@@ -87,6 +89,28 @@ export async function createChangeRequest(
     content_digest: string
   }>)[0]
   if (!row) throw new ChangeRequestError('CHANGE_REQUEST_CREATE_FAILED', 'No row returned.', 500)
+
+  if (input.sourceRunId) {
+    const { data: bound, error: bindError } = await supabaseAdmin()
+      .from('change_requests')
+      .update({ source_run_id: input.sourceRunId })
+      .eq('account_id', input.accountId)
+      .eq('id', row.id)
+      .or(
+        `source_run_id.is.null,source_run_id.eq.${input.sourceRunId}`,
+      )
+      .select('source_run_id')
+      .maybeSingle()
+
+    if (bindError) throw bindError
+    if (!bound || bound.source_run_id !== input.sourceRunId) {
+      throw new ChangeRequestError(
+        'CHANGE_REQUEST_SOURCE_RUN_MISMATCH',
+        'The idempotent change request is already bound to another source run.',
+        409,
+      )
+    }
+  }
 
   try {
     const notification = await notifyTrustedAdminsOfChangeRequest({
@@ -302,7 +326,7 @@ export async function listChangeRequests(
     .from('change_requests')
     // Never select confirmation_code or confirmation_code_hash.
     .select(
-      'id, account_id, code, action_key, action_version, target_type, target_id, intent, proposed_payload, expected_version, idempotency_key, status, content_digest, summary, expires_at, created_by, created_at, approved_by, approved_at, approved_identity_id, approved_message_id, approved_run_id, rejected_by, rejected_at, executed_at, execution_result, error_code',
+      'id, account_id, code, action_key, action_version, target_type, target_id, intent, proposed_payload, expected_version, idempotency_key, status, content_digest, summary, expires_at, created_by, created_at, approved_by, approved_at, approved_identity_id, approved_message_id, approved_run_id, source_run_id, rejected_by, rejected_at, executed_at, execution_result, error_code',
     )
     .eq('account_id', accountId)
     .order('code', { ascending: false })
