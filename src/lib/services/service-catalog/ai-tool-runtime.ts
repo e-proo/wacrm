@@ -235,6 +235,7 @@ export async function executeServiceProposeUpdate(
       ]),
       summary: `تعديل خدمة ${service.name} وإنشاء نسخة منشورة جديدة بعد الاعتماد`,
       actorUserId: ctx.actorUserId,
+      sourceRunId: ctx.runId,
     })
 
     return {
