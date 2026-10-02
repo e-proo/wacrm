@@ -180,13 +180,19 @@ begin
     'wamid.observability.reply','sent',v_outbound_local,false
   );
 
-  v_run_reply:=public.create_agent_execution(
-    v_account,v_conversation,v_inbound_reply,
-    v_agent,v_revision,v_connection,
-    null,'task_reply:reply_context','customer','inbound',
-    v_task,v_target,'task_reply','reply_context','service_customer',
-    'observability-reply-'||v_task::text
+  v_json:=public.correlate_agent_task_inbound_reply(
+    v_account,
+    v_conversation,
+    v_inbound_reply,
+    v_outbound_local,
+    false
   );
+
+  if v_json->>'status'<>'matched' then
+    raise exception 'Official task-reply correlation failed: %',v_json;
+  end if;
+
+  v_run_reply:=(v_json->>'run_id')::uuid;
 
   update public.ai_agent_runs
   set status='succeeded',
