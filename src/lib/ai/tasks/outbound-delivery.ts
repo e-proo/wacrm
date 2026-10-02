@@ -1,5 +1,11 @@
 import { engineSendTemplate, engineSendText } from '@/lib/automations/meta-send'
 import { supabaseAdmin } from '../admin-client'
+import {
+  assertRuntimeCircuitClosed,
+  circuitErrorCode,
+  recordRuntimeCircuitEvent,
+  RuntimeCircuitOpenError,
+} from '../runtime/circuit-breaker'
 
 export interface AgentTaskOutboundDeliveryResult {
   status:
@@ -137,6 +143,36 @@ export async function deliverAgentTaskOutboundReservation(input: {
     throw new Error('WHATSAPP_CONFIG_OWNER_MISSING')
   }
 
+  try {
+    await assertRuntimeCircuitClosed({
+      accountId: row.account_id,
+      scopeType: 'channel',
+      scopeKey: 'whatsapp',
+    })
+  } catch (error) {
+    if (error instanceof RuntimeCircuitOpenError) {
+      const { error: cancelError } = await db
+        .from('ai_agent_task_outbound_messages')
+        .update({
+          status: 'cancelled',
+          error_code: error.code,
+          error_detail: 'WhatsApp channel circuit is open.',
+        })
+        .eq('id', row.id)
+        .eq('status', 'reserved')
+      if (cancelError) throw cancelError
+
+      return {
+        status: 'denied',
+        reason: error.code,
+        reservationId: row.id,
+        localMessageId: row.local_message_id,
+        whatsappMessageId: row.whatsapp_message_id,
+      }
+    }
+    throw error
+  }
+
   const { data: claimed, error: claimError } = await db.rpc(
     'claim_agent_task_outbound_message',
     {
@@ -239,6 +275,13 @@ export async function deliverAgentTaskOutboundReservation(input: {
       localMessageId = localMessage.id
     }
 
+    await recordRuntimeCircuitEvent({
+      accountId: row.account_id,
+      scopeType: 'channel',
+      scopeKey: 'whatsapp',
+      outcome: 'success',
+    })
+
     const { data: completed, error: completionError } = await db.rpc(
       'complete_agent_task_outbound_message',
       {
@@ -264,6 +307,13 @@ export async function deliverAgentTaskOutboundReservation(input: {
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
+    await recordRuntimeCircuitEvent({
+      accountId: row.account_id,
+      scopeType: 'channel',
+      scopeKey: 'whatsapp',
+      outcome: 'failure',
+      errorCode: circuitErrorCode(error),
+    })
     const { error: reconciliationError } = await db.rpc(
       'mark_agent_task_outbound_reconciliation',
       {
