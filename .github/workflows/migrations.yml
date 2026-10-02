@@ -107,6 +107,9 @@ jobs:
       - name: Verify Agent Task audit and observability
         run: supabase db query --local --file supabase/ci/agent-task-observability-smoke.sql
 
+      - name: Verify Agent Task security acceptance
+        run: supabase db query --local --file supabase/ci/agent-task-security-acceptance-smoke.sql
+
       - name: Verify Coverage sourcing business outcome
         run: supabase db query --local --file supabase/ci/coverage-sourcing-agent-smoke.sql
 
