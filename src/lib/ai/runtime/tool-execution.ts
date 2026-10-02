@@ -306,13 +306,15 @@ export async function executeTool(
     durationMs: Date.now() - startedAt,
   })
 
-  await recordRuntimeCircuitEvent({
-    accountId: ctx.accountId,
-    scopeType: 'tool',
-    scopeKey: toolCircuitKey,
-    outcome: result.ok ? 'success' : 'failure',
-    errorCode: result.ok ? null : result.code,
-  })
+  if (result.ok || result.safe_to_show === false) {
+    await recordRuntimeCircuitEvent({
+      accountId: ctx.accountId,
+      scopeType: 'tool',
+      scopeKey: toolCircuitKey,
+      outcome: result.ok ? 'success' : 'failure',
+      errorCode: result.ok ? null : result.code,
+    })
+  }
   return {
     ...baseOutcome,
     result,
