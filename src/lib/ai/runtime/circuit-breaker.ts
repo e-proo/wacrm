@@ -75,15 +75,19 @@ export async function recordRuntimeCircuitEvent(input: {
   scopeKey: string
   outcome: RuntimeCircuitOutcome
   errorCode?: string | null
+  runId?: string | null
+  taskId?: string | null
 }): Promise<RuntimeCircuitState | null> {
   const { data, error } = await supabaseAdmin().rpc(
-    'record_ai_agent_circuit_event',
+    'record_ai_agent_circuit_event_v2',
     {
       p_account_id: input.accountId,
       p_scope_type: input.scopeType,
       p_scope_key: input.scopeKey,
       p_outcome: input.outcome,
       p_error_code: input.errorCode ?? null,
+      p_run_id: input.runId ?? null,
+      p_task_id: input.taskId ?? null,
     },
   )
 
