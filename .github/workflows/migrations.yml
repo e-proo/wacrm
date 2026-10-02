@@ -119,6 +119,9 @@ jobs:
       - name: Verify Agent Task crash recovery
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-crash-recovery-smoke.sql
 
+      - name: Verify Agent Task guarded TEST cutover
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-cutover-smoke.sql
+
       - name: Verify Agent Task authenticated RLS isolation
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-rls-smoke.sql
 
