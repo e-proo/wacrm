@@ -803,3 +803,96 @@ $$;
 --    assertion (commit 42c7db0, run 31579334056) surfaced as
 --    `failed to execute query: error: ...` and exited 1. This is not a
 --    decorative green tick.
+
+
+-- Agent Task scheduling / Business Event triggers (124).
+do $$
+begin
+  if to_regclass('public.ai_agent_task_triggers') is null
+     or to_regclass('public.ai_agent_task_trigger_firings') is null then
+    raise exception 'Agent Task trigger tables are missing — migration 124 did not apply';
+  end if;
+
+  if not exists (
+    select 1 from pg_class
+    where oid='public.ai_agent_task_triggers'::regclass
+      and relrowsecurity
+  ) or not exists (
+    select 1 from pg_class
+    where oid='public.ai_agent_task_trigger_firings'::regclass
+      and relrowsecurity
+  ) then
+    raise exception 'Agent Task trigger RLS is not enabled';
+  end if;
+
+  if to_regprocedure(
+       'public.create_agent_task_trigger(uuid,text,integer,uuid,text,text,timestamptz,integer,text,integer,jsonb,jsonb,text,uuid)'
+     ) is null
+     or to_regprocedure(
+       'public.set_agent_task_trigger_status(uuid,uuid,text)'
+     ) is null
+     or to_regprocedure(
+       'public.materialize_agent_task_trigger_firings(timestamptz,integer)'
+     ) is null
+     or to_regprocedure(
+       'public.claim_next_agent_task_trigger_firing(text,integer)'
+     ) is null
+     or to_regprocedure(
+       'public.complete_agent_task_trigger_firing(uuid,text,uuid)'
+     ) is null
+     or to_regprocedure(
+       'public.fail_agent_task_trigger_firing(uuid,text,text,integer)'
+     ) is null then
+    raise exception 'Agent Task trigger RPC surface is incomplete';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.create_agent_task_trigger(uuid,text,integer,uuid,text,text,timestamptz,integer,text,integer,jsonb,jsonb,text,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.create_agent_task_trigger(uuid,text,integer,uuid,text,text,timestamptz,integer,text,integer,jsonb,jsonb,text,uuid)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.create_agent_task_trigger(uuid,text,integer,uuid,text,text,timestamptz,integer,text,integer,jsonb,jsonb,text,uuid)',
+       'EXECUTE'
+     ) then
+    raise exception 'create_agent_task_trigger privileges are unsafe';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.claim_next_agent_task_trigger_firing(text,integer)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.claim_next_agent_task_trigger_firing(text,integer)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.claim_next_agent_task_trigger_firing(text,integer)',
+       'EXECUTE'
+     ) then
+    raise exception 'Agent Task trigger claim privileges are unsafe';
+  end if;
+
+  if exists (
+    select 1
+    from pg_policies
+    where schemaname='public'
+      and tablename in (
+        'ai_agent_task_triggers',
+        'ai_agent_task_trigger_firings'
+      )
+      and cmd in ('INSERT','UPDATE','DELETE','ALL')
+  ) then
+    raise exception 'Authenticated clients must not mutate Agent Task trigger state directly';
+  end if;
+end
+$$;
