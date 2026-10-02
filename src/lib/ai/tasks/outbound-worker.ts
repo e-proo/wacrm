@@ -6,6 +6,10 @@ import {
   type AgentExecutionContext,
 } from '../runtime/execution'
 import { loadAccountRuntimePolicy } from '../runtime/runtime-policy'
+import {
+  assertRuntimeCircuitClosed,
+  RuntimeCircuitOpenError,
+} from '../runtime/circuit-breaker'
 import { deliverAgentTaskOutboundReservation } from './outbound-delivery'
 import { prepareAndReserveCurrentTaskOutboundMessage } from './outbound-runtime'
 
@@ -112,6 +116,20 @@ export async function processAgentTaskOutboundRunQueue(input: {
     ) {
       result.gated += 1
       continue
+    }
+
+    try {
+      await assertRuntimeCircuitClosed({
+        accountId: run.account_id,
+        scopeType: 'channel',
+        scopeKey: 'whatsapp',
+      })
+    } catch (error) {
+      if (error instanceof RuntimeCircuitOpenError) {
+        result.gated += 1
+        continue
+      }
+      throw error
     }
 
     result.attempted += 1
