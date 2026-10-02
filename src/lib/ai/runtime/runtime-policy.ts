@@ -9,6 +9,8 @@ export interface AccountRuntimePolicy extends RuntimeFeaturePolicy {
   maxRunsPerMinute: number
   dailyInputTokenBudget: number | null
   dailyOutputTokenBudget: number | null
+  dailyMessageBudget: number | null
+  dailyEstimatedProviderCostMicros: number | null
 }
 
 /** Fail closed for dangerous features when no row exists. */
@@ -18,7 +20,7 @@ export async function loadAccountRuntimePolicy(
 ): Promise<AccountRuntimePolicy> {
   const { data, error } = await db
     .from('ai_runtime_policies')
-    .select('multi_agent_enabled, admin_plane_enabled, native_tools_enabled, proposal_tools_enabled, recovery_worker_enabled, outbound_task_delivery_enabled, kill_switch, max_runs_per_minute, daily_input_token_budget, daily_output_token_budget')
+    .select('multi_agent_enabled, admin_plane_enabled, native_tools_enabled, proposal_tools_enabled, recovery_worker_enabled, outbound_task_delivery_enabled, kill_switch, max_runs_per_minute, daily_input_token_budget, daily_output_token_budget, daily_message_budget, daily_estimated_provider_cost_micros')
     .eq('account_id', accountId)
     .maybeSingle()
   if (error) throw error
@@ -34,6 +36,8 @@ export async function loadAccountRuntimePolicy(
       maxRunsPerMinute: 30,
       dailyInputTokenBudget: null,
       dailyOutputTokenBudget: null,
+      dailyMessageBudget: null,
+      dailyEstimatedProviderCostMicros: null,
     }
   }
   const r = data as Record<string, unknown>
@@ -49,5 +53,10 @@ export async function loadAccountRuntimePolicy(
     maxRunsPerMinute: Number(r.max_runs_per_minute ?? 30),
     dailyInputTokenBudget: r.daily_input_token_budget == null ? null : Number(r.daily_input_token_budget),
     dailyOutputTokenBudget: r.daily_output_token_budget == null ? null : Number(r.daily_output_token_budget),
+    dailyMessageBudget: r.daily_message_budget == null ? null : Number(r.daily_message_budget),
+    dailyEstimatedProviderCostMicros:
+      r.daily_estimated_provider_cost_micros == null
+        ? null
+        : Number(r.daily_estimated_provider_cost_micros),
   }
 }
