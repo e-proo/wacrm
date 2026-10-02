@@ -188,7 +188,32 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
       manifest.followupPolicy.maximumIntervalMinutes,
     p_stop_on_reply: manifest.followupPolicy.stopOnReply,
   })
-  if (error) throw error
+  if (error) {
+    const guardReason = outboundBudgetGuardReason(error)
+    if (!guardReason) throw error
+
+    await recordRuntimeCircuitEvent({
+      accountId: runRow.account_id,
+      scopeType: 'task_type',
+      scopeKey: taskRow.task_type + '@' + taskRow.task_type_version,
+      outcome: 'rejection',
+      errorCode: guardReason,
+    })
+
+    return {
+      status: 'denied',
+      candidate,
+      decision: {
+        reserved: false,
+        reason: guardReason,
+        reservationId: null,
+        status: null,
+        messageKind: candidate.kind,
+        sessionWindowActive: null,
+        idempotencyKey: null,
+      },
+    }
+  }
 
   const decision = normalizeReservationDecision(data)
 
@@ -265,4 +290,41 @@ function normalizeReservationDecision(
         ? value.idempotency_key
         : null,
   }
+}
+
+
+function outboundBudgetGuardReason(error: unknown): string | null {
+  const text =
+    error && typeof error === 'object' && 'message' in error
+      ? String((error as { message?: unknown }).message ?? '')
+      : error instanceof Error
+        ? error.message
+        : String(error ?? '')
+  const upper = text.toUpperCase()
+
+  const codes = [
+    'AI_KILL_SWITCH',
+    'OUTBOUND_TASK_DELIVERY_DISABLED',
+    'ACCOUNT_DAILY_MESSAGE_BUDGET_EXCEEDED',
+    'AGENT_PAUSED',
+    'TASK_NOT_RUNNING',
+    'TASK_DAILY_MESSAGE_BUDGET_EXCEEDED',
+    'AGENT_BUDGET_MESSAGES_EXCEEDED',
+    'AGENT_TASK_TYPE_DISABLED',
+    'TASK_TYPE_DAILY_MESSAGE_LIMIT_EXCEEDED',
+    'AGENT_CHANNEL_DISABLED',
+    'CHANNEL_DAILY_MESSAGE_LIMIT_EXCEEDED',
+  ] as const
+
+  const code = codes.find((candidate) => upper.includes(candidate))
+  if (!code) return null
+
+  if (code === 'AGENT_BUDGET_MESSAGES_EXCEEDED') {
+    const action = ['HANDOFF', 'PAUSE', 'CHEAPER_AGENT'].find((value) =>
+      upper.includes(':' + value),
+    )
+    return action ? code + ':' + action.toLowerCase() : code
+  }
+
+  return code
 }
