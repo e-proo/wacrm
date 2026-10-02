@@ -48,6 +48,7 @@ export interface RecordIntentInput {
    *  Review handoff is not an authoritative Change Action. */
   escalateToAdmin?: boolean
   actorUserId: string | null
+  sourceRunId?: string | null
 }
 
 export interface RecordedIntent {
@@ -93,6 +94,22 @@ export async function recordIntent(
     )
   }
   const intentId = data as string
+
+  if (input.sourceRunId) {
+    const { error: lineageError } = await supabaseAdmin().rpc(
+      'link_ai_agent_business_outcome',
+      {
+        p_account_id: input.accountId,
+        p_run_id: input.sourceRunId,
+        p_outcome_type: 'customer_intent',
+        p_outcome_id: intentId,
+        p_outcome_status: input.escalateToAdmin
+          ? 'forwarded_to_admin'
+          : 'new',
+      },
+    )
+    if (lineageError) throw lineageError
+  }
 
   if (!input.escalateToAdmin) {
     return { intentId, status: 'new', changeRequest: null }
