@@ -1021,3 +1021,110 @@ begin
   end if;
 end
 $$;
+
+
+-- Agent Task audit / observability lineage (131-133).
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema='public'
+      and table_name='change_requests'
+      and column_name='source_run_id'
+  ) then
+    raise exception 'Change Request source-run lineage is missing';
+  end if;
+
+  if to_regclass('public.ai_agent_business_outcome_links') is null
+     or to_regclass('public.ai_agent_circuit_events') is null then
+    raise exception 'Phase 15 observability tables are missing';
+  end if;
+
+  if to_regprocedure(
+       'public.link_ai_agent_business_outcome(uuid,uuid,text,text,text)'
+     ) is null
+     or to_regprocedure(
+       'public.record_ai_agent_circuit_event_v2(uuid,text,text,text,text,uuid,uuid)'
+     ) is null
+     or to_regprocedure(
+       'public.inspect_ai_agent_task_trace(uuid,uuid)'
+     ) is null
+     or to_regprocedure(
+       'public.inspect_ai_agent_task_metrics(uuid,timestamptz,timestamptz)'
+     ) is null then
+    raise exception 'Phase 15 observability RPC surface is incomplete';
+  end if;
+
+  if not exists (
+    select 1 from pg_class
+    where oid='public.ai_agent_business_outcome_links'::regclass
+      and relrowsecurity
+  ) or not exists (
+    select 1 from pg_class
+    where oid='public.ai_agent_circuit_events'::regclass
+      and relrowsecurity
+  ) then
+    raise exception 'Phase 15 observability RLS is not enabled';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.inspect_ai_agent_task_trace(uuid,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.inspect_ai_agent_task_trace(uuid,uuid)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.inspect_ai_agent_task_trace(uuid,uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.inspect_ai_agent_task_metrics(uuid,timestamptz,timestamptz)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.inspect_ai_agent_task_metrics(uuid,timestamptz,timestamptz)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.inspect_ai_agent_task_metrics(uuid,timestamptz,timestamptz)',
+       'EXECUTE'
+     ) then
+    raise exception 'Phase 15 observability RPC privileges are unsafe';
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.role_table_grants
+    where table_schema='public'
+      and table_name in (
+        'ai_agent_business_outcome_links',
+        'ai_agent_circuit_events'
+      )
+      and grantee in ('anon','authenticated')
+  ) then
+    raise exception 'Phase 15 observability tables are exposed to clients';
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger
+    where tgrelid='public.change_requests'::regclass
+      and tgname='change_requests_source_run_tenant_guard'
+      and not tgisinternal
+  ) or not exists (
+    select 1 from pg_trigger
+    where tgrelid='public.business_event_outbox'::regclass
+      and tgname='business_event_outbox_agent_run_lineage'
+      and not tgisinternal
+  ) then
+    raise exception 'Phase 15 lineage triggers are missing';
+  end if;
+end
+$$;
