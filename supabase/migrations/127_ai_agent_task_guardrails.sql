@@ -41,6 +41,10 @@ alter table public.ai_agent_budget_policies
   add column if not exists max_messages bigint,
   add column if not exists max_estimated_provider_cost_micros bigint;
 
+create unique index if not exists ai_agent_budget_policies_account_default_period_uidx
+  on public.ai_agent_budget_policies(account_id, period)
+  where agent_id is null;
+
 do $$
 begin
   if not exists (
@@ -124,8 +128,7 @@ $$;
 create table public.ai_provider_model_cost_rates (
   id uuid primary key default gen_random_uuid(),
   account_id uuid not null references public.accounts(id) on delete cascade,
-  provider_connection_id uuid not null
-    references public.ai_provider_connections(id) on delete cascade,
+  provider_connection_id uuid not null,
   model text not null check (length(btrim(model)) > 0),
   input_micros_per_million_tokens bigint not null
     check (input_micros_per_million_tokens >= 0),
@@ -135,7 +138,11 @@ create table public.ai_provider_model_cost_rates (
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (account_id, provider_connection_id, model)
+  unique (account_id, provider_connection_id, model),
+  constraint ai_provider_model_cost_rates_account_provider_fk
+    foreign key (account_id, provider_connection_id)
+    references public.ai_provider_connections(account_id, id)
+    on delete cascade
 );
 
 create index ai_provider_model_cost_rates_lookup_idx
