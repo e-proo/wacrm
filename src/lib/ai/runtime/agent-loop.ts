@@ -137,6 +137,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           scopeType: 'provider',
           scopeKey: revision.providerConnectionId,
           outcome: 'success',
+          runId,
         })
         return result
       } catch (error) {
@@ -146,6 +147,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           scopeKey: revision.providerConnectionId,
           outcome: 'failure',
           errorCode: circuitErrorCode(error),
+          runId,
         })
         throw error
       }
