@@ -95,6 +95,20 @@ begin
     v_connection,'smoke-model'
   );
 
+  insert into public.ai_runtime_policies (
+    account_id,multi_agent_enabled,recovery_worker_enabled,
+    outbound_task_delivery_enabled,kill_switch,max_runs_per_minute,updated_by
+  ) values (
+    v_account,true,true,true,false,100,v_user
+  )
+  on conflict (account_id) do update set
+    multi_agent_enabled=true,
+    recovery_worker_enabled=true,
+    outbound_task_delivery_enabled=true,
+    kill_switch=false,
+    max_runs_per_minute=100,
+    updated_by=v_user;
+
   insert into public.ai_agent_tasks (
     id,account_id,task_type,task_type_version,agent_id,agent_revision_id,
     trigger_type,status,objective,channel,max_targets,max_attempts_per_target,
