@@ -26,7 +26,7 @@ import {
   RATE_LIMITS,
 } from '@/lib/rate-limit'
 
-export const REVISION_SELECT =
+const REVISION_SELECT =
   'id, account_id, agent_id, revision_number, status, provider_connection_id, model, system_prompt, response_style, language_policy, temperature, max_output_tokens, max_tool_rounds, max_ai_replies_per_conversation, handoff_human_member_id, operational_mode, outreach_policy, settings, created_at, published_at, rejection_reason'
 
 interface UpdateBody {
