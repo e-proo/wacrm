@@ -68,71 +68,71 @@ jobs:
       # typo'd object name into a silent no-op. Assert the outcome, not
       # just the absence of an error.
       - name: Verify the resulting schema
-        run: supabase db query --local --file supabase/ci/verify-schema.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
 
       # Exercise the Phase 2 financial invariants against the database
       # created above. The smoke file is one transactional DO statement:
       # failed assertions roll back automatically and successful fixtures
       # are explicitly removed before commit.
       - name: Verify Agent Task platform behavior
-        run: supabase db query --local --file supabase/ci/agent-task-platform-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-platform-smoke.sql
 
       - name: Verify Agent Task orchestrator behavior
-        run: supabase db query --local --file supabase/ci/agent-task-orchestrator-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-orchestrator-smoke.sql
 
       - name: Verify Agent Target resolution behavior
-        run: supabase db query --local --file supabase/ci/agent-target-resolution-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-target-resolution-smoke.sql
 
       - name: Verify Agent Outbound messaging policy
-        run: supabase db query --local --file supabase/ci/agent-outbound-messaging-policy-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-outbound-messaging-policy-smoke.sql
 
       - name: Verify Agent Task reply correlation
-        run: supabase db query --local --file supabase/ci/agent-task-reply-correlation-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-reply-correlation-smoke.sql
 
       - name: Verify Agent Outbound capabilities
-        run: supabase db query --local --file supabase/ci/agent-outbound-capabilities-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-outbound-capabilities-smoke.sql
 
       - name: Verify Agent Builder V2 persistence
-        run: supabase db query --local --file supabase/ci/agent-builder-v2-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-builder-v2-smoke.sql
 
       - name: Verify generic Agent Task creation
-        run: supabase db query --local --file supabase/ci/agent-task-creation-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-creation-smoke.sql
 
       - name: Verify Agent Task scheduling and Business Event triggers
-        run: supabase db query --local --file supabase/ci/agent-task-trigger-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-trigger-smoke.sql
 
       - name: Verify Agent Task budgets and abuse protection
-        run: supabase db query --local --file supabase/ci/agent-task-guardrails-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-guardrails-smoke.sql
 
       - name: Verify Agent Task audit and observability
-        run: supabase db query --local --file supabase/ci/agent-task-observability-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-observability-smoke.sql
 
       - name: Verify Agent Task security acceptance
-        run: supabase db query --local --file supabase/ci/agent-task-security-acceptance-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-security-acceptance-smoke.sql
 
       - name: Verify Agent Task full integration chain
-        run: supabase db query --local --file supabase/ci/agent-task-full-integration-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-full-integration-smoke.sql
 
       - name: Verify Agent Task crash recovery
-        run: supabase db query --local --file supabase/ci/agent-task-crash-recovery-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-crash-recovery-smoke.sql
 
       - name: Verify Coverage sourcing business outcome
-        run: supabase db query --local --file supabase/ci/coverage-sourcing-agent-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/coverage-sourcing-agent-smoke.sql
 
       - name: Verify Intents controlled cutover safety
-        run: supabase db query --local --file supabase/ci/intents-cutover-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/intents-cutover-smoke.sql
 
       - name: Verify FX V2 Phase 2 domain behavior
-        run: supabase db query --local --file supabase/ci/fx-v2-phase-2-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-2-smoke.sql
 
       # Phase 6 closure invariant: every final verification replays migration
       # 084 from scratch before proving durable, deduplicated customer lifecycle
       # events and the frozen customer_buy/customer_sell rate semantics.
       - name: Verify FX V2 Phase 6 messaging behavior
-        run: supabase db query --local --file supabase/ci/fx-v2-phase-6-messaging-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-6-messaging-smoke.sql
 
       # Phase 7 closure invariant: migration 085 must remove the legacy
       # rate-book persistence/RPC surface without removing any FX V2 object.
       # Phase 2 and Phase 6 smokes above then prove the surviving V2 behavior.
       - name: Verify FX V2 Phase 7 legacy cleanup
-        run: supabase db query --local --file supabase/ci/fx-v2-phase-7-legacy-cleanup-smoke.sql
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-7-legacy-cleanup-smoke.sql
