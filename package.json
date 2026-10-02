@@ -45,7 +45,8 @@
     "test:intents-cutover-evidence-live": "vitest run src/lib/services/intents/cutover-evidence.live.test.ts",
     "test:intents-cutover-transport-live": "vitest run src/lib/services/intents/cutover-transport.live.test.ts",
     "test:agent-task-cutover-live": "vitest run src/lib/ai/tasks/cutover.live.test.ts",
-    "test:agent-task-dry-run-live": "vitest run src/lib/ai/tasks/cutover-dry-run.live.test.ts"
+    "test:agent-task-dry-run-live": "vitest run src/lib/ai/tasks/cutover-dry-run.live.test.ts",
+    "test:coverage-pilot-readiness-live": "vitest run src/lib/services/coverage/pilot-readiness.live.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
