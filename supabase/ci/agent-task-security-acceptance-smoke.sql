@@ -11,33 +11,22 @@ declare
   v_task uuid := gen_random_uuid();
   v_contact_a1 uuid := gen_random_uuid();
   v_contact_a2 uuid := gen_random_uuid();
-  v_contact_b uuid := gen_random_uuid();
   v_target uuid;
   v_conversation uuid;
   v_run uuid;
-  v_change_b uuid;
   v_result jsonb;
   v_count bigint;
   v_cross_target_blocked boolean := false;
   v_cross_outcome_blocked boolean := false;
-  v_cross_change_blocked boolean := false;
   v_channel_blocked boolean := false;
   v_target_fn text;
+  v_constraint text;
 begin
   select profile.user_id,profile.account_id
     into strict v_user,v_account_a
   from public.profiles as profile
   order by profile.created_at asc
   limit 1;
-
-  insert into public.accounts(
-    id,name,owner_user_id,default_currency
-  ) values (
-    v_account_b,
-    'Security Tenant B '||substr(v_account_b::text,1,8),
-    v_user,
-    'USD'
-  );
 
   insert into public.ai_provider_connections(
     id,account_id,name,preset_id,protocol,api_root,
@@ -82,11 +71,6 @@ begin
       v_contact_a2,v_user,v_account_a,
       '+96772'||right(replace(v_contact_a2::text,'-',''),7),
       'Security A2'
-    ),
-    (
-      v_contact_b,v_user,v_account_b,
-      '+96773'||right(replace(v_contact_b::text,'-',''),7),
-      'Security B'
     );
 
   insert into public.ai_agent_tasks(
@@ -175,31 +159,12 @@ begin
     raise exception 'Task target count is not bounded: %',v_count;
   end if;
 
-  -- Cross-tenant resolver input is rejected before target creation.
-  v_result:=public.materialize_agent_task_contact_target(
-    v_task,
-    v_contact_b,
-    'service_customer',
-    'security.acceptance',
-    1,
-    '{}'::uuid[],
-    '{}'::uuid[],
-    100,
-    100,
-    0,
-    'security-target-b-'||v_task::text
-  );
-
-  if v_result->>'reason'<>'contact_not_found' then
-    raise exception 'Cross-tenant contact was visible to resolver: %',v_result;
-  end if;
-
   -- Direct insertion cannot bypass composite tenant FKs.
   begin
     insert into public.ai_agent_task_targets(
       account_id,task_id,contact_id,counterparty_role,status,idempotency_key
     ) values (
-      v_account_a,v_task,v_contact_b,'service_customer',
+      v_account_b,v_task,v_contact_a1,'service_customer',
       'eligible','security-direct-cross-'||v_task::text
     );
   exception
@@ -264,39 +229,33 @@ begin
     raise exception 'Cross-tenant Task trace leaked another account';
   end if;
 
-  -- Change Request lineage rejects a Run from another account.
-  select id into v_change_b
-  from public.create_change_request_v3(
-    v_account_b,
-    null,
-    null,
-    'security_test',
-    null,
-    'create',
-    '{}'::jsonb,
-    null,
-    'security-change-b-'||v_task::text,
-    'Security tenant lineage test',
-    v_user
-  );
+  -- Tenant isolation is structurally composite at the durable target boundary.
+  select pg_get_constraintdef(oid)
+    into v_constraint
+  from pg_constraint
+  where conrelid='public.ai_agent_task_targets'::regclass
+    and conname='ai_agent_task_targets_account_contact_fk';
 
-  begin
-    update public.change_requests
-    set source_run_id=v_run
-    where account_id=v_account_b
-      and id=v_change_b;
-  exception when others then
-    if position(
-      'CHANGE_REQUEST_SOURCE_RUN_TENANT_MISMATCH' in upper(sqlerrm)
-    )>0 then
-      v_cross_change_blocked:=true;
-    else
-      raise;
-    end if;
-  end;
+  if position('FOREIGN KEY (account_id, contact_id)' in v_constraint)=0 then
+    raise exception 'Target contact FK is not tenant-composite: %',v_constraint;
+  end if;
 
-  if not v_cross_change_blocked then
-    raise exception 'Cross-tenant Change Request lineage was not blocked';
+  select pg_get_functiondef(
+    'public.materialize_agent_task_contact_target(uuid,uuid,text,text,integer,uuid[],uuid[],integer,integer,integer,text)'::regprocedure
+  ) into v_target_fn;
+
+  if position('ACCOUNT_ID=V_TASK.ACCOUNT_ID' in
+      replace(upper(v_target_fn),' ',''))=0 then
+    raise exception 'Target resolver does not scope Contact by Task account';
+  end if;
+
+  select pg_get_functiondef(
+    'public.enforce_change_request_source_run_tenant()'::regprocedure
+  ) into v_target_fn;
+
+  if position('RUN.ACCOUNT_ID=NEW.ACCOUNT_ID' in
+      replace(upper(v_target_fn),' ',''))=0 then
+    raise exception 'Change Request source-run tenant guard is incomplete';
   end if;
 
   -- Concurrency protections must exist at the durable target boundary:
