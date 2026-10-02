@@ -198,6 +198,8 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
       scopeKey: taskRow.task_type + '@' + taskRow.task_type_version,
       outcome: 'rejection',
       errorCode: guardReason,
+      runId: runRow.id,
+      taskId: taskRow.id,
     })
 
     return {
@@ -224,6 +226,8 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
       scopeKey: taskRow.task_type + '@' + taskRow.task_type_version,
       outcome: 'rejection',
       errorCode: decision.reason,
+      runId: runRow.id,
+      taskId: taskRow.id,
     })
   }
 
