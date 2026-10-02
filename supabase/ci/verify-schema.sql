@@ -1128,3 +1128,54 @@ begin
   end if;
 end
 $$;
+
+
+-- Agent Task security acceptance hardening (135).
+do $$
+declare
+  v_def text;
+begin
+  select pg_get_constraintdef(oid)
+    into v_def
+  from pg_constraint
+  where conrelid='public.ai_agent_task_targets'::regclass
+    and conname='ai_agent_task_targets_account_contact_fk';
+
+  if v_def is null
+     or position('FOREIGN KEY (account_id, contact_id)' in v_def)=0 then
+    raise exception 'Task Target contact tenant FK is incomplete';
+  end if;
+
+  select pg_get_constraintdef(oid)
+    into v_def
+  from pg_constraint
+  where conrelid='public.ai_agent_task_targets'::regclass
+    and conname='ai_agent_task_targets_account_task_fk';
+
+  if v_def is null
+     or position('FOREIGN KEY (account_id, task_id)' in v_def)=0 then
+    raise exception 'Task Target task tenant FK is incomplete';
+  end if;
+
+  select pg_get_constraintdef(oid)
+    into v_def
+  from pg_constraint
+  where conrelid='public.ai_agent_tasks'::regclass
+    and conname='ai_agent_tasks_channel_check';
+
+  if v_def is null or position('whatsapp' in lower(v_def))=0 then
+    raise exception 'V1 Task channel constraint is not WhatsApp-only';
+  end if;
+
+  select pg_get_functiondef(
+    'public.enforce_ai_agent_task_target_scope_guard()'::regprocedure
+  ) into v_def;
+
+  if position('PG_ADVISORY_XACT_LOCK' in upper(v_def))=0
+     or position('AGENT_TASK_TARGET_LIMIT_EXCEEDED' in upper(v_def))=0
+     or position('AGENT_ACCOUNT_HOURLY_TARGET_LIMIT_EXCEEDED' in upper(v_def))=0
+     or position('AGENT_DAILY_TARGET_LIMIT_EXCEEDED' in upper(v_def))=0 then
+    raise exception 'Serialized Task Target limit enforcement is incomplete';
+  end if;
+end
+$$;
