@@ -21,6 +21,7 @@ declare
   v_json jsonb;
   v_target_guarded boolean := false;
   v_message_guarded boolean := false;
+  v_fail_closed boolean := false;
 begin
   select profile.user_id, profile.account_id
     into strict v_user, v_account
@@ -40,7 +41,7 @@ begin
   insert into public.ai_agents(
     id,account_id,slug,name,purpose,status
   ) values (
-    v_agent,v_account,'guardrails-agent',
+    v_agent,v_account,'guardrails-agent-'||substr(v_agent::text,1,8),
     'Guardrails Agent','custom','active'
   );
 
@@ -109,7 +110,9 @@ begin
       'dailyMessageBudget',1,
       'dailyEstimatedProviderCostMicros',1000
     ),
-    'guardrails-task-127','guardrails-correlation-127',v_user
+    'guardrails-task-127-'||v_task::text,
+    'guardrails-correlation-127-'||v_task::text,
+    v_user
   );
 
   insert into public.ai_agent_task_targets(
@@ -117,14 +120,14 @@ begin
     conversation_id,attempt_count,idempotency_key
   ) values (
     v_target_1,v_account,v_task,v_contact_1,'supplier','in_progress',
-    v_conv_1,1,'guardrails-target-1-127'
+    v_conv_1,1,'guardrails-target-1-'||v_target_1::text
   );
 
   v_run_1:=public.create_agent_execution(
     v_account,v_conv_1,null,v_agent,v_revision,v_connection,
     null,'guardrails smoke','customer','outbound',
     v_task,v_target_1,'task_target','attempt:1','supplier',
-    'guardrails-run-1-127'
+    'guardrails-run-1-'||v_task::text
   );
   if public.claim_agent_run(v_run_1,'guardrails-worker',300)<>'claimed' then
     raise exception 'guardrails run 1 claim failed';
@@ -173,6 +176,267 @@ begin
     where id=v_run_1 and provider_cost_micros=75
   ) then
     raise exception 'actual provider cost trigger failed';
+  end if;
+
+  perform public.release_ai_agent_runtime_budget(v_run_1);
+
+  -- Agent pause is a hard execution switch.
+  update public.ai_agents set status='paused' where id=v_agent;
+  v_result:=public.reserve_ai_agent_runtime_budget(
+    v_account,v_run_1,10,10
+  );
+  if v_result<>'AGENT_PAUSED' then
+    raise exception 'paused agent was allowed: %',v_result;
+  end if;
+  update public.ai_agents set status='active' where id=v_agent;
+
+  -- Task pause is a hard execution switch.
+  update public.ai_agent_tasks set status='paused' where id=v_task;
+  v_result:=public.reserve_ai_agent_runtime_budget(
+    v_account,v_run_1,10,10
+  );
+  if v_result<>'TASK_NOT_RUNNING' then
+    raise exception 'paused task was allowed: %',v_result;
+  end if;
+  update public.ai_agent_tasks set status='running' where id=v_task;
+
+  -- Existing rate-limit override table is enforced.
+  insert into public.ai_agent_rate_limit_overrides(
+    account_id,agent_id,rate_window,max_requests,is_active,created_by
+  ) values (
+    v_account,v_agent,'minute',1,true,v_user
+  );
+
+  v_run_2:=public.create_agent_execution(
+    v_account,v_conv_1,null,v_agent,v_revision,v_connection,
+    null,'guardrails rate smoke','customer','outbound',
+    v_task,v_target_1,'task_target','attempt:2','supplier',
+    'guardrails-run-2-'||v_task::text
+  );
+  if public.claim_agent_run(v_run_2,'guardrails-worker',300)<>'claimed' then
+    raise exception 'guardrails run 2 claim failed';
+  end if;
+
+  v_result:=public.reserve_ai_agent_runtime_budget(
+    v_account,v_run_2,10,10
+  );
+  if v_result<>'AGENT_RATE_LIMIT_EXCEEDED:minute' then
+    raise exception 'agent rate override was not enforced: %',v_result;
+  end if;
+
+  delete from public.ai_agent_rate_limit_overrides
+  where account_id=v_account
+    and agent_id=v_agent;
+
+  -- Task-type and channel kill switches are enforced before provider use.
+  insert into public.ai_agent_scope_controls(
+    account_id,scope_type,scope_key,is_enabled,created_by
+  ) values (
+    v_account,'task_type','coverage.sourcing@1',false,v_user
+  );
+
+  v_result:=public.reserve_ai_agent_runtime_budget(
+    v_account,v_run_2,10,10
+  );
+  if v_result<>'TASK_TYPE_DISABLED' then
+    raise exception 'task-type switch was not enforced: %',v_result;
+  end if;
+
+  update public.ai_agent_scope_controls
+  set is_enabled=true
+  where account_id=v_account
+    and scope_type='task_type'
+    and scope_key='coverage.sourcing@1';
+
+  insert into public.ai_agent_scope_controls(
+    account_id,scope_type,scope_key,is_enabled,created_by
+  ) values (
+    v_account,'channel','whatsapp',false,v_user
+  );
+
+  v_result:=public.reserve_ai_agent_runtime_budget(
+    v_account,v_run_2,10,10
+  );
+  if v_result<>'CHANNEL_DISABLED' then
+    raise exception 'channel switch was not enforced: %',v_result;
+  end if;
+
+  update public.ai_agent_scope_controls
+  set is_enabled=true,daily_target_limit=1
+  where account_id=v_account
+    and scope_type='channel'
+    and scope_key='whatsapp';
+
+  -- Channel target cap rejects the second target transactionally.
+  begin
+    insert into public.ai_agent_task_targets(
+      id,account_id,task_id,contact_id,counterparty_role,status,
+      conversation_id,attempt_count,idempotency_key
+    ) values (
+      v_target_2,v_account,v_task,v_contact_2,'supplier','in_progress',
+      v_conv_2,1,'guardrails-target-2-'||v_target_2::text
+    );
+  exception when others then
+    if position(
+      'AGENT_CHANNEL_DAILY_TARGET_LIMIT_EXCEEDED' in upper(sqlerrm)
+    )>0 then
+      v_target_guarded:=true;
+    else
+      raise;
+    end if;
+  end;
+
+  if not v_target_guarded then
+    raise exception 'channel daily target limit was not enforced';
+  end if;
+
+  update public.ai_agent_scope_controls
+  set daily_target_limit=null
+  where account_id=v_account
+    and scope_type='channel'
+    and scope_key='whatsapp';
+
+  insert into public.ai_agent_task_targets(
+    id,account_id,task_id,contact_id,counterparty_role,status,
+    conversation_id,attempt_count,idempotency_key
+  ) values (
+    v_target_2,v_account,v_task,v_contact_2,'supplier','in_progress',
+    v_conv_2,1,'guardrails-target-2-'||v_target_2::text
+  );
+
+  -- First outbound reservation consumes the task one-message daily budget.
+  v_json:=public.reserve_agent_task_outbound_message(
+    v_run_1,'coverage.sourcing_message',1,'text',
+    'Guardrails first message.',null,null,'[]'::jsonb,
+    1,0,1440,true
+  );
+  if coalesce((v_json->>'reserved')::boolean,false)<>true then
+    raise exception 'first guarded message was not reserved: %',v_json;
+  end if;
+
+  v_run_3:=public.create_agent_execution(
+    v_account,v_conv_2,null,v_agent,v_revision,v_connection,
+    null,'guardrails message smoke','customer','outbound',
+    v_task,v_target_2,'task_target','attempt:1','supplier',
+    'guardrails-run-3-'||v_task::text
+  );
+  if public.claim_agent_run(v_run_3,'guardrails-worker',300)<>'claimed' then
+    raise exception 'guardrails run 3 claim failed';
+  end if;
+
+  begin
+    v_json:=public.reserve_agent_task_outbound_message(
+      v_run_3,'coverage.sourcing_message',1,'text',
+      'Guardrails second message.',null,null,'[]'::jsonb,
+      1,0,1440,true
+    );
+  exception when others then
+    if position(
+      'TASK_DAILY_MESSAGE_BUDGET_EXCEEDED' in upper(sqlerrm)
+    )>0 then
+      v_message_guarded:=true;
+    else
+      raise;
+    end if;
+  end;
+
+  if not v_message_guarded then
+    raise exception 'task daily message budget was not enforced';
+  end if;
+
+  -- Account provider-cost cap includes the current reservation estimate.
+  update public.ai_runtime_policies
+  set daily_estimated_provider_cost_micros=100
+  where account_id=v_account;
+
+  v_result:=public.reserve_ai_agent_runtime_budget(
+    v_account,v_run_2,100,100
+  );
+  if v_result<>'DAILY_PROVIDER_COST_BUDGET_EXCEEDED' then
+    raise exception 'account provider cost budget was not enforced: %',v_result;
+  end if;
+
+  -- Circuit opens at threshold, blocks, then closes after cooldown expiry.
+  insert into public.ai_agent_circuit_breakers(
+    account_id,scope_type,scope_key,
+    failure_threshold,rejection_threshold,
+    window_seconds,cooldown_seconds,created_by
+  ) values (
+    v_account,'provider',v_connection::text,
+    2,3,300,30,v_user
+  );
+
+  v_json:=public.record_ai_agent_circuit_event(
+    v_account,'provider',v_connection::text,'failure','SMOKE_FAILURE_1'
+  );
+  if coalesce((v_json->>'open')::boolean,false) then
+    raise exception 'provider circuit opened too early: %',v_json;
+  end if;
+
+  v_json:=public.record_ai_agent_circuit_event(
+    v_account,'provider',v_connection::text,'failure','SMOKE_FAILURE_2'
+  );
+  if coalesce((v_json->>'open')::boolean,false)<>true then
+    raise exception 'provider circuit did not open: %',v_json;
+  end if;
+
+  v_json:=public.check_ai_agent_circuit_breaker(
+    v_account,'provider',v_connection::text
+  );
+  if coalesce((v_json->>'open')::boolean,false)<>true then
+    raise exception 'open provider circuit was not observable: %',v_json;
+  end if;
+
+  update public.ai_agent_circuit_breakers
+  set blocked_until=now()-interval '1 second'
+  where account_id=v_account
+    and scope_type='provider'
+    and scope_key=v_connection::text;
+
+  v_json:=public.check_ai_agent_circuit_breaker(
+    v_account,'provider',v_connection::text
+  );
+  if coalesce((v_json->>'open')::boolean,false) then
+    raise exception 'expired provider circuit did not close: %',v_json;
+  end if;
+
+  -- Reservation is fail-closed even when a caller bypasses the worker.
+  delete from public.ai_runtime_policies where account_id=v_account;
+
+  begin
+    v_json:=public.reserve_agent_task_outbound_message(
+      v_run_3,'coverage.sourcing_message',1,'text',
+      'This must be rejected by the DB gate.',null,null,'[]'::jsonb,
+      1,0,1440,true
+    );
+  exception when others then
+    if position('OUTBOUND_TASK_DELIVERY_DISABLED' in upper(sqlerrm))>0 then
+      v_fail_closed:=true;
+    else
+      raise;
+    end if;
+  end;
+
+  if not v_fail_closed then
+    raise exception 'outbound reservation was not fail-closed without policy';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.record_ai_agent_circuit_event(uuid,text,text,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.record_ai_agent_circuit_event(uuid,text,text,text,text)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.record_ai_agent_circuit_event(uuid,text,text,text,text)',
+       'EXECUTE'
+     ) then
+    raise exception 'circuit event RPC privileges are unsafe';
   end if;
 
   raise notice 'Agent Task guardrails smoke passed';
