@@ -64,12 +64,12 @@ begin
   ) values
     (
       v_contact_a1,v_user,v_account_a,
-      '+96771'||right(replace(v_contact_a1::text,'-',''),7),
+      '+967711111111',
       'Security A1'
     ),
     (
       v_contact_a2,v_user,v_account_a,
-      '+96772'||right(replace(v_contact_a2::text,'-',''),7),
+      '+967722222222',
       'Security A2'
     );
 
