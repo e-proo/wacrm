@@ -73,7 +73,7 @@ begin
   ) values (
     v_task, v_account_a, 'coverage.sourcing', 1,
     v_agent, v_revision, 'manual', 'queued',
-    'Find one bounded supplier', 'whatsapp', 1, 2,
+    'Find one bounded supplier', 'whatsapp', 2, 2,
     'task-smoke-109', 'task-smoke-correlation-109', v_user_a
   );
 
