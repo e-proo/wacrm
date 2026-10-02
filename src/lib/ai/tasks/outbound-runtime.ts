@@ -304,6 +304,7 @@ function outboundBudgetGuardReason(error: unknown): string | null {
 
   const codes = [
     'AI_KILL_SWITCH',
+    'MULTI_AGENT_DISABLED',
     'OUTBOUND_TASK_DELIVERY_DISABLED',
     'ACCOUNT_DAILY_MESSAGE_BUDGET_EXCEEDED',
     'AGENT_PAUSED',
