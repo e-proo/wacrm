@@ -11,6 +11,12 @@ import { validateToolArguments } from './tool-schema'
 import { generateNativeAgentTurn, type NativeAgentMessage } from './native-agent-tools'
 import { mergeConsecutive } from '../providers/shared'
 import { loadAccountRuntimePolicy } from './runtime-policy'
+import {
+  assertRuntimeCircuitClosed,
+  circuitErrorCode,
+  recordRuntimeCircuitEvent,
+  RuntimeCircuitOpenError,
+} from './circuit-breaker'
 import { reserveRuntimeBudget, releaseRuntimeBudget, RuntimeBudgetError } from './runtime-budget'
 import { CURRENT_PLATFORM_REGISTRY, getCurrentPlatformTool } from '../tools/platform/current-domain-registry'
 import {
@@ -104,9 +110,46 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     if (policy.killSwitch || !policy.multiAgentEnabled) return failed('runtime_disabled')
     if (input.plane === 'admin' && !policy.adminPlaneEnabled) return failed('admin_plane_disabled')
 
+    try {
+      await assertRuntimeCircuitClosed({
+        accountId,
+        scopeType: 'provider',
+        scopeKey: revision.providerConnectionId,
+      })
+    } catch (error) {
+      if (error instanceof RuntimeCircuitOpenError) {
+        return failed(error.code)
+      }
+      throw error
+    }
+
     // CRITICAL: generation credentials/model come from the frozen published
     // revision, not from account-global ai_configs.
     const connection = await loadRuntimeConnection(db, accountId, revision.providerConnectionId)
+
+    const generateProviderTurn = async (
+      ...args: Parameters<typeof generateNativeAgentTurn>
+    ) => {
+      try {
+        const result = await generateNativeAgentTurn(...args)
+        await recordRuntimeCircuitEvent({
+          accountId,
+          scopeType: 'provider',
+          scopeKey: revision.providerConnectionId,
+          outcome: 'success',
+        })
+        return result
+      } catch (error) {
+        await recordRuntimeCircuitEvent({
+          accountId,
+          scopeType: 'provider',
+          scopeKey: revision.providerConnectionId,
+          outcome: 'failure',
+          errorCode: circuitErrorCode(error),
+        })
+        throw error
+      }
+    }
 
     // Embeddings are independent of chat activation. Do not load the account
     // chat config here: a revision-specific provider must still run when the
@@ -348,7 +391,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     const rounds = Math.max(maxRounds, 1)
 
     const recoverAfterAuthoritativeRead = async () => {
-      const recovery = await generateNativeAgentTurn({
+      const recovery = await generateProviderTurn({
         connection,
         model: revision.model,
         systemPrompt:
@@ -372,7 +415,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           : null
       const toolsForTurn = forcedFreshTool ? [forcedFreshTool] : offeredTools
 
-      let turn = await generateNativeAgentTurn({
+      let turn = await generateProviderTurn({
         connection,
         model: revision.model,
         systemPrompt,
@@ -386,7 +429,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
       if (coverageRateRequired && !coverageRateSatisfied && coverageRateTool && turn.toolCalls.length === 0) {
         console.info('[agent loop] concrete coverage query attempted without coverage.get_rates; forcing authoritative read')
-        turn = await generateNativeAgentTurn({
+        turn = await generateProviderTurn({
           connection,
           model: revision.model,
           systemPrompt:
@@ -413,7 +456,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         turn.toolCalls.length === 0
       ) {
         console.info('[agent loop] concrete FX query attempted without exchange_rates.get_current; forcing authoritative read')
-        turn = await generateNativeAgentTurn({
+        turn = await generateProviderTurn({
           connection,
           model: revision.model,
           systemPrompt:
@@ -671,7 +714,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         }
         // Final turn is tool-free: provider cannot request another action after
         // the configured tool-round budget is exhausted.
-        const last = await generateNativeAgentTurn({
+        const last = await generateProviderTurn({
           connection,
           model: revision.model,
           systemPrompt,
