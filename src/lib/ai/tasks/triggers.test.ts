@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { CURRENT_AGENT_TASK_TRIGGER_REGISTRY } from './current-platform'
 import {
   AgentTaskTriggerRegistry,
   normalizeAgentTaskTriggerFiring,
@@ -89,4 +90,53 @@ describe('Agent Task Trigger Registry', () => {
       }),
     ).toBeNull()
   })
+  it('registers current Coverage and Services trigger handlers without kernel branching', () => {
+    const coverage = CURRENT_AGENT_TASK_TRIGGER_REGISTRY.get(
+      'coverage.sourcing',
+      1,
+    )
+    const promotion = CURRENT_AGENT_TASK_TRIGGER_REGISTRY.get(
+      'services.promotion',
+      1,
+    )
+
+    expect(coverage?.domain).toBe('coverage')
+    expect(promotion?.domain).toBe('services')
+
+    expect(() =>
+      coverage?.validate({
+        accountId: 'account',
+        taskType: 'coverage.sourcing',
+        taskTypeVersion: 1,
+        agentId: 'agent',
+        triggerKind: 'business_event',
+        eventType: 'coverage.request.approved',
+        eventVersion: 1,
+        config: {},
+        filters: { subject_type: 'coverage_request' },
+        idempotencyKey: 'coverage-trigger-test-0001',
+        createdBy: null,
+      }),
+    ).not.toThrow()
+
+    expect(() =>
+      promotion?.validate({
+        accountId: 'account',
+        taskType: 'services.promotion',
+        taskTypeVersion: 1,
+        agentId: 'agent',
+        triggerKind: 'schedule',
+        scheduleKind: 'recurring',
+        nextFireAt: '2026-10-03T00:00:00.000Z',
+        intervalMinutes: 1440,
+        config: {
+          serviceId: '00000000-0000-4000-8000-000000000001',
+        },
+        filters: {},
+        idempotencyKey: 'promotion-trigger-test-0001',
+        createdBy: null,
+      }),
+    ).not.toThrow()
+  })
+
 })
