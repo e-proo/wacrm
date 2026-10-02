@@ -10,7 +10,7 @@ import {
   loadAgentRevisionCapabilities,
   loadAgentRevisionToolGrants,
 } from '@/lib/ai/tasks/capability-policy'
-import { CURRENT_AGENT_TASK_PLATFORM } from '@/lib/ai/tasks/current-platform'
+import type { AgentTaskStartSource } from '@/lib/ai/tasks/triggers'
 import {
   SERVICE_PROMOTION_TASK_TYPE,
   loadServicePromotionContext,
@@ -58,7 +58,8 @@ export async function startServicePromotionTask(input: {
   accountId: string
   serviceId: string
   agentId: string
-  actorUserId: string
+  actorUserId: string | null
+  trigger?: AgentTaskStartSource
 }): Promise<{
   taskId: string
   agentId: string
@@ -183,6 +184,9 @@ export async function startServicePromotionTask(input: {
       revisionId,
     }),
   ])
+  const { CURRENT_AGENT_TASK_PLATFORM } = await import(
+    '@/lib/ai/tasks/current-platform'
+  )
   const validation = validateBuilderV2Configuration({
     config: configCandidate,
     registry: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
@@ -290,10 +294,14 @@ export async function startServicePromotionTask(input: {
     dailyTokenBudget: binding.dailyTokenBudget,
   }
   const segmentKey = frozenTags.join(',')
-  const idempotencyKey =
+  const baseIdempotencyKey =
     `services:promotion:service:${input.serviceId}:segment:${segmentKey}:agent:${input.agentId}:revision:${revisionId}`
+  const idempotencyKey = input.trigger
+    ? baseIdempotencyKey + ':source:' + input.trigger.sourceKey
+    : baseIdempotencyKey
   const correlationId =
-    `services:promotion:${input.serviceId}:${revisionId}:${segmentKey}`
+    `services:promotion:${input.serviceId}:${revisionId}:${segmentKey}` +
+    (input.trigger ? ':source:' + input.trigger.sourceKey : '')
 
   const { data: taskId, error: createError } = await db.rpc(
     'create_ai_agent_task',
@@ -303,8 +311,9 @@ export async function startServicePromotionTask(input: {
       p_task_type_version: SERVICE_PROMOTION_TASK_TYPE.version,
       p_agent_id: input.agentId,
       p_agent_revision_id: revisionId,
-      p_trigger_type: 'manual',
-      p_trigger_ref: 'service:' + input.serviceId,
+      p_trigger_type: input.trigger?.triggerType ?? 'manual',
+      p_trigger_ref:
+        input.trigger?.triggerRef ?? 'service:' + input.serviceId,
       p_objective:
         'Promote the frozen service snapshot to the explicit eligible customer segment and capture qualified customer intent.',
       p_task_context: taskContext,
