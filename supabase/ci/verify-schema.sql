@@ -1368,3 +1368,51 @@ begin
   end if;
 end
 $$;
+
+
+-- Agent Task TEST/STAGING cutover controls (139).
+do $$
+begin
+  if to_regprocedure(
+       'public.inspect_ai_agent_task_test_cutover_readiness(uuid)'
+     ) is null
+     or to_regprocedure(
+       'public.set_ai_agent_task_test_cutover_mode(uuid,text,text)'
+     ) is null then
+    raise exception 'Phase 18 Agent Task cutover RPC surface is incomplete';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.inspect_ai_agent_task_test_cutover_readiness(uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.inspect_ai_agent_task_test_cutover_readiness(uuid)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.inspect_ai_agent_task_test_cutover_readiness(uuid)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.set_ai_agent_task_test_cutover_mode(uuid,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.set_ai_agent_task_test_cutover_mode(uuid,text,text)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.set_ai_agent_task_test_cutover_mode(uuid,text,text)',
+       'EXECUTE'
+     ) then
+    raise exception 'Phase 18 Agent Task cutover RPC privileges are unsafe';
+  end if;
+end
+$$;
