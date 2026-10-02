@@ -18,6 +18,7 @@ declare
   v_intent uuid;
   v_change uuid;
   v_event uuid := gen_random_uuid();
+  v_json jsonb;
   v_trace jsonb;
   v_metrics jsonb;
   v_now timestamptz := now();
