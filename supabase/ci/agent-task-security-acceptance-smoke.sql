@@ -170,6 +170,12 @@ begin
   exception
     when foreign_key_violation then
       v_cross_target_blocked:=true;
+    when others then
+      if position('AGENT_TASK_NOT_FOUND' in upper(sqlerrm))>0 then
+        v_cross_target_blocked:=true;
+      else
+        raise;
+      end if;
   end;
 
   if not v_cross_target_blocked then
