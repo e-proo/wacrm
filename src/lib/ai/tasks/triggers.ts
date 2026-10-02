@@ -49,6 +49,12 @@ export interface AgentTaskTriggerDefinition {
   createdBy: string | null
 }
 
+export interface AgentTaskStartSource {
+  triggerType: 'scheduled' | 'business_event'
+  triggerRef: string
+  sourceKey: string
+}
+
 export interface AgentTaskTriggerHandler {
   domain: string
   taskType: string
