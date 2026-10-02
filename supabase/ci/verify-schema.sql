@@ -891,6 +891,15 @@ begin
         'ai_agent_task_trigger_firings'
       )
       and cmd in ('INSERT','UPDATE','DELETE','ALL')
+      and not (
+        policyname in (
+          'ai_agent_task_triggers_client_deny',
+          'ai_agent_task_trigger_firings_client_deny'
+        )
+        and roles @> array['anon'::name,'authenticated'::name]
+        and qual='false'
+        and with_check='false'
+      )
   ) then
     raise exception 'Authenticated clients must not mutate Agent Task trigger state directly';
   end if;
