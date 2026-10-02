@@ -10,7 +10,7 @@ import {
   loadAgentRevisionCapabilities,
   loadAgentRevisionToolGrants,
 } from '@/lib/ai/tasks/capability-policy'
-import { CURRENT_AGENT_TASK_PLATFORM } from '@/lib/ai/tasks/current-platform'
+import type { AgentTaskStartSource } from '@/lib/ai/tasks/triggers'
 import {
   COVERAGE_SOURCING_TASK_TYPE,
   loadCoverageSourcingTaskContext,
@@ -45,7 +45,8 @@ export interface StartCoverageSourcingTaskInput {
   accountId: string
   coverageRequestId: string
   agentId: string
-  actorUserId: string
+  actorUserId: string | null
+  trigger?: AgentTaskStartSource
 }
 
 export interface StartCoverageSourcingTaskResult {
@@ -71,15 +72,16 @@ function taskIdempotencyKey(input: {
   coverageRequestId: string
   agentId: string
   revisionId: string
+  sourceKey?: string | null
 }): string {
-  return (
+  const base =
     'coverage:sourcing:request:' +
     input.coverageRequestId +
     ':agent:' +
     input.agentId +
     ':revision:' +
     input.revisionId
-  )
+  return input.sourceKey ? base + ':source:' + input.sourceKey : base
 }
 
 export async function startCoverageSourcingTask(
@@ -221,6 +223,9 @@ export async function startCoverageSourcingTask(
     }),
   ])
 
+  const { CURRENT_AGENT_TASK_PLATFORM } = await import(
+    '@/lib/ai/tasks/current-platform'
+  )
   const builderValidation = validateBuilderV2Configuration({
     config: configCandidate,
     registry: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
@@ -329,9 +334,14 @@ export async function startCoverageSourcingTask(
     coverageRequestId: input.coverageRequestId,
     agentId: input.agentId,
     revisionId,
+    sourceKey: input.trigger?.sourceKey,
   })
   const correlationId =
-    'coverage:sourcing:' + input.coverageRequestId + ':' + revisionId
+    'coverage:sourcing:' +
+    input.coverageRequestId +
+    ':' +
+    revisionId +
+    (input.trigger ? ':source:' + input.trigger.sourceKey : '')
 
   const { data: taskId, error: createError } = await db.rpc(
     'create_ai_agent_task',
@@ -341,8 +351,10 @@ export async function startCoverageSourcingTask(
       p_task_type_version: COVERAGE_SOURCING_TASK_TYPE.version,
       p_agent_id: input.agentId,
       p_agent_revision_id: revisionId,
-      p_trigger_type: 'manual',
-      p_trigger_ref: 'coverage_request:' + input.coverageRequestId,
+      p_trigger_type: input.trigger?.triggerType ?? 'manual',
+      p_trigger_ref:
+        input.trigger?.triggerRef ??
+        'coverage_request:' + input.coverageRequestId,
       p_objective:
         'Source compatible coverage capacity for the frozen Coverage Request.',
       p_task_context: taskContext,
