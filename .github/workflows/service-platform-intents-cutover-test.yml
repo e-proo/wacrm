@@ -1,0 +1,170 @@
+name: Service Platform Intents Cutover TEST
+
+on:
+  workflow_dispatch:
+    inputs:
+      gate:
+        description: Controlled TEST gate to run
+        required: true
+        type: choice
+        options:
+          - evidence
+          - activate
+          - transport
+          - rollback
+      confirmation:
+        description: Exact confirmation phrase required by the selected gate
+        required: true
+        type: string
+
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/service-platform-intents-cutover-test.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-platform-intents-cutover-test
+  cancel-in-progress: false
+
+jobs:
+  intents-cutover:
+    name: Intents cutover — ${{ github.event_name == 'push' && 'transport' || inputs.gate }}
+    runs-on: ubuntu-latest
+    environment: wacrm-test
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.WACRM_TEST_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.WACRM_TEST_SUPABASE_SERVICE_ROLE_KEY }}
+      ENCRYPTION_KEY: ${{ secrets.WACRM_TEST_ENCRYPTION_KEY }}
+      WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID: ${{ vars.WACRM_TEST_ACCOUNT_ID }}
+      WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID: ${{ vars.WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID }}
+      WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID: ${{ vars.WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID }}
+      WACRM_INTENTS_CUTOVER_GATE: ${{ github.event_name == 'push' && 'transport' || inputs.gate }}
+      WACRM_INTENTS_CUTOVER_CONFIRMATION: ${{ github.event_name == 'push' && 'SEND_TEST_WHATSAPP' || inputs.confirmation }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'push' && 'refactor/service-platform-v2' || github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate TEST configuration and explicit confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            NEXT_PUBLIC_SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+          )
+
+          expected=''
+          case "$WACRM_INTENTS_CUTOVER_GATE" in
+            evidence)
+              expected='GENERATE_TEST_EVIDENCE'
+              ;;
+            activate)
+              expected='ACTIVATE_TEST'
+              ;;
+            transport)
+              expected='SEND_TEST_WHATSAPP'
+              required+=(
+                ENCRYPTION_KEY
+                WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID
+                WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID
+              )
+              ;;
+            rollback)
+              expected='ROLLBACK_TEST'
+              ;;
+            *)
+              echo 'Unsupported cutover gate.'
+              exit 1
+              ;;
+          esac
+
+          if [[ "$WACRM_INTENTS_CUTOVER_CONFIRMATION" != "$expected" ]]; then
+            echo "Confirmation does not match the selected gate."
+            exit 1
+          fi
+
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Required TEST configuration is missing: $name"
+              exit 1
+            fi
+          done
+
+      - name: Resolve TEST account
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID:-}" ]]; then
+            exit 0
+          fi
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          import { createClient } from '@supabase/supabase-js'
+
+          const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+          const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+          if (!url || !key) throw new Error('SUPABASE_TEST_ENV_REQUIRED')
+
+          const db = createClient(url, key)
+          const { data, error } = await db
+            .from('accounts')
+            .select('id')
+            .order('created_at', { ascending: true })
+            .limit(2)
+
+          if (error) throw error
+          if (!data || data.length !== 1) {
+            throw new Error(
+              'WACRM_TEST_ACCOUNT_ID_REQUIRED_WHEN_TEST_HAS_MULTIPLE_ACCOUNTS',
+            )
+          }
+
+          fs.appendFileSync(
+            process.env.GITHUB_ENV,
+            `WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID=${data[0].id}\n`,
+          )
+          NODE
+
+      - name: Generate 4/4 shadow parity evidence
+        if: env.WACRM_INTENTS_CUTOVER_GATE == 'evidence'
+        env:
+          WACRM_INTENTS_CUTOVER_EVIDENCE_LIVE: '1'
+          WACRM_INTENTS_CUTOVER_EVIDENCE_CONFIRM: GENERATE_TEST_EVIDENCE
+        run: npm run test:intents-cutover-evidence-live
+
+      - name: Activate controlled Intents route
+        if: env.WACRM_INTENTS_CUTOVER_GATE == 'activate'
+        env:
+          WACRM_INTENTS_CUTOVER_ACTIVATE_LIVE: '1'
+          WACRM_INTENTS_CUTOVER_CONFIRM: ACTIVATE_TEST
+        run: npm run test:intents-cutover-control-live
+
+      - name: Send one active WhatsApp E2E fixture
+        if: env.WACRM_INTENTS_CUTOVER_GATE == 'transport'
+        env:
+          WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_LIVE: '1'
+          WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_CONFIRM: SEND_TEST_WHATSAPP
+        run: npm run test:intents-cutover-transport-live
+
+      - name: Roll back controlled Intents route
+        if: env.WACRM_INTENTS_CUTOVER_GATE == 'rollback'
+        env:
+          WACRM_INTENTS_CUTOVER_ROLLBACK_LIVE: '1'
+          WACRM_INTENTS_CUTOVER_CONFIRM: ROLLBACK_TEST
+        run: npm run test:intents-cutover-control-live
