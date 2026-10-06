@@ -28,12 +28,15 @@
 - Intents موجود كـDomain ثالث حقيقي ويصدر canonical Business Events.
 - Intents Gate A (4/4 parity) نجحت على TEST.
 - Intents Gate B (controlled activation) نجحت على TEST، والمسار الحالي `service_request_customer_whatsapp` في وضع `active` و`ready=true`.
-- Gate C (active WhatsApp E2E) متوقف مؤقتًا بسبب قيد خارجي في Meta يعيد `API access blocked`.
+- Intents Gate C (active WhatsApp E2E) نجحت على TEST في 2026-10-06 عبر المسار الفعلي `business_event_outbox → projector/template → engineSendText → Meta`، مع رسالة واحدة فقط ونجاح replay بدون duplicate.
+- Intents Gate D (guarded rollback) نجحت على TEST في 2026-10-06، وبعدها ثبت عدم وجود `sending` أو `requires_reconciliation`.
+- أعيد تفعيل `service_request_customer_whatsapp` بعد إثبات rollback، والحالة النهائية في TEST هي `active`, `ready=true`, `blockers=0`, `legacy_nonterminal=0`, `active_nonterminal=0`.
+- Phase 1 أصبحت مغلقة رسميًا.
 - Phase 2 وPhase 3 وPhase 4 مغلقة رسميًا.
-- Phase 5 لم تبدأ، وما زال شرطها إغلاق Phase 1 أولًا.
+- Phase 5 أصبح مسموحًا البدء به بعد إغلاق Phase 1.
 - migration history المرتبط بهذا cutover في TEST وصل حتى 108.
 
-المتبقي ليس إعادة بناء المنصة، بل إغلاق Gate C/Gate D للـIntents ثم تنفيذ legacy contraction والقبول النهائي.
+المتبقي الآن هو legacy contraction المنضبط في Phase 5 ثم القبول المعماري النهائي في Phase 6.
 
 ---
 
@@ -41,7 +44,7 @@
 
 ### Phase 1 — Intents / Service Requests General Outbox Cutover
 
-**الحالة:** IN PROGRESS — PAUSED AT GATE C (EXTERNAL META BLOCKER)
+**الحالة:** COMPLETE — GATES A/B/C/D PASSED ON TEST (2026-10-06)
 
 الهدف:
 
@@ -182,6 +185,44 @@
 - لا تغيّر `ENCRYPTION_KEY` المستخدم للتوكن الحالي.
 - إذا احتاج إصلاح Meta إلى Access Token جديد، أعد حفظه باستخدام نفس `ENCRYPTION_KEY`.
 - لا تعتبر timestamps القديمة `registered_at/subscribed_apps_at` إثباتًا حيًا؛ أعد فحص Meta عند الاستئناف.
+
+---
+
+### Phase 1 — Closure Checkpoint — 2026-10-06
+
+تم استئناف المرحلة بعد زوال العائق الخارجي وإغلاق بوابات القبول المتبقية على TEST.
+
+#### النتيجة المثبتة
+
+- Gate A: **PASS** — parity = `4/4`.
+- Gate B: **PASS** — controlled activation.
+- Gate C: **PASS** — active WhatsApp E2E نجح للحدث `service_request.approved`.
+- الحدث المرسل أصبح `sent` في `business_event_outbox`.
+- صف `customer_intent_notifications` المرتبط به أصبح `sent` بنفس `local_message_id`، ما يثبت مزامنة strangler وعدم وجود duplicate.
+- replay داخل اختبار Gate C لم يطالب بأي إرسال ثانٍ.
+- Gate D: **PASS** — guarded rollback أعاد route إلى `legacy` بنجاح.
+- بعد rollback:
+  - `active_nonterminal=0`.
+  - `legacy_nonterminal=0`.
+  - لا `sending`.
+  - لا `requires_reconciliation`.
+- بعد إثبات rollback أعيد activation بنجاح.
+- الحالة النهائية على TEST:
+  - `service_request_customer_whatsapp = active`.
+  - `ready=true`.
+  - `blockers=0`.
+  - `matched_event_types=4/4`.
+  - `active_nonterminal=0`.
+  - `legacy_nonterminal=0`.
+- CI الخاص بإصلاحات Gate C/D نجح في lint/typecheck/test/build.
+
+#### إصلاحات الاختبار التي ثبتت أثناء الإغلاق
+
+- تطبيع TEST recipient/account identifiers باستخدام `trim()` لأن GitHub Environment variable احتوى newline مخفيًا.
+- Gate C يستخدم مسار Trusted Admin الرسمي ذي capability `change_requests.approve` بدل Dashboard approval الذي يتطلب `auth.uid` ولا يصلح من `service_role`.
+- Gate D control test يطبع `WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID` قبل RPC.
+
+النتيجة: Phase 1 **COMPLETE**، وPhase 5 لم يعد محجوبًا.
 
 ---
 
@@ -359,9 +400,9 @@ Phase 6  Full acceptance
 - [x] جمع parity evidence للأحداث الأربعة على TEST: `4/4 matched`.
 - [x] readiness = true على TEST: `mode=active`, `ready=true`, `blockers=0`, `legacy_nonterminal=0`, `active_nonterminal=0`.
 - [x] controlled activation test.
-- [ ] active delivery E2E عبر WhatsApp. **PAUSED:** Meta يعيد حاليًا `HTTP 400 / API access blocked` قبل وصول webhook أو transport E2E.
-- [ ] rollback test بعد نجاح Gate C.
-- [ ] تحديد الوضع النهائي بعد rollback: إعادة `active` إذا كان TEST سيستمر على المسار الجديد، ثم إعلان Phase 1 `COMPLETE`.
+- [x] active delivery E2E عبر WhatsApp — Gate C PASS في 2026-10-06؛ event `service_request.approved` أرسل مرة واحدة عبر general outbox، والـreplay لم ينتج duplicate.
+- [x] rollback test بعد نجاح Gate C — Gate D PASS؛ guarded rollback أعاد route إلى `legacy` مع صفر `sending/requires_reconciliation`.
+- [x] تحديد الوضع النهائي بعد rollback — أعيد `active` بنجاح للتجربة المستمرة، والحالة النهائية `ready=true` وPhase 1 = `COMPLETE`.
 
 يتم تحديث هذه القائمة مع تقدم التنفيذ، دون تغيير معايير القبول لتلائم النتيجة.
 
