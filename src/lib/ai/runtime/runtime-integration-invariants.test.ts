@@ -102,6 +102,10 @@ describe('multi-agent runtime integration invariants', () => {
       new URL('../../services/coverage/ai-tool-runtime.ts', import.meta.url),
       'utf8',
     )
+    const changeRequestsRuntime = readFileSync(
+      new URL('../../services/change-requests/ai-tool-runtime.ts', import.meta.url),
+      'utf8',
+    )
 
     expect(coverageRuntime).toContain("key: 'coverage.get_rates'")
     expect(coverageRuntime).toContain("key: 'coverage.find_offers'")
@@ -111,7 +115,8 @@ describe('multi-agent runtime integration invariants', () => {
     expect(coverageRuntime).toContain("key: 'coverage.admin_list_requests'")
     expect(centralExecutors).toContain('CURRENT_BUSINESS_DOMAIN_RUNTIMES')
     expect(centralExecutors).not.toContain("add('coverage.")
-    expect(centralExecutors).toContain("add('change_requests.list_pending', 1")
+    expect(centralExecutors).not.toContain("add('change_requests.list_pending'")
+    expect(changeRequestsRuntime).toContain("key: 'change_requests.list_pending'")
     expect(centralExecutors).toContain('sanitizeToolResultForModel')
   })
 
