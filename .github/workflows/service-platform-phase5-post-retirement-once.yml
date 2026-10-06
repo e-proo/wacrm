@@ -1,0 +1,65 @@
+name: Service Platform Phase 5 Post-Retirement TEST Once
+
+on:
+  push:
+    branches:
+      - refactor/service-platform-v2
+    paths:
+      - .github/workflows/service-platform-phase5-post-retirement-once.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-platform-phase5-post-retirement-once
+  cancel-in-progress: false
+
+jobs:
+  post-retirement-transport:
+    if: github.event.head_commit.message == 'test(services): run Phase 5 post-retirement transport'
+    name: Post-retirement Intents WhatsApp E2E
+    runs-on: ubuntu-latest
+    environment: wacrm-test
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.WACRM_TEST_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.WACRM_TEST_SUPABASE_SERVICE_ROLE_KEY }}
+      ENCRYPTION_KEY: ${{ secrets.WACRM_TEST_ENCRYPTION_KEY }}
+      WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID: ${{ vars.WACRM_TEST_ACCOUNT_ID }}
+      WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID: ${{ vars.WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID }}
+      WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID: ${{ vars.WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID }}
+      WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_LIVE: '1'
+      WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_CONFIRM: SEND_TEST_WHATSAPP
+      WACRM_INTENTS_CUTOVER_REQUIRE_LEGACY_WRITES_DISABLED: '1'
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate TEST configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            NEXT_PUBLIC_SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            ENCRYPTION_KEY
+            WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID
+            WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID
+            WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Required TEST configuration is missing: $name"
+              exit 1
+            fi
+          done
+
+      - name: Send one post-retirement WhatsApp E2E fixture
+        run: npm run test:intents-cutover-transport-live
