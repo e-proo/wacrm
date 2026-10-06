@@ -44,11 +44,12 @@ liveDescribe('Intents active WhatsApp transport E2E on TEST', () => {
       )
     }
 
-    const accountId = process.env.WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID
+    const accountId =
+      process.env.WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID?.trim()
     const contactId =
-      process.env.WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID
+      process.env.WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID?.trim()
     const conversationId =
-      process.env.WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID
+      process.env.WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID?.trim()
 
     if (!accountId || !contactId || !conversationId) {
       throw new Error(
