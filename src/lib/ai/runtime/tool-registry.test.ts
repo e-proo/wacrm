@@ -37,12 +37,11 @@ const ALL_CURRENT_KEYS = [
 ].sort()
 
 describe('legacy tool registry contraction', () => {
-  it('retains only domains that have not migrated to native manifests', () => {
+  it('is empty after every current tool migrates to a native manifest', () => {
     const keys = listRegisteredTools().map((tool) => tool.key).sort()
-    expect(keys).toEqual(
-      ['change_requests.list_pending'],
-    )
+    expect(keys).toEqual([])
 
+    expect(getRegisteredTool('change_requests.list_pending')).toBeNull()
     expect(getRegisteredTool('exchange_rates.get_current')).toBeNull()
     expect(getRegisteredTool('coverage.get_rates')).toBeNull()
     expect(getRegisteredTool('intents.record')).toBeNull()
@@ -56,29 +55,28 @@ describe('legacy tool registry contraction', () => {
     expect(getRegisteredTool('pricing_rules.propose_service_price')).toBeNull()
   })
 
-  it('preserves read/proposal permission invariants for remaining legacy tools', () => {
-    for (const tool of listRegisteredTools()) {
-      if (tool.grantPermissions.includes('read')) {
-        expect(tool.risk).toBe('read')
-        expect(tool.grantPermissions).toEqual(['read'])
-      } else {
-        expect(tool.grantPermissions).toEqual(['propose'])
-        expect(tool.risk).not.toBe('read')
-      }
-      expect(isGrantAllowed(tool, 'execute')).toBe(false)
-    }
-  })
+  it('keeps legacy permission/catalog helpers fail-closed after contraction', () => {
+    expect(
+      isGrantAllowed(
+        {
+          key: 'compat.only',
+          version: 1,
+          description: 'compatibility fixture',
+          argumentSchema: {},
+          returnSchema: '{}',
+          grantPermissions: ['read'],
+          category: 'changes',
+          risk: 'read',
+        },
+        'execute',
+      ),
+    ).toBe(false)
 
-  it('keeps the legacy prompt catalog limited to legacy-owned tools', () => {
     const catalog = renderToolCatalog([
       { tool_key: 'change_requests.list_pending', permission: 'read' },
       { tool_key: 'services.get', permission: 'read' },
-      { tool_key: 'pricing.calculate_quote', permission: 'read' },
     ])
-
-    expect(catalog).toContain('change_requests.list_pending (read)')
-    expect(catalog).not.toContain('services.get')
-    expect(catalog).not.toContain('pricing.calculate_quote')
+    expect(catalog).toBe('')
   })
 })
 
@@ -87,6 +85,14 @@ describe('current platform tool compatibility projection', () => {
     expect(listCurrentToolDefinitions().map((tool) => tool.key).sort()).toEqual(
       ALL_CURRENT_KEYS,
     )
+  })
+
+  it('projects the native Change Requests contract without a legacy bridge', () => {
+    const pending = getCurrentToolDefinition('change_requests.list_pending', 1)
+    expect(pending?.grantPermissions).toEqual(['read'])
+    expect(pending?.category).toBe('changes')
+    expect(pending?.argumentSchema.limit?.required).toBe(false)
+    expect(pending?.returnSchema).toContain('proposed_payload')
   })
 
   it('projects native Coverage contracts without a central duplicate spec', () => {

@@ -1,3 +1,4 @@
+import { CHANGE_REQUESTS_DOMAIN, CHANGE_REQUESTS_RUNTIME } from '@/lib/services/change-requests/domain'
 import { COVERAGE_DOMAIN, COVERAGE_RUNTIME } from '@/lib/services/coverage/domain'
 import { FX_V2_DOMAIN, FX_V2_RUNTIME } from '@/lib/services/fx-v2/domain'
 import { INTENTS_DOMAIN, INTENTS_RUNTIME } from '@/lib/services/intents/domain'
@@ -14,6 +15,7 @@ import type { BusinessDomainManifest } from './domain-contracts'
  * template resolution, or tool dispatch.
  */
 export const CURRENT_BUSINESS_DOMAIN_MODULES: readonly BusinessDomainManifest[] = [
+  CHANGE_REQUESTS_DOMAIN,
   FX_V2_DOMAIN,
   COVERAGE_DOMAIN,
   INTENTS_DOMAIN,
@@ -23,6 +25,7 @@ export const CURRENT_BUSINESS_DOMAIN_MODULES: readonly BusinessDomainManifest[] 
 ]
 
 export const CURRENT_BUSINESS_DOMAIN_RUNTIMES = [
+  CHANGE_REQUESTS_RUNTIME,
   FX_V2_RUNTIME,
   COVERAGE_RUNTIME,
   INTENTS_RUNTIME,

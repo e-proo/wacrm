@@ -21,31 +21,11 @@ export interface ArgumentSchema {
   required?: boolean
 }
 
-const CHANGE_REQUESTS_LIST_PENDING: ToolDefinition = {
-  key: 'change_requests.list_pending',
-  version: 1,
-  description:
-    'Admin-only list of pending proposed system changes awaiting a human decision.',
-  argumentSchema: {
-    limit: {
-      type: 'number',
-      description: 'Default 20, max 100.',
-      required: false,
-    },
-  },
-  returnSchema:
-    'Array<{ id, code, target_type, intent, summary, proposed_payload, created_at, expires_at }>',
-  grantPermissions: ['read'],
-  category: 'changes',
-  risk: 'read',
-}
-
-// Final transitional registry. Business-domain tools are owned by native
-// PlatformToolManifest contracts and projected back to ToolDefinition only via
-// runtime-tool-compat for API/UI consumers.
-const REGISTRY: ReadonlyArray<ToolDefinition> = [
-  CHANGE_REQUESTS_LIST_PENDING,
-]
+// Historical compatibility registry. All current tools are now owned by
+// native PlatformToolManifest contracts under business domains. Keep these
+// helpers temporarily so older internal callers fail closed while Phase 5
+// contracts the remaining compatibility surface.
+const REGISTRY: ReadonlyArray<ToolDefinition> = []
 
 export function listRegisteredTools(): ReadonlyArray<ToolDefinition> {
   return REGISTRY

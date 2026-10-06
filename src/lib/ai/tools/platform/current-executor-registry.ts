@@ -2,7 +2,6 @@ import {
   type ToolContext,
   type ToolResult,
 } from '../executors'
-import { executeChangeRequestsListPending } from '../business-handoff'
 import type { PlatformToolManifest } from './contracts'
 import { CURRENT_BUSINESS_DOMAIN_RUNTIMES } from '@/lib/services/platform/composition'
 import { ToolExecutorRegistry } from './execution-registry'
@@ -19,13 +18,6 @@ function add(key: string, version: number, executor: RuntimeExecutor): void {
   if (!contract) throw new Error(`Cannot register executor without platform contract: ${key}@${version}`)
   CURRENT_EXECUTORS.register({ key, version, executor })
 }
-
-/**
- * Transitional registrations for domains that have not yet moved into a
- * BusinessDomainRuntime. FX V2, Coverage, and Intents are registered below
- * from their owning domain runtimes.
- */
-add('change_requests.list_pending', 1, (ctx, args) => executeChangeRequestsListPending(ctx, args as never))
 
 for (const runtime of CURRENT_BUSINESS_DOMAIN_RUNTIMES) {
   for (const registration of runtime.toolExecutors) {
