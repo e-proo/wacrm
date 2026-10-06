@@ -4,7 +4,7 @@ import {
   setIntentsBusinessEventDeliveryMode,
 } from './cutover'
 
-const accountId = process.env.WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID
+const accountId = process.env.WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID?.trim()
 const activateEnabled =
   process.env.WACRM_INTENTS_CUTOVER_ACTIVATE_LIVE === '1'
 const rollbackEnabled =
