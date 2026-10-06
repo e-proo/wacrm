@@ -22,7 +22,7 @@
 - legacy tool registry لم يعد يملك أي tool حالي.
 - migration `140_service_platform_legacy_notification_write_contraction.sql` مطبقة على TEST.
 - FX/Coverage/Intents كلها `active + ready=true` على TEST، وlegacy notification writes معطلة لكل المسارات الثلاثة.
-- الخطوة التالية هي post-retirement live transport acceptance قبل أي contraction إضافي للـlegacy notification fallback.
+- post-retirement live transport acceptance نجحت على TEST في 2026-10-06؛ الخطوة التالية هي consumer scan وتقليص legacy claim/fallback المتبقي بصورة منضبطة قبل Phase 6.
 
 الأقسام التي تصف `legacy-bridge` أو `customer_intent_notifications` كحالة قائمة عند إعداد الوثيقة يجب قراءتها كـ**baseline transition snapshot**، لا كحالة التنفيذ الحالية.
 
