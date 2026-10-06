@@ -72,6 +72,19 @@ liveDescribe('Intents active WhatsApp transport E2E on TEST', () => {
     expect(readiness.mode).toBe('active')
     expect(readiness.ready).toBe(true)
 
+    const { data: deliveryControl, error: deliveryControlError } = await db
+      .from('business_event_delivery_controls')
+      .select('legacy_notification_write_enabled')
+      .eq('account_id', accountId)
+      .eq('route_key', 'service_request_customer_whatsapp')
+      .maybeSingle()
+    if (deliveryControlError) throw deliveryControlError
+    if (!deliveryControl) {
+      throw new Error('INTENTS_CUTOVER_DELIVERY_CONTROL_REQUIRED')
+    }
+    const legacyWritesEnabled =
+      deliveryControl.legacy_notification_write_enabled !== false
+
     const { data: recipient, error: recipientError } = await db
       .from('conversations')
       .select('id, contact_id, account_id')
@@ -202,7 +215,19 @@ liveDescribe('Intents active WhatsApp transport E2E on TEST', () => {
       delivery_mode: 'active',
       status: 'pending',
     })
-    expect(eventBeforeSend?.legacy_notification_id).toBeTruthy()
+    if (legacyWritesEnabled) {
+      expect(eventBeforeSend?.legacy_notification_id).toBeTruthy()
+    } else {
+      expect(eventBeforeSend?.legacy_notification_id).toBeNull()
+
+      const { count: legacyCount, error: legacyCountError } = await db
+        .from('customer_intent_notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', accountId)
+        .eq('change_request_id', created.id)
+      if (legacyCountError) throw legacyCountError
+      expect(legacyCount).toBe(0)
+    }
 
     const delivered =
       await deliverActiveSubjectBusinessEventNotifications({
@@ -230,22 +255,35 @@ liveDescribe('Intents active WhatsApp transport E2E on TEST', () => {
     expect(eventAfterSend?.local_message_id).toBeTruthy()
     expect(eventAfterSend?.sent_at).toBeTruthy()
 
-    const { data: legacyAfterSend, error: legacyError } = await db
-      .from('customer_intent_notifications')
-      .select('status, local_message_id, sent_at')
-      .eq('account_id', accountId)
-      .eq('id', eventAfterSend?.legacy_notification_id)
-      .maybeSingle()
-    if (legacyError) throw legacyError
+    if (legacyWritesEnabled) {
+      const { data: legacyAfterSend, error: legacyError } = await db
+        .from('customer_intent_notifications')
+        .select('status, local_message_id, sent_at')
+        .eq('account_id', accountId)
+        .eq('id', eventAfterSend?.legacy_notification_id)
+        .maybeSingle()
+      if (legacyError) throw legacyError
 
-    expect(legacyAfterSend).toMatchObject({
-      status: 'sent',
-      local_message_id: eventAfterSend?.local_message_id,
-    })
-    expect(legacyAfterSend?.sent_at).toBeTruthy()
+      expect(legacyAfterSend).toMatchObject({
+        status: 'sent',
+        local_message_id: eventAfterSend?.local_message_id,
+      })
+      expect(legacyAfterSend?.sent_at).toBeTruthy()
+    } else {
+      expect(eventAfterSend?.legacy_notification_id).toBeNull()
+
+      const { count: legacyCount, error: legacyCountError } = await db
+        .from('customer_intent_notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', accountId)
+        .eq('change_request_id', created.id)
+      if (legacyCountError) throw legacyCountError
+      expect(legacyCount).toBe(0)
+    }
 
     // A second subject-scoped pass must have nothing left to claim. This proves
-    // the active event and its linked legacy row did not create two sends.
+    // the canonical active event remains idempotent both before and after
+    // Phase 5 legacy-notification write retirement.
     const replay =
       await deliverActiveSubjectBusinessEventNotifications({
         accountId,
