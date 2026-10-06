@@ -122,6 +122,9 @@ jobs:
       - name: Verify Agent Task guarded TEST cutover
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-cutover-smoke.sql
 
+      - name: Verify Service Platform legacy notification contraction
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/service-platform-legacy-notification-contraction-smoke.sql
+
       - name: Verify Agent Task authenticated RLS isolation
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-rls-smoke.sql
 
@@ -130,9 +133,6 @@ jobs:
 
       - name: Verify Intents controlled cutover safety
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/intents-cutover-smoke.sql
-
-      - name: Verify Service Platform legacy notification contraction
-        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/service-platform-legacy-notification-contraction-smoke.sql
 
       - name: Verify FX V2 Phase 2 domain behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-2-smoke.sql
