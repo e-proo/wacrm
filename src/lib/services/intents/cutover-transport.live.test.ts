@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { approveChangeRequest } from '@/lib/ai/runtime/change-requests-service'
+import { approveChangeRequestFromTrustedAdmin } from '@/lib/ai/runtime/change-requests-service'
 import { executeApprovedChangeRequest } from '@/lib/ai/runtime/change-request-executor'
 import { deliverActiveSubjectBusinessEventNotifications } from '@/lib/ai/runtime/customer-notification-delivery'
 import { recordIntent } from './intents-service'
@@ -95,6 +95,22 @@ liveDescribe('Intents active WhatsApp transport E2E on TEST', () => {
     }
     const actorUserId = account.owner_user_id as string
 
+    const { data: trustedAdminRows, error: trustedAdminError } = await db
+      .from('trusted_admin_identities')
+      .select('id, allowed_capabilities')
+      .eq('account_id', accountId)
+      .eq('channel', 'whatsapp')
+      .eq('status', 'active')
+    if (trustedAdminError) throw trustedAdminError
+
+    const approvalIdentity = (trustedAdminRows ?? []).find((row) =>
+      Array.isArray(row.allowed_capabilities) &&
+      row.allowed_capabilities.includes('change_requests.approve'),
+    )
+    if (!approvalIdentity?.id) {
+      throw new Error('INTENTS_CUTOVER_TRUSTED_APPROVER_REQUIRED')
+    }
+
     const { data: policy, error: policyError } = await db
       .from('ai_runtime_policies')
       .select('recovery_worker_enabled')
@@ -149,19 +165,21 @@ liveDescribe('Intents active WhatsApp transport E2E on TEST', () => {
     const created = (
       createdRows as Array<{
         id: string
+        code: number
         confirmation_code: string | null
       }> | null
     )?.[0]
-    if (!created?.id || !created.confirmation_code) {
+    if (!created?.id || !created.code || !created.confirmation_code) {
       throw new Error('INTENTS_CUTOVER_CHANGE_REQUEST_CREATE_FAILED')
     }
     touchedChangeRequestIds.add(created.id)
 
-    await approveChangeRequest({
+    await approveChangeRequestFromTrustedAdmin({
       accountId,
-      changeRequestId: created.id,
+      requestCode: created.code,
       confirmationCode: created.confirmation_code,
-      actorUserId,
+      identityId: approvalIdentity.id,
+      inboundMessageId: null,
     })
 
     await executeApprovedChangeRequest({
