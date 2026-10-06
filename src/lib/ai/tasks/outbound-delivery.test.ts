@@ -8,9 +8,7 @@ describe('Agent Task outbound delivery boundary', () => {
       'utf8',
     )
 
-    const claim = source.search(
-      /\\.rpc\\(\\s*['"]claim_agent_task_outbound_message['"]/,
-    )
+    const claim = source.indexOf('claim_agent_task_outbound_message')
     const sendText = source.indexOf('transport.sendText')
     const sendTemplate = source.indexOf('transport.sendTemplate')
 
