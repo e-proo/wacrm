@@ -106,7 +106,7 @@ export async function inspectCoverageSourcingPilotReadiness(input: {
   )
   if (config && !binding) blockers.push('COVERAGE_SOURCING_BINDING_MISSING')
 
-  if (binding) {
+  if (config && binding) {
     const validation = validateBuilderV2Configuration({
       config,
       registry: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
@@ -163,7 +163,7 @@ export async function inspectCoverageSourcingPilotReadiness(input: {
         taskId: 'pilot-readiness',
         taskType: COVERAGE_SOURCING_TASK_TYPE.key,
         taskTypeVersion: COVERAGE_SOURCING_TASK_TYPE.version,
-        taskContext,
+        taskContext: { ...taskContext },
         targetPolicy: {
           coverageRegionIds: [...binding.targetScope.regionIds],
         },

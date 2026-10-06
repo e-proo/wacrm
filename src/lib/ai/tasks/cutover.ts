@@ -129,6 +129,14 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function modeValue(
   value: unknown,
+  allowInconsistent: false,
+): Exclude<AgentTaskTestCutoverMode, 'inconsistent'>
+function modeValue(
+  value: unknown,
+  allowInconsistent: true,
+): AgentTaskTestCutoverMode
+function modeValue(
+  value: unknown,
   allowInconsistent: boolean,
 ): AgentTaskTestCutoverMode {
   if (value === 'disabled' || value === 'pilot') return value

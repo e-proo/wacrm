@@ -106,7 +106,7 @@ export async function inspectServicePromotionPilotReadiness(input: {
   )
   if (config && !binding) blockers.push('SERVICE_PROMOTION_BINDING_MISSING')
 
-  if (binding) {
+  if (config && binding) {
     const validation = validateBuilderV2Configuration({
       config,
       registry: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
