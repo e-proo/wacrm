@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   post-retirement-transport:
-    if: github.event.head_commit.message == 'test(services): run Phase 5 post-retirement transport'
+    if: "${{ github.event.head_commit.message == 'test(services): run Phase 5 post-retirement transport' }}"
     name: Post-retirement Intents WhatsApp E2E
     runs-on: ubuntu-latest
     environment: wacrm-test
