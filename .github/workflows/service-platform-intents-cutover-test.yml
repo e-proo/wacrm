@@ -17,12 +17,6 @@ on:
         required: true
         type: string
 
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/service-platform-intents-cutover-test.yml'
-
 permissions:
   contents: read
 
@@ -32,7 +26,7 @@ concurrency:
 
 jobs:
   intents-cutover:
-    name: Intents cutover — ${{ github.event_name == 'push' && 'rollback' || inputs.gate }}
+    name: Intents cutover — ${{ inputs.gate }}
     runs-on: ubuntu-latest
     environment: wacrm-test
     env:
@@ -42,13 +36,9 @@ jobs:
       WACRM_INTENTS_CUTOVER_LIVE_ACCOUNT_ID: ${{ vars.WACRM_TEST_ACCOUNT_ID }}
       WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID: ${{ vars.WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID }}
       WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID: ${{ vars.WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID }}
-      WACRM_INTENTS_CUTOVER_GATE: ${{ github.event_name == 'push' && 'rollback' || inputs.gate }}
-      WACRM_INTENTS_CUTOVER_CONFIRMATION: ${{ github.event_name == 'push' && 'ROLLBACK_TEST' || inputs.confirmation }}
 
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'push' && 'refactor/service-platform-v2' || github.ref }}
 
       - uses: actions/setup-node@v7
         with:
@@ -69,7 +59,7 @@ jobs:
           )
 
           expected=''
-          case "$WACRM_INTENTS_CUTOVER_GATE" in
+          case "${{ inputs.gate }}" in
             evidence)
               expected='GENERATE_TEST_EVIDENCE'
               ;;
@@ -93,7 +83,7 @@ jobs:
               ;;
           esac
 
-          if [[ "$WACRM_INTENTS_CUTOVER_CONFIRMATION" != "$expected" ]]; then
+          if [[ "${{ inputs.confirmation }}" != "$expected" ]]; then
             echo "Confirmation does not match the selected gate."
             exit 1
           fi
@@ -142,28 +132,28 @@ jobs:
           NODE
 
       - name: Generate 4/4 shadow parity evidence
-        if: env.WACRM_INTENTS_CUTOVER_GATE == 'evidence'
+        if: inputs.gate == 'evidence'
         env:
           WACRM_INTENTS_CUTOVER_EVIDENCE_LIVE: '1'
           WACRM_INTENTS_CUTOVER_EVIDENCE_CONFIRM: GENERATE_TEST_EVIDENCE
         run: npm run test:intents-cutover-evidence-live
 
       - name: Activate controlled Intents route
-        if: env.WACRM_INTENTS_CUTOVER_GATE == 'activate'
+        if: inputs.gate == 'activate'
         env:
           WACRM_INTENTS_CUTOVER_ACTIVATE_LIVE: '1'
           WACRM_INTENTS_CUTOVER_CONFIRM: ACTIVATE_TEST
         run: npm run test:intents-cutover-control-live
 
       - name: Send one active WhatsApp E2E fixture
-        if: env.WACRM_INTENTS_CUTOVER_GATE == 'transport'
+        if: inputs.gate == 'transport'
         env:
           WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_LIVE: '1'
           WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_CONFIRM: SEND_TEST_WHATSAPP
         run: npm run test:intents-cutover-transport-live
 
       - name: Roll back controlled Intents route
-        if: env.WACRM_INTENTS_CUTOVER_GATE == 'rollback'
+        if: inputs.gate == 'rollback'
         env:
           WACRM_INTENTS_CUTOVER_ROLLBACK_LIVE: '1'
           WACRM_INTENTS_CUTOVER_CONFIRM: ROLLBACK_TEST
