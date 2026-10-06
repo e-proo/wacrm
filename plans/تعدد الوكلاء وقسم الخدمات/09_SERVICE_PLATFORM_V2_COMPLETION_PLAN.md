@@ -33,10 +33,10 @@
 - أعيد تفعيل `service_request_customer_whatsapp` بعد إثبات rollback، والحالة النهائية في TEST هي `active`, `ready=true`, `blockers=0`, `legacy_nonterminal=0`, `active_nonterminal=0`.
 - Phase 1 أصبحت مغلقة رسميًا.
 - Phase 2 وPhase 3 وPhase 4 مغلقة رسميًا.
-- Phase 5 أصبح مسموحًا البدء به بعد إغلاق Phase 1.
-- migration history المرتبط بهذا cutover في TEST وصل حتى 108.
+- Phase 5 بدأت فعليًا بعد إغلاق Phase 1، وأُنجزت أول دفعتين من contraction: إزالة legacy tool bridge ثم تقليص legacy notification writes.
+- migration history الفعلي على `wacrm test` وصل حتى `140_service_platform_legacy_notification_write_contraction.sql`؛ migrations `109–139` تخص AI Agent Task Platform، و`140` هي أول migration خاصة بـPhase 5 contraction.
 
-المتبقي الآن هو legacy contraction المنضبط في Phase 5 ثم القبول المعماري النهائي في Phase 6.
+Phase 5 الآن `IN PROGRESS`. المتبقي المباشر هو إثبات post-retirement WhatsApp E2E بعد تعطيل legacy writes، ثم تحديد ما يمكن حذفه من legacy claim/fallback بصورة آمنة قبل الانتقال إلى Phase 6.
 
 ---
 
@@ -98,7 +98,9 @@
 
 ### Phase 1 — Pause / Resume Checkpoint — 2026-09-27
 
-هذه هي **نقطة الاستئناف الرسمية** أثناء معالجة قيد Meta/Instagram خارج المستودع.
+> **Historical checkpoint:** هذا القسم يوثق حالة التوقف في 2026-09-27 فقط. Gate C/D أُغلقت لاحقًا في 2026-10-06، ولا يمثل هذا القسم الحالة الحالية.
+
+هذه كانت **نقطة الاستئناف الرسمية** أثناء معالجة قيد Meta/Instagram خارج المستودع.
 
 #### الحالة المثبتة قبل التوقف
 
@@ -306,7 +308,7 @@
 
 ### Phase 5 — Legacy Notification / Registry Contraction
 
-**الحالة:** PENDING
+**الحالة:** IN PROGRESS — FIRST CONTRACTION APPLIED ON TEST (2026-10-06)
 
 لا تبدأ قبل إغلاق Phase 1 وPhase 2.
 
@@ -318,6 +320,70 @@
 - تقليص الاعتماد على `customer_intent_notifications`.
 - عدم حذف migration history.
 - عدم حذف fallback قبل إثبات rollback/cutover لكل Domain معني.
+
+#### الحالة الفعلية الحالية — 2026-10-07
+
+تم فتح Phase 5 بعد إغلاق Phase 1، ونُفذ فعليًا ما يلي:
+
+1. **Native Change Requests ownership**
+   - نُقلت `change_requests.list_pending@1` إلى:
+     - `src/lib/services/change-requests/tool-manifests.ts`
+     - `src/lib/services/change-requests/ai-tool-runtime.ts`
+     - `src/lib/services/change-requests/domain.ts`
+   - `current-domain-registry.ts` و`current-executor-registry.ts` يعتمدان الآن فقط على `CURRENT_BUSINESS_DOMAIN_MODULES/RUNTIMES`.
+   - حُذف `src/lib/ai/tools/platform/legacy-bridge.ts` بالكامل.
+   - أزيل export الخاص به من `src/lib/ai/tools/platform/index.ts`.
+   - `src/lib/ai/runtime/tool-registry.ts` لم يعد يملك أي tool حالي؛ الـregistry فارغ ويُبقى مؤقتًا كواجهة compatibility/fail-closed إلى حين فحص بقية consumers.
+
+2. **Legacy notification write contraction**
+   - أضيفت migration:
+     - `140_service_platform_legacy_notification_write_contraction.sql`
+   - migration مطبقة فعليًا على `wacrm test`.
+   - أضيف `legacy_notification_write_enabled` إلى `business_event_delivery_controls`.
+   - retirement لا يسمح بالتعطيل إلا لمسار `active` و`ready=true`.
+   - legacy mode يعيد fallback writes تلقائيًا.
+   - rollback يحظر demotion لحدث active غير مرسل إذا لم توجد legacy fallback row مرتبطة به.
+
+3. **الحالة الحية الحالية على TEST**
+   - `fx_trade_customer_whatsapp`: `active`, `ready=true`, `legacy_notification_write_enabled=false`.
+   - `coverage_customer_whatsapp`: `active`, `ready=true`, `legacy_notification_write_enabled=false`.
+   - `service_request_customer_whatsapp`: `active`, `ready=true`, `legacy_notification_write_enabled=false`.
+   - readiness لكل المسارات الثلاثة يثبت:
+     - `blockers=0`
+     - `active_nonterminal=0`
+     - `legacy_nonterminal=0`
+
+4. **Verification**
+   - clean migration replay يمر عبر migration 140.
+   - `service-platform-legacy-notification-contraction-smoke.sql` يمر في GitHub Actions.
+   - آخر General CI قبل تجهيز gate التالي: run `37526379320` على head `2afff1a31dd0f414d65b76ae86707e949b55044e` = **PASS**.
+   - Migrations run `37525909042` يثبت نجاح replay/schema وPhase 5 smoke؛ النتيجة الإجمالية للـworkflow بقيت حمراء بسبب فشل لاحق في `Agent Task authenticated RLS isolation`، وهو blocker منفصل عن Service Platform contraction ولا يعني فشل migration 140.
+
+#### بوابة Phase 5 التالية
+
+الخطوة التالية ليست حذف `customer_intent_notifications` بعد. المطلوب أولًا إثبات مسار حي جديد بعد retirement:
+
+`Intents decision → business_event_outbox(active) → no customer_intent_notifications row → projector/template → WhatsApp → sent → replay بدون duplicate`
+
+لذلك يوجد gate يدوي مخصص في:
+
+`.github/workflows/service-platform-intents-cutover-test.yml`
+
+باسم:
+
+`post-retirement-transport`
+
+ويستخدم confirmation مستقل:
+
+`SEND_TEST_WHATSAPP_POST_RETIREMENT`
+
+الـgate يفشل **قبل إنشاء fixture أو إرسال WhatsApp** إذا لم يكن `legacy_notification_write_enabled=false`، ثم يعيد استخدام transport E2E نفسه لإثبات:
+- عدم إنشاء legacy row جديدة.
+- نجاح canonical Business Event delivery.
+- وجود `local_message_id/sent_at`.
+- replay لا يطالب بإرسال ثانٍ.
+
+لا تُحذف legacy claim/fallback functions أو الجدول التاريخي قبل نجاح هذا gate ثم إعادة قياس rollback requirements لكل FX/Coverage/Intents.
 
 ---
 
@@ -1382,9 +1448,11 @@ Variables:
 **Phase 5 تبقى غير مبدوءة:** شرطها الصريح يتطلب إغلاق Phase 1 أولًا. لا يتم حذف `customer_intent_notifications` أو fallback/legacy claim path قبل نجاح evidence → activation → transport → rollback.
 
 
-### Phase 5 — Preflight inventory (NOT STARTED)
+### Phase 5 — Preflight inventory (HISTORICAL PRE-START SNAPSHOT)
 
-Phase 5 ما تزال `PENDING` لأن شرطها الصريح "لا تبدأ قبل إغلاق Phase 1 وPhase 2" لم يتحقق بالكامل. هذا القسم جرد فقط ولا يجيز حذف fallback.
+> **Historical snapshot:** هذا الجرد أُخذ قبل إغلاق Phase 1. الحالة الحالية لـPhase 5 هي `IN PROGRESS` كما هو موثق في القسم الرسمي أعلاه.
+
+وقت هذا الجرد كانت Phase 5 ما تزال `PENDING` لأن شرطها الصريح "لا تبدأ قبل إغلاق Phase 1 وPhase 2" لم يكن قد تحقق بالكامل. هذا القسم محفوظ كسجل evidence ولا يمثل الحالة الحالية.
 
 #### TEST cutover snapshot
 
@@ -1501,7 +1569,7 @@ Phase 5 ما تزال `PENDING` لأن شرطها الصريح "لا تبدأ ق
 6. أي DB contraction يتم عبر migration جديدة؛ migration history لا تُعدل ولا تُحذف.
 7. إبقاء `runtime-tool-compat` إلى أن تنتهي API/UI migration الخاصة به.
 
-**Phase 5 status يبقى PENDING.**
+**Historical status at this checkpoint:** كانت Phase 5 `PENDING`. الحالة الحالية موثقة أعلى الوثيقة كـ`IN PROGRESS`.
 
 
 ### Phase 1 — Live runner account discovery hardening
@@ -1592,7 +1660,7 @@ Phase 5 ما تزال `PENDING` لأن شرطها الصريح "لا تبدأ ق
 Phase 1 تبقى `IN PROGRESS` حتى نجاح Gate C ثم Gate D.
 
 
-### Phase 1 — Gate C blocked by Meta API access restriction
+### Phase 1 — Historical Gate C blocker: Meta API access restriction
 
 تمت محاولة تجهيز Gate C على TEST recipient باسم `Pro Codar`.
 
@@ -1621,4 +1689,4 @@ Gate C لا يمكن اعتباره فشلًا في Intents أو Business Event 
 
 تم تعطيل Edge Function التشخيصية المؤقتة وإزالة workflow التشخيصي المؤقت من الفرع بعد جمع evidence.
 
-**Phase 1 تبقى IN PROGRESS.**
+**Historical status at that time:** كانت Phase 1 `IN PROGRESS`. أُغلقت لاحقًا في 2026-10-06 كما هو موثق في Closure Checkpoint أعلاه.

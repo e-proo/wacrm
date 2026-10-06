@@ -10,6 +10,8 @@ import { inspectIntentsBusinessEventCutoverReadiness } from './cutover'
 const enabled =
   process.env.WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_LIVE === '1'
 const liveDescribe = enabled ? describe : describe.skip
+const requireLegacyWritesDisabled =
+  process.env.WACRM_INTENTS_CUTOVER_REQUIRE_LEGACY_WRITES_DISABLED === '1'
 
 let accountIdForCleanup: string | null = null
 let previousRecoveryWorker: boolean | null = null
@@ -84,6 +86,10 @@ liveDescribe('Intents active WhatsApp transport E2E on TEST', () => {
     }
     const legacyWritesEnabled =
       deliveryControl.legacy_notification_write_enabled !== false
+
+    if (requireLegacyWritesDisabled) {
+      expect(legacyWritesEnabled).toBe(false)
+    }
 
     const { data: recipient, error: recipientError } = await db
       .from('conversations')

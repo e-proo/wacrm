@@ -11,6 +11,7 @@ on:
           - evidence
           - activate
           - transport
+          - post-retirement-transport
           - rollback
       confirmation:
         description: Exact confirmation phrase required by the selected gate
@@ -68,6 +69,14 @@ jobs:
               ;;
             transport)
               expected='SEND_TEST_WHATSAPP'
+              required+=(
+                ENCRYPTION_KEY
+                WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID
+                WACRM_INTENTS_CUTOVER_TEST_CONVERSATION_ID
+              )
+              ;;
+            post-retirement-transport)
+              expected='SEND_TEST_WHATSAPP_POST_RETIREMENT'
               required+=(
                 ENCRYPTION_KEY
                 WACRM_INTENTS_CUTOVER_TEST_CONTACT_ID
@@ -150,6 +159,14 @@ jobs:
         env:
           WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_LIVE: '1'
           WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_CONFIRM: SEND_TEST_WHATSAPP
+        run: npm run test:intents-cutover-transport-live
+
+      - name: Send one post-retirement active WhatsApp E2E fixture
+        if: inputs.gate == 'post-retirement-transport'
+        env:
+          WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_LIVE: '1'
+          WACRM_INTENTS_CUTOVER_TRANSPORT_E2E_CONFIRM: SEND_TEST_WHATSAPP
+          WACRM_INTENTS_CUTOVER_REQUIRE_LEGACY_WRITES_DISABLED: '1'
         run: npm run test:intents-cutover-transport-live
 
       - name: Roll back controlled Intents route

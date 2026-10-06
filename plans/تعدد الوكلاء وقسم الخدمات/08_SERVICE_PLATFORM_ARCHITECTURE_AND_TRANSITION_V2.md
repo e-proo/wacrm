@@ -3,10 +3,28 @@
 ## 1. هوية الوثيقة
 
 - **Repository:** `e-proo/wacrm`
-- **Development Branch:** `test/ai-runtime-kb-tools-v2`
+- **Transition Implementation Branch:** `refactor/service-platform-v2`
+- **Safe rollback baseline:** `test/ai-runtime-kb-tools-v2`
 - **Baseline عند إعداد الوثيقة:** سلسلة migrations الحالية تصل إلى `089_fx_trade_canonical_business_events.sql`.
 - **الدور:** المرجع المعماري الحاكم للانتقال التدريجي من بنية الخدمات الحالية إلى منصة خدمات قابلة للتوسع.
 - **النطاق:** منصة الخدمات، الأدوات، الاعتمادات، Business Events، Outbox، Messaging، الصلاحيات، التنفيذ الحتمي، والتكامل مع الوكلاء.
+
+### Current implementation checkpoint — 2026-10-07
+
+هذه الوثيقة تظل المرجع المعماري، بينما `09_SERVICE_PLATFORM_V2_COMPLETION_PLAN.md` هو مرجع حالة التنفيذ والإغلاق.
+
+الحالة الفعلية على `refactor/service-platform-v2` تجاوزت baseline الأصلي لهذه الوثيقة:
+
+- Phase 1 و2 و3 و4 مغلقة.
+- Phase 5 بدأت فعليًا.
+- `change_requests.list_pending@1` أصبح native داخل Change Requests Domain/Runtime.
+- `src/lib/ai/tools/platform/legacy-bridge.ts` حُذف.
+- legacy tool registry لم يعد يملك أي tool حالي.
+- migration `140_service_platform_legacy_notification_write_contraction.sql` مطبقة على TEST.
+- FX/Coverage/Intents كلها `active + ready=true` على TEST، وlegacy notification writes معطلة لكل المسارات الثلاثة.
+- الخطوة التالية هي post-retirement live transport acceptance قبل أي contraction إضافي للـlegacy notification fallback.
+
+الأقسام التي تصف `legacy-bridge` أو `customer_intent_notifications` كحالة قائمة عند إعداد الوثيقة يجب قراءتها كـ**baseline transition snapshot**، لا كحالة التنفيذ الحالية.
 
 هذه الوثيقة لا تلغي الخطط السابقة المتعلقة بمنطق التغطيات أو أسعار الصرف أو أمن الوكلاء. وظيفتها أن تصبح المرجع الحاكم لكيفية بناء وربط الخدمات الحالية والجديدة بالمنصة.
 
