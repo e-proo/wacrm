@@ -359,31 +359,51 @@ Phase 5 الآن `IN PROGRESS`. المتبقي المباشر هو إثبات po
    - آخر General CI قبل تجهيز gate التالي: run `37526379320` على head `2afff1a31dd0f414d65b76ae86707e949b55044e` = **PASS**.
    - Migrations run `37525909042` يثبت نجاح replay/schema وPhase 5 smoke؛ النتيجة الإجمالية للـworkflow بقيت حمراء بسبب فشل لاحق في `Agent Task authenticated RLS isolation`، وهو blocker منفصل عن Service Platform contraction ولا يعني فشل migration 140.
 
-#### بوابة Phase 5 التالية
+#### Post-retirement transport acceptance — PASS (2026-10-06 23:52 UTC)
 
-الخطوة التالية ليست حذف `customer_intent_notifications` بعد. المطلوب أولًا إثبات مسار حي جديد بعد retirement:
+تم تشغيل post-retirement Intents WhatsApp E2E فعليًا على `wacrm test` باستخدام TEST recipient `Pro Codar`.
 
-`Intents decision → business_event_outbox(active) → no customer_intent_notifications row → projector/template → WhatsApp → sent → replay بدون duplicate`
+GitHub Actions evidence:
 
-لذلك يوجد gate يدوي مخصص في:
+- run: `37548828742`
+- job: `Post-retirement Intents WhatsApp E2E`
+- conclusion: **SUCCESS**
+- `WACRM_INTENTS_CUTOVER_REQUIRE_LEGACY_WRITES_DISABLED=1`
+- test: `src/lib/services/intents/cutover-transport.live.test.ts`
+- النتيجة: `1 test passed`
 
-`.github/workflows/service-platform-intents-cutover-test.yml`
+المسار الحي المثبت:
 
-باسم:
+`Intents decision → business_event_outbox(active) → no customer_intent_notifications row → projector/template → WhatsApp transport → sent → replay without duplicate`
 
-`post-retirement-transport`
+Database evidence للحدث الجديد:
 
-ويستخدم confirmation مستقل:
+- event: `service_request.approved@1`
+- event id: `85b31aed-cd9b-4c24-acc2-f44f6e75773c`
+- `delivery_mode=active`
+- `status=sent`
+- `legacy_notification_id=null`
+- `local_message_id` موجود
+- `sent_at` موجود
+- عدد `customer_intent_notifications` المرتبطة بنفس change request = `0`
+- replay داخل نفس الاختبار نجح ولم يطالب بإرسال ثانٍ.
 
-`SEND_TEST_WHATSAPP_POST_RETIREMENT`
+المشغّل المؤقت one-shot الذي استُخدم لأن GitHub connector لا يوفّر `workflow_dispatch` مباشرة حُذف بعد إطلاق الـrun، لمنع أي إرسال تلقائي لاحق. الـgate اليدوي الرسمي `post-retirement-transport` يبقى في workflow الأساسي لإعادة القبول مستقبلًا عند الحاجة.
 
-الـgate يفشل **قبل إنشاء fixture أو إرسال WhatsApp** إذا لم يكن `legacy_notification_write_enabled=false`، ثم يعيد استخدام transport E2E نفسه لإثبات:
-- عدم إنشاء legacy row جديدة.
-- نجاح canonical Business Event delivery.
-- وجود `local_message_id/sent_at`.
-- replay لا يطالب بإرسال ثانٍ.
+#### الخطوة التالية في Phase 5
 
-لا تُحذف legacy claim/fallback functions أو الجدول التاريخي قبل نجاح هذا gate ثم إعادة قياس rollback requirements لكل FX/Coverage/Intents.
+بعد نجاح post-retirement transport، أصبح مسموحًا الانتقال إلى contraction التالي، لكن **ليس حذف الجدول التاريخي مباشرة**.
+
+الترتيب التالي:
+
+1. إعادة consumer scan لـ `src/lib/ai/runtime/customer-notification-delivery.ts` وتحديد legacy claim branches التي لم تعد مطلوبة للـFX/Coverage/Intents في الوضع active.
+2. جرد database functions التي ما زالت تعتمد على `customer_intent_notifications` وفصل:
+   - rollback/runtime requirements الحالية.
+   - reconciliation/history-only helpers.
+   - functions التي أصبحت بلا مستهلك فعلي.
+3. الحفاظ على rollback safety للأحداث القديمة وعدم حذف migration history.
+4. أي schema contraction جديد يتم عبر migration جديدة بعد `140` فقط، وبعد إثبات أن fallback المطلوب لا يتأثر.
+5. بعد كل contraction: clean migration replay + smoke + General CI + TEST verification قبل الانتقال للجزء التالي.
 
 ---
 
