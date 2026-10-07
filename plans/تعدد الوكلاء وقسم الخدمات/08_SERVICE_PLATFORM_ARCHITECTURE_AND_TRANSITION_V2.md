@@ -27,7 +27,7 @@
 - Phase 5 exit gate = **PASS**؛ الإزالة الإضافية لهذه compatibility surfaces مؤجلة إلى قرار مستقل بإنهاء rollback compatibility، لا إلى عمل Phase 5 غير مكتمل.
 - Phase 6 acceptance matrix أصبحت موثقة في `09_SERVICE_PLATFORM_V2_COMPLETION_PLAN.md` ببوابات مستقلة لـCI، clean DB، extensibility، live E2E، deferred risks، وrollback-baseline review.
 - أضيف contract test دائم باسم `Phase 6 final architectural extensibility acceptance` داخل `src/lib/services/platform/service-platform.test.ts` لمنع رجوع domain-specific dispatch إلى القلب العام.
-- rollback baseline review أظهر أن `refactor/service-platform-v2` متشعب عن `test/ai-runtime-kb-tools-v2`: أمامه 680 commit وخلفه 8 commits؛ لا يجوز merge/rebase قبل جرد الـ8 commits.
+- rollback baseline review أظهر أن `refactor/service-platform-v2` متشعب عن `test/ai-runtime-kb-tools-v2`. جرد الـ8 baseline-only commits أثبت أنها أربع تغييرات FX تبعتها أربع restores إلى baseline، والمقارنة من merge-base إلى رأس rollback baseline تعطي `files=[]`؛ لا يوجد net baseline-only content مطلوب port حاليًا. يعاد هذا الفحص على final acceptance head قبل merge/release.
 - branch-wide Migrations workflow ليس أخضر بالكامل حاليًا بسبب Agent Task RLS smoke مستقل؛ clean replay/schema وكل Service Platform smokes نفسها PASS.
 
 الأقسام التي تصف `legacy-bridge` أو `customer_intent_notifications` كحالة قائمة عند إعداد الوثيقة يجب قراءتها كـ**baseline transition snapshot**، لا كحالة التنفيذ الحالية.
