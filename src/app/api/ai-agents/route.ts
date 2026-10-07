@@ -264,9 +264,8 @@ async function createAgentFromTemplate(
   const revisionId = (revRow as { id: string }).id
 
   // Copy the template's suggested tool keys into grants using the
-  // current platform registry. Native business-domain tools are intentionally
-  // absent from the contracted legacy ToolDefinition registry, so template
-  // seeding must resolve them from PlatformToolManifest ownership.
+  // current platform registry. Native business-domain manifests are the only
+  // source of truth; the compact API/UI shape is projected from them separately.
   const suggested = Array.isArray(
     (tpl as { suggested_tool_keys: unknown }).suggested_tool_keys,
   )

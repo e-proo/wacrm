@@ -125,9 +125,6 @@ jobs:
       - name: Verify Service Platform legacy notification contraction
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/service-platform-legacy-notification-contraction-smoke.sql
 
-      - name: Verify Agent Task authenticated RLS isolation
-        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-rls-smoke.sql
-
       - name: Verify Coverage sourcing business outcome
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/coverage-sourcing-agent-smoke.sql
 
@@ -148,3 +145,8 @@ jobs:
       # Phase 2 and Phase 6 smokes above then prove the surviving V2 behavior.
       - name: Verify FX V2 Phase 7 legacy cleanup
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-7-legacy-cleanup-smoke.sql
+
+      # Keep the known Agent Task RLS blocker last so Service Platform,
+      # Coverage, Intents, and FX smokes always produce independent evidence.
+      - name: Verify Agent Task authenticated RLS isolation
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-rls-smoke.sql

@@ -113,13 +113,13 @@ interface NotificationAccountCandidate {
 /**
  * One bounded worker tick for durable customer business events.
  *
- * Candidate discovery may see both the legacy table and active general outbox,
+ * Candidate discovery may see both the compatibility table and active general outbox,
  * but claiming/sending is delegated to deliverCustomerOutcomeNotifications().
  * That function is the single route-aware delivery boundary: active general
- * events are claimed first, then any remaining budget is offered to the legacy
+ * events are claimed first, then any remaining budget is offered to the compatibility
  * RPC, whose FX claim is disabled while the FX route is active.
  */
-export async function processCustomerIntentNotifications(input: {
+export async function processCustomerBusinessEventNotifications(input: {
   limit?: number
 }): Promise<NotificationWorkerResult> {
   const db = supabaseAdmin()
@@ -204,7 +204,7 @@ export async function processAgentRunQueue(input: {
   const db = supabaseAdmin()
   const limit = Math.max(1, Math.min(input.limit ?? 20, 100))
   const changeRequests = await processApprovedChangeRequests({ limit })
-  const notifications = await processCustomerIntentNotifications({ limit })
+  const notifications = await processCustomerBusinessEventNotifications({ limit })
   const taskTriggers = await processAgentTaskTriggerQueue({
     workerId: input.workerId + ':task-triggers',
     limit,
