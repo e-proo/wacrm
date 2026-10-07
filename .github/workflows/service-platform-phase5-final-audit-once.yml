@@ -1,0 +1,27 @@
+name: Service Platform Phase 5 Final Audit Once
+
+on:
+  push:
+    branches:
+      - refactor/service-platform-v2
+    paths:
+      - .github/workflows/service-platform-phase5-final-audit-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Phase 5 final source audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Scan remaining legacy surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          for needle in             "from './tool-registry'"             "from '@/lib/ai/runtime/tool-registry'"             "listRegisteredTools"             "getRegisteredTool"             "renderToolCatalog"             "isGrantAllowed"             "ToolDefinition"             "claim_customer_intent_notifications"             "claim_customer_business_notifications"             "deliverCustomerOutcomeNotifications"             "processCustomerIntentNotifications"             "legacy-bridge"
+          do
+            echo "=== $needle ==="
+            git grep -n -F "$needle" -- ':!supabase/migrations/*' ':!plans/*' || true
+          done
