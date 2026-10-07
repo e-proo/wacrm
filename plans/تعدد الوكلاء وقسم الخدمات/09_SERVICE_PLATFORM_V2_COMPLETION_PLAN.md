@@ -472,6 +472,37 @@ Baseline evidence:
   - الـworkflow الإجمالي = **FAIL** فقط في `Agent Task authenticated RLS isolation` بسبب:
     `permission denied for table ai_agent_runs`.
 
+#### Gate B diagnosis — prepared 2026-10-07
+
+تم فحص migration الأصلية `046_ai_routing_runs.sql` وPhase 17 RLS test وTEST database الفعلية.
+
+النتيجة:
+
+- `ai_agent_runs` لديها RLS policies صحيحة من حيث المقصود:
+  - members يقرؤون.
+  - admin يمكنه direct update.
+- `ai_agent_run_events` لديها member-read policy، والكتابة يفترض أن تبقى service-side فقط.
+- migration `046` لم تثبت table grants صراحةً، واعتمدت عمليًا على default privileges التاريخية.
+- clean replay الحديثة لا تمنح `authenticated` الوصول المطلوب تلقائيًا، ولذلك PostgreSQL يرفض `SELECT` على `ai_agent_runs` قبل أن يصل إلى RLS.
+- TEST القديمة ما زالت تحمل grants واسعة على `ai_agent_runs` و`ai_agent_run_events` لـ`anon/authenticated` تشمل SELECT/INSERT/UPDATE/DELETE، وهي أوسع من العقد الموثق في migration 046.
+
+الإصلاح المحضر لـGate B:
+
+1. إنشاء migration جديدة بعد آخر migration الحالية `142` باستخدام Supabase CLI migration generator أولًا، ثم الحفاظ على تسلسل المشروع.
+2. تثبيت ACL لـ`ai_agent_runs` صراحةً:
+   - revoke all من `anon, authenticated`.
+   - grant `SELECT, UPDATE` إلى `authenticated`.
+   - grant privileges اللازمة إلى `service_role`.
+3. تثبيت ACL لـ`ai_agent_run_events`:
+   - revoke all من `anon, authenticated`.
+   - grant `SELECT` فقط إلى `authenticated`.
+   - الكتابة تبقى service-side.
+4. عدم توسيع RLS أو إضافة `SECURITY DEFINER` لحل permission error.
+5. إضافة privilege assertions للـCI حتى لا تعود المشكلة إذا تغيرت Supabase defaults لاحقًا.
+6. تشغيل clean replay + `agent-task-rls-smoke.sql` + كامل Migrations workflow.
+7. بعد نجاح CI فقط، تطبيق migration نفسها على `wacrm test` ثم إعادة RLS smoke وSupabase Security Advisor.
+8. عند نجاح ذلك: `NOTE-004 = resolved` وGate B = **PASS**.
+
 هذا الفشل مسجل في `PROJECT_NOTES.md` كـcross-plan blocker. لا يعيد فتح Phase 5، لكنه يمنع اعتبار branch-wide migration acceptance خضراء حتى يتم حسمه.
 
 #### Gate C — Architectural extensibility
