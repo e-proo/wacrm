@@ -20,6 +20,9 @@ This file is the canonical place for important findings that are **outside the s
 - **Important context:** Migrations `082_fx_v2_admin_agent_tools.sql` and `083_fx_v2_admin_grant_plane_cleanup.sql` did not introduce these findings. Phase 5 only remapped/cleaned frozen AI tool-grant rows.
 - **Why deferred:** Resolving these warnings safely requires a dedicated project-wide security-hardening plan because several functions are shared infrastructure and changing grants/search paths can affect existing application flows.
 - **Return-to-work criteria:** Create an explicit Supabase security-hardening plan, inventory each advisor finding against runtime callers, classify intentional vs unsafe exposure, patch incrementally on TEST/STAGING, then rerun advisors and full CI/E2E before production consideration.
+- **Recheck — 2026-10-07 after Service Platform Phase 5 closure:** current TEST advisor counts are: `rls_enabled_no_policy=1`, `function_search_path_mutable=16`, `extension_in_public=1`, `anon_security_definer_function_executable=22`, `authenticated_security_definer_function_executable=28`, and `auth_leaked_password_protection=1`. This supersedes the older count wording in the summary but does not change the deferred classification.
+- **Phase 5 relevance check:** no current advisor finding was named against `claim_customer_*`, `business_event_*`, or `customer_intent_notifications`; the Phase 5 contraction did not introduce a newly identified advisor exposure.
+- **Advisor references:** https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy ; https://supabase.com/docs/guides/database/database-linter?lint=0011_function_search_path_mutable ; https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable ; https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable
 
 ### NOTE-002 — Meta/Instagram restriction blocked Intents WhatsApp Gate C
 
@@ -34,3 +37,45 @@ This file is the canonical place for important findings that are **outside the s
 - **Final TEST state:** route `service_request_customer_whatsapp` was reactivated; `mode=active`, `ready=true`, `blockers=0`, parity `4/4`, `active_nonterminal=0`, `legacy_nonterminal=0`.
 - **Code verification:** CI for the Gate C/D hardening passed lint, typecheck, test, and build.
 - **Follow-up:** Phase 1 is COMPLETE. Phase 5 legacy contraction may proceed under its own safeguards; this resolved note remains as historical evidence for why the earlier pause was correct.
+### NOTE-003 — Service Platform rollback compatibility retirement window
+
+- **Status:** open / intentionally deferred
+- **Discovered during:** Service Platform V2 Phase 5 closure
+- **Scope:** post-cutover compatibility retirement; not required to reopen Phase 5.
+- **Summary:** The new customer delivery source of truth is `business_event_outbox` for covered active routes, but several historical/rollback surfaces intentionally remain: `customer_intent_notifications`, `claim_customer_business_notifications`, `renderLinkedLegacyBusinessEventNotification`, readiness/rollback/reconciliation helpers, and the schema-only `claim_customer_intent_notifications` RPC.
+- **Current runtime fact:** `claim_customer_intent_notifications` has no current runtime consumer; contract tests explicitly prevent reintroducing that call. The RPC remains only for backward compatibility with older binaries.
+- **Why deferred:** The transition plan explicitly forbids deleting the rollback path in the same cutover phase. Historical terminal rows also remain and some rollback/readiness helpers still depend on the compatibility table.
+- **Safety state on TEST at Phase 5 closure:** FX/Coverage/Intents routes are active with legacy notification writes disabled; there are no `pending`, `sending`, or `requires_reconciliation` rows in `customer_intent_notifications`.
+- **Return-to-work criteria:** explicitly end the rollback compatibility window, inventory every remaining DB/runtime consumer, decide support for rollback to older binaries, define archival/retention handling for historical rows, then perform any schema removal through a new append-only migration with clean replay, security checks, rollback plan, and live TEST acceptance.
+
+### NOTE-004 — Agent Task authenticated RLS smoke blocks branch-wide Migrations green state
+
+- **Status:** open / Phase 6 release-gate blocker outside Service Platform Phase 5
+- **Discovered during:** Service Platform V2 Phase 5 final verification / Phase 6 preparation
+- **Scope:** AI Agent Task Platform security acceptance, not Service Platform legacy contraction.
+- **Evidence:** GitHub Actions Migrations run `37551887552` replayed all migrations successfully, passed `verify-schema.sql`, passed Service Platform/FX/Coverage/Intents smokes, then failed only at `supabase/ci/agent-task-rls-smoke.sql`.
+- **Exact failure:** `permission denied for table ai_agent_runs` at the DO block ending on line 169 while exercising an authenticated owner RLS scenario.
+- **Important distinction:** this does not invalidate migration replay or Phase 5 contraction evidence, but the branch-wide Migrations workflow is still red and therefore cannot be treated as a fully green release signal in Phase 6.
+- **Why deferred from Phase 5:** fixing Agent Task RLS grants/policies changes another platform's security contract and would have expanded Phase 5 scope.
+- **Return-to-work criteria:** inspect table grants + RLS policies for `ai_agent_runs` and related Agent Task tables, determine whether authenticated access is intended to reach RLS or should be denied by table grants, fix under the Agent Task plan, rerun the RLS smoke, then require the complete Migrations workflow to become green before final release/merge acceptance.
+
+### NOTE-005 — Transient Next.js `next/font` build failure during Phase 5 closure
+
+- **Status:** resolved / observation retained
+- **Discovered during:** Service Platform V2 Phase 5 closure
+- **Scope:** CI/build environment observation.
+- **Evidence of failure:** CI run `37552262468` passed lint, typecheck, and tests, then `next build --webpack` failed in `next/font` with `TypeError: Cannot read properties of null (reading '1')`.
+- **Resolution evidence:** the final Phase 5 head CI run `37552511616` subsequently passed lint, typecheck, tests, and build without a source fix specifically for `next/font`.
+- **Conclusion:** treat the earlier failure as transient unless it recurs. It is not a current Phase 6 blocker.
+- **Return-to-work criteria if it recurs:** inspect the exact Next.js version documentation under `node_modules/next/dist/docs/` per `AGENTS.md`, capture reproducibility/environment differences, and fix only after confirming a deterministic project issue.
+
+### NOTE-006 — Transition branch diverged from rollback baseline
+
+- **Status:** open / Phase 6 merge-review requirement
+- **Discovered during:** Service Platform V2 Phase 6 preparation
+- **Scope:** branch integration and rollback safety.
+- **Branches:** transition = `refactor/service-platform-v2`; rollback baseline = `test/ai-runtime-kb-tools-v2`.
+- **Comparison snapshot — 2026-10-07:** GitHub reports `diverged`; transition branch is `680` commits ahead and `8` commits behind the rollback baseline. Compared baseline head: `99e070c54a3f024d7e596fa789ffeab424c74f6f`; merge base: `4a80fb72709dcaffa4b3d1b5d51358b1cdaf8a76`.
+- **Risk:** an eventual merge/rebase could silently lose or conflict with one of the 8 baseline-only commits if “ahead by 680” is mistaken for complete supersession.
+- **Phase 6 rule:** no merge/rebase/release decision until the 8 baseline-only commits are explicitly inventoried and classified as `superseded`, `must-port`, `conflict`, or `irrelevant`.
+- **Return-to-work criteria:** run a focused commit/file comparison, document disposition for all baseline-only commits, port required fixes deliberately, then rerun Phase 6 CI/database/live acceptance on the resulting final head.
