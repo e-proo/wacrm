@@ -71,11 +71,20 @@ This file is the canonical place for important findings that are **outside the s
 
 ### NOTE-006 — Transition branch diverged from rollback baseline
 
-- **Status:** open / Phase 6 merge-review requirement
+- **Status:** resolved as a missing-content risk / retain final-head recheck
 - **Discovered during:** Service Platform V2 Phase 6 preparation
 - **Scope:** branch integration and rollback safety.
 - **Branches:** transition = `refactor/service-platform-v2`; rollback baseline = `test/ai-runtime-kb-tools-v2`.
-- **Comparison snapshot — 2026-10-07:** GitHub reports `diverged`; transition branch is `680` commits ahead and `8` commits behind the rollback baseline. Compared baseline head: `99e070c54a3f024d7e596fa789ffeab424c74f6f`; merge base: `4a80fb72709dcaffa4b3d1b5d51358b1cdaf8a76`.
-- **Risk:** an eventual merge/rebase could silently lose or conflict with one of the 8 baseline-only commits if “ahead by 680” is mistaken for complete supersession.
-- **Phase 6 rule:** no merge/rebase/release decision until the 8 baseline-only commits are explicitly inventoried and classified as `superseded`, `must-port`, `conflict`, or `irrelevant`.
-- **Return-to-work criteria:** run a focused commit/file comparison, document disposition for all baseline-only commits, port required fixes deliberately, then rerun Phase 6 CI/database/live acceptance on the resulting final head.
+- **Initial comparison snapshot — 2026-10-07:** GitHub reported `diverged`; transition branch was `680` commits ahead and `8` commits behind the rollback baseline. Compared baseline head: `99e070c54a3f024d7e596fa789ffeab424c74f6f`; merge base: `4a80fb72709dcaffa4b3d1b5d51358b1cdaf8a76`.
+- **Inventory result:** the eight baseline-only commits are four FX changes followed by four rollback/restoration commits:
+  - `2b4712e5` — suppress stale lifecycle notifications.
+  - `e142bd9a` — share lifecycle event renderer in worker.
+  - `1f42c32d` — migrate canonical lifecycle events safely.
+  - `13858d9b` — add canonical event recovery/supersession coverage.
+  - `9ea1a301` — restore `fx-v2-outbox.ts` baseline.
+  - `430520b6` — restore `worker.ts` baseline.
+  - `2c657c40` — restore migration `089_fx_trade_canonical_business_events.sql` baseline.
+  - `99e070c5` — restore `fx-business-event-delivery-contract.test.ts` baseline.
+- **Net-tree verification:** comparing merge base `4a80fb72...` to rollback baseline head `99e070c5...` returns `files=[]`. Therefore the eight commits leave no net content delta that must be ported into the transition branch.
+- **Conclusion:** there is no currently missing rollback-baseline fix hidden by the commit-graph divergence. The transition branch may remain graph-diverged without requiring those eight commits to be cherry-picked.
+- **Final Phase 6 safeguard:** repeat the compare on the final acceptance head before any merge/rebase/release decision; if baseline changes later, classify any new baseline-only content before proceeding.
