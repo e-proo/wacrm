@@ -419,26 +419,233 @@ Phase 5 **لا تسقط** العناصر التالية عمدًا:
 
 ### Phase 6 — Final Architectural Acceptance
 
-**الحالة:** PENDING
+**الحالة:** PREPARED / IN PROGRESS — ACCEPTANCE MATRIX READY (2026-10-07)
 
-المطلوب قبل إعلان Service Platform V2 مكتملة:
+هدف Phase 6 ليس إضافة features جديدة، بل إثبات أن Service Platform V2 الحالية قابلة للإعلان كمنصة موحدة دون إخفاء blockers أو الاعتماد على evidence قديمة بصورة غير منضبطة.
 
-1. `npm run typecheck`
-2. `npm test`
-3. `npm run build`
-4. `npm run lint`
-5. migration replay على clean database.
-6. schema verification.
-7. TEST/STAGING live E2E لـ FX.
-8. TEST/STAGING live E2E لـ Coverage.
-9. TEST/STAGING live E2E لـ Intents.
-10. التحقق أن إضافة Domain جديد لا تحتاج branch جديد داخل:
-   - AI Runtime
-   - Change Request kernel
-   - Notification worker
-   - Template resolver
-11. مراجعة `PROJECT_NOTES.md` للمخاطر المؤجلة.
-12. مقارنة branch مع نقطة الرجوع قبل أي قرار دمج لاحق.
+#### قاعدة الإغلاق
+
+لا تصبح Phase 6 `COMPLETE` إلا عندما تكون كل البوابات المطلوبة أدناه إما:
+
+- **PASS** بدليل على final acceptance head نفسه، أو
+- **ACCEPTED EXTERNAL/DEFERRED RISK** موثقة صراحةً في `PROJECT_NOTES.md` ولا تكسر صحة Service Platform أو قرار النشر/الدمج.
+
+لا يجوز تحويل failure إلى deferred لمجرد إغلاق المرحلة.
+
+#### Gate A — Final code quality
+
+المطلوب على **final acceptance head**:
+
+1. `npm run lint`
+2. `npm run typecheck`
+3. `npm test`
+4. `npm run build`
+
+Baseline evidence قبل بدء Phase 6:
+
+- CI run `37552511616` على head `18a851103c3f5dc3fcbe25c78b187f9f8117e5c6` = **SUCCESS**.
+- lint/typecheck/test/build كلها PASS.
+
+هذا baseline جيد، لكنه لا يغني عن rerun بعد أي تعديل برمجي داخل Phase 6.
+
+#### Gate B — Clean database + schema acceptance
+
+المطلوب:
+
+1. replay كل migrations من الصفر.
+2. `supabase/ci/verify-schema.sql`.
+3. Service Platform DB smokes:
+   - `service-platform-legacy-notification-contraction-smoke.sql`
+   - `intents-cutover-smoke.sql`
+   - `fx-v2-phase-2-smoke.sql`
+   - `fx-v2-phase-6-messaging-smoke.sql`
+   - `fx-v2-phase-7-legacy-cleanup-smoke.sql`
+   - Coverage business outcome smoke.
+4. branch-wide Migrations workflow يجب أن يكون مفهومًا بالكامل قبل release/merge decision.
+
+Baseline evidence:
+
+- Migrations run `37551887552`:
+  - clean replay = **PASS**
+  - schema verification = **PASS**
+  - كل Service Platform/FX/Coverage/Intents smokes المذكورة = **PASS**
+  - الـworkflow الإجمالي = **FAIL** فقط في `Agent Task authenticated RLS isolation` بسبب:
+    `permission denied for table ai_agent_runs`.
+
+هذا الفشل مسجل في `PROJECT_NOTES.md` كـcross-plan blocker. لا يعيد فتح Phase 5، لكنه يمنع اعتبار branch-wide migration acceptance خضراء حتى يتم حسمه.
+
+#### Gate C — Architectural extensibility
+
+معيار القبول:
+
+إضافة Business Domain جديد يجب أن تتم أساسًا عبر Domain manifest/runtime + التسجيل في composition root، **دون إضافة domain-specific branch جديد** داخل:
+
+- AI Runtime tool dispatch.
+- Change Request kernel.
+- Notification worker/delivery boundary.
+- Business Event projector/template renderer.
+
+تم تجهيز contract gate دائم داخل:
+
+`src/lib/services/platform/service-platform.test.ts`
+
+بعنوان:
+
+`Phase 6 final architectural extensibility acceptance`
+
+ويثبت:
+
+- AI tool manifests/executors تأتي من `CURRENT_BUSINESS_DOMAIN_MODULES/RUNTIMES`.
+- `change-request-executor.ts` يستخدم `tryExecuteCurrentChangeAction` ولا dispatch حسب target type لدومينات الأعمال الحالية.
+- notification worker يبقى customer-business-event oriented ولا يضيف if/switch لكل Domain.
+- Business Event rendering يعتمد projection + template registry ولا switch حسب event family.
+
+**ملاحظة composition مقصودة:**  
+`domain-catalog.ts` هو composition root المركزي المسموح تعديله عند إضافة Domain. كذلك قد يلزم تسجيل template array خفيف في `current-system-template-registry.ts` وفق قرار Phase 4 لتجنب circular dependency؛ الممنوع هو إضافة business branching داخل resolver/renderer، وليس منع composition registration.
+
+#### Gate D — FX final TEST acceptance
+
+المطلوب قبل الإغلاق:
+
+- route ما زال `active + ready=true`.
+- لا active/legacy nonterminal backlog غير مفسر.
+- cutover/readiness contract يعمل على TEST.
+- إثبات customer-facing delivery النهائي للـFX صالح بعد آخر تغييرات transport ذات الصلة.
+- replay/idempotency لا ينتج duplicate.
+
+Harnesses الموجودة:
+
+- `src/lib/services/fx-v2/cutover.live.test.ts`
+- `src/lib/services/fx-v2/cutover-control.live.test.ts`
+- `npm run test:fx-cutover-live`
+- `npm run test:fx-cutover-control-live`
+
+**Acceptance gap المحسوم في التحضير:** هذه harnesses تثبت readiness/control أكثر من كونها unified final WhatsApp transport runner. عند التنفيذ النهائي يجب إما:
+1. إعادة استخدام live transport evidence سابقة فقط إذا ثبت أن transport path لم يتغير بعدها، مع توثيق commit boundary؛ أو
+2. إضافة/تشغيل final TEST transport harness خاص بـFX.
+
+لا نفترض PASS بلا واحد من هذين الدليلين.
+
+#### Gate E — Coverage final TEST acceptance
+
+المطلوب مماثل لـFX:
+
+- `active + ready=true`.
+- backlog غير الطرفي = صفر أو مفسر.
+- readiness/control contracts PASS.
+- customer-facing transport evidence صالح على final relevant path.
+- idempotency/replay PASS.
+
+Harnesses الموجودة:
+
+- `src/lib/services/coverage/cutover.live.test.ts`
+- `src/lib/services/coverage/cutover-control.live.test.ts`
+
+يوجد أيضًا `coverage/pilot-readiness.live.test.ts` لكنه خاص بـCoverage sourcing/Agent Task pilot ولا يُستخدم بدل customer transport acceptance.
+
+مثل FX، لا يوجد حاليًا unified Phase-6 WhatsApp transport runner مماثل لـIntents؛ هذه نقطة تنفيذ صريحة وليست PASS افتراضية.
+
+#### Gate F — Intents final TEST acceptance
+
+المسار لديه harness كامل:
+
+- evidence/readiness.
+- controlled activation/rollback.
+- active WhatsApp transport.
+- post-retirement transport مع legacy writes disabled.
+
+المرجع التشغيلي:
+
+`.github/workflows/service-platform-intents-cutover-test.yml`
+
+والـtransport test:
+
+`src/lib/services/intents/cutover-transport.live.test.ts`
+
+الـconfirmation الآمن للـpost-retirement gate يبقى عبر workflow الرسمي؛ لا ننشئ one-shot runner دائم.
+
+Baseline evidence:
+
+- Gate C/D التاريخية PASS.
+- post-retirement run `37548828742` = **SUCCESS**.
+- final Phase 6 acceptance يقرر هل يلزم rerun بناءً على changes بعد ذلك في transport/projector/template path.
+
+#### Gate G — Deferred risks / security review
+
+قبل الإغلاق:
+
+1. مراجعة كل open entry في `PROJECT_NOTES.md`.
+2. تصنيف كل واحدة إلى:
+   - blocker لـService Platform V2 acceptance؛ أو
+   - deferred project-wide risk لا يغيّر صحة المنصة الحالية.
+3. إعادة فحص Supabase advisors على TEST.
+4. عدم إصلاح project-wide findings داخل Phase 6 بصمت إذا احتاجت خطة مستقلة.
+
+الحالة الحالية:
+
+- Security Advisor findings العامة ما زالت موجودة ومؤجلة في `NOTE-001`.
+- recheck بعد Phase 5 لم يُظهر finding مسمى متعلقًا بـ`claim_customer_*` أو `business_event_*` أو `customer_intent_notifications`.
+- rollback compatibility surfaces موثقة في note مستقلة ولا تُعتبر legacy debt مجهولة.
+
+#### Gate H — Rollback baseline / branch delta review
+
+Safe rollback baseline:
+
+`test/ai-runtime-kb-tools-v2`
+
+Transition branch:
+
+`refactor/service-platform-v2`
+
+Phase 6 prep comparison في 2026-10-07:
+
+- compare status: `diverged`.
+- transition branch: **680 commits ahead**.
+- transition branch: **8 commits behind** rollback baseline.
+- merge base: `4a80fb72709dcaffa4b3d1b5d51358b1cdaf8a76`.
+- compared baseline head: `99e070c54a3f024d7e596fa789ffeab424c74f6f`.
+
+لذلك قبل أي merge/rebase/release decision:
+
+1. جرد الـ8 commits الموجودة في rollback baseline وغير الموجودة في transition branch.
+2. تصنيفها: superseded / must-port / conflict / irrelevant.
+3. لا يتم merge أو rebase تلقائيًا ضمن Phase 6 بدون مراجعة أثرها.
+4. تسجيل القرار النهائي في هذه الوثيقة.
+
+#### Phase 6 execution order
+
+```text
+A  Final CI
+↓
+B  Clean DB + schema + branch-wide migration status
+↓
+C  Architectural extensibility gate
+↓
+D  FX final live acceptance
+↓
+E  Coverage final live acceptance
+↓
+F  Intents final live acceptance
+↓
+G  PROJECT_NOTES + Supabase advisors review
+↓
+H  rollback-baseline delta review
+↓
+Final closure decision
+```
+
+#### Prepared artifacts / evidence map
+
+- General CI: `.github/workflows/ci.yml`
+- Clean DB: `.github/workflows/migrations.yml`
+- Architectural contract: `src/lib/services/platform/service-platform.test.ts`
+- FX cutover harnesses: `src/lib/services/fx-v2/cutover*.live.test.ts`
+- Coverage cutover harnesses: `src/lib/services/coverage/cutover*.live.test.ts`
+- Intents live workflow: `.github/workflows/service-platform-intents-cutover-test.yml`
+- Deferred risks: `PROJECT_NOTES.md`
+- Architecture reference: `08_SERVICE_PLATFORM_ARCHITECTURE_AND_TRANSITION_V2.md`
+
+**Phase 6 ليست مكتملة بعد.** التحضير أصبح جاهزًا، والبدء التنفيذي يكون بإغلاق Gate A/B/C على final head ثم live Gates D/E/F.
 
 ---
 
