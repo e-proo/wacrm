@@ -1298,3 +1298,92 @@ describe('Phase 4 domain-owned system templates', () => {
     expect(resolver).not.toContain("from './defaults'")
   })
 })
+
+
+describe('Phase 6 final architectural extensibility acceptance', () => {
+  it('keeps business-domain registration in one composition root instead of AI runtime branches', () => {
+    const catalog = readFileSync(
+      new URL('./domain-catalog.ts', import.meta.url),
+      'utf8',
+    )
+    const nativeTools = readFileSync(
+      new URL('../../ai/runtime/native-agent-tools.ts', import.meta.url),
+      'utf8',
+    )
+    const toolRegistry = readFileSync(
+      new URL('../../ai/tools/platform/current-domain-registry.ts', import.meta.url),
+      'utf8',
+    )
+    const executorRegistry = readFileSync(
+      new URL('../../ai/tools/platform/current-executor-registry.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(catalog).toContain('CURRENT_BUSINESS_DOMAIN_MODULES')
+    expect(catalog).toContain('CURRENT_BUSINESS_DOMAIN_RUNTIMES')
+    expect(nativeTools).not.toMatch(/case ['"](?:exchange_rates|coverage|intents|services|pricing)/)
+    expect(toolRegistry).toContain('CURRENT_BUSINESS_DOMAIN_MODULES')
+    expect(executorRegistry).toContain('CURRENT_BUSINESS_DOMAIN_RUNTIMES')
+  })
+
+  it('keeps the generic Change Request kernel free of domain target dispatch', () => {
+    const kernel = readFileSync(
+      new URL('../../ai/runtime/change-request-executor.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(kernel).toContain('tryExecuteCurrentChangeAction')
+    expect(kernel).not.toMatch(
+      /row\.target_type\s*===\s*['"](?:service|pricing_rule|fx_rate_pair|fx_trade_request|service_intent|coverage_offer|coverage_request)['"]/,
+    )
+    expect(kernel).not.toMatch(
+      /switch\s*\(\s*row\.target_type\s*\)/,
+    )
+  })
+
+  it('keeps notification delivery domain-neutral and route-aware', () => {
+    const worker = readFileSync(
+      new URL('../../ai/runtime/worker.ts', import.meta.url),
+      'utf8',
+    )
+    const delivery = readFileSync(
+      new URL('../../ai/runtime/customer-notification-delivery.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(worker).toContain('processCustomerBusinessEventNotifications')
+    expect(worker).toContain('deliverCustomerOutcomeNotifications')
+    expect(worker).not.toMatch(
+      /if\s*\([^)]*(?:exchange_rates|coverage|service_request)/,
+    )
+    expect(delivery).toContain('deliverActiveBusinessEventNotifications')
+    expect(delivery).not.toMatch(
+      /switch\s*\([^)]*(?:event_type|eventType|route_key|routeKey)[^)]*\)/,
+    )
+  })
+
+  it('keeps Business Event rendering generic and projector/template driven', () => {
+    const renderer = readFileSync(
+      new URL('./business-event-message-renderer.ts', import.meta.url),
+      'utf8',
+    )
+    const projectors = readFileSync(
+      new URL('./event-projector-registry.ts', import.meta.url),
+      'utf8',
+    )
+    const templates = readFileSync(
+      new URL('../../messaging/current-system-template-registry.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(renderer).toContain('projection.eventKey')
+    expect(renderer).toContain('findSystemMessageTemplate')
+    expect(renderer).not.toMatch(
+      /case ['"](?:fx_|exchange_|coverage\.|service_request\.)/,
+    )
+    expect(projectors).toContain('EventProjectorRegistry')
+    expect(projectors).toContain('this.projectors.get(eventType +')
+    expect(templates).toContain('SystemTemplateRegistry')
+    expect(templates).not.toMatch(/switch\s*\(/)
+  })
+})
