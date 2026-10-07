@@ -589,9 +589,9 @@ describe('Intents third-domain architectural acceptance', () => {
       new URL('../../ai/runtime/change-request-executor.ts', import.meta.url),
       'utf8',
     )
-    const toolRegistry = readFileSync(
-      new URL('../../ai/runtime/tool-registry.ts', import.meta.url),
-      'utf8',
+    const legacyToolRegistry = new URL(
+      '../../ai/runtime/tool-registry.ts',
+      import.meta.url,
     )
     const executorRegistry = readFileSync(
       new URL('../../ai/tools/platform/current-executor-registry.ts', import.meta.url),
@@ -608,7 +608,7 @@ describe('Intents third-domain architectural acceptance', () => {
 
     expect(changeExecutor).toContain('tryExecuteCurrentChangeAction')
     expect(changeExecutor).not.toContain("row.target_type === 'service_intent'")
-    expect(toolRegistry).not.toContain("key: 'intents.")
+    expect(existsSync(legacyToolRegistry)).toBe(false)
     expect(executorRegistry).not.toContain("add('intents.")
     expect(centralExecutors).not.toContain('executeIntentsRecord')
     expect(centralExecutors).not.toContain('executeIntentsSearch')
