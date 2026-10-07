@@ -565,26 +565,68 @@ Baseline evidence:
 
 #### Gate D — FX final TEST acceptance
 
-المطلوب قبل الإغلاق:
+**الحالة:** PASS — 2026-10-07
 
-- route ما زال `active + ready=true`.
-- لا active/legacy nonterminal backlog غير مفسر.
+متطلبات الإغلاق:
+
+- route = `active + ready=true`.
+- لا active/legacy nonterminal backlog.
 - cutover/readiness contract يعمل على TEST.
-- إثبات customer-facing delivery النهائي للـFX صالح بعد آخر تغييرات transport ذات الصلة.
+- customer-facing transport evidence على المسار الحالي بعد Phase 4/5.
 - replay/idempotency لا ينتج duplicate.
 
-Harnesses الموجودة:
+#### Gate D closure evidence
 
-- `src/lib/services/fx-v2/cutover.live.test.ts`
-- `src/lib/services/fx-v2/cutover-control.live.test.ts`
-- `npm run test:fx-cutover-live`
-- `npm run test:fx-cutover-control-live`
+Live readiness على `wacrm test` قبل transport:
 
-**Acceptance gap المحسوم في التحضير:** هذه harnesses تثبت readiness/control أكثر من كونها unified final WhatsApp transport runner. عند التنفيذ النهائي يجب إما:
-1. إعادة استخدام live transport evidence سابقة فقط إذا ثبت أن transport path لم يتغير بعدها، مع توثيق commit boundary؛ أو
-2. إضافة/تشغيل final TEST transport harness خاص بـFX.
+- route: `fx_trade_customer_whatsapp`.
+- mode: `active`.
+- ready: `true`.
+- blockers: `0`.
+- evidence: `8` rows.
+- matched event types: `4/4`.
+- active nonterminal: `0`.
+- legacy nonterminal: `0`.
 
-لا نفترض PASS بلا واحد من هذين الدليلين.
+الأدلة القديمة من سبتمبر 2026 لم تُعتمد وحدها لأنها سبقت تغييرات Phase 4/5 في projector/template/delivery.
+
+تم لذلك إضافة harness نهائي دائم:
+
+- `src/lib/services/fx-v2/cutover-transport.live.test.ts`
+- `npm run test:fx-cutover-transport-live`
+
+العقد الذي يثبته:
+
+1. route active + readiness PASS.
+2. legacy notification writes معطلة.
+3. recipient هو contact/conversation TEST مخصص.
+4. recovery worker يتوقف مؤقتًا لمنع race.
+5. ينشأ FX request حقيقي مع current rate snapshot.
+6. `exchange_rate.trade.requested` يظهر في general Business Event outbox كـ`active/pending`.
+7. delivery يرسل event واحدًا فقط عبر current projector/template/WhatsApp path.
+8. outbox يصبح `sent` مع `attempts=1`, `local_message_id`, و`sent_at`.
+9. `legacy_notification_id=null`.
+10. replay ثانٍ يطالب `0` ويرسل `0`.
+11. fixture request يُلغى بعد الاختبار، وrecovery worker يعود إلى حالته السابقة.
+
+Verification:
+
+- CI للحarness: run `37556023190` = **SUCCESS**؛ lint/typecheck/test/build كلها PASS.
+- one-shot TEST transport run `37556278928` = **SUCCESS**.
+- one-shot workflow حُذف بعد الاستخدام ولم يبق runner تلقائي دائم.
+- live TEST row:
+  - request: `150d2830-41e8-497a-af98-7aefb52df72c`, ثم cleanup إلى `cancelled`.
+  - event: `0fa0bbab-ad8f-4b68-8fd5-781d267ca445`.
+  - event type: `exchange_rate.trade.requested`.
+  - delivery mode: `active`.
+  - status: `sent`.
+  - attempts: `1`.
+  - local message: `25db0164-807e-452d-b96c-9c488a3ee3a5`.
+  - sent at: `2026-10-07 01:17:12.989+00`.
+  - legacy notification: `null`.
+  - last error: `null`.
+
+**Gate D = PASS.** الخطوة التالية هي Gate E — Coverage final TEST acceptance.
 
 #### Gate E — Coverage final TEST acceptance
 
