@@ -15,7 +15,7 @@
 
 الحالة الفعلية على `refactor/service-platform-v2` تجاوزت baseline الأصلي لهذه الوثيقة:
 
-- Phase 1 و2 و3 و4 و5 مغلقة؛ Phase 6 هي المرحلة الرسمية التالية.
+- Phase 1 و2 و3 و4 و5 مغلقة؛ Phase 6 الآن **PREPARED / IN PROGRESS** كمرحلة قبول نهائي وليست مرحلة features.
 - `change_requests.list_pending@1` أصبح native داخل Change Requests Domain/Runtime.
 - `src/lib/ai/tools/platform/legacy-bridge.ts` و`src/lib/ai/runtime/tool-registry.ts` حُذفا نهائيًا بعد consumer scans.
 - Services/Pricing executable aliases التاريخية أزيلت من `src/lib/ai/tools/executors.ts` بعد final consumer audit، مع إبقاء العقود/تنفيذ Coverage الذي ما زال مستهلكًا فعليًا.
@@ -25,6 +25,10 @@
 - `claim_customer_intent_notifications` لا يملك runtime consumer حاليًا، لكنه يبقى schema-only compatibility surface إلى أن تنتهي rollback window صراحةً.
 - `customer_intent_notifications` وunified compatibility claim والـhistorical linked renderer تبقى intentional rollback/history surfaces وليست source of truth للأحداث الجديدة.
 - Phase 5 exit gate = **PASS**؛ الإزالة الإضافية لهذه compatibility surfaces مؤجلة إلى قرار مستقل بإنهاء rollback compatibility، لا إلى عمل Phase 5 غير مكتمل.
+- Phase 6 acceptance matrix أصبحت موثقة في `09_SERVICE_PLATFORM_V2_COMPLETION_PLAN.md` ببوابات مستقلة لـCI، clean DB، extensibility، live E2E، deferred risks، وrollback-baseline review.
+- أضيف contract test دائم باسم `Phase 6 final architectural extensibility acceptance` داخل `src/lib/services/platform/service-platform.test.ts` لمنع رجوع domain-specific dispatch إلى القلب العام.
+- rollback baseline review أظهر أن `refactor/service-platform-v2` متشعب عن `test/ai-runtime-kb-tools-v2`: أمامه 680 commit وخلفه 8 commits؛ لا يجوز merge/rebase قبل جرد الـ8 commits.
+- branch-wide Migrations workflow ليس أخضر بالكامل حاليًا بسبب Agent Task RLS smoke مستقل؛ clean replay/schema وكل Service Platform smokes نفسها PASS.
 
 الأقسام التي تصف `legacy-bridge` أو `customer_intent_notifications` كحالة قائمة عند إعداد الوثيقة يجب قراءتها كـ**baseline transition snapshot**، لا كحالة التنفيذ الحالية.
 
@@ -61,6 +65,26 @@
 المبدأ الحاكم:
 
 > **نوحد كيفية تشغيل الخدمات، ولا نوحد معنى الخدمات نفسها.**
+
+### 2.1 Phase 6 architectural acceptance rule
+
+القبول النهائي لا يقيس فقط أن Domains الحالية تعمل؛ بل يقيس أن إضافة Domain جديد لا تعيد فتح القلب العام.
+
+المسموح عند إضافة Domain:
+
+- تعريف Domain manifest/runtime جديد.
+- تسجيله في `src/lib/services/platform/domain-catalog.ts` باعتباره composition root.
+- إضافة tool manifests / change executors / event projectors / domain-owned templates داخل مجلد الـDomain.
+- تسجيل template array خفيف في current system-template composition عند الحاجة، وفق قرار منع circular dependency في Phase 4.
+
+غير المسموح:
+
+- إضافة `if/switch` جديد في AI Runtime حسب اسم الـDomain.
+- إضافة target-type dispatch جديد في `change-request-executor.ts`.
+- إضافة event-family branch في notification worker/delivery.
+- إضافة event-family branch في Business Event renderer/template resolver.
+
+هذا الفرق مهم: **central registration مسموح؛ central business branching غير مسموح.**
 
 ---
 
