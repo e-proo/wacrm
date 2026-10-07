@@ -600,17 +600,25 @@ Transition branch:
 Phase 6 prep comparison في 2026-10-07:
 
 - compare status: `diverged`.
-- transition branch: **680 commits ahead**.
-- transition branch: **8 commits behind** rollback baseline.
+- transition branch كان عند أول snapshot **680 commits ahead** و**8 commits behind** rollback baseline.
 - merge base: `4a80fb72709dcaffa4b3d1b5d51358b1cdaf8a76`.
 - compared baseline head: `99e070c54a3f024d7e596fa789ffeab424c74f6f`.
 
-لذلك قبل أي merge/rebase/release decision:
+تم جرد الـ8 baseline-only commits فعليًا، وهي سلسلة FX قصيرة:
 
-1. جرد الـ8 commits الموجودة في rollback baseline وغير الموجودة في transition branch.
-2. تصنيفها: superseded / must-port / conflict / irrelevant.
-3. لا يتم merge أو rebase تلقائيًا ضمن Phase 6 بدون مراجعة أثرها.
-4. تسجيل القرار النهائي في هذه الوثيقة.
+- `2b4712e5` suppress stale lifecycle notifications.
+- `e142bd9a` share lifecycle renderer in worker.
+- `1f42c32d` migrate canonical lifecycle events safely.
+- `13858d9b` add recovery/supersession contract coverage.
+- ثم أربع commits rollback تعيد بالتتابع:
+  - `fx-v2-outbox.ts`
+  - `worker.ts`
+  - migration `089`
+  - `fx-business-event-delivery-contract.test.ts`
+
+المقارنة بين merge-base ورأس rollback baseline تعطي **files=[]**؛ أي أن السلسلة الثمانية لا تحمل net tree diff بعد rollback.
+
+**نتيجة Gate H التحضيرية:** لا يوجد حاليًا baseline-only content يحتاج port من هذه الـ8 commits. يبقى واجب Phase 6 هو إعادة compare على **final acceptance head** للتأكد أن هذه النتيجة لم تتغير قبل أي merge/rebase/release decision.
 
 #### Phase 6 execution order
 
