@@ -1,0 +1,41 @@
+name: Service Platform Phase 5 Final Consumer Audit Once
+
+on:
+  push:
+    branches:
+      - refactor/service-platform-v2
+    paths:
+      - .github/workflows/service-platform-phase5-final-consumer-audit-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Phase 5 final compatibility consumer audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Scan central executor and retired notification consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          needles=(
+            "from '@/lib/ai/tools/executors'"
+            "from './executors'"
+            "executeServicesSearch"
+            "executeServicesGet"
+            "executeServicesMatchRequest"
+            "executePricingCalculateQuote"
+            "executeCoverageCheckAvailability"
+            "executeCoverageFindOffers"
+            "executeCoverageGetRates"
+            "processCustomerIntentNotifications"
+            "claim_customer_intent_notifications"
+            "tool-registry"
+            "legacy-bridge"
+          )
+          for needle in "${needles[@]}"; do
+            echo "=== $needle ==="
+            git grep -n -F "$needle" -- ':!supabase/migrations/*' ':!plans/*' ':!.github/workflows/service-platform-phase5-final-consumer-audit-once.yml' || true
+          done
