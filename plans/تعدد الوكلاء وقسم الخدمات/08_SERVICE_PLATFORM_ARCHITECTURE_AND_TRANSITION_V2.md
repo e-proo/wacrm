@@ -15,14 +15,16 @@
 
 الحالة الفعلية على `refactor/service-platform-v2` تجاوزت baseline الأصلي لهذه الوثيقة:
 
-- Phase 1 و2 و3 و4 مغلقة.
-- Phase 5 بدأت فعليًا.
+- Phase 1 و2 و3 و4 و5 مغلقة؛ Phase 6 هي المرحلة الرسمية التالية.
 - `change_requests.list_pending@1` أصبح native داخل Change Requests Domain/Runtime.
-- `src/lib/ai/tools/platform/legacy-bridge.ts` حُذف.
-- legacy tool registry لم يعد يملك أي tool حالي.
+- `src/lib/ai/tools/platform/legacy-bridge.ts` و`src/lib/ai/runtime/tool-registry.ts` حُذفا نهائيًا بعد consumer scans.
+- Services/Pricing executable aliases التاريخية أزيلت من `src/lib/ai/tools/executors.ts` بعد final consumer audit، مع إبقاء العقود/تنفيذ Coverage الذي ما زال مستهلكًا فعليًا.
 - migration `140_service_platform_legacy_notification_write_contraction.sql` مطبقة على TEST.
 - FX/Coverage/Intents كلها `active + ready=true` على TEST، وlegacy notification writes معطلة لكل المسارات الثلاثة.
-- post-retirement live transport acceptance نجحت على TEST في 2026-10-06؛ الخطوة التالية هي consumer scan وتقليص legacy claim/fallback المتبقي بصورة منضبطة قبل Phase 6.
+- post-retirement live transport acceptance نجحت على TEST في 2026-10-06 بدون legacy row أو duplicate.
+- `claim_customer_intent_notifications` لا يملك runtime consumer حاليًا، لكنه يبقى schema-only compatibility surface إلى أن تنتهي rollback window صراحةً.
+- `customer_intent_notifications` وunified compatibility claim والـhistorical linked renderer تبقى intentional rollback/history surfaces وليست source of truth للأحداث الجديدة.
+- Phase 5 exit gate = **PASS**؛ الإزالة الإضافية لهذه compatibility surfaces مؤجلة إلى قرار مستقل بإنهاء rollback compatibility، لا إلى عمل Phase 5 غير مكتمل.
 
 الأقسام التي تصف `legacy-bridge` أو `customer_intent_notifications` كحالة قائمة عند إعداد الوثيقة يجب قراءتها كـ**baseline transition snapshot**، لا كحالة التنفيذ الحالية.
 
