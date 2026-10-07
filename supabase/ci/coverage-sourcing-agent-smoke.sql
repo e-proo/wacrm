@@ -202,6 +202,11 @@ begin
     v_user
   ) as created;
 
+  -- Dashboard approval authorizes through auth.uid(), so make the smoke
+  -- execute under the same authenticated member identity instead of relying
+  -- on postgres/service-role privilege to bypass the membership contract.
+  perform set_config('request.jwt.claim.sub', v_user::text, true);
+
   if public.approve_change_request_dashboard_v2(
        v_account,
        v_change_request,
