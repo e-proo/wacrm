@@ -390,20 +390,56 @@ Database evidence للحدث الجديد:
 
 المشغّل المؤقت one-shot الذي استُخدم لأن GitHub connector لا يوفّر `workflow_dispatch` مباشرة حُذف بعد إطلاق الـrun، لمنع أي إرسال تلقائي لاحق. الـgate اليدوي الرسمي `post-retirement-transport` يبقى في workflow الأساسي لإعادة القبول مستقبلًا عند الحاجة.
 
-#### الخطوة التالية في Phase 5
+#### Consumer audit checkpoint — PASS (2026-10-07)
 
-بعد نجاح post-retirement transport، أصبح مسموحًا الانتقال إلى contraction التالي، لكن **ليس حذف الجدول التاريخي مباشرة**.
+تم تنفيذ scan على **نفس الفرع** `refactor/service-platform-v2` عبر GitHub Actions run `37550064536` بدل الاعتماد على GitHub code search الذي يفهرس default branch.
 
-الترتيب التالي:
+النتيجة الحالية:
 
-1. إعادة consumer scan لـ `src/lib/ai/runtime/customer-notification-delivery.ts` وتحديد legacy claim branches التي لم تعد مطلوبة للـFX/Coverage/Intents في الوضع active.
-2. جرد database functions التي ما زالت تعتمد على `customer_intent_notifications` وفصل:
-   - rollback/runtime requirements الحالية.
-   - reconciliation/history-only helpers.
-   - functions التي أصبحت بلا مستهلك فعلي.
-3. الحفاظ على rollback safety للأحداث القديمة وعدم حذف migration history.
-4. أي schema contraction جديد يتم عبر migration جديدة بعد `140` فقط، وبعد إثبات أن fallback المطلوب لا يتأثر.
-5. بعد كل contraction: clean migration replay + smoke + General CI + TEST verification قبل الانتقال للجزء التالي.
+- `claim_customer_intent_notifications`
+  - لا يوجد له أي runtime consumer حالي.
+  - runtime contract tests تؤكد صراحة أن `customer-notification-delivery.ts` لا يستدعيه.
+  - آخر executable consumer كان `supabase/ci/fx-v2-phase-6-messaging-smoke.sql`، وتمت إزالة هذا الاستدعاء في خطوة التجهيز الحالية.
+  - يبقى الـRPC نفسه مؤقتًا كـbackward-compatibility surface للإصدارات الأقدم؛ **لا يُسقط بعد** حتى يُحسم rollback compatibility.
+
+- `claim_customer_business_notifications`
+  - ما زال runtime-required.
+  - المستهلك الفعلي هو `src/lib/ai/runtime/customer-notification-delivery.ts`.
+  - لا يجوز حذفه الآن لأنه يمثل fallback claim عند وجود historical/legacy-mode rows.
+
+- `deliverCustomerOutcomeNotifications`
+  - مستخدم في `admin-change-commands.ts` للإرسال الفوري بعد قرار الإدارة.
+  - مستخدم في `worker.ts` للاسترداد/التسليم الخلفي.
+  - ينفذ active Business Event claim أولًا ثم يمنح السعة المتبقية للlegacy claim.
+
+- `customer_intent_notifications`
+  - ما زال runtime compatibility/rollback surface، وليس source of truth للأحداث الجديدة المغطاة بعد retirement.
+  - توجد writes في `change-request-executor.ts` و`change-requests-service.ts`؛ migration 140 تمنع covered writes عندما يكون route `active` وlegacy writes متوقفة، وتسمح لها بالعودة في `legacy` mode.
+  - توجد sent-state compatibility updates في `business-event-delivery.ts` للأحداث التاريخية المرتبطة.
+  - shadow parity code في `business-event-outbox.ts` ما زال يقرأ legacy rows التاريخية.
+  - `renderLinkedLegacyBusinessEventNotification` ما زال مطلوبًا للparity/historical fallback ولا يُحذف الآن.
+
+TEST database snapshot أثناء هذا الفحص:
+
+- لا توجد legacy rows بحالات `pending` أو `sending` أو `requires_reconciliation`.
+- الموجود حاليًا هو historical rows بحالات `sent` وFX `failed/superseded`.
+- database functions التي ما زالت تعتمد على الجدول تشمل readiness/rollback/reconciliation helpers إضافة إلى unified claim.
+
+#### أول contraction آمن بعد هذا الفحص
+
+تم تجهيز إزالة آخر **CI dependency** على `claim_customer_intent_notifications` من `fx-v2-phase-6-messaging-smoke.sql`، مع contract assertion يمنع إعادة الاستدعاء القديم.
+
+هذا التغيير:
+- لا يسقط RPC.
+- لا يغير runtime behavior.
+- لا يغير TEST schema.
+- لا يضعف rollback.
+- يجعل الـRPC القديم معزولًا فعليًا كـcompatibility-only surface.
+
+الخطوة التالية بعد نجاح CI/migration replay لهذا التغيير هي اتخاذ قرار مستقل حول retirement للـRPC القديم:
+- إذا كان rollback إلى binaries قديمة ما زال مطلوبًا، يبقى الـRPC حتى Phase 6/قرار إنهاء rollback window.
+- إذا تم إنهاء compatibility window صراحةً، يكون إسقاطه عبر migration جديدة بعد `140` أول schema contraction مرشح، مع تحديث security/schema contracts.
+- `claim_customer_business_notifications` والجدول التاريخي لا يدخلان في هذا الإسقاط بعد.
 
 ---
 

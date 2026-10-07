@@ -263,22 +263,12 @@ begin
     raise exception 'FX_PHASE6_REJECT_EVENT_MISSING: %', v_count;
   end if;
 
-  -- Intent-only claim RPC must not claim or mutate FX rows.
-  select count(*) into v_count
-  from public.claim_customer_intent_notifications(v_account_id, null, 100);
-  if v_count <> 0 then
-    raise exception 'FX_PHASE6_LEGACY_CLAIM_STOLE_FX_EVENT: %', v_count;
-  end if;
-
-  if exists (
-    select 1
-    from public.customer_intent_notifications
-    where account_id = v_account_id
-      and fx_trade_request_id in (v_buy_id, v_sell_id)
-      and status <> 'pending'
-  ) then
-    raise exception 'FX_PHASE6_OUTBOX_STATUS_MUTATED_BY_LEGACY_CLAIM';
-  end if;
+  -- The old intent-only claim RPC is no longer an executable dependency of
+  -- current runtime/CI. Unified customer delivery is owned by
+  -- claim_customer_business_notifications(), while the historical RPC remains
+  -- temporarily in database history for backward compatibility with older
+  -- deployments. Phase 5 validates current route-aware behavior in
+  -- service-platform-legacy-notification-contraction-smoke.sql instead.
 
   -- Successful smoke leaves the local CI database pristine.
   delete from public.exchange_trade_requests where account_id = v_account_id;

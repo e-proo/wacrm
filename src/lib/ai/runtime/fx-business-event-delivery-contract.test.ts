@@ -30,6 +30,10 @@ const canonicalEventMigrationSource = readFileSync(
   new URL('../../../../supabase/migrations/089_fx_trade_canonical_business_events.sql', import.meta.url),
   'utf8',
 )
+const phase6MessagingSmokeSource = readFileSync(
+  new URL('../../../../supabase/ci/fx-v2-phase-6-messaging-smoke.sql', import.meta.url),
+  'utf8',
+)
 
 describe('FX V2 unified customer business-event delivery', () => {
   it('claims service and FX events through the unified outbox RPC', () => {
@@ -37,6 +41,9 @@ describe('FX V2 unified customer business-event delivery', () => {
     expect(deliverySource).not.toContain("db.rpc('claim_customer_intent_notifications'")
     expect(unifiedClaimMigrationSource).toContain('fx_trade_request_id uuid')
     expect(unifiedClaimMigrationSource).toContain('event_type text')
+    expect(phase6MessagingSmokeSource).not.toContain(
+      'claim_customer_intent_notifications',
+    )
   })
 
   it('renders linked legacy FX rows through the generic Business Event projector path', () => {
