@@ -48,7 +48,8 @@
     "test:agent-task-dry-run-live": "vitest run src/lib/ai/tasks/cutover-dry-run.live.test.ts",
     "test:coverage-pilot-readiness-live": "vitest run src/lib/services/coverage/pilot-readiness.live.test.ts",
     "test:service-promotion-pilot-readiness-live": "vitest run src/lib/services/service-catalog/pilot-readiness.live.test.ts",
-    "test:fx-cutover-transport-live": "vitest run src/lib/services/fx-v2/cutover-transport.live.test.ts"
+    "test:fx-cutover-transport-live": "vitest run src/lib/services/fx-v2/cutover-transport.live.test.ts",
+    "test:coverage-cutover-transport-live": "vitest run src/lib/services/coverage/cutover-transport.live.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
