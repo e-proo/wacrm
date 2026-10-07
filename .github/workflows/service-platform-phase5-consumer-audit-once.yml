@@ -1,0 +1,32 @@
+name: Service Platform Phase 5 Consumer Audit Once
+
+on:
+  push:
+    branches:
+      - refactor/service-platform-v2
+    paths:
+      - .github/workflows/service-platform-phase5-consumer-audit-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Legacy notification consumer audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Scan branch consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== claim_customer_intent_notifications ==='
+          git grep -n 'claim_customer_intent_notifications' -- ':!supabase/migrations/*' ':!plans/*' || true
+          echo '=== claim_customer_business_notifications ==='
+          git grep -n 'claim_customer_business_notifications' -- ':!supabase/migrations/*' ':!plans/*' || true
+          echo '=== deliverCustomerOutcomeNotifications ==='
+          git grep -n 'deliverCustomerOutcomeNotifications' -- ':!plans/*' || true
+          echo '=== customer_intent_notifications runtime/source ==='
+          git grep -n 'customer_intent_notifications' -- 'src/**' 'supabase/ci/**' || true
+          echo '=== renderLinkedLegacyBusinessEventNotification ==='
+          git grep -n 'renderLinkedLegacyBusinessEventNotification' -- 'src/**' || true
