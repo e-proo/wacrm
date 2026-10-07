@@ -50,20 +50,21 @@ This file is the canonical place for important findings that are **outside the s
 
 ### NOTE-004 — Agent Task authenticated RLS smoke blocks branch-wide Migrations green state
 
-- **Status:** open / diagnosed / remediation prepared
-- **Discovered during:** Service Platform V2 Phase 5 final verification / Phase 6 preparation
+- **Status:** resolved — 2026-10-07
+- **Discovered during:** Service Platform V2 Phase 5 final verification / Phase 6 preparation.
 - **Scope:** AI Agent Task Platform security acceptance, not Service Platform legacy contraction.
-- **Evidence:** GitHub Actions Migrations run `37551887552` replayed all migrations successfully, passed `verify-schema.sql`, passed Service Platform/FX/Coverage/Intents smokes, then failed only at `supabase/ci/agent-task-rls-smoke.sql`.
-- **Exact failure:** `permission denied for table ai_agent_runs` at the DO block ending on line 169 while exercising an authenticated owner RLS scenario.
-- **Root cause confirmed — 2026-10-07:** `046_ai_routing_runs.sql` created the intended member-read/admin-update RLS policies but did not explicitly normalize table grants. Modern clean replay therefore can deny `authenticated` at the GRANT layer before RLS is evaluated.
-- **Live TEST ACL snapshot:** `wacrm test` currently has SELECT/INSERT/UPDATE/DELETE available to both `anon` and `authenticated` on `ai_agent_runs` and `ai_agent_run_events` through historical/default privileges. RLS is enabled, but these grants are wider than the documented contract.
-- **Intended least-privilege contract:** `ai_agent_runs` = authenticated SELECT + UPDATE, no anon access; `ai_agent_run_events` = authenticated SELECT only, no anon/client writes; service-side execution retains required privileges.
-- **Runtime compatibility check:** production worker/dispatch/outbound runtime accesses `ai_agent_runs` with `supabaseAdmin()`; the dashboard audit API reads it through the authenticated RLS-scoped client. No client-side INSERT/DELETE contract is required by the inspected surfaces.
-- **Important distinction:** this does not invalidate migration replay or Phase 5 contraction evidence, but the branch-wide Migrations workflow is still red and therefore cannot be treated as a fully green release signal in Phase 6.
-- **Why not patched in place:** migration 046 is historical and must not be edited. The next fix must be additive.
-- **Prepared remediation:** create a new migration after current migration 142, explicitly revoke broad `anon/authenticated` grants, grant only the documented operations, add CI privilege assertions, replay from clean DB, then apply to TEST only after CI passes and rerun advisors.
-- **Tooling constraint recorded:** the current execution environment does not expose a working Supabase CLI binary, and downloading/installing it is unavailable here. Repository policy requires creating a migration through the migration generator rather than inventing a migration file manually, so the DDL file has intentionally not been fabricated in chat.
-- **Return-to-work criteria:** generate the additive migration with Supabase CLI in an environment where the repository is checked out, commit it to `refactor/service-platform-v2`, require clean replay + RLS smoke + full Migrations workflow success, apply the same migration to `wacrm test`, rerun RLS verification and Security Advisor, then mark Gate B PASS.
+- **Original evidence:** Migrations run `37551887552` failed only at `agent-task-rls-smoke.sql` with `permission denied for table ai_agent_runs`.
+- **Root cause:** `046_ai_routing_runs.sql` created the intended RLS policies but did not explicitly normalize table grants. Clean replay no longer inherited the historical Data API grants required for authenticated access, so PostgreSQL rejected the query before RLS evaluation.
+- **Historical TEST drift found:** before remediation, long-lived TEST still exposed SELECT/INSERT/UPDATE/DELETE table privileges to `anon` and `authenticated` on `ai_agent_runs` and `ai_agent_run_events`, which was wider than the documented runtime contract.
+- **Official additive migration:** generated with pinned Supabase CLI `2.113.0` through one-shot Actions run `37554911701`: `supabase/migrations/20261007010039_ai_agent_run_acl_hardening.sql`.
+- **Final ACL:** `ai_agent_runs` gives authenticated SELECT+UPDATE only and no anon access; `ai_agent_run_events` gives authenticated SELECT only and no anon/client writes; service_role retains service operations.
+- **Regression coverage:** `supabase/ci/agent-task-rls-smoke.sql` now asserts table privileges before exercising owner/cross-tenant RLS.
+- **Clean DB proof:** Migrations run `37555338146` = SUCCESS, including clean replay, schema verification, every Service Platform/Agent Task smoke, and the final authenticated RLS isolation test.
+- **Application CI proof:** run `37555338255` = SUCCESS with lint/typecheck/test/build all green.
+- **TEST deployment:** migration applied successfully to `wacrm test`; remote migration history records `20261007010743 ai_agent_run_acl_hardening`.
+- **Live TEST proof:** authenticated owner reads for Agent Runs/Run Events succeed through RLS; forbidden client privileges and all anon table privileges are absent.
+- **Advisor recheck:** no new Security Advisor finding targets `ai_agent_runs` or `ai_agent_run_events`. Existing project-wide findings remain tracked under `NOTE-001`.
+- **Resolution:** Phase 6 Gate B is PASS. No further work is required under NOTE-004 unless the ACL contract intentionally changes later.
 
 ### NOTE-005 — Transient Next.js `next/font` build failure during Phase 5 closure
 
