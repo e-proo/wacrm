@@ -33,10 +33,13 @@
 - أعيد تفعيل `service_request_customer_whatsapp` بعد إثبات rollback، والحالة النهائية في TEST هي `active`, `ready=true`, `blockers=0`, `legacy_nonterminal=0`, `active_nonterminal=0`.
 - Phase 1 أصبحت مغلقة رسميًا.
 - Phase 2 وPhase 3 وPhase 4 مغلقة رسميًا.
-- Phase 5 بدأت فعليًا بعد إغلاق Phase 1، وأُنجزت أول دفعتين من contraction: إزالة legacy tool bridge ثم تقليص legacy notification writes.
-- migration history الفعلي على `wacrm test` وصل حتى `140_service_platform_legacy_notification_write_contraction.sql`؛ migrations `109–139` تخص AI Agent Task Platform، و`140` هي أول migration خاصة بـPhase 5 contraction.
+- Phase 5 أُغلقت رسميًا في 2026-10-07 بعد post-retirement transport acceptance وconsumer audits وإزالة آخر registry/executor aliases غير المستهلكة.
+- migration `140_service_platform_legacy_notification_write_contraction.sql` مطبقة على `wacrm test`، بينما migration history الفعلي على TEST وصل لاحقًا إلى `142_coverage_sourcing_greatest_syntax_hardening.sql` بسبب أعمال مستقلة عن Phase 5.
+- `legacy-bridge.ts` و`tool-registry.ts` حُذفا نهائيًا، وServices/Pricing لم يعد لهما executable aliases داخل `src/lib/ai/tools/executors.ts`.
+- legacy notification writes معطلة لمسارات FX/Coverage/Intents النشطة، والأحداث الجديدة المغطاة تعتمد `business_event_outbox` كمصدر التسليم الأساسي.
+- `customer_intent_notifications` و`claim_customer_business_notifications` والـlinked historical renderer تبقى **intentional rollback/compatibility survivors**، لا أعمال Phase 5 غير مكتملة.
 
-Phase 5 الآن `IN PROGRESS`. المتبقي المباشر هو إثبات post-retirement WhatsApp E2E بعد تعطيل legacy writes، ثم تحديد ما يمكن حذفه من legacy claim/fallback بصورة آمنة قبل الانتقال إلى Phase 6.
+Phase 5 الآن `COMPLETE`. الخطوة التالية الرسمية هي Phase 6 — Final Architectural Acceptance.
 
 ---
 
@@ -308,140 +311,111 @@ Phase 5 الآن `IN PROGRESS`. المتبقي المباشر هو إثبات po
 
 ### Phase 5 — Legacy Notification / Registry Contraction
 
-**الحالة:** IN PROGRESS — FIRST CONTRACTION APPLIED ON TEST (2026-10-06)
+**الحالة:** COMPLETE — SAFE CONTRACTION CLOSED (2026-10-07)
 
-لا تبدأ قبل إغلاق Phase 1 وPhase 2.
+لا تبدأ قبل إغلاق Phase 1 وPhase 2؛ هذا الشرط تحقق قبل بدء contraction.
 
-النطاق المتوقع:
+النطاق الذي أُغلق:
 
-- إزالة legacy tool specs التي لم يعد لها مستهلك.
-- تقليص `legacy-bridge`.
-- إزالة branches القديمة من customer notification fallback عند ثبوت عدم الحاجة.
-- تقليص الاعتماد على `customer_intent_notifications`.
-- عدم حذف migration history.
-- عدم حذف fallback قبل إثبات rollback/cutover لكل Domain معني.
+- إزالة legacy tool specs/registries التي لم يعد لها مستهلك.
+- حذف `legacy-bridge`.
+- إيقاف legacy notification writes للمسارات التي اجتازت cutover.
+- إزالة runtime/CI الاعتماد على `claim_customer_intent_notifications`.
+- تقليص أسماء ومسارات runtime التي كانت توحي أن Intents هي outbox الأساسية.
+- الحفاظ على rollback/historical compatibility التي ما زالت لازمة بدل حذفها في نفس مرحلة cutover.
+- عدم تعديل أو حذف migration history.
 
-#### الحالة الفعلية الحالية — 2026-10-07
+#### Closure evidence — 2026-10-07
 
-تم فتح Phase 5 بعد إغلاق Phase 1، ونُفذ فعليًا ما يلي:
+1. **Native tool ownership مكتمل**
+   - `change_requests.list_pending@1` أصبح مملوكًا لـChange Requests Domain/Runtime.
+   - `src/lib/ai/tools/platform/legacy-bridge.ts` حُذف.
+   - `src/lib/ai/runtime/tool-registry.ts` حُذف نهائيًا بعد consumer scan، وليس مجرد registry فارغ.
+   - `runtime-tool-compat.ts` بقي projection مقصودًا لـAPI/UI من `PlatformToolManifest`، وليس registry ثانٍ.
+   - commit إزالة registry: `4ffe42b205d54c5c01e2d4a4733b83fc28229986`.
 
-1. **Native Change Requests ownership**
-   - نُقلت `change_requests.list_pending@1` إلى:
-     - `src/lib/services/change-requests/tool-manifests.ts`
-     - `src/lib/services/change-requests/ai-tool-runtime.ts`
-     - `src/lib/services/change-requests/domain.ts`
-   - `current-domain-registry.ts` و`current-executor-registry.ts` يعتمدان الآن فقط على `CURRENT_BUSINESS_DOMAIN_MODULES/RUNTIMES`.
-   - حُذف `src/lib/ai/tools/platform/legacy-bridge.ts` بالكامل.
-   - أزيل export الخاص به من `src/lib/ai/tools/platform/index.ts`.
-   - `src/lib/ai/runtime/tool-registry.ts` لم يعد يملك أي tool حالي؛ الـregistry فارغ ويُبقى مؤقتًا كواجهة compatibility/fail-closed إلى حين فحص بقية consumers.
+2. **Services/Pricing central executor aliases أزيلت**
+   - final consumer audit على **نفس الفرع**: GitHub Actions run `37552174140` = **SUCCESS**.
+   - أثبت أن aliases التالية لم يعد لها runtime consumer:
+     - `executeServicesSearch`
+     - `executeServicesGet`
+     - `executeServicesMatchRequest`
+     - `executePricingCalculateQuote`
+   - أزيلت من `src/lib/ai/tools/executors.ts` في commit `6eb4bfb717cf126e6ba02744578b8236d802064c`.
+   - أضيف contract يمنع رجوعها في commit `cdb0f2fdff0ffea479eb59ed759fc73a6852f78c`.
+   - Coverage executors داخل الملف لم تُحذف لأنها ما زالت مستهلكة فعليًا من Coverage runtime/directional layer.
 
-2. **Legacy notification write contraction**
-   - أضيفت migration:
-     - `140_service_platform_legacy_notification_write_contraction.sql`
-   - migration مطبقة فعليًا على `wacrm test`.
-   - أضيف `legacy_notification_write_enabled` إلى `business_event_delivery_controls`.
-   - retirement لا يسمح بالتعطيل إلا لمسار `active` و`ready=true`.
-   - legacy mode يعيد fallback writes تلقائيًا.
-   - rollback يحظر demotion لحدث active غير مرسل إذا لم توجد legacy fallback row مرتبطة به.
-
-3. **الحالة الحية الحالية على TEST**
+3. **Legacy notification write contraction مطبق على TEST**
+   - migration: `140_service_platform_legacy_notification_write_contraction.sql`.
    - `fx_trade_customer_whatsapp`: `active`, `ready=true`, `legacy_notification_write_enabled=false`.
    - `coverage_customer_whatsapp`: `active`, `ready=true`, `legacy_notification_write_enabled=false`.
    - `service_request_customer_whatsapp`: `active`, `ready=true`, `legacy_notification_write_enabled=false`.
-   - readiness لكل المسارات الثلاثة يثبت:
-     - `blockers=0`
-     - `active_nonterminal=0`
-     - `legacy_nonterminal=0`
+   - migration يعيد fallback writes تلقائيًا عند rollback إلى `legacy` ويمنع rollback غير الآمن عندما لا توجد fallback row مطلوبة.
 
-4. **Verification**
-   - clean migration replay يمر عبر migration 140.
-   - `service-platform-legacy-notification-contraction-smoke.sql` يمر في GitHub Actions.
-   - آخر General CI قبل تجهيز gate التالي: run `37526379320` على head `2afff1a31dd0f414d65b76ae86707e949b55044e` = **PASS**.
-   - Migrations run `37525909042` يثبت نجاح replay/schema وPhase 5 smoke؛ النتيجة الإجمالية للـworkflow بقيت حمراء بسبب فشل لاحق في `Agent Task authenticated RLS isolation`، وهو blocker منفصل عن Service Platform contraction ولا يعني فشل migration 140.
+4. **Post-retirement transport acceptance: PASS**
+   - GitHub Actions run: `37548828742` = **SUCCESS**.
+   - event: `service_request.approved@1`.
+   - `delivery_mode=active`, `status=sent`, `legacy_notification_id=null`.
+   - لم يُنشأ `customer_intent_notifications` row لهذا change request.
+   - replay لم ينتج إرسالًا ثانيًا.
+   - المسار المثبت:
+     `Intents decision → business_event_outbox → projector/template → WhatsApp → sent`.
 
-#### Post-retirement transport acceptance — PASS (2026-10-06 23:52 UTC)
+5. **Legacy claim consumer isolation: PASS**
+   - consumer audit run `37550064536` أثبت أن `claim_customer_intent_notifications` لا يملك runtime consumer حاليًا.
+   - آخر CI dependency عليه أزيل من `fx-v2-phase-6-messaging-smoke.sql`.
+   - contract tests تمنع إعادة استدعائه من `customer-notification-delivery.ts`.
+   - الـRPC نفسه يبقى في schema فقط كـbackward-compatibility surface للإصدارات الأقدم.
 
-تم تشغيل post-retirement Intents WhatsApp E2E فعليًا على `wacrm test` باستخدام TEST recipient `Pro Codar`.
+6. **Runtime naming/ownership contraction**
+   - worker entry أصبح `processCustomerBusinessEventNotifications` بدل `processCustomerIntentNotifications`.
+   - `deliverCustomerOutcomeNotifications` يبقى route-aware boundary: active Business Events أولًا، ثم compatibility claim للسعة المتبقية.
+   - هذا التغيير موجود ضمن commit `f22506b0f106fa9bb4cd441b12abbbd1ce728d5c`.
 
-GitHub Actions evidence:
+7. **Clean-database verification**
+   - Migrations run `37551887552`:
+     - replay every migration from scratch: **PASS**.
+     - resulting schema verification: **PASS**.
+     - Service Platform legacy notification contraction smoke: **PASS**.
+     - Intents controlled cutover safety: **PASS**.
+     - FX V2 messaging/legacy cleanup smokes: **PASS**.
+     - Coverage sourcing business outcome: **PASS**.
+   - الـworkflow ككل انتهى **failure** فقط في آخر خطوة `Agent Task authenticated RLS isolation`، وهي blocker مستقل يخص AI Agent Task Platform ولا تُبطل Phase 5 evidence.
 
-- run: `37548828742`
-- job: `Post-retirement Intents WhatsApp E2E`
-- conclusion: **SUCCESS**
-- `WACRM_INTENTS_CUTOVER_REQUIRE_LEGACY_WRITES_DISABLED=1`
-- test: `src/lib/services/intents/cutover-transport.live.test.ts`
-- النتيجة: `1 test passed`
+#### TEST database closure snapshot
 
-المسار الحي المثبت:
+الفحص المباشر على `wacrm test` عند الإغلاق يثبت:
 
-`Intents decision → business_event_outbox(active) → no customer_intent_notifications row → projector/template → WhatsApp transport → sent → replay without duplicate`
+- المسارات الثلاثة FX/Coverage/Intents في `active` وlegacy writes معطلة.
+- لا توجد rows في `customer_intent_notifications` بحالات `pending` أو `sending` أو `requires_reconciliation`.
+- الموجود تاريخي terminal فقط: `sent` و`failed` و`superseded`.
+- `claim_customer_intent_notifications` و`claim_customer_business_notifications` غير قابلتين للتنفيذ من `anon` أو `authenticated`؛ `service_role` فقط يملك EXECUTE.
 
-Database evidence للحدث الجديد:
+#### Intentional compatibility survivors — ليست blockers
 
-- event: `service_request.approved@1`
-- event id: `85b31aed-cd9b-4c24-acc2-f44f6e75773c`
-- `delivery_mode=active`
-- `status=sent`
-- `legacy_notification_id=null`
-- `local_message_id` موجود
-- `sent_at` موجود
-- عدد `customer_intent_notifications` المرتبطة بنفس change request = `0`
-- replay داخل نفس الاختبار نجح ولم يطالب بإرسال ثانٍ.
+Phase 5 **لا تسقط** العناصر التالية عمدًا:
 
-المشغّل المؤقت one-shot الذي استُخدم لأن GitHub connector لا يوفّر `workflow_dispatch` مباشرة حُذف بعد إطلاق الـrun، لمنع أي إرسال تلقائي لاحق. الـgate اليدوي الرسمي `post-retirement-transport` يبقى في workflow الأساسي لإعادة القبول مستقبلًا عند الحاجة.
+- `customer_intent_notifications`: historical/rollback transport compatibility.
+- `claim_customer_business_notifications`: runtime fallback claim عند historical rows أو legacy mode.
+- `renderLinkedLegacyBusinessEventNotification`: canonical rendering للصفوف التاريخية المرتبطة.
+- readiness/rollback/reconciliation DB helpers.
+- `claim_customer_intent_notifications`: schema-only backward compatibility للإصدارات القديمة، بلا runtime consumer حالي.
+- `runtime-tool-compat.ts`: API/UI projection من native manifests.
 
-#### Consumer audit checkpoint — PASS (2026-10-07)
+سبب بقائها هو قاعدة الخطة نفسها: **لا نحذف rollback path في نفس مرحلة cutover**. إسقاط هذه surfaces مستقبلًا يحتاج قرارًا صريحًا بإنهاء compatibility window ومراجعة المستهلكين/الصفوف التاريخية، وليس شرطًا لإغلاق Phase 5.
 
-تم تنفيذ scan على **نفس الفرع** `refactor/service-platform-v2` عبر GitHub Actions run `37550064536` بدل الاعتماد على GitHub code search الذي يفهرس default branch.
+#### Exit gate
 
-النتيجة الحالية:
+**PASS.**
 
-- `claim_customer_intent_notifications`
-  - لا يوجد له أي runtime consumer حالي.
-  - runtime contract tests تؤكد صراحة أن `customer-notification-delivery.ts` لا يستدعيه.
-  - آخر executable consumer كان `supabase/ci/fx-v2-phase-6-messaging-smoke.sql`، وتمت إزالة هذا الاستدعاء في خطوة التجهيز الحالية.
-  - يبقى الـRPC نفسه مؤقتًا كـbackward-compatibility surface للإصدارات الأقدم؛ **لا يُسقط بعد** حتى يُحسم rollback compatibility.
+- legacy tool bridge/registry غير موجودين.
+- executable Services/Pricing aliases القديمة غير موجودة.
+- covered new customer events لا تكتب legacy notifications في active mode.
+- post-retirement WhatsApp transport مثبت فعليًا بدون duplicate.
+- old intent-only claim معزول عن runtime.
+- rollback compatibility المتبقية محددة ومقصودة ومحمية بعقود، وليست source of truth للمسارات الجديدة.
 
-- `claim_customer_business_notifications`
-  - ما زال runtime-required.
-  - المستهلك الفعلي هو `src/lib/ai/runtime/customer-notification-delivery.ts`.
-  - لا يجوز حذفه الآن لأنه يمثل fallback claim عند وجود historical/legacy-mode rows.
-
-- `deliverCustomerOutcomeNotifications`
-  - مستخدم في `admin-change-commands.ts` للإرسال الفوري بعد قرار الإدارة.
-  - مستخدم في `worker.ts` للاسترداد/التسليم الخلفي.
-  - ينفذ active Business Event claim أولًا ثم يمنح السعة المتبقية للlegacy claim.
-
-- `customer_intent_notifications`
-  - ما زال runtime compatibility/rollback surface، وليس source of truth للأحداث الجديدة المغطاة بعد retirement.
-  - توجد writes في `change-request-executor.ts` و`change-requests-service.ts`؛ migration 140 تمنع covered writes عندما يكون route `active` وlegacy writes متوقفة، وتسمح لها بالعودة في `legacy` mode.
-  - توجد sent-state compatibility updates في `business-event-delivery.ts` للأحداث التاريخية المرتبطة.
-  - shadow parity code في `business-event-outbox.ts` ما زال يقرأ legacy rows التاريخية.
-  - `renderLinkedLegacyBusinessEventNotification` ما زال مطلوبًا للparity/historical fallback ولا يُحذف الآن.
-
-TEST database snapshot أثناء هذا الفحص:
-
-- لا توجد legacy rows بحالات `pending` أو `sending` أو `requires_reconciliation`.
-- الموجود حاليًا هو historical rows بحالات `sent` وFX `failed/superseded`.
-- database functions التي ما زالت تعتمد على الجدول تشمل readiness/rollback/reconciliation helpers إضافة إلى unified claim.
-
-#### أول contraction آمن بعد هذا الفحص
-
-تم تجهيز إزالة آخر **CI dependency** على `claim_customer_intent_notifications` من `fx-v2-phase-6-messaging-smoke.sql`، مع contract assertion يمنع إعادة الاستدعاء القديم.
-
-هذا التغيير:
-- لا يسقط RPC.
-- لا يغير runtime behavior.
-- لا يغير TEST schema.
-- لا يضعف rollback.
-- يجعل الـRPC القديم معزولًا فعليًا كـcompatibility-only surface.
-
-الخطوة التالية بعد نجاح CI/migration replay لهذا التغيير هي اتخاذ قرار مستقل حول retirement للـRPC القديم:
-- إذا كان rollback إلى binaries قديمة ما زال مطلوبًا، يبقى الـRPC حتى Phase 6/قرار إنهاء rollback window.
-- إذا تم إنهاء compatibility window صراحةً، يكون إسقاطه عبر migration جديدة بعد `140` أول schema contraction مرشح، مع تحديث security/schema contracts.
-- `claim_customer_business_notifications` والجدول التاريخي لا يدخلان في هذا الإسقاط بعد.
-
----
+**المرحلة التالية:** Phase 6 — Final Architectural Acceptance.
 
 ### Phase 6 — Final Architectural Acceptance
 
@@ -927,7 +901,7 @@ Legacy ToolDefinition registry:
 
 ملاحظة مؤجلة لمرحلة Legacy Contraction:
 
-`src/lib/ai/tools/executors.ts` ما زال يحتوي بعض exports القديمة read-only لخدمات/تسعير قد يستخدمها مستهلك داخلي تاريخي. لم تعد هذه الدوال مسجلة في model runtime ولا مصدر العقود. حذفها النهائي يُجرى بعد فحص consumers ضمن Phase 5، ولا يعاد ربطها كمسار تشغيل.
+أُغلق هذا البند في Phase 5: final consumer audit run `37552174140` أثبت عدم وجود runtime consumers للـServices/Pricing aliases التاريخية داخل `src/lib/ai/tools/executors.ts`، ثم أزيلت aliases وأضيف contract يمنع رجوعها. يبقى الملف حاليًا مالكًا لعقود ToolContext/ToolResult وبعض Coverage read implementations التي لها مستهلكون فعليون.
 
 
 ### Phase 2C — Generic Change Request kernel purity
@@ -1506,7 +1480,7 @@ Variables:
 
 ### Phase 5 — Preflight inventory (HISTORICAL PRE-START SNAPSHOT)
 
-> **Historical snapshot:** هذا الجرد أُخذ قبل إغلاق Phase 1. الحالة الحالية لـPhase 5 هي `IN PROGRESS` كما هو موثق في القسم الرسمي أعلاه.
+> **Historical snapshot:** هذا الجرد أُخذ قبل إغلاق Phase 1. Phase 5 أُغلقت لاحقًا كـ`COMPLETE` في 2026-10-07 كما هو موثق في القسم الرسمي أعلاه.
 
 وقت هذا الجرد كانت Phase 5 ما تزال `PENDING` لأن شرطها الصريح "لا تبدأ قبل إغلاق Phase 1 وPhase 2" لم يكن قد تحقق بالكامل. هذا القسم محفوظ كسجل evidence ولا يمثل الحالة الحالية.
 
@@ -1625,7 +1599,7 @@ Variables:
 6. أي DB contraction يتم عبر migration جديدة؛ migration history لا تُعدل ولا تُحذف.
 7. إبقاء `runtime-tool-compat` إلى أن تنتهي API/UI migration الخاصة به.
 
-**Historical status at this checkpoint:** كانت Phase 5 `PENDING`. الحالة الحالية موثقة أعلى الوثيقة كـ`IN PROGRESS`.
+**Historical status at this checkpoint:** كانت Phase 5 `PENDING`. الحالة النهائية موثقة أعلى الوثيقة كـ`COMPLETE`.
 
 
 ### Phase 1 — Live runner account discovery hardening
