@@ -1073,16 +1073,16 @@ describe('Phase 2 executable ownership contraction', () => {
     expect(central).not.toContain('previewServiceQuote({')
     expect(central).not.toContain('matchServiceRequest({')
 
-    expect(central).toContain(
+    expect(central).not.toContain(
       'executeServicesSearchSafe as executeServicesSearch',
     )
-    expect(central).toContain(
+    expect(central).not.toContain(
       'executeServicesGetSafe as executeServicesGet',
     )
-    expect(central).toContain(
+    expect(central).not.toContain(
       "export { executeServicesMatchRequest } from '@/lib/services/service-catalog/ai-tool-runtime'",
     )
-    expect(central).toContain(
+    expect(central).not.toContain(
       "export { executePricingCalculateQuote } from '@/lib/services/pricing/ai-tool-runtime'",
     )
     expect(serviceRuntime).toContain(
