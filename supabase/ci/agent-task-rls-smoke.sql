@@ -1,6 +1,58 @@
 begin;
 
-do $$
+-- Phase 6 / NOTE-004: table privileges are a prerequisite for RLS.
+-- Assert the intended client surface explicitly so a change in Supabase
+-- defaults cannot silently make clean replay differ from long-lived TEST.
+do $
+begin
+  if not has_table_privilege('authenticated', 'public.ai_agent_runs', 'SELECT')
+     or not has_table_privilege('authenticated', 'public.ai_agent_runs', 'UPDATE') then
+    raise exception 'authenticated must have SELECT+UPDATE on ai_agent_runs';
+  end if;
+
+  if has_table_privilege('authenticated', 'public.ai_agent_runs', 'INSERT')
+     or has_table_privilege('authenticated', 'public.ai_agent_runs', 'DELETE') then
+    raise exception 'authenticated must not have INSERT/DELETE on ai_agent_runs';
+  end if;
+
+  if has_table_privilege('anon', 'public.ai_agent_runs', 'SELECT')
+     or has_table_privilege('anon', 'public.ai_agent_runs', 'INSERT')
+     or has_table_privilege('anon', 'public.ai_agent_runs', 'UPDATE')
+     or has_table_privilege('anon', 'public.ai_agent_runs', 'DELETE') then
+    raise exception 'anon must not have table privileges on ai_agent_runs';
+  end if;
+
+  if not has_table_privilege('authenticated', 'public.ai_agent_run_events', 'SELECT') then
+    raise exception 'authenticated must have SELECT on ai_agent_run_events';
+  end if;
+
+  if has_table_privilege('authenticated', 'public.ai_agent_run_events', 'INSERT')
+     or has_table_privilege('authenticated', 'public.ai_agent_run_events', 'UPDATE')
+     or has_table_privilege('authenticated', 'public.ai_agent_run_events', 'DELETE') then
+    raise exception 'authenticated must not mutate ai_agent_run_events';
+  end if;
+
+  if has_table_privilege('anon', 'public.ai_agent_run_events', 'SELECT')
+     or has_table_privilege('anon', 'public.ai_agent_run_events', 'INSERT')
+     or has_table_privilege('anon', 'public.ai_agent_run_events', 'UPDATE')
+     or has_table_privilege('anon', 'public.ai_agent_run_events', 'DELETE') then
+    raise exception 'anon must not have table privileges on ai_agent_run_events';
+  end if;
+
+  if not has_table_privilege('service_role', 'public.ai_agent_runs', 'SELECT')
+     or not has_table_privilege('service_role', 'public.ai_agent_runs', 'INSERT')
+     or not has_table_privilege('service_role', 'public.ai_agent_runs', 'UPDATE')
+     or not has_table_privilege('service_role', 'public.ai_agent_runs', 'DELETE')
+     or not has_table_privilege('service_role', 'public.ai_agent_run_events', 'SELECT')
+     or not has_table_privilege('service_role', 'public.ai_agent_run_events', 'INSERT')
+     or not has_table_privilege('service_role', 'public.ai_agent_run_events', 'UPDATE')
+     or not has_table_privilege('service_role', 'public.ai_agent_run_events', 'DELETE') then
+    raise exception 'service_role Agent Run table privileges are incomplete';
+  end if;
+end
+$;
+
+do $
 declare
   v_user_a uuid := '00000000-0000-4000-8000-000000000117';
   v_user_b uuid := '00000000-0000-4000-8000-000000000217';
