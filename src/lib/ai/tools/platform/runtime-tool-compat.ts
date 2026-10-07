@@ -1,8 +1,24 @@
-import type {
-  ArgumentSchema,
-  ToolDefinition,
-} from '@/lib/ai/runtime/tool-registry'
+import type { ToolGrantPermission } from '@/lib/ai/runtime/multi-agent-types'
 import type { PlatformToolManifest } from './contracts'
+
+export interface RuntimeToolArgumentSchema {
+  type: 'string' | 'number' | 'boolean' | 'enum' | 'object'
+  description: string
+  values?: string[]
+  required?: boolean
+}
+
+export interface RuntimeToolDefinition {
+  key: string
+  version: number
+  description: string
+  notes?: string
+  argumentSchema: Record<string, RuntimeToolArgumentSchema>
+  returnSchema: string
+  grantPermissions: ReadonlyArray<ToolGrantPermission>
+  category: 'services' | 'pricing' | 'rates' | 'coverage' | 'intents' | 'changes'
+  risk: 'read' | 'low' | 'medium' | 'high'
+}
 import {
   CURRENT_PLATFORM_REGISTRY,
   getCurrentPlatformTool,
@@ -10,7 +26,7 @@ import {
 
 const CATEGORY_BY_DOMAIN: Record<
   string,
-  ToolDefinition['category']
+  RuntimeToolDefinition['category']
 > = {
   services: 'services',
   pricing: 'pricing',
@@ -22,12 +38,13 @@ const CATEGORY_BY_DOMAIN: Record<
 }
 
 /**
- * Compatibility projection for APIs/UI that still consume the historical
- * ToolDefinition shape. The source of truth is always PlatformToolManifest.
+ * Compatibility projection for APIs/UI that consume the compact runtime tool
+ * shape. PlatformToolManifest remains the only source of truth; this module
+ * owns only the projection shape and never a second tool registry.
  */
 export function platformManifestToToolDefinition(
   manifest: PlatformToolManifest,
-): ToolDefinition {
+): RuntimeToolDefinition {
   return {
     key: manifest.key,
     version: manifest.version,
@@ -43,17 +60,17 @@ export function platformManifestToToolDefinition(
   }
 }
 
-export function listCurrentToolDefinitions(): ReadonlyArray<ToolDefinition> {
+export function listCurrentToolDefinitions(): ReadonlyArray<RuntimeToolDefinition> {
   return CURRENT_PLATFORM_REGISTRY.listTools().map(platformManifestToToolDefinition)
 }
 
 /**
  * Builder-facing projection. Authoritative EXECUTE handlers are platform
  * internals and must never appear as grants an administrator can hand to a
- * model, even if a future registry entry is accidentally projected through
- * the legacy ToolDefinition compatibility shape.
+ * model, even if a future native manifest is accidentally projected through
+ * this compatibility shape.
  */
-export function listBuilderToolDefinitions(): ReadonlyArray<ToolDefinition> {
+export function listBuilderToolDefinitions(): ReadonlyArray<RuntimeToolDefinition> {
   return CURRENT_PLATFORM_REGISTRY
     .listTools()
     .filter(isBuilderExposedManifest)
@@ -63,7 +80,7 @@ export function listBuilderToolDefinitions(): ReadonlyArray<ToolDefinition> {
 export function getBuilderToolDefinition(
   key: string,
   version?: number,
-): ToolDefinition | null {
+): RuntimeToolDefinition | null {
   const manifest = getCurrentPlatformTool(key, version)
   return manifest && isBuilderExposedManifest(manifest)
     ? platformManifestToToolDefinition(manifest)
@@ -73,7 +90,7 @@ export function getBuilderToolDefinition(
 export function getCurrentToolDefinition(
   key: string,
   version?: number,
-): ToolDefinition | null {
+): RuntimeToolDefinition | null {
   const manifest = getCurrentPlatformTool(key, version)
   return manifest ? platformManifestToToolDefinition(manifest) : null
 }
@@ -88,7 +105,7 @@ function isBuilderExposedManifest(manifest: PlatformToolManifest): boolean {
 
 function compactArgumentSchema(
   schema: Readonly<Record<string, unknown>>,
-): Record<string, ArgumentSchema> {
+): Record<string, RuntimeToolArgumentSchema> {
   if (
     schema.type === 'object' &&
     (schema.properties === undefined || isRecord(schema.properties))
@@ -120,7 +137,7 @@ function compactArgumentSchema(
 function jsonPropertyToArgumentSchema(
   raw: unknown,
   required: boolean,
-): ArgumentSchema {
+): RuntimeToolArgumentSchema {
   if (!isRecord(raw)) {
     return { type: 'object', description: '', required }
   }
@@ -150,7 +167,7 @@ function jsonPropertyToArgumentSchema(
   }
 }
 
-function isCompactArgumentSchema(value: unknown): value is ArgumentSchema {
+function isCompactArgumentSchema(value: unknown): value is RuntimeToolArgumentSchema {
   return (
     isRecord(value) &&
     ['string', 'number', 'boolean', 'enum', 'object'].includes(String(value.type))

@@ -1,16 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { authorizeToolInvocation } from './tool-policy'
-import type { ToolDefinition } from './tool-registry'
 
-const tool: ToolDefinition = {
+const tool = {
   key: 'services.get',
   version: 1,
-  description: 'test',
-  argumentSchema: { id_or_code: { type: 'string', description: 'id', required: true } },
-  returnSchema: '{}',
-  grantPermissions: ['read'],
-  category: 'services',
-  risk: 'read',
 }
 const features = { killSwitch: false, nativeToolsEnabled: true, proposalToolsEnabled: true }
 
@@ -61,15 +54,13 @@ describe('authorizeToolInvocation', () => {
   })
 
   it('allows customers to forward FX buy/sell requests but not change rates', () => {
-    const tradeRequestTool: ToolDefinition = {
-      key: 'exchange_rates.record_trade_request', version: 2, description: 'test',
-      argumentSchema: {}, returnSchema: '{}', grantPermissions: ['propose'],
-      category: 'rates', risk: 'medium',
+    const tradeRequestTool = {
+      key: 'exchange_rates.record_trade_request',
+      version: 2,
     }
-    const rateChangeTool: ToolDefinition = {
-      key: 'exchange_rates.propose_pair_change', version: 2, description: 'test',
-      argumentSchema: {}, returnSchema: '{}', grantPermissions: ['propose'],
-      category: 'rates', risk: 'high',
+    const rateChangeTool = {
+      key: 'exchange_rates.propose_pair_change',
+      version: 2,
     }
     const context = {
       plane: 'customer' as const, channel: 'whatsapp' as const, simulation: false,
@@ -85,10 +76,9 @@ describe('authorizeToolInvocation', () => {
   })
 
   it('requires rates.propose for an admin exchange-rate change', () => {
-    const rateChangeTool: ToolDefinition = {
-      key: 'exchange_rates.propose_pair_change', version: 2, description: 'test',
-      argumentSchema: {}, returnSchema: '{}', grantPermissions: ['propose'],
-      category: 'rates', risk: 'high',
+    const rateChangeTool = {
+      key: 'exchange_rates.propose_pair_change',
+      version: 2,
     }
     const base = {
       plane: 'admin' as const, channel: 'whatsapp' as const, simulation: false,
@@ -105,10 +95,9 @@ describe('authorizeToolInvocation', () => {
   })
 
   it('requires rates.propose for an admin FX trade decision', () => {
-    const decisionTool: ToolDefinition = {
-      key: 'exchange_rates.propose_trade_decision', version: 1, description: 'test',
-      argumentSchema: {}, returnSchema: '{}', grantPermissions: ['propose'],
-      category: 'rates', risk: 'high',
+    const decisionTool = {
+      key: 'exchange_rates.propose_trade_decision',
+      version: 1,
     }
     const base = {
       plane: 'admin' as const, channel: 'whatsapp' as const, simulation: false,
@@ -189,10 +178,9 @@ describe('authorizeToolInvocation', () => {
   })
 
   it('keeps service pricing mutations off the customer plane', () => {
-    const pricingTool: ToolDefinition = {
-      key: 'pricing_rules.propose_service_price', version: 1, description: 'test',
-      argumentSchema: {}, returnSchema: '{}', grantPermissions: ['propose'],
-      category: 'pricing', risk: 'high',
+    const pricingTool = {
+      key: 'pricing_rules.propose_service_price',
+      version: 1,
     }
     const result = authorizeToolInvocation({
       tool: pricingTool,

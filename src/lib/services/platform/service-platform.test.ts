@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { PlatformToolManifest } from '@/lib/ai/tools/platform/contracts'
-import { getRegisteredTool } from '@/lib/ai/runtime/tool-registry'
 import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
 import { getCurrentToolDefinition } from '@/lib/ai/tools/platform/runtime-tool-compat'
 import { COVERAGE_DOMAIN, COVERAGE_RUNTIME } from '@/lib/services/coverage/domain'
@@ -365,9 +364,8 @@ describe('native domain tool ownership', () => {
     )
   })
 
-  it('contracts native tools out of the central registry while preserving the API compatibility projection', () => {
+  it('projects native tools for API compatibility without a second registry', () => {
     for (const manifest of nativeManifests) {
-      expect(getRegisteredTool(manifest.key), manifest.key).toBeNull()
 
       const projected = getCurrentToolDefinition(manifest.key, manifest.version)
       expect(projected, manifest.key).not.toBeNull()
@@ -380,15 +378,12 @@ describe('native domain tool ownership', () => {
     }
   })
 
-  it('removes FX, Coverage, and Intents semantic specs from both the legacy bridge and central tool registry', () => {
+  it('removes the central legacy tool registry after native ownership is complete', () => {
     const registrySource = readFileSync(
       new URL('../../ai/tools/platform/current-domain-registry.ts', import.meta.url),
       'utf8',
     )
-    const legacyToolRegistrySource = readFileSync(
-      new URL('../../ai/runtime/tool-registry.ts', import.meta.url),
-      'utf8',
-    )
+    const legacyRegistryUrl = new URL('../../ai/runtime/tool-registry.ts', import.meta.url)
 
     expect(registrySource).toContain('CURRENT_BUSINESS_DOMAIN_MODULES')
     expect(registrySource).not.toContain('const NATIVE_DOMAINS')
@@ -398,9 +393,7 @@ describe('native domain tool ownership', () => {
     expect(registrySource).not.toContain("key: 'exchange_rates.")
     expect(registrySource).not.toContain("key: 'coverage.")
     expect(registrySource).not.toContain("key: 'intents.")
-    expect(legacyToolRegistrySource).not.toContain("key: 'exchange_rates.")
-    expect(legacyToolRegistrySource).not.toContain("key: 'coverage.")
-    expect(legacyToolRegistrySource).not.toContain("key: 'intents.")
+    expect(existsSync(legacyRegistryUrl)).toBe(false)
   })
 })
 
@@ -901,14 +894,13 @@ describe('Services/Pricing Phase 2A native ownership', () => {
 
 
 describe('Services/Pricing Phase 2B ownership contraction', () => {
-  it('contracts all Services/Pricing tool definitions out of the legacy registry', () => {
+  it('projects all Services/Pricing native definitions without a legacy registry', () => {
     const manifests = [
       ...SERVICES_TOOL_MANIFESTS,
       ...PRICING_TOOL_MANIFESTS,
       ...PRICING_RULES_TOOL_MANIFESTS,
     ]
     for (const manifest of manifests) {
-      expect(getRegisteredTool(manifest.key), manifest.key).toBeNull()
       expect(getCurrentPlatformTool(manifest.key, manifest.version)).toEqual(
         manifest,
       )
