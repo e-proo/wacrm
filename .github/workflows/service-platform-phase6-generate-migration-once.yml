@@ -1,0 +1,49 @@
+name: Service Platform Phase 6 Generate Migration Once
+
+on:
+  push:
+    branches: [refactor/service-platform-v2]
+    paths:
+      - '.github/workflows/service-platform-phase6-generate-migration-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pinned Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.113.0
+
+      - name: Generate migration with Supabase CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase migration new ai_agent_run_acl_hardening
+          migration="$(ls -1t supabase/migrations/*_ai_agent_run_acl_hardening.sql | head -n 1)"
+          cat > "$migration" <<'SQL'
+          -- Phase 6 / NOTE-004: make Agent Run table privileges deterministic.
+          --
+          -- RLS remains the row-level authority. This migration normalizes the
+          -- table-level ACL so clean databases and long-lived TEST databases
+          -- expose the same client surface instead of inheriting historical
+          -- default privileges.
+
+          revoke all on table public.ai_agent_runs from anon, authenticated;
+          grant select, update on table public.ai_agent_runs to authenticated;
+          grant select, insert, update, delete on table public.ai_agent_runs to service_role;
+
+          revoke all on table public.ai_agent_run_events from anon, authenticated;
+          grant select on table public.ai_agent_run_events to authenticated;
+          grant select, insert, update, delete on table public.ai_agent_run_events to service_role;
+          SQL
+
+          echo "PHASE6_MIGRATION_PATH=$migration"
+          echo '--- PHASE6_MIGRATION_CONTENT_BEGIN ---'
+          cat "$migration"
+          echo '--- PHASE6_MIGRATION_CONTENT_END ---'
