@@ -503,7 +503,36 @@ Baseline evidence:
 7. بعد نجاح CI فقط، تطبيق migration نفسها على `wacrm test` ثم إعادة RLS smoke وSupabase Security Advisor.
 8. عند نجاح ذلك: `NOTE-004 = resolved` وGate B = **PASS**.
 
-هذا الفشل مسجل في `PROJECT_NOTES.md` كـcross-plan blocker. لا يعيد فتح Phase 5، لكنه يمنع اعتبار branch-wide migration acceptance خضراء حتى يتم حسمه.
+#### Gate B closure — PASS (2026-10-07)
+
+تم تنفيذ خطة الإصلاح كاملة:
+
+- Supabase CLI `2.113.0` شُغّل داخل GitHub Actions، و`supabase migration new ai_agent_run_acl_hardening` ولّد migration الرسمية:
+  `supabase/migrations/20261007010039_ai_agent_run_acl_hardening.sql`.
+- migration تثبت ACL صريحة:
+  - `ai_agent_runs`: authenticated = `SELECT, UPDATE` فقط؛ anon = لا وصول؛ service_role يحتفظ بعمليات الخدمة.
+  - `ai_agent_run_events`: authenticated = `SELECT` فقط؛ anon = لا وصول؛ client mutations ممنوعة.
+- `supabase/ci/agent-task-rls-smoke.sql` أصبح يختبر table privileges نفسها قبل RLS، لمنع الرجوع إلى الاعتماد على Supabase default grants.
+- أول run بعد إضافة assertions كشف خطأ syntax في delimiters الخاصة بالـsmoke نفسه، وليس في migration؛ تم إصلاحه بصيغة named dollar quotes.
+- Migrations run `37555338146` على commit `1d0851065ccb9759e7fb97fa12b0eaf347d5648a` = **SUCCESS**:
+  - clean replay = PASS.
+  - schema verification = PASS.
+  - كل Agent Task smokes = PASS.
+  - Service Platform/Coverage/Intents/FX smokes = PASS.
+  - `Agent Task authenticated RLS isolation` = PASS.
+- CI run `37555338255` على نفس commit = **SUCCESS**:
+  - lint/typecheck/test/build = PASS.
+- migration طُبقت على TEST باسم `ai_agent_run_acl_hardening`، وسجل migration الفعلي:
+  `20261007010743`.
+- live TEST verification أثبت:
+  - authenticated يستطيع قراءة Agent Runs/Run Events عبر RLS.
+  - authenticated لا يملك INSERT/DELETE على `ai_agent_runs`.
+  - authenticated لا يملك mutations على `ai_agent_run_events`.
+  - anon لا يملك table privileges على الجدولين.
+- Security Advisor أُعيد بعد التطبيق ولم يظهر finding جديد متعلق بـ`ai_agent_runs` أو `ai_agent_run_events`; findings العامة المؤجلة تبقى ضمن `NOTE-001`.
+
+**Gate B = PASS.**  
+`NOTE-004` أُغلق. الخطوة التالية في Phase 6 هي Gate D — FX final TEST acceptance.
 
 #### Gate C — Architectural extensibility
 
