@@ -3,7 +3,7 @@ begin;
 -- Phase 6 / NOTE-004: table privileges are a prerequisite for RLS.
 -- Assert the intended client surface explicitly so a change in Supabase
 -- defaults cannot silently make clean replay differ from long-lived TEST.
-do $
+do $phase6_acl$
 begin
   if not has_table_privilege('authenticated', 'public.ai_agent_runs', 'SELECT')
      or not has_table_privilege('authenticated', 'public.ai_agent_runs', 'UPDATE') then
@@ -50,9 +50,9 @@ begin
     raise exception 'service_role Agent Run table privileges are incomplete';
   end if;
 end
-$;
+$phase6_acl$;
 
-do $
+do $phase17_fixture$
 declare
   v_user_a uuid := '00000000-0000-4000-8000-000000000117';
   v_user_b uuid := '00000000-0000-4000-8000-000000000217';
@@ -170,7 +170,7 @@ begin
   perform set_config('phase17.target',v_target::text,true);
   perform set_config('phase17.run',v_run::text,true);
 end
-$$;
+$phase17_fixture$;
 
 set local role authenticated;
 select set_config(
