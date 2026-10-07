@@ -13,15 +13,12 @@ import type {
 import type { RuntimeFeaturePolicy } from '@/lib/ai/runtime/tool-policy'
 
 // ============================================================
-// Tool executors (Phase 3).
+// Shared AI tool execution contracts plus the Coverage read
+// implementations that are still consumed by the Coverage runtime.
 //
-// Each function in this module is the IMPLEMENTATION behind a
-// tool definition in src/lib/ai/runtime/tool-registry.ts. The
-// dispatcher calls them via `executeTool(key, args, ctx)` after
-// validating the grant against the agent's published revision.
-//
-// All executors are READ-ONLY in Phase 3. Mutations go through
-// the change-request approval flow (see change-requests-service).
+// Native PlatformToolManifest/domain runtimes are the source of
+// tool ownership. This module is no longer a central tool registry,
+// and retired Services/Pricing executor aliases must not be restored.
 //
 // Errors are typed as `{ code, message, safe_to_show }` so the
 // agent can decide whether to surface the message verbatim or
@@ -447,26 +444,3 @@ export async function executeCoverageGetRates(
     }
   }
 }
-
-// ------------------------------------------------------------
-// services.match_request
-// ------------------------------------------------------------
-export interface ServicesMatchRequestArgs {
-  service_hint?: string
-  attributes?: Record<string, unknown>
-  limit?: number
-}
-
-/**
- * Compatibility exports only.
- *
- * Services/Pricing execution is owned by native business-domain runtimes.
- * Keep these historical import names working without maintaining a second
- * executable implementation in the central AI tools module.
- */
-export {
-  executeServicesSearchSafe as executeServicesSearch,
-  executeServicesGetSafe as executeServicesGet,
-} from '@/lib/services/service-catalog/read-tools'
-export { executeServicesMatchRequest } from '@/lib/services/service-catalog/ai-tool-runtime'
-export { executePricingCalculateQuote } from '@/lib/services/pricing/ai-tool-runtime'
