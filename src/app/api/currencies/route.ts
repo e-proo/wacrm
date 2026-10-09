@@ -1,6 +1,6 @@
 // ============================================================
 // /api/currencies — list + create currencies for the account.
-// Admin+ only.
+// Reads: any account member. Writes: admin+ only.
 // ============================================================
 
 import { NextResponse } from 'next/server'
@@ -18,9 +18,9 @@ import {
 
 export async function GET() {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireRole('viewer')
     const limit = checkRateLimit(
-      `admin:currenciesList:${ctx.userId}`,
+      `currenciesList:${ctx.userId}`,
       RATE_LIMITS.adminAction,
     )
     if (!limit.success) return rateLimitResponse(limit)

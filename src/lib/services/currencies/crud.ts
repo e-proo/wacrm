@@ -7,12 +7,9 @@ export { ServiceError }
 // Currency catalog CRUD (Phase 2 completion).
 //
 // Reads are account-scoped via RLS; writes are admin+ gated at
-// the API layer. Currencies are immutable in the sense that you
-// cannot DELETE a row that has historical rate references —
-// the schema doesn't enforce this today (Phase 2 has no FK from
-// exchange_rates to currencies yet) but the service refuses to
-// deactivate a currency while it has live rate rows in the
-// current published version of any book.
+// the API layer. A currency cannot be disabled while any FX V2
+// pair references it because published rate history remains
+// attached to that pair.
 // ============================================================
 
 export interface CurrencyRow {
@@ -169,11 +166,11 @@ export async function updateCurrency(
     if (!existing) {
       throw new ServiceError('NOT_FOUND', 'Currency not found.', 404)
     }
-    const inUse = await isCurrencyInUse(accountId, existing.code)
+    const inUse = await isCurrencyInUse(accountId, existing.id)
     if (inUse) {
       throw new ServiceError(
         'CURRENCY_IN_USE',
-        'Cannot disable a currency that is referenced by active rate rows.',
+        'Cannot disable a currency that is referenced by an FX pair.',
         409,
       )
     }
@@ -208,33 +205,20 @@ export async function updateCurrency(
 }
 
 /**
- * True when the currency code appears in any `exchange_rates`
- * row whose parent version is the current published version of
- * its book. Historical rows are ignored.
+ * True when the currency is referenced by any FX V2 pair. Disabled pairs
+ * still retain immutable rate history and therefore remain references.
  */
 async function isCurrencyInUse(
   accountId: string,
-  code: string,
+  currencyId: string,
 ): Promise<boolean> {
-  const { data, error } = await supabaseAdmin()
-    .from('exchange_rate_books')
-    .select('id, current_published_version_id')
-    .eq('account_id', accountId)
-    .not('current_published_version_id', 'is', null)
-  if (error) throw error
-  const liveVersionIds = (data ?? [])
-    .map((b) => (b as { current_published_version_id: string | null }).current_published_version_id)
-    .filter((v): v is string => Boolean(v))
-  if (liveVersionIds.length === 0) return false
-  const { data: rateRows, error: rateErr } = await supabaseAdmin()
-    .from('exchange_rates')
+  const { count, error } = await supabaseAdmin()
+    .from('exchange_rate_pairs')
     .select('id', { head: true, count: 'exact' })
     .eq('account_id', accountId)
-    .in('version_id', liveVersionIds)
-    .or(`base_currency.eq.${code},quote_currency.eq.${code}`)
-    .limit(1)
-  if (rateErr) throw rateErr
-  return ((rateRows as unknown as { length?: number })?.length ?? 0) > 0
+    .or(`base_currency_id.eq.${currencyId},quote_currency_id.eq.${currencyId}`)
+  if (error) throw error
+  return (count ?? 0) > 0
 }
 
 // ------------------------------------------------------------

@@ -6,46 +6,56 @@ import {
   renderToolCatalog,
 } from './tool-registry'
 
-// Phase 3: registry + the 5 read-only tools it ships.
-
-describe('tool registry (Phase 3)', () => {
-  it('registers exactly the 11 documented tools', () => {
-    const tools = listRegisteredTools()
-    const keys = tools.map((t) => t.key).sort()
+describe('tool registry — repaired platform contract', () => {
+  it('registers exactly the current 23 platform tools', () => {
+    const keys = listRegisteredTools().map((tool) => tool.key).sort()
     expect(keys).toEqual(
       [
+        'change_requests.list_pending',
+        'coverage.admin_list_offers',
+        'coverage.admin_list_requests',
         'coverage.check_availability',
         'coverage.find_offers',
         'coverage.get_rates',
         'coverage.propose_offer',
+        'coverage.propose_request',
+        'exchange_rates.admin_list_pairs',
+        'exchange_rates.admin_list_trade_requests',
         'exchange_rates.get_current',
+        'exchange_rates.propose_pair_change',
+        'exchange_rates.propose_trade_decision',
+        'exchange_rates.record_trade_request',
+        'intents.propose_decision',
         'intents.record',
         'intents.search',
         'pricing.calculate_quote',
+        'pricing_rules.propose_service_price',
         'services.get',
         'services.match_request',
+        'services.propose_update',
         'services.search',
       ].sort(),
     )
+    expect(getRegisteredTool('exchange_rates.admin_list_books')).toBeNull()
   })
 
-  it('every read tool is risk=read and grants only `read`', () => {
-    for (const t of listRegisteredTools()) {
-      if (t.key === 'intents.record' || t.key === 'coverage.propose_offer') continue
-      expect(t.risk).toBe('read')
-      expect(t.grantPermissions).toEqual(['read'])
+  it('read grants remain read-risk and read-only', () => {
+    for (const tool of listRegisteredTools()) {
+      if (!tool.grantPermissions.includes('read')) continue
+      expect(tool.risk).toBe('read')
+      expect(tool.grantPermissions).toEqual(['read'])
+      expect(isGrantAllowed(tool, 'execute')).toBe(false)
     }
   })
 
-  it('propose-class tools cannot be self-executed by the model', () => {
-    for (const key of ['intents.record', 'coverage.propose_offer']) {
-      const tool = getRegisteredTool(key)
-      expect(tool).not.toBeNull()
-      if (tool) {
-        expect(tool.grantPermissions).toEqual(['propose'])
-        expect(isGrantAllowed(tool, 'read')).toBe(false)
-        expect(isGrantAllowed(tool, 'execute')).toBe(false)
-      }
+  it('proposal tools are proposal-only and never model-executable', () => {
+    const proposalTools = listRegisteredTools().filter((tool) => tool.grantPermissions.includes('propose'))
+    expect(proposalTools.length).toBeGreaterThan(0)
+    for (const tool of proposalTools) {
+      expect(tool.grantPermissions).toEqual(['propose'])
+      expect(tool.risk).not.toBe('read')
+      expect(isGrantAllowed(tool, 'read')).toBe(false)
+      expect(isGrantAllowed(tool, 'execute')).toBe(false)
     }
   })
 
@@ -64,6 +74,94 @@ describe('tool registry (Phase 3)', () => {
     expect(getRegisteredTool('execute_in_arbitrary_sql')).toBeNull()
   })
 
+  it('keeps published coverage grant versions stable while adding directional quote inputs', () => {
+    const rates = getRegisteredTool('coverage.get_rates')
+    expect(rates?.version).toBe(1)
+    expect(rates?.grantPermissions).toEqual(['read'])
+    expect(rates?.argumentSchema).toHaveProperty('amount')
+    expect(rates?.argumentSchema).toHaveProperty('currency')
+    expect(rates?.argumentSchema).toHaveProperty('pay_region')
+    expect(rates?.argumentSchema).toHaveProperty('pay_region_id')
+    expect(rates?.argumentSchema).toHaveProperty('receive_region')
+    expect(rates?.argumentSchema).toHaveProperty('receive_region_id')
+    expect(rates?.argumentSchema.receive_method.values).toContain('networks')
+    expect(rates?.description).toContain('PAY south + RECEIVE north')
+    expect(rates?.description).toContain('PAY north + RECEIVE south')
+    expect(getRegisteredTool('coverage.find_offers')?.version).toBe(2)
+    expect(getRegisteredTool('coverage.propose_offer')?.version).toBe(2)
+    expect(getRegisteredTool('coverage.propose_request')?.version).toBe(1)
+  })
+
+  it('requires the quoted FX V2 version when recording a customer trade request', () => {
+    const read = getRegisteredTool('exchange_rates.get_current')
+    expect(read?.version).toBe(1)
+    expect(read?.description).toContain('authoritative CURRENT FX V2 rate')
+    expect(read?.returnSchema).toContain('rate_version_id')
+
+    const record = getRegisteredTool('exchange_rates.record_trade_request')
+    expect(record?.version).toBe(2)
+    expect(record?.grantPermissions).toEqual(['propose'])
+    expect(record?.argumentSchema.expected_rate_version_id?.required).toBe(true)
+    expect(record?.returnSchema).toContain('trade_request')
+    expect(record?.description).toContain('pending_admin')
+  })
+
+  it('uses pair-centric Phase 5 admin contracts and optimistic locks', () => {
+    const pairs = getRegisteredTool('exchange_rates.admin_list_pairs')
+    expect(pairs?.version).toBe(1)
+    expect(pairs?.grantPermissions).toEqual(['read'])
+    expect(pairs?.returnSchema).toContain('lock_version')
+
+    const change = getRegisteredTool('exchange_rates.propose_pair_change')
+    expect(change?.version).toBe(2)
+    expect(change?.argumentSchema.pair_id?.required).toBe(true)
+    expect(change?.argumentSchema.expected_lock_version?.required).toBe(true)
+    expect(change?.argumentSchema.business_buy_rate?.required).toBe(true)
+    expect(change?.argumentSchema.business_sell_rate?.required).toBe(true)
+    expect(change?.argumentSchema).not.toHaveProperty('book_id')
+
+    const trades = getRegisteredTool('exchange_rates.admin_list_trade_requests')
+    expect(trades?.grantPermissions).toEqual(['read'])
+    expect(trades?.returnSchema).toContain('rate_version_id')
+
+    const decision = getRegisteredTool('exchange_rates.propose_trade_decision')
+    expect(decision?.grantPermissions).toEqual(['propose'])
+    expect(decision?.argumentSchema.decision.values).toEqual(['approve', 'reject'])
+    expect(decision?.description).toContain('does NOT mean settlement completed')
+  })
+
+  it('renderToolCatalog teaches the model the customer-leg coverage direction', () => {
+    const catalog = renderToolCatalog([
+      { tool_key: 'coverage.get_rates', permission: 'read' },
+      { tool_key: 'coverage.find_offers', permission: 'read' },
+    ])
+    expect(catalog).toContain('coverage.get_rates (read)')
+    expect(catalog).toContain('coverage.find_offers (read)')
+    expect(catalog).toContain('PAY south + RECEIVE north')
+    expect(catalog).toContain('pay_region')
+    expect(catalog).toContain('receive_region')
+  })
+
+  it('renderToolCatalog surfaces the FX quote version requirement', () => {
+    const catalog = renderToolCatalog([
+      { tool_key: 'exchange_rates.get_current', permission: 'read' },
+      { tool_key: 'exchange_rates.record_trade_request', permission: 'propose' },
+    ])
+    expect(catalog).toContain('authoritative CURRENT FX V2 rate')
+    expect(catalog).toContain('expected_rate_version_id: string')
+  })
+
+  it('renderToolCatalog surfaces Phase 5 pair lock and trade-decision inputs', () => {
+    const catalog = renderToolCatalog([
+      { tool_key: 'exchange_rates.admin_list_pairs', permission: 'read' },
+      { tool_key: 'exchange_rates.propose_pair_change', permission: 'propose' },
+      { tool_key: 'exchange_rates.propose_trade_decision', permission: 'propose' },
+    ])
+    expect(catalog).toContain('expected_lock_version: number')
+    expect(catalog).toContain('business_buy_rate: string')
+    expect(catalog).toContain('decision: approve|reject')
+  })
+
   it('renderToolCatalog surfaces exactly the granted, registered tools', () => {
     const catalog = renderToolCatalog([
       { tool_key: 'coverage.get_rates', permission: 'read' },
@@ -71,7 +169,6 @@ describe('tool registry (Phase 3)', () => {
     ])
     expect(catalog).toContain('coverage.get_rates (read)')
     expect(catalog).toContain('intents.record (propose)')
-    // Compact argument hint so the model can emit the call.
     expect(catalog).toContain('args: {')
   })
 

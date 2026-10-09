@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   classifyCandidate,
   overallMatch,
+  SERVICE_MATCH_SELECT,
   type MatchedCandidate,
 } from './service-matcher'
 import type { FieldDefinitionInput } from '@/lib/services/catalog/field-schema'
@@ -97,5 +98,12 @@ describe('overallMatch', () => {
 
   it('none when nothing fits', () => {
     expect(overallMatch([candidate({ classification: 'none' })])).toBe('none')
+  })
+})
+
+describe('service matcher query contract', () => {
+  it('pins current revision and does not use an ambiguous category embed', () => {
+    expect(SERVICE_MATCH_SELECT).toContain('service_revisions!services_current_revision_fk')
+    expect(SERVICE_MATCH_SELECT).not.toContain('service_categories(')
   })
 })

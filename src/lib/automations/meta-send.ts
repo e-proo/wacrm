@@ -40,6 +40,16 @@ interface SendTextArgs {
   conversationId: string
   contactId: string
   text: string
+  /**
+   * Multi-agent run UUID. When present the sender reserves exactly one
+   * local `messages` row BEFORE the Meta call. This is the idempotency
+   * boundary for an AI run; a retry never creates a second outbound send.
+   */
+  aiAgentRunId?: string
+  /** Durable non-AI business notification key (for example an approved
+   * customer-intent result). Mutually compatible with the same local-first
+   * reservation semantics as aiAgentRunId. */
+  engineIdempotencyKey?: string
 }
 
 interface SendTemplateArgs {
@@ -52,7 +62,10 @@ interface SendTemplateArgs {
   params?: string[]
 }
 
-export async function engineSendText(args: SendTextArgs): Promise<{ whatsapp_message_id: string }> {
+export async function engineSendText(args: SendTextArgs): Promise<{
+  whatsapp_message_id: string
+  local_message_id: string
+}> {
   return sendViaMeta({ ...args, kind: 'text' })
 }
 
@@ -109,7 +122,10 @@ type SendInput =
   | (SendTextArgs & { kind: 'text' })
   | (SendTemplateArgs & { kind: 'template' })
 
-async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: string }> {
+async function sendViaMeta(input: SendInput): Promise<{
+  whatsapp_message_id: string
+  local_message_id: string
+}> {
   const db = supabaseAdmin()
 
   // Scope the contact + config lookups by account_id, not user_id.
@@ -161,6 +177,68 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
           )
         ).row
       : null
+
+  // For AI-agent text sends, reserve the LOCAL message row first. The unique
+  // messages.ai_agent_run_id index means only one worker can own a run's
+  // outbound send. `sending`/`failed` without a wamid is intentionally NOT
+  // retried automatically because a provider timeout may have happened after
+  // Meta accepted the message; automatic resend could duplicate customer text.
+  let reservedMessageId: string | null = null
+  const reservationColumn =
+    input.kind === 'text' && input.aiAgentRunId
+      ? 'ai_agent_run_id'
+      : input.kind === 'text' && input.engineIdempotencyKey
+        ? 'engine_idempotency_key'
+        : null
+  const reservationValue =
+    input.kind === 'text'
+      ? (input.aiAgentRunId ?? input.engineIdempotencyKey ?? null)
+      : null
+  if (input.kind === 'text' && reservationColumn && reservationValue) {
+    const { data: existing, error: existingErr } = await db
+      .from('messages')
+      .select('id, message_id, status')
+      .eq(reservationColumn, reservationValue)
+      .maybeSingle()
+    if (existingErr) throw existingErr
+    if (existing) {
+      const row = existing as { id: string; message_id: string | null; status: string }
+      if (row.message_id && ['sent', 'delivered', 'read'].includes(row.status)) {
+        return { whatsapp_message_id: row.message_id, local_message_id: row.id }
+      }
+      throw new Error(`AI_AGENT_SEND_REQUIRES_RECONCILIATION:${row.id}`)
+    }
+
+    const { data: reserved, error: reserveErr } = await db
+      .from('messages')
+      .insert({
+        conversation_id: input.conversationId,
+        sender_type: 'bot',
+        content_type: 'text',
+        content_text: input.text,
+        message_id: null,
+        status: 'sending',
+        ...(input.aiAgentRunId ? { ai_agent_run_id: input.aiAgentRunId } : {}),
+        ...(input.engineIdempotencyKey
+          ? { engine_idempotency_key: input.engineIdempotencyKey }
+          : {}),
+      })
+      .select('id')
+      .single()
+    if (reserveErr || !reserved) {
+      // A concurrent worker may have won the unique run-id reservation.
+      const { data: raced } = await db
+        .from('messages')
+        .select('id, message_id, status')
+        .eq(reservationColumn, reservationValue)
+        .maybeSingle()
+      if (raced?.message_id && ['sent', 'delivered', 'read'].includes(raced.status)) {
+        return { whatsapp_message_id: raced.message_id, local_message_id: raced.id }
+      }
+      throw reserveErr ?? new Error('ENGINE_SEND_RESERVATION_LOST')
+    }
+    reservedMessageId = (reserved as { id: string }).id
+  }
 
   const attempt = async (phone: string): Promise<string> => {
     if (input.kind === 'template') {
@@ -221,19 +299,36 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
       : templateContentText(templateRow, input.params ?? [])
   const template_name = input.kind === 'template' ? input.templateName : null
 
-  const { error: msgErr } = await db.from('messages').insert({
-    conversation_id: input.conversationId,
-    sender_type: 'bot',
-    content_type,
-    content_text,
-    template_name,
-    message_id: waMessageId,
-    status: 'sent',
-  })
+  const persisted = reservedMessageId
+    ? await db
+        .from('messages')
+        .update({ message_id: waMessageId, status: 'sent' })
+        .eq('id', reservedMessageId)
+        .eq('status', 'sending')
+        .select('id')
+        .maybeSingle()
+    : await db
+        .from('messages')
+        .insert({
+          conversation_id: input.conversationId,
+          sender_type: 'bot',
+          content_type,
+          content_text,
+          template_name,
+          message_id: waMessageId,
+          status: 'sent',
+        })
+        .select('id')
+        .single()
+  const msgErr = persisted.error
   if (msgErr) {
     // Meta already has the message; record the DB error but don't pretend
     // the send failed. The engine wraps this in a log line.
     throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+  }
+  const localMessageId = (persisted.data as { id: string } | null)?.id ?? reservedMessageId
+  if (!localMessageId) {
+    throw new Error('sent to Meta but local message id was not returned')
   }
 
   await db
@@ -248,5 +343,5 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
     })
     .eq('id', input.conversationId)
 
-  return { whatsapp_message_id: waMessageId }
+  return { whatsapp_message_id: waMessageId, local_message_id: localMessageId }
 }

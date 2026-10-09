@@ -11,6 +11,7 @@ import {
   Bell,
   Bot,
   Briefcase,
+  CircleDollarSign,
   Crown,
   GitBranch,
   LayoutDashboard,
@@ -99,6 +100,7 @@ const navItems: NavItem[] = [
   { href: "/broadcasts", labelKey: "broadcasts", icon: Radio },
   { href: "/automations", labelKey: "automations", icon: Zap },
   { href: "/flows", labelKey: "flows", icon: Workflow, beta: true },
+  { href: "/fx", labelKey: "__fx", icon: CircleDollarSign },
   { href: "/services", labelKey: "services", icon: Briefcase, beta: true },
   { href: "/agents", labelKey: "aiAgents", icon: Bot },
 ];
@@ -240,7 +242,9 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     )}
                   >
                     <item.icon className="h-4 w-4" />
-                    <span className="flex-1">{t(item.labelKey as string)}</span>
+                    <span className="flex-1">
+                      {item.labelKey === "__fx" ? "FX" : t(item.labelKey as string)}
+                    </span>
                     {item.beta && (
                       <span
                         aria-label={t("beta")}

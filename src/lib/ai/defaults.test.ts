@@ -40,7 +40,7 @@ describe('buildSystemPrompt tool catalog section', () => {
       knowledge: ['[1] policy only'],
       tools: '- services.search (read): search the catalog.',
     })
-    expect(withTools).toMatch(/call one of the System tools below/)
+    expect(withTools).toMatch(/use an offered System tool/)
     const withoutTools = buildSystemPrompt({
       userPrompt: null,
       mode: 'auto_reply',

@@ -62,6 +62,36 @@ vi.mock('@supabase/supabase-js', () => ({
                 }),
             }),
           }
+        case 'trusted_admin_identities':
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    is: () => Promise.resolve({ data: [], error: null }),
+                  }),
+                }),
+              }),
+            }),
+          }
+        case 'ai_agent_routes':
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  eq: () => Promise.resolve({ data: [], error: null }),
+                }),
+              }),
+            }),
+          }
+        case 'ai_agents':
+          return {
+            select: () => ({
+              eq: () => ({
+                in: () => Promise.resolve({ data: [], error: null }),
+              }),
+            }),
+          }
         case 'conversations':
           // findOrCreateConversation: select().eq().eq().order().limit()
           return {

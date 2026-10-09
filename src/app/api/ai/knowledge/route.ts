@@ -1,109 +1,64 @@
 import { NextResponse } from 'next/server'
-import {
-  getCurrentAccount,
-  requireRole,
-  toErrorResponse,
-} from '@/lib/auth/account'
+import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { loadEmbeddingsKey } from '@/lib/ai/config'
-import { ingestDocument } from '@/lib/ai/knowledge'
-import { AiError } from '@/lib/ai/types'
+import { addKnowledgeDocument, ensureGeneralKnowledgeBase } from '@/lib/ai/knowledge-v2'
 
 /**
- * GET /api/ai/knowledge
+ * Compatibility facade for the old single-list knowledge UI.
  *
- * List the account's knowledge-base documents (any member).
+ * The runtime no longer has a global account KB fallback. New code should use
+ * /api/ai/knowledge-bases. This endpoint maps legacy manual entries into the
+ * dynamic shared "general" KB and always leaves new content in review state.
  */
 export async function GET() {
   try {
     const { supabase, accountId } = await getCurrentAccount()
     const { data, error } = await supabase
       .from('ai_knowledge_documents')
-      .select('id, title, updated_at')
+      .select('id, title, updated_at, lifecycle_status, knowledge_base_id, ai_knowledge_bases(name, slug, status)')
       .eq('account_id', accountId)
       .order('updated_at', { ascending: false })
-    if (error) {
-      console.error('[ai/knowledge GET] error:', error)
-      return NextResponse.json(
-        { error: 'Failed to load knowledge base' },
-        { status: 500 },
-      )
-    }
-    return NextResponse.json({ documents: data ?? [] })
+    if (error) throw error
+    return NextResponse.json({ documents: data ?? [], deprecated_single_base_api: true })
   } catch (err) {
     return toErrorResponse(err)
   }
 }
 
-/**
- * POST /api/ai/knowledge  (admin+)
- *
- * Create a document, then chunk + (optionally) embed it. If indexing
- * fails the document is still saved so the admin can retry via reindex.
- */
 export async function POST(request: Request) {
   try {
     const { supabase, accountId, userId } = await requireRole('admin')
     const limit = checkRateLimit(`ai-kb:${userId}`, RATE_LIMITS.adminAction)
     if (!limit.success) return rateLimitResponse(limit)
-
-    const body = await request.json().catch(() => null)
+    const body = await request.json().catch(() => null) as { title?: unknown; content?: unknown } | null
     const title = typeof body?.title === 'string' ? body.title.trim() : ''
     const content = typeof body?.content === 'string' ? body.content.trim() : ''
     if (!title || !content) {
-      return NextResponse.json(
-        { error: 'title and content are required' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'title and content are required' }, { status: 400 })
     }
 
-    const { data: doc, error } = await supabase
-      .from('ai_knowledge_documents')
-      .insert({ account_id: accountId, created_by: userId, title, content })
-      .select('id')
-      .single()
-    if (error || !doc) {
-      console.error('[ai/knowledge POST] insert error:', error)
-      return NextResponse.json(
-        { error: 'Failed to save document' },
-        { status: 500 },
-      )
-    }
-
-    const { key: embeddingsApiKey, corrupt, embedSetup } = await loadEmbeddingsKey(
-      supabase,
+    const base = await ensureGeneralKnowledgeBase({ db: supabase, accountId, userId })
+    const embeddings = await loadEmbeddingsKey(supabase, accountId)
+    const created = await addKnowledgeDocument({
+      db: supabase,
       accountId,
-    )
-    try {
-      await ingestDocument(
-        supabase,
-        accountId,
-        { embeddingsApiKey, embeddingSetup: embedSetup },
-        doc.id,
-        content,
-      )
-    } catch (err) {
-      const message = err instanceof AiError ? err.message : 'indexing failed'
-      console.error('[ai/knowledge POST] ingest error:', err)
-      return NextResponse.json(
-        {
-          success: true,
-          id: doc.id,
-          warning: `Saved, but semantic indexing failed (${message}). Lexical search still works; use Reindex to retry.`,
-        },
-        { status: 200 },
-      )
-    }
+      userId,
+      knowledgeBaseId: base.id,
+      document: { title, content, sourceType: 'manual', trustLevel: 'internal', language: 'auto' },
+      embedding: { embeddingsApiKey: embeddings.key, embeddingSetup: embeddings.embedSetup },
+    })
 
-    if (corrupt) {
-      return NextResponse.json({
-        success: true,
-        id: doc.id,
-        warning:
-          'Saved with keyword search only — your embeddings key could not be decrypted (check ENCRYPTION_KEY, then re-enter the key).',
-      })
-    }
-    return NextResponse.json({ success: true, id: doc.id })
+    return NextResponse.json({
+      success: true,
+      id: created.id,
+      knowledge_base_id: base.id,
+      lifecycle_status: created.lifecycleStatus,
+      injection_risk: created.injectionRisk,
+      warning: created.indexingWarning,
+      requires_review: true,
+      deprecated_single_base_api: true,
+    }, { status: 201 })
   } catch (err) {
     return toErrorResponse(err)
   }

@@ -17,7 +17,7 @@ interface ActivityRow {
   created_at: string;
 }
 
-const TARGET_TYPES = ['rate_book_version', 'coverage_match', 'service', 'pricing_rule'] as const;
+const TARGET_TYPES = ['fx_rate_pair', 'fx_trade_request', 'coverage_match', 'service', 'pricing_rule'] as const;
 
 export function ActivityFeedPanel() {
   const t = useTranslations('Services');

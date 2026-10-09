@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { validateAgentRevisionForPublish } from '@/lib/ai/runtime/builder-service'
-import { PublishError, publishAgentRevision } from '@/lib/ai/runtime/agents-service'
+import { PublishError } from '@/lib/ai/runtime/agents-service'
+import { publishAgentRevisionAtomic } from '@/lib/ai/runtime/atomic-publish'
 
 export async function POST(
   _request: Request,
@@ -20,7 +21,7 @@ export async function POST(
     })
     if (!validation.ok) return NextResponse.json(validation, { status: 409 })
     try {
-      const agent = await publishAgentRevision(ctx.supabase, {
+      const agent = await publishAgentRevisionAtomic(ctx.supabase, {
         accountId: ctx.accountId,
         agentId: id,
         revisionId,

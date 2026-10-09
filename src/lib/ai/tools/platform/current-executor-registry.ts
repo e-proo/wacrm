@@ -1,0 +1,130 @@
+import {
+  executeCoverageCheckAvailability,
+  executePricingCalculateQuote,
+  executeServicesMatchRequest,
+  executeIntentsRecord,
+  executeIntentsSearch,
+  type ToolContext,
+  type ToolResult,
+} from '../executors'
+import { executeServicesGetSafe, executeServicesSearchSafe } from '../service-search'
+import {
+  executeCoverageAdminListOffers,
+  executeCoverageAdminListRequests,
+  executeChangeRequestsListPending,
+  executeIntentProposeDecision,
+  executeServiceProposeUpdate,
+  executePricingRuleProposeServicePrice,
+} from '../business-handoff'
+import {
+  executeFxV2GetCurrent,
+  executeFxV2RecordTradeRequest,
+} from '../fx-v2-tools'
+import {
+  executeFxV2AdminListPairs,
+  executeFxV2AdminListTradeRequests,
+  executeFxV2ProposePairChange,
+  executeFxV2ProposeTradeDecision,
+} from '../fx-v2-admin-tools'
+import {
+  executeCoverageFindOffersDirectional,
+  executeCoverageGetRatesDirectional,
+} from '../coverage-directional'
+import { executeCoverageProposalResilient } from '../coverage-proposal-resilient'
+import type { ToolDefinition } from '../../runtime/tool-registry'
+import { ToolExecutorRegistry } from './execution-registry'
+import { getCurrentPlatformTool } from './current-domain-registry'
+
+type RuntimeResult = ToolResult<unknown>
+type RuntimeExecutor = (ctx: ToolContext, args: Record<string, unknown>) => Promise<RuntimeResult>
+
+const CURRENT_EXECUTORS = new ToolExecutorRegistry<ToolContext, RuntimeResult>()
+
+function add(key: string, version: number, executor: RuntimeExecutor): void {
+  const contract = getCurrentPlatformTool(key, version)
+  if (!contract) throw new Error(`Cannot register executor without platform contract: ${key}@${version}`)
+  CURRENT_EXECUTORS.register({ key, version, executor })
+}
+
+add('services.search', 1, (ctx, args) => executeServicesSearchSafe(ctx, args as never))
+add('services.get', 1, (ctx, args) => executeServicesGetSafe(ctx, args as never))
+add('services.match_request', 1, (ctx, args) => executeServicesMatchRequest(ctx, args as never))
+add('services.propose_update', 1, (ctx, args) => executeServiceProposeUpdate(ctx, args as never))
+add('pricing.calculate_quote', 1, (ctx, args) => executePricingCalculateQuote(ctx, args as never))
+add('pricing_rules.propose_service_price', 1, (ctx, args) => executePricingRuleProposeServicePrice(ctx, args as never))
+add('exchange_rates.get_current', 1, (ctx, args) => executeFxV2GetCurrent(ctx, args as never))
+add('exchange_rates.record_trade_request', 2, (ctx, args) => executeFxV2RecordTradeRequest(ctx, args as never))
+add('exchange_rates.admin_list_pairs', 1, (ctx, args) => executeFxV2AdminListPairs(ctx, args as never))
+add('exchange_rates.propose_pair_change', 2, (ctx, args) => executeFxV2ProposePairChange(ctx, args as never))
+add('exchange_rates.admin_list_trade_requests', 1, (ctx, args) => executeFxV2AdminListTradeRequests(ctx, args as never))
+add('exchange_rates.propose_trade_decision', 1, (ctx, args) => executeFxV2ProposeTradeDecision(ctx, args as never))
+add('coverage.check_availability', 1, (ctx, args) => executeCoverageCheckAvailability(ctx, args as never))
+add('coverage.find_offers', 2, (ctx, args) => {
+  const hasDirectionalLegs = Boolean(
+    (args.pay_region_id || args.pay_region || args.pay_macro) &&
+      (args.receive_region_id || args.receive_region || args.receive_macro),
+  )
+  const effectiveArgs = hasDirectionalLegs ? { ...args, limit: 50 } : args
+  return executeCoverageFindOffersDirectional(ctx, effectiveArgs as never)
+})
+add('coverage.get_rates', 1, (ctx, args) => executeCoverageGetRatesDirectional(ctx, args as never))
+add('coverage.propose_offer', 2, (ctx, args) => executeCoverageProposalResilient(ctx, args, 'offer'))
+add('coverage.propose_request', 1, (ctx, args) => executeCoverageProposalResilient(ctx, args, 'request'))
+add('coverage.admin_list_offers', 1, (ctx, args) => executeCoverageAdminListOffers(ctx, args as never))
+add('coverage.admin_list_requests', 1, (ctx, args) => executeCoverageAdminListRequests(ctx, args as never))
+add('intents.record', 1, (ctx, args) => executeIntentsRecord(ctx, args as never))
+add('intents.search', 1, (ctx, args) => executeIntentsSearch(ctx, args as never))
+add('intents.propose_decision', 1, (ctx, args) => executeIntentProposeDecision(ctx, args as never))
+add('change_requests.list_pending', 1, (ctx, args) => executeChangeRequestsListPending(ctx, args as never))
+
+const MODEL_SECRET_KEYS = new Set([
+  'confirmation_code',
+  'confirmationCode',
+  'confirmation_code_hash',
+  'confirmationCodeHash',
+])
+
+function stripModelSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripModelSecrets)
+  if (!value || typeof value !== 'object') return value
+
+  const clean: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (MODEL_SECRET_KEYS.has(key)) continue
+    clean[key] = stripModelSecrets(child)
+  }
+  return clean
+}
+
+export function sanitizeToolResultForModel(result: RuntimeResult): RuntimeResult {
+  if (result.data == null) return result
+  return { ...result, data: stripModelSecrets(result.data) }
+}
+
+export async function executeCurrentPlatformTool(
+  ctx: ToolContext,
+  tool: ToolDefinition,
+  args: Record<string, unknown>,
+): Promise<RuntimeResult> {
+  const contract = getCurrentPlatformTool(tool.key, tool.version)
+  if (!contract) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: false,
+      code: 'TOOL_CONTRACT_MISSING',
+      message: 'Tool is not available.',
+    }
+  }
+  if (!CURRENT_EXECUTORS.has(tool.key, tool.version)) {
+    return {
+      ok: false,
+      data: null,
+      safe_to_show: false,
+      code: 'TOOL_EXECUTOR_MISSING',
+      message: 'Tool is not available.',
+    }
+  }
+  const result = await CURRENT_EXECUTORS.execute(tool.key, tool.version, ctx, args)
+  return sanitizeToolResultForModel(result)
+}

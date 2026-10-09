@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { providerFetch } from './shared'
+import { providerFetch, toNetworkError } from './shared'
 import { AiError } from '../types'
 import type { AdapterContext } from './contract'
 
@@ -92,5 +92,23 @@ describe('providerFetch — the custom-root gate', () => {
     await expect(
       providerFetch(ctx({ customEndpoint: true }), 'https://api.b.ai/v1/', {}),
     ).rejects.toMatchObject({ code: 'endpoint_blocked' })
+  })
+})
+
+describe('toNetworkError — classification preservation', () => {
+  it('keeps an already-classified outbound AiError intact', () => {
+    const original = new AiError('blocked before transport', {
+      code: 'endpoint_blocked',
+      status: 502,
+    })
+    expect(toNetworkError(original)).toBe(original)
+    expect(toNetworkError(original)).toMatchObject({ code: 'endpoint_blocked', status: 502 })
+  })
+
+  it('still maps ordinary fetch failures to network_error', () => {
+    expect(toNetworkError(new Error('socket closed'))).toMatchObject({
+      code: 'network_error',
+      status: 502,
+    })
   })
 })
