@@ -21,7 +21,8 @@ describe('OpenWAClient', () => {
   })
 
   it('adds auth, correlation and idempotency headers without exposing them in results', async () => {
-    const fetchImpl = vi.fn(async (_url: URL | RequestInfo, init?: RequestInit) => {
+    const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const init = args[1]
       const headers = init?.headers as Record<string, string>
       expect(headers.authorization).toBe('Bearer secret-key')
       expect(headers['x-correlation-id']).toBe('corr-1')
@@ -47,8 +48,10 @@ describe('OpenWAClient', () => {
   })
 
   it('treats a timeout as an ambiguous outcome', async () => {
-    const fetchImpl = vi.fn((_url: URL | RequestInfo, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => new Promise<Response>((resolve, reject) => {
+      const init = args[1]
       init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))
+      void resolve
     })) as unknown as typeof fetch
     const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', timeoutMs: 5, fetchImpl })
     await expect(client.request('/messages', { method: 'POST', body: { text: 'hello' } })).rejects.toMatchObject({ code: 'ambiguous_outcome' })
