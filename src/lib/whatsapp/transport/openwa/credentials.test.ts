@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/whatsapp/encryption', () => ({
@@ -6,13 +7,22 @@ vi.mock('@/lib/whatsapp/encryption', () => ({
 
 import { resolveOpenWACredentials } from './credentials'
 
-function query(result: { data: unknown; error: unknown }) {
-  const chain: any = {
-    select: vi.fn(() => chain),
-    eq: vi.fn(() => chain),
-    maybeSingle: vi.fn(async () => result),
-  }
+type QueryChain = {
+  select: ReturnType<typeof vi.fn>
+  eq: ReturnType<typeof vi.fn>
+  maybeSingle: ReturnType<typeof vi.fn>
+}
+
+function query(result: { data: unknown; error: unknown }): QueryChain {
+  const chain = {} as QueryChain
+  chain.select = vi.fn(() => chain)
+  chain.eq = vi.fn(() => chain)
+  chain.maybeSingle = vi.fn(async () => result)
   return chain
+}
+
+function asSupabaseClient(from: (table: string) => QueryChain): SupabaseClient {
+  return { from: vi.fn(from) } as unknown as SupabaseClient
 }
 
 describe('resolveOpenWACredentials', () => {
@@ -27,7 +37,7 @@ describe('resolveOpenWACredentials', () => {
       },
       error: null,
     })
-    const db = { from: vi.fn((table: string) => table === 'whatsapp_connections' ? connectionQuery : credentialQuery) }
+    const db = asSupabaseClient((table) => table === 'whatsapp_connections' ? connectionQuery : credentialQuery)
 
     await expect(resolveOpenWACredentials(db, 'acc-1', 'conn-1')).resolves.toEqual({
       accountId: 'acc-1', connectionId: 'conn-1', baseUrl: 'https://openwa.example.com',
@@ -41,7 +51,7 @@ describe('resolveOpenWACredentials', () => {
   })
 
   it('fails closed when the connection is outside the requested account', async () => {
-    const db = { from: vi.fn(() => query({ data: null, error: null })) }
+    const db = asSupabaseClient(() => query({ data: null, error: null }))
     await expect(resolveOpenWACredentials(db, 'acc-a', 'conn-b')).rejects.toMatchObject({ code: 'authentication_or_configuration' })
   })
 
@@ -51,7 +61,7 @@ describe('resolveOpenWACredentials', () => {
       data: { connection_id: 'conn-1', account_id: 'acc-other', provider: 'openwa', base_url: 'https://openwa.example.com', api_key_encrypted: 'enc' },
       error: null,
     })
-    const db = { from: vi.fn((table: string) => table === 'whatsapp_connections' ? connectionQuery : credentialQuery) }
+    const db = asSupabaseClient((table) => table === 'whatsapp_connections' ? connectionQuery : credentialQuery)
     await expect(resolveOpenWACredentials(db, 'acc-1', 'conn-1')).rejects.toMatchObject({ code: 'authentication_or_configuration' })
   })
 })
