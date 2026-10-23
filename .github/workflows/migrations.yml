@@ -15,13 +15,6 @@ name: Migrations
 
 on:
   pull_request:
-    # `supabase/**` rather than `supabase/migrations/**` so a change to
-    # config.toml re-runs the check too, and this workflow is listed so
-    # that edits to the check are validated by the check.
-    #
-    # NOTE: if this is ever made a REQUIRED status check, drop these
-    # filters. GitHub leaves a required check that never ran stuck as
-    # "expected", which blocks every PR that doesn't touch SQL.
     paths:
       - 'supabase/**'
       - '.github/workflows/migrations.yml'
@@ -45,35 +38,20 @@ jobs:
       - name: Install the Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          # Pinned rather than `latest`: this check is infrastructure,
-          # and a CLI release changing behaviour should be a deliberate
-          # bump in a PR, not a Tuesday where main goes red.
           version: 2.113.0
 
       - name: Start Postgres
         run: supabase db start
 
-      # `db start` already applies the migrations on a cold volume, but
-      # only on a cold volume — it is a no-op against a database that
-      # already exists. `db reset` drops and rebuilds unconditionally,
-      # so this step, not the one above, is the guarantee that every
-      # migration ran in filename order against nothing. It fails on the
-      # first statement Postgres rejects. --no-seed because there is no
-      # seed script and this is about schema, not data.
       - name: Replay every migration from scratch
         run: supabase db reset --local --no-seed
 
-      # A migration can apply "successfully" and still do nothing —
-      # every DDL statement here is IF NOT EXISTS-guarded, which turns a
-      # typo'd object name into a silent no-op. Assert the outcome, not
-      # just the absence of an error.
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
 
-      # Exercise the Phase 2 financial invariants against the database
-      # created above. The smoke file is one transactional DO statement:
-      # failed assertions roll back automatically and successful fixtures
-      # are explicitly removed before commit.
+      - name: Verify OW-1 provider-neutral WhatsApp schema and RLS
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/whatsapp-provider-neutral-connections-smoke.sql
+
       - name: Verify Agent Task platform behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-platform-smoke.sql
 
@@ -134,19 +112,11 @@ jobs:
       - name: Verify FX V2 Phase 2 domain behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-2-smoke.sql
 
-      # Phase 6 closure invariant: every final verification replays migration
-      # 084 from scratch before proving durable, deduplicated customer lifecycle
-      # events and the frozen customer_buy/customer_sell rate semantics.
       - name: Verify FX V2 Phase 6 messaging behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-6-messaging-smoke.sql
 
-      # Phase 7 closure invariant: migration 085 must remove the legacy
-      # rate-book persistence/RPC surface without removing any FX V2 object.
-      # Phase 2 and Phase 6 smokes above then prove the surviving V2 behavior.
       - name: Verify FX V2 Phase 7 legacy cleanup
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-7-legacy-cleanup-smoke.sql
 
-      # Keep the known Agent Task RLS blocker last so Service Platform,
-      # Coverage, Intents, and FX smokes always produce independent evidence.
       - name: Verify Agent Task authenticated RLS isolation
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-rls-smoke.sql
