@@ -1,6 +1,6 @@
 # WACRM — WhatsApp Multi-Provider + OpenWA Integration
 
-Status: PLANNING ONLY — no runtime implementation is authorized by this plan commit.
+Status: EXECUTION IN PROGRESS — OW-0 and OW-1 complete; OW-2 is the current engineering phase.
 
 ## Objective
 Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Meta WhatsApp Cloud API as the official/default production transport. WACRM remains the source of truth for contacts, conversations, messages, campaigns, automations, agents, business policy, audit, and idempotency.
@@ -9,14 +9,35 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 - Repository: `e-proo/wacrm`
 - Branch: `refactor/service-platform-v2`
 - Planning baseline HEAD at plan creation: `e05792f90775fa01e17b20614e1a98511017d002`
+- OW-1 verified implementation HEAD: `31fa9f998099733cd3788c85f151c14444d1eb3c`
+- Current execution phase: `OW-2 — Meta Adapter Extraction`
 - Existing outbound core: `src/lib/whatsapp/send-message.ts`
 - Existing Meta client: `src/lib/whatsapp/meta-api.ts`
 - Existing inbound Meta webhook: `src/app/api/whatsapp/webhook/route.ts`
 - Existing dashboard send adapter: `src/app/api/whatsapp/send/route.ts`
 - Existing inbound media mirror: `src/lib/whatsapp/mirror-inbound-media.ts`
 - Existing messaging architecture: `docs/architecture/messaging-business-events.md`
-- Existing schema starts with `whatsapp_config`, `messages`, `conversations`, `contacts`; migrations are append-only.
 - Project-wide Supabase security debt remains tracked by `PROJECT_NOTES.md` NOTE-001 and is a production-readiness dependency, not something this integration may silently weaken or bypass.
+
+## Verified execution status
+| Phase | Status | Evidence level |
+|---|---|---|
+| OW-0 | COMPLETE | contract/baseline freeze; no runtime behavior change |
+| OW-1 | COMPLETE | implementation complete + TEST verified + CI verified |
+| OW-2 | CURRENT / READY TO EXECUTE | Meta adapter extraction; zero-regression gate required |
+| OW-3..OW-14 | NOT STARTED | gated by preceding phases |
+
+OW-1 evidence:
+- `supabase/migrations/143_whatsapp_provider_neutral_connections.sql`
+- `supabase/migrations/144_whatsapp_connections_authenticated_grants.sql`
+- `supabase/ci/whatsapp-provider-neutral-connections-smoke.sql`
+- deterministic Meta compatibility backfill and provider-neutral message/broadcast identity
+- TEST Supabase schema/RLS verification including cross-tenant isolation and credential non-exposure
+- GitHub Migrations run `40012212695`: success, including clean replay, schema verification and OW-1 smoke
+- GitHub CI run `40012212709` / #781: success, including lint, typecheck, tests and build
+- Linear `SOF-29`: Done
+
+OW-1 closure does not mean production/GA readiness. NOTE-001 and later live acceptance/pilot/rollout gates remain separate.
 
 ## Architectural decision
 WACRM will expose a provider-neutral WhatsApp transport boundary. Provider values are initially `meta_cloud` and `openwa`. OpenWA engine (`whatsapp-web.js` or `baileys`) is provider-internal metadata, not a top-level WACRM transport.
@@ -73,20 +94,19 @@ Every implementation phase from OW-1 onward must prove that existing Meta behavi
 1. Tenant isolation: every connection/session/provider lookup is account-scoped; no cross-account send, QR, status, media, webhook, or credential access.
 2. Secrets: no plaintext OpenWA or Meta credentials in logs/client payloads. Existing encrypted Meta token behavior remains intact.
 3. Idempotency: provider webhook retries and WACRM business retries are separate retry domains and both must be safe.
-4. Provider identity: do not treat Meta `wamid` as universal. Introduce provider-neutral message/event identity additively and preserve backward compatibility.
+4. Provider identity: do not treat Meta `wamid` as universal. Provider-neutral identity now exists additively; preserve backward compatibility while callers migrate.
 5. Rollback: schema changes are additive; applied migrations are never edited.
 6. CRM ownership: provider contacts/chats are transport identities mapped into WACRM contacts/conversations; they are not the source of truth.
 7. Async webhook processing: acknowledge quickly, then process through a runtime-safe mechanism; do not perform AI fan-out before acknowledgement.
 8. OpenWA risk: WhatsApp Web automation is unofficial and must have explicit UI/ops warnings, rate controls, restriction handling, and bounded rollout.
 
-## Proposed data-model direction
-Final column/table names are frozen only in OW-1 after inventorying all current migrations and callers. Preferred direction:
-
-- `whatsapp_connections`: account-scoped provider-neutral connection record.
-- Meta-specific identifiers/credentials retained or migrated compatibly from `whatsapp_config`.
-- OpenWA session/instance/engine state stored as provider-specific connection data; searchable routing identifiers should be explicit columns rather than opaque JSON only.
-- provider-neutral message identity fields such as `provider`, `connection_id`, `provider_message_id` added without removing current `message_id`/Meta compatibility during transition.
-- optional `openwa_instances` only if deployment topology requires placement/capacity routing.
+## Data-model baseline after OW-1
+OW-1 froze and verified the additive provider-neutral model:
+- `whatsapp_connections`: account-scoped provider-neutral connection record supporting `meta_cloud` and `openwa`.
+- Existing `whatsapp_config` remains compatible; credentials were not destructively moved.
+- OpenWA session/instance/engine state has explicit provider-neutral connection fields where routing/search requires them.
+- `messages` and `broadcast_recipients` have additive `provider`, `connection_id`, and `provider_message_id` identity while preserving legacy Meta IDs.
+- RLS and authenticated table grants are both present; RLS remains the tenant/role authorization boundary.
 
 ## Initial MVP capability envelope
 Required before live acceptance: session creation, QR, connection state/recovery, inbound/outbound text, replies, inbound/outbound image/video/audio/document, delivery/read status where provider supplies it, logout/disconnect, restriction detection, signed webhooks, deduplication, idempotent send semantics, and WACRM-owned safety limits.
@@ -113,4 +133,4 @@ Deferred: groups, channels, calls, presence, labels, catalogs, OpenWA automation
 `production ready` requires all preceding levels, bounded pilot evidence, operational rollback/monitoring, unresolved security debt review (including NOTE-001), and explicit release approval.
 
 ## Execution rule
-No phase may begin from this document alone. Before implementing a phase, re-read its detailed file, verify current branch HEAD and affected code/schema, then execute only that phase. Update the plan if reality has changed.
+Before implementing OW-2 or any later phase, re-read its detailed file, verify current branch HEAD and affected code/schema, then execute only that phase. Update the plan whenever current repository evidence changes the baseline.
