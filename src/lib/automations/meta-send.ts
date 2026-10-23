@@ -83,7 +83,6 @@ async function sendViaMeta(input: SendInput): Promise<{
   local_message_id: string
 }> {
   const db = supabaseAdmin()
-
   const { data: contact, error: contactErr } = await db
     .from('contacts')
     .select('id, phone')
@@ -95,20 +94,10 @@ async function sendViaMeta(input: SendInput): Promise<{
   const sanitized = sanitizePhoneForMeta(contact.phone)
   if (!isValidE164(sanitized)) throw new Error(`contact phone invalid: ${contact.phone}`)
 
-  // Resolve the account-scoped Meta connection before reserving an outbound
-  // row. Configuration failures therefore do not leave a false ambiguous send.
   const resolved = await resolveMetaTransport(db, input.accountId)
-
   const templateRow =
     input.kind === 'template'
-      ? (
-          await resolveTemplateRow(
-            db,
-            input.accountId,
-            input.templateName,
-            input.language,
-          )
-        ).row
+      ? (await resolveTemplateRow(db, input.accountId, input.templateName, input.language)).row
       : null
 
   let reservedMessageId: string | null = null
@@ -119,9 +108,7 @@ async function sendViaMeta(input: SendInput): Promise<{
         ? 'engine_idempotency_key'
         : null
   const reservationValue =
-    input.kind === 'text'
-      ? (input.aiAgentRunId ?? input.engineIdempotencyKey ?? null)
-      : null
+    input.kind === 'text' ? (input.aiAgentRunId ?? input.engineIdempotencyKey ?? null) : null
 
   if (input.kind === 'text' && reservationColumn && reservationValue) {
     const { data: existing, error: existingErr } = await db
@@ -157,9 +144,7 @@ async function sendViaMeta(input: SendInput): Promise<{
         provider_message_id: null,
         status: 'sending',
         ...(input.aiAgentRunId ? { ai_agent_run_id: input.aiAgentRunId } : {}),
-        ...(input.engineIdempotencyKey
-          ? { engine_idempotency_key: input.engineIdempotencyKey }
-          : {}),
+        ...(input.engineIdempotencyKey ? { engine_idempotency_key: input.engineIdempotencyKey } : {}),
       })
       .select('id')
       .single()
@@ -169,9 +154,11 @@ async function sendViaMeta(input: SendInput): Promise<{
         .select('id, message_id, provider_message_id, status')
         .eq(reservationColumn, reservationValue)
         .maybeSingle()
-      const racedProviderId = raced?.provider_message_id ?? raced?.message_id
-      if (racedProviderId && ['sent', 'delivered', 'read'].includes(raced.status)) {
-        return { whatsapp_message_id: racedProviderId, local_message_id: raced.id }
+      if (raced) {
+        const racedProviderId = raced.provider_message_id ?? raced.message_id
+        if (racedProviderId && ['sent', 'delivered', 'read'].includes(raced.status)) {
+          return { whatsapp_message_id: racedProviderId, local_message_id: raced.id }
+        }
       }
       throw reserveErr ?? new Error('ENGINE_SEND_RESERVATION_LOST')
     }
@@ -189,9 +176,6 @@ async function sendViaMeta(input: SendInput): Promise<{
         }
       : { kind: 'text', text: input.text }
 
-  // Do not catch-and-resend provider failures here. If the provider outcome is
-  // ambiguous, the local-first reservation remains `sending` and the existing
-  // reconciliation guard prevents a duplicate customer message.
   const sendResult = await resolved.transport.send({
     accountId: input.accountId,
     connectionId: resolved.connectionId,
@@ -215,11 +199,8 @@ async function sendViaMeta(input: SendInput): Promise<{
 
   const content_type = input.kind === 'template' ? 'template' : 'text'
   const content_text =
-    input.kind === 'text'
-      ? input.text
-      : templateContentText(templateRow, input.params ?? [])
+    input.kind === 'text' ? input.text : templateContentText(templateRow, input.params ?? [])
   const template_name = input.kind === 'template' ? input.templateName : null
-
   const providerFields = {
     message_id: waMessageId,
     provider: sendResult.provider,
@@ -249,9 +230,7 @@ async function sendViaMeta(input: SendInput): Promise<{
         .select('id')
         .single()
 
-  if (persisted.error) {
-    throw new Error(`sent to Meta but DB insert failed: ${persisted.error.message}`)
-  }
+  if (persisted.error) throw new Error(`sent to Meta but DB insert failed: ${persisted.error.message}`)
   const localMessageId = (persisted.data as { id: string } | null)?.id ?? reservedMessageId
   if (!localMessageId) throw new Error('sent to Meta but local message id was not returned')
 
