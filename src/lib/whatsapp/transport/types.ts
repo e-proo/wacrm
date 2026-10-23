@@ -1,5 +1,6 @@
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
 import type { MediaKind } from '@/lib/whatsapp/meta-api'
+import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
 import type { MessageTemplate } from '@/types'
 
 export type WhatsAppProvider = 'meta_cloud' | 'openwa'
@@ -11,7 +12,7 @@ export type WhatsAppTransportContent =
       templateName: string
       language: string
       template?: MessageTemplate
-      messageParams?: unknown
+      messageParams?: SendTimeParams
       params?: string[]
     }
   | {
