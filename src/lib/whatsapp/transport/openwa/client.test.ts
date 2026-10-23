@@ -36,6 +36,36 @@ describe('OpenWAClient', () => {
     expect(result.raw?.token).toBe('[REDACTED]')
   })
 
+  it('supports create, QR, reconnect and logout session primitives', async () => {
+    const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const target = args[0] as URL
+      const init = args[1]
+      if (target.pathname.endsWith('/sessions') && init?.method === 'POST') {
+        return response(200, { sessionId: 's1', status: 'waiting_qr', qr: 'secret-qr' })
+      }
+      if (target.pathname.endsWith('/sessions/s1/qr')) return response(200, { qr: 'secret-qr', expiresAt: '2026-10-24T00:00:00Z' })
+      if (target.pathname.endsWith('/sessions/s1/reconnect')) return response(200, { sessionId: 's1', status: 'reconnecting' })
+      if (target.pathname.endsWith('/sessions/s1') && init?.method === 'DELETE') return response(204)
+      return response(404)
+    }) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+
+    const created = await client.createSession({ sessionId: 's1', engine: 'baileys', idempotencyKey: 'create-s1' })
+    expect(created.status).toBe('waiting_qr')
+    expect(created.raw?.qr).toBe('[REDACTED]')
+    await expect(client.getSessionQr('s1')).resolves.toEqual({ qr: 'secret-qr', expiresAt: '2026-10-24T00:00:00Z' })
+    await expect(client.reconnectSession('s1')).resolves.toMatchObject({ status: 'reconnecting' })
+    await expect(client.logoutSession('s1')).resolves.toBeUndefined()
+  })
+
+  it('rejects QR responses without QR material', async () => {
+    const client = new OpenWAClient({
+      baseUrl: 'https://openwa.example.com', apiKey: 'key',
+      fetchImpl: vi.fn(async () => response(200, { status: 'waiting_qr' })) as unknown as typeof fetch,
+    })
+    await expect(client.getSessionQr('s1')).rejects.toMatchObject({ code: 'retryable_provider_failure' })
+  })
+
   it('maps authentication and rate-limit errors', async () => {
     for (const [status, code] of [[401, 'authentication_or_configuration'], [429, 'rate_limited']] as const) {
       const client = new OpenWAClient({
@@ -73,9 +103,9 @@ describe('OpenWAClient', () => {
     await expect(missingId.sendText({ sessionId: 's1', to: '1', text: 'x' })).rejects.toMatchObject({ code: 'retryable_provider_failure' })
   })
 
-  it('recursively redacts credential-shaped fields', () => {
-    expect(redactOpenWAValue({ apiKey: 'a', nested: { webhook_secret: 'b', value: 1 } })).toEqual({
-      apiKey: '[REDACTED]',
+  it('recursively redacts credential and QR shaped fields', () => {
+    expect(redactOpenWAValue({ apiKey: 'a', qr: 'c', nested: { webhook_secret: 'b', value: 1 } })).toEqual({
+      apiKey: '[REDACTED]', qr: '[REDACTED]',
       nested: { webhook_secret: '[REDACTED]', value: 1 },
     })
   })
