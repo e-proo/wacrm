@@ -25,6 +25,22 @@ export interface OpenWASessionStatus {
   raw?: Record<string, unknown>
 }
 
+export interface OpenWASessionCreateRequest {
+  sessionId: string
+  engine?: 'whatsapp-web.js' | 'baileys'
+  correlationId?: string
+  idempotencyKey?: string
+}
+
+export interface OpenWASessionCreateResult extends OpenWASessionStatus {
+  qr?: string
+}
+
+export interface OpenWAQrResult {
+  qr: string
+  expiresAt?: string
+}
+
 export interface OpenWASendTextRequest {
   sessionId: string
   to: string
@@ -80,7 +96,7 @@ export function redactOpenWAValue(value: unknown): unknown {
 
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, item]) => {
-      if (/token|secret|authorization|api[-_]?key|cookie/i.test(key)) return [key, REDACTED]
+      if (/token|secret|authorization|api[-_]?key|cookie|qr/i.test(key)) return [key, REDACTED]
       return [key, redactOpenWAValue(item)]
     }),
   )
@@ -93,6 +109,14 @@ function mapHttpError(status: number): WhatsAppTransportError {
   if (status === 429) return new WhatsAppTransportError('rate_limited', 'OpenWA rate limit reached')
   if (status >= 500) return new WhatsAppTransportError('retryable_provider_failure', `OpenWA provider failure (${status})`)
   return new WhatsAppTransportError('permanent_provider_failure', `OpenWA request failed (${status})`)
+}
+
+function requiredString(payload: Record<string, unknown>, keys: string[], message: string): string {
+  for (const key of keys) {
+    const value = payload[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  throw new WhatsAppTransportError('retryable_provider_failure', message)
 }
 
 export class OpenWAClient {
@@ -153,8 +177,40 @@ export class OpenWAClient {
     }
   }
 
+  async createSession(request: OpenWASessionCreateRequest): Promise<OpenWASessionCreateResult> {
+    const response = await this.request<Record<string, unknown>>('/sessions', {
+      method: 'POST',
+      correlationId: request.correlationId,
+      idempotencyKey: request.idempotencyKey,
+      body: { sessionId: request.sessionId, engine: request.engine },
+    })
+    return {
+      sessionId: typeof response.sessionId === 'string' ? response.sessionId : request.sessionId,
+      status: typeof response.status === 'string' ? response.status : 'creating',
+      phoneIdentity: typeof response.phoneIdentity === 'string' ? response.phoneIdentity : undefined,
+      qr: typeof response.qr === 'string' ? response.qr : undefined,
+      raw: redactOpenWAValue(response) as Record<string, unknown>,
+    }
+  }
+
   getSessionStatus(sessionId: string, correlationId?: string): Promise<OpenWASessionStatus> {
     return this.request(`/sessions/${encodeURIComponent(sessionId)}`, { correlationId })
+  }
+
+  async getSessionQr(sessionId: string, correlationId?: string): Promise<OpenWAQrResult> {
+    const response = await this.request<Record<string, unknown>>(`/sessions/${encodeURIComponent(sessionId)}/qr`, { correlationId })
+    return {
+      qr: requiredString(response, ['qr', 'data', 'code'], 'OpenWA QR response is missing QR material'),
+      expiresAt: typeof response.expiresAt === 'string' ? response.expiresAt : undefined,
+    }
+  }
+
+  reconnectSession(sessionId: string, correlationId?: string): Promise<OpenWASessionStatus> {
+    return this.request(`/sessions/${encodeURIComponent(sessionId)}/reconnect`, { method: 'POST', correlationId })
+  }
+
+  logoutSession(sessionId: string, correlationId?: string): Promise<void> {
+    return this.request(`/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE', correlationId })
   }
 
   async sendText(request: OpenWASendTextRequest, correlationId?: string): Promise<OpenWASendTextResult> {
