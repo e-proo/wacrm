@@ -1,17 +1,29 @@
 # Linear Execution Map — WhatsApp Multi-Provider + OpenWA
 
 ## Dedicated Linear project
-Create a project separate from `WACRM — AI Agent Task & Outreach Platform V1`.
-
-Recommended name:
+Project:
 `WACRM — WhatsApp Multi-Provider & OpenWA Integration`
+
+Identifier: `P-SOF-2`
 
 Team: `Software engineer`
 
 Purpose: plan, implement, verify and roll out the provider-neutral WhatsApp layer and optional OpenWA transport without mixing its lifecycle with the Agent Task project.
 
+## Current execution status
+- OW-0 — Baseline & Contract Freeze: COMPLETE.
+- OW-1 — Provider-Neutral Data Model: COMPLETE at implementation + TEST + CI verified.
+- OW-2 — Meta Adapter Extraction: NEXT / current execution phase.
+- OW-3 through OW-14: not started; preserve dependency gates.
+
+OW-1 Linear issue:
+- `SOF-29 — OW-1 — Implement provider-neutral WhatsApp connection data model and tenant RLS`
+- Status: `Done`
+- Verified implementation HEAD before documentation commits: `31fa9f998099733cd3788c85f151c14444d1eb3c`
+- Migrations run `40012212695`: success
+- CI run `40012212709` / #781: success
+
 ## Milestones / phases
-Create one milestone per engineering phase:
 - OW-0 Baseline & Contract Freeze
 - OW-1 Provider-Neutral Data Model
 - OW-2 Meta Adapter Extraction
@@ -29,10 +41,10 @@ Create one milestone per engineering phase:
 - OW-14 Production Rollout Decision
 
 ## Issue convention
-Each milestone receives a primary phase issue plus implementation/test issues as needed after the phase starts. Do not pre-claim exact migration filenames before OW-1 inventories the latest migration sequence. Every phase issue must contain:
+Each milestone receives a primary phase issue plus implementation/test issues as needed after the phase starts. Every phase issue must contain:
 - objective
 - affected current files/tables
-- proposed new files/migrations
+- proposed new files/migrations when applicable
 - security/tenant requirements
 - tests
 - Meta regression gate
@@ -43,7 +55,11 @@ Each milestone receives a primary phase issue plus implementation/test issues as
 ## Dependency chain
 OW-0 → OW-1 → OW-2 → OW-3 → OW-4 → OW-5 → OW-6 → OW-7 → OW-8 → OW-9 → OW-10 → OW-11 → OW-12 → OW-13 → OW-14.
 
-Some implementation can later overlap after contracts stabilize, but Linear should preserve these gates. In particular, live TEST/pilot/rollout cannot be marked complete from code-only evidence.
+Some implementation can later overlap after contracts stabilize, but Linear must preserve these gates. In particular, live TEST/pilot/rollout cannot be marked complete from code-only evidence.
 
-## Source links
-Phase issues should link back to this plan directory in GitHub and, where relevant, to exact implementation commits/CI runs/migrations. The project description should identify `refactor/service-platform-v2` as the implementation source of truth.
+## Evidence discipline
+GitHub code/current branch is the implementation source of truth. CI/TEST evidence determines verification level. Linear records execution state and must be synchronized only after the phase Definition of Done is demonstrated.
+
+Phase issues should link to this plan directory and, where relevant, exact implementation commits, migrations and CI runs. The implementation source of truth remains `refactor/service-platform-v2`.
+
+OW-1 closure does not imply production readiness. NOTE-001 and later live acceptance, bounded pilot and rollout gates remain open concerns for their appropriate phases.
