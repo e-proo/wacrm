@@ -1,9 +1,17 @@
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
-import type { MediaKind } from '@/lib/whatsapp/meta-api'
-import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
 import type { MessageTemplate } from '@/types'
 
 export type WhatsAppProvider = 'meta_cloud' | 'openwa'
+export type WhatsAppMediaKind = 'image' | 'video' | 'document' | 'audio'
+
+/** Provider-neutral per-send template values. */
+export interface WhatsAppTemplateSendParams {
+  body?: string[]
+  headerText?: string
+  headerMediaUrl?: string
+  headerMediaId?: string
+  buttonParams?: Record<number, string>
+}
 
 export type WhatsAppTransportContent =
   | { kind: 'text'; text: string }
@@ -12,12 +20,12 @@ export type WhatsAppTransportContent =
       templateName: string
       language: string
       template?: MessageTemplate
-      messageParams?: SendTimeParams
+      messageParams?: WhatsAppTemplateSendParams
       params?: string[]
     }
   | {
       kind: 'media'
-      mediaKind: MediaKind
+      mediaKind: WhatsAppMediaKind
       link: string
       caption?: string
       filename?: string

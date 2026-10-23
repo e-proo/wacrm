@@ -42,11 +42,20 @@ class MetaWhatsAppTransport implements WhatsAppTransport {
   readonly provider = 'meta_cloud' as const
 
   constructor(
+    private readonly accountId: string,
+    private readonly connectionId: string,
     private readonly phoneNumberId: string,
     private readonly accessToken: string,
   ) {}
 
   async send(request: WhatsAppTransportSendRequest): Promise<WhatsAppTransportSendResult> {
+    if (request.accountId !== this.accountId || request.connectionId !== this.connectionId) {
+      throw new WhatsAppTransportError(
+        'invalid_request',
+        'WhatsApp transport request does not match the resolved account connection',
+      )
+    }
+
     const attempt = async (recipient: string): Promise<string> => {
       const contextMessageId = request.replyToProviderMessageId
       const content = request.content
@@ -139,7 +148,7 @@ class MetaWhatsAppTransport implements WhatsAppTransport {
 
     return {
       provider: 'meta_cloud',
-      connectionId: request.connectionId,
+      connectionId: this.connectionId,
       providerMessageId,
       providerMetadata:
         workingRecipient === request.recipient ? undefined : { workingRecipient },
@@ -183,6 +192,12 @@ export async function resolveMetaTransport(
   }
 
   const metaConfig = config as MetaConfigRow
+  if (metaConnection.account_id !== accountId || metaConfig.account_id !== accountId) {
+    throw new WhatsAppTransportError(
+      'authentication_or_configuration',
+      'Resolved Meta WhatsApp configuration is outside the requested account',
+    )
+  }
   if (
     metaConnection.provider_external_id &&
     metaConnection.provider_external_id !== metaConfig.phone_number_id
@@ -207,6 +222,11 @@ export async function resolveMetaTransport(
 
   return {
     connectionId: metaConnection.id,
-    transport: new MetaWhatsAppTransport(metaConfig.phone_number_id, accessToken),
+    transport: new MetaWhatsAppTransport(
+      accountId,
+      metaConnection.id,
+      metaConfig.phone_number_id,
+      accessToken,
+    ),
   }
 }
