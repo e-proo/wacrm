@@ -1,216 +1,348 @@
-# OW-0 — Execution Preparation & Audit Checklist
+# OW-0 — Completed Audit & Provider Contract Freeze
 
-Status: READY FOR AUDIT — planning/evidence only. No runtime behavior change in OW-0.
+Status: **COMPLETE** — evidence/planning only. No runtime behavior changed by OW-0.
 
-Prepared against branch HEAD: `b82d8fbb1894fd92713575cf8cd4f57182dbf762`.
+Audit baseline code commit: `e05792f90775fa01e17b20614e1a98511017d002`.
+Planning HEAD inspected before audit: `c40820639eae0676f2baba2d05bdba858ac3b115`.
+Linear: `SOF-28`.
 
-Linear: `SOF-28` — OW-0 Audit current WhatsApp surfaces and freeze provider contract.
+## 1. Executive conclusion
 
-## 1. Verified current architecture anchors
+WACRM already has a useful business/transport separation direction, but WhatsApp execution is still Meta-specific in multiple independent outbound paths. The OpenWA integration MUST therefore introduce a provider contract below business intent and above provider APIs, then migrate existing Meta callers behind it without changing their business persistence/idempotency semantics.
 
-### Shared/manual outbound
-`src/lib/whatsapp/send-message.ts` is the shared dashboard/public-API outbound core, but it is not provider-neutral internally. It currently:
-- reads account-scoped `whatsapp_config`
-- decrypts the Meta access token and self-heals legacy ciphertext
-- resolves reply context through `messages.message_id`
-- dispatches directly to Meta `sendTextMessage`, `sendTemplateMessage`, `sendMediaMessage`, `sendInteractiveButtons`, and `sendInteractiveList`
-- applies Meta-specific phone sanitization/variant retry
-- persists the returned Meta ID into `messages.message_id`
-- updates conversation preview/timestamps and pauses active Flow runs on agent intervention
+OW-0 freezes these rules:
+1. `meta-api.ts` remains the Meta Graph adapter implementation; it is not replaced.
+2. OpenWA is an additional provider (`openwa`), not a replacement for Meta Cloud (`meta_cloud`).
+3. `whatsapp-web.js` / `baileys` are OpenWA engine metadata, not top-level WACRM providers.
+4. WACRM remains source of truth for contacts, conversations, messages, broadcasts, automations, agents, tasks/outreach and audit.
+5. OpenWA owns linked-device/session transport mechanics only.
+6. Existing Meta identifiers (`messages.message_id`, broadcast `wamid`) stay backward compatible during additive migration.
+7. Provider credentials, QR/session secrets, engine-specific types and Meta-only payload shapes stay behind adapter boundaries.
+8. Every implementation phase must pass a fresh Meta regression gate before progressing.
 
-This file is therefore a major OW-2 extraction boundary, not the provider contract itself.
+## 2. Current outbound surface map
 
-### Automation outbound
-`src/lib/automations/meta-send.ts` is a second direct Meta transport surface. It owns account-scoped contact/config lookup, Meta phone rules, token decryption, persistence, and local-first idempotency behavior for AI/business notification sends. It also delegates interactive sends into the Flow Meta sender.
+### Dashboard/manual + public API
+`src/lib/whatsapp/send-message.ts` is the shared send core used by dashboard/public API adapters. It currently owns account-scoped contact/config resolution, Meta token decryption, Meta phone normalization/variant retry, reply lookup through `messages.message_id`, direct Meta text/template/media/interactive dispatch, message persistence, conversation updates and Flow pause on human intervention.
 
-### Flow outbound
-`src/lib/flows/meta-send.ts` is a third direct Meta transport surface. It contains text/media/interactive send behavior, account-scoped lookups, phone variant retry, persistence, and conversation updates. Existing comments already identify shared extraction as a future direction.
+Known adapters:
+- `src/app/api/whatsapp/send/route.ts`
+- `src/app/api/v1/messages/route.ts`
 
-### Meta transport implementation
-`src/lib/whatsapp/meta-api.ts` remains the low-level Meta Graph API implementation and must become/remain the Meta adapter implementation rather than being rewritten.
+### Automation engine
+`src/lib/automations/meta-send.ts` is a separate Meta-coupled path. It owns account-scoped contact/config lookup, token decryption, phone retry, send/persist behavior and business-notification idempotency. Some interactive behavior delegates to the Flow sender.
 
-### WhatsApp API surface
-Current `src/app/api/whatsapp` areas include `broadcast`, `config`, `media`, `react`, `send`, `templates`, and `webhook`. OW-0 must inspect each transport-sensitive route before contract freeze.
+### Flow engine
+`src/lib/flows/meta-send.ts` is another direct Meta path containing text/media/interactive sends, account-scoped config, phone retry, message persistence and conversation updates. Existing source comments already identify shared extraction as a future direction.
 
-### Existing tests
-The WhatsApp library already contains regression coverage including:
-- `broadcast-core.test.ts`
-- `broadcast-resume.test.ts`
-- `encryption.test.ts`
-- `interactive.test.ts`
-- `meta-api.test.ts`
-- `meta-api.media.test.ts`
-- `meta-api.resumable.test.ts`
-- `mirror-inbound-media.test.ts`
+### Broadcast engine
+`src/lib/whatsapp/broadcast-core.ts` directly imports Meta transport functions. It validates account ownership, reserves recipients atomically with `reserve_broadcast_recipient`, rate-limits, sends template/text, stores provider IDs as `wamid`, classifies failures and finalizes counters/status.
 
-Automation and Flow suites also exist and must be included where transport behavior is touched.
+`src/lib/whatsapp/broadcast-resume.ts` provides recovery/orchestration around the same core and preserves reservation/idempotency semantics.
 
-## 2. Key finding to freeze before implementation
+Broadcast ownership remains in WACRM. OpenWA executes individual sends only; it does not replace WACRM campaign state, recipient reservation, pause/resume or audit.
 
-There is currently no single transport seam. At least three outbound implementations own overlapping Meta-specific responsibilities:
-
+Current shape:
 ```text
-Dashboard/Public API -> whatsapp/send-message.ts -> meta-api.ts
-Automation Engine    -> automations/meta-send.ts -> meta-api.ts / flows/meta-send.ts
-Flow Engine          -> flows/meta-send.ts       -> meta-api.ts
-Broadcast            -> broadcast core/resume    -> inspect exact transport calls
+Dashboard/Public API -> whatsapp/send-message.ts ---------> meta-api.ts
+Automation Engine    -> automations/meta-send.ts ---------> meta-api.ts / flows/meta-send.ts
+Flow Engine          -> flows/meta-send.ts ---------------> meta-api.ts
+Broadcast Engine     -> broadcast-core.ts ----------------> meta-api.ts
 ```
 
-OW-2 must not simply wrap `send-message.ts`; doing that would leave Automation/Flow/Broadcast on parallel Meta paths. The provider contract must be low enough to serve all business callers while preserving each caller's persistence/idempotency semantics during migration.
+Target:
+```text
+Business callers
+      |
+WhatsAppTransport / Provider Router
+      |
+      +-- MetaWhatsAppTransport -> meta-api.ts
+      +-- OpenWATransport ------> OpenWA REST
+```
 
-## 3. Audit work package
+OW-2 is not complete until all four caller families are behind the provider boundary.
 
-Before OW-0 closes, inspect and record:
+## 3. Inbound/status pipeline audit
 
-### A. Outbound callers
-- every import/call of Meta send functions
-- dashboard send route
-- public v1 message routes
-- automation engine send paths
-- Flow engine send paths
-- broadcast initial-send/resume paths
-- reactions and media routes if they perform provider calls
-- AI Agent/task/outreach paths that reach any of the above
-
-For each caller record:
-`caller -> business intent -> DB lookup -> provider call -> persistence -> idempotency -> retry -> status handling`.
-
-### B. Inbound/status paths
-Inspect `src/app/api/whatsapp/webhook/route.ts` and map:
-- webhook verification/authenticity
-- account/config resolution
-- inbound message parsing
+`src/app/api/whatsapp/webhook/route.ts` is the current Meta webhook + business-dispatch pipeline. It coordinates:
+- Meta verification/authenticity
+- `phone_number_id` / account config resolution
+- inbound message extraction
 - contact/conversation resolution
 - message deduplication/persistence
-- media mirroring
-- reply/context mapping
-- delivery/read/failure status updates
-- broadcast recipient reconciliation
-- Flow/Automation dispatch
-- AI Agent dispatch
-- task/outreach correlation
-- external webhook fan-out
+- inbound media mirroring
+- reply/context and reaction handling
+- delivery/read/failure status handling
+- broadcast recipient reconciliation/counters
+- Flow dispatch/resume
+- Automation dispatch
+- AI/agent-related dispatch where enabled
+- service-platform/task/outreach processing present in the webhook pipeline
+- external event/webhook fan-out
 - template lifecycle updates
 
-The target of OW-6 is to extract provider-normalized inbound events before shared business processing, not duplicate this pipeline for OpenWA.
-
-### C. Schema/migrations
-Inventory every migration touching:
-- `whatsapp_config`
-- `messages.message_id`
-- `broadcast_recipients.wamid`
-- contacts/conversations tenancy
-- account migration/RLS
-- AI/automation idempotency keys
-- message reply/reaction/status fields
-
-Do not choose the OW-1 migration number until this inventory confirms the latest sequence on current HEAD.
-
-### D. CI/regression
-Current package scripts include `lint`, `typecheck`, `test`, and `build`. OW-0 must freeze the exact focused test set plus branch-wide gates used before and after every provider refactor phase.
-
-## 4. Draft provider contract requirements
-
-The contract must support these normalized inputs without exposing Meta credentials or OpenWA engine details to business callers:
-
-```ts
-provider: 'meta_cloud' | 'openwa'
-connectionId: string
-recipient: provider-neutral recipient identity
-content: text | media | interactive | template-capability request
-replyToProviderMessageId?: string
-idempotencyKey?: string
+OW-6 must not clone this business pipeline. Frozen design:
+```text
+Meta webhook ----> MetaWebhookAdapter ----┐
+                                          v
+                                  UnifiedInboundEvent
+                                          |
+OpenWA webhook --> OpenWAWebhookAdapter --┘
+                                          |
+                             Existing WACRM business pipeline
 ```
 
-Normalized result:
+Adapters own provider authenticity/raw parsing/provider IDs. Shared WACRM owns tenant resolution, contacts/conversations, persistence, automation/agent/flow/task dispatch and audit.
 
-```ts
+## 4. Schema / migration / RLS audit
+
+Relevant evolution:
+- `001_initial_schema.sql`: original WhatsApp/config/contact/conversation/message/broadcast schema.
+- `003_broadcast_recipient_wamid.sql`: Meta-shaped broadcast identity (`wamid`) and recipient reliability behavior.
+- `009_message_actions.sql`: message action/reply/reaction fields tied to provider message identity.
+- `017_account_sharing.sql`: account membership/role model and account-scoped RLS evolution. OW-1 must build on this; never reintroduce user-scoped connection ownership.
+- `037_webhook_broadcast_reliability.sql`: webhook/broadcast reliability.
+- `038_broadcast_resume.sql`: resume/recovery behavior.
+- `039_inbound_media_mirror.sql`: inbound media mirroring.
+
+The current branch migration tree reaches `079_service_platform_phase6_transport.sql`. OW-1 therefore uses a new additive migration after the current sequence. No historical migration is edited.
+
+Frozen OW-1 direction:
+```text
+whatsapp_connections
+- id
+- account_id
+- provider: meta_cloud | openwa
+- display/phone identity
+- lifecycle status
+- provider external/session identity
+- provider metadata (non-secret extras)
+- timestamps
+```
+
+Provider-neutral message identity is additive:
+```text
+connection_id
 provider
-connectionId
-providerMessageId
-acceptedAt?
-providerMetadata? // adapter-owned, non-secret
+provider_message_id
 ```
 
-Normalized error classes must distinguish at least:
-- invalid request / unsupported capability
-- authentication/configuration
-- recipient/address failure
-- rate limit / retryable provider failure
-- restriction/account state
-- permanent provider failure
-- ambiguous outcome requiring reconciliation
+Compatibility rules:
+- keep `messages.message_id` working while readers/writers migrate
+- keep broadcast `wamid` working while readers/writers migrate
+- scope uniqueness by provider/connection where appropriate
+- deterministic/idempotent backfill only
+- account-scoped RLS
+- service-role webhook lookup must resolve an explicit connection/account
+- credentials encrypted/server-only
 
-Exact TypeScript names are not frozen until the complete caller audit is finished.
+## 5. Security and tenant boundary
 
-## 5. Capability matrix to finalize in OW-0
+Every provider action resolves:
+```text
+account_id + connection_id + provider
+```
 
-| Capability | Meta Cloud | OpenWA target | Contract treatment |
+OpenWA additionally maps provider session/instance identity to that connection.
+
+Mandatory rules:
+- cross-account connection access denied
+- QR/session/connection mutation restricted to a sufficiently privileged existing account role
+- no plaintext provider credentials in browser state, logs or client-readable DB responses
+- QR payload short-lived/admin-only and excluded from analytics/logging
+- webhook signature verification before business processing
+- replay/dedup protection
+- unknown OpenWA session rejected, never guessed by phone number alone
+- restricted/logged-out connection blocks outbound sends
+
+Existing project-wide Supabase debt in `NOTE-001` remains a separate production-readiness gate; OW-0 does not claim it is resolved.
+
+## 6. Frozen provider contract
+
+Exact file names are OW-2 implementation detail; semantics are frozen.
+
+```ts
+type WhatsAppProvider = 'meta_cloud' | 'openwa'
+type OpenWAEngine = 'whatsapp-web.js' | 'baileys'
+
+interface WhatsAppSendRequest {
+  accountId: string
+  connectionId: string
+  recipient: string
+  content: WhatsAppContent
+  replyToProviderMessageId?: string
+  idempotencyKey?: string
+}
+
+interface WhatsAppSendResult {
+  provider: WhatsAppProvider
+  connectionId: string
+  providerMessageId: string
+  acceptedAt?: string
+  providerMetadata?: Record<string, unknown>
+}
+```
+
+Business callers never branch on OpenWA engine.
+
+Normalized transport failures:
+- `unsupported_capability`
+- `invalid_request`
+- `authentication_or_configuration`
+- `recipient_invalid_or_unreachable`
+- `rate_limited`
+- `retryable_provider_failure`
+- `connection_restricted`
+- `permanent_provider_failure`
+- `ambiguous_outcome`
+
+Capability contract:
+```ts
+interface WhatsAppCapabilities {
+  text: boolean
+  media: boolean
+  replies: boolean
+  reactions: boolean
+  interactive: boolean
+  officialTemplates: boolean
+  deliveryStatus: boolean
+  readStatus: boolean
+  qrAuthentication: boolean
+  linkedDeviceSession: boolean
+}
+```
+
+Groups/channels/calls/presence/labels/catalog remain deferred in V1 even when a provider can support them.
+
+## 7. Validated OpenWA baseline
+
+OW-0 validated the selected gateway as `rmyndharis/OpenWA`, disambiguating it from the similarly named `open-wa/wa-automate-nodejs` library.
+
+Confirmed from the selected gateway documentation/source:
+- multi-session REST + webhook gateway
+- engines include `whatsapp-web.js` and `baileys`
+- `ENGINE_TYPE` config means engine placement is OpenWA infrastructure metadata, not a per-message business choice
+- session create/start/stop/logout/status/QR operations
+- text and media send endpoint families
+- message/session/status webhook event families
+- webhook signing via `X-OpenWA-Signature` using HMAC-SHA256 over raw body when a webhook secret is configured
+- webhook retry/dead-letter behavior
+- send idempotency support; WACRM still keeps its own business idempotency
+- health/readiness endpoints
+
+Implementation must pin an OpenWA version/image and rerun contract tests before deployment.
+
+Capability matrix:
+| Capability | Meta Cloud | OpenWA target | WACRM treatment |
 |---|---|---|---|
-| text | yes | required | common |
-| image/video/audio/document | yes | required | common |
-| reply/context | yes | required | common |
-| official Meta template | yes | no equivalent | provider capability/policy |
-| interactive buttons/lists | yes | verify exact OpenWA parity | capability-gated |
-| delivery/read status | yes | required where emitted | normalized status |
-| QR authentication | no | yes | connection capability |
-| linked-device session lifecycle | no | yes | OpenWA-only connection capability |
-| groups/channels/calls/presence | not MVP | deferred | explicitly unsupported in MVP |
+| text | yes | yes | common |
+| image/video/audio/document | yes | yes | common MVP |
+| reply/context | yes | yes | common MVP |
+| reactions | current support | provider capability | capability-gated |
+| official Meta template | yes | no equivalent | Meta-only policy capability |
+| interactive buttons/lists | current Meta path | version/provider dependent | capability-gated; no assumed parity |
+| delivery/read status | yes | event support | normalized status |
+| QR authentication | no | yes | OpenWA-only connection capability |
+| linked-device lifecycle | no | yes | OpenWA-only connection capability |
+| groups/channels/calls/presence | not MVP | may exist | deferred |
 
-OpenWA feature claims must be revalidated against the exact OpenWA version/docs selected for deployment before OW-3 implementation.
+## 8. Meta-only semantics behind adapter
 
-## 6. Meta semantics that must remain adapter-owned
+These remain adapter-owned:
+- Graph API URL/version
+- `phone_number_id` / WABA mechanics
+- access token format
+- Meta template payload construction
+- customer-service-window/template policy mechanics
+- `wamid` naming
+- Meta error parsing
+- Meta phone-variant workaround
+- Meta media/resumable upload mechanics
+- Meta webhook payload/signature shape
 
-- Graph API endpoint/version details
-- `phone_number_id` and WABA semantics
-- access token format/decryption use
-- Meta approved template payload construction
-- 24-hour/customer-service policy behavior
-- Meta `wamid`
-- Meta-specific error parsing
-- recipient phone variant workaround
-- Meta media upload/resumable upload behavior
-- webhook signature/payload shape specific to Meta
+## 9. Idempotency/reconciliation freeze
 
-Business callers should not gain new dependencies on these concepts.
+Manual/public sends preserve current persistence semantics during extraction.
 
-## 7. Proposed extraction order after OW-0
+Automation/agent/business notifications preserve existing local-first/business idempotency keys. Provider idempotency is defense in depth, not a replacement.
 
-1. OW-1 adds provider-neutral connection/message identity schema additively while keeping Meta compatibility.
-2. OW-2 introduces the transport contract and Meta adapter.
-3. Migrate one caller family at a time behind the Meta adapter, proving behavior parity after each move.
-4. Only after all current Meta caller families are covered should OpenWA become selectable for production business sends.
+Broadcast preserves `reserve_broadcast_recipient`, attempt accounting, recovery/resume and finalization.
 
-This ordering prevents a partial abstraction where manual sends are multi-provider but automations/flows/broadcasts silently remain Meta-only.
-
-## 8. OW-0 regression baseline commands
-
-Minimum repository gates to record:
-
-```bash
-npm run lint
-npm run typecheck
-npm test
-npm run build
+Inbound events use provider-scoped identity such as:
+```text
+(provider, connection_id, provider_event_id)
 ```
 
-Focused tests must include all existing WhatsApp Meta API, inbound media, interactive, broadcast, automation and Flow transport-sensitive suites discovered by the final inventory. Migration verification is mandatory starting OW-1 and whenever schema changes.
+OpenWA webhook-delivery retry and WACRM business-processing retry are independent retry domains.
 
-## 9. OW-0 exit checklist
+A timeout after possible provider acceptance becomes `ambiguous_outcome`; do not blindly resend when reconciliation is possible.
 
-- [x] current branch HEAD reverified before preparation
-- [x] shared/manual Meta coupling confirmed
-- [x] automation Meta coupling confirmed
-- [x] Flow Meta coupling confirmed
-- [x] current WhatsApp API areas inventoried at directory level
-- [x] existing WhatsApp test family inventoried at directory level
-- [ ] exact outbound call-site inventory complete
-- [ ] exact inbound/status dispatch map complete
-- [ ] broadcast transport/idempotency map complete
-- [ ] migration/RLS inventory complete
-- [ ] focused regression test list frozen
-- [ ] provider contract TypeScript shape frozen
-- [ ] capability matrix validated against selected OpenWA release/docs
-- [ ] Meta regression baseline evidence recorded
+## 10. Meta regression baseline
 
-OW-0 remains open until every unchecked item has evidence. No runtime implementation should be started merely because this preparation document exists.
+Repository CI runs:
+- `npm ci`
+- `npm run lint`
+- `npm run typecheck`
+- `npm test`
+- `npm run build`
+
+The last runtime/code baseline before OpenWA planning is `e05792f90775fa01e17b20614e1a98511017d002`. Its branch CI completed successfully across lint/typecheck/test/build. Comparing that baseline through OW-0 planning HEAD shows documentation-only additions under `plans/WhatsApp Multi-Provider OpenWA Integration/`; no runtime/source/migration/package behavior changed.
+
+OW-0 therefore records successful `e05792...` CI as its Meta regression baseline. OW-1 and every runtime/schema phase require fresh CI/TEST evidence on their own implementation commits.
+
+Focused regression families frozen for preservation/extension:
+- `src/lib/whatsapp/meta-api.test.ts`
+- `src/lib/whatsapp/meta-api.media.test.ts`
+- `src/lib/whatsapp/meta-api.resumable.test.ts`
+- `src/lib/whatsapp/interactive.test.ts`
+- `src/lib/whatsapp/broadcast-core.test.ts`
+- `src/lib/whatsapp/broadcast-resume.test.ts`
+- `src/lib/whatsapp/mirror-inbound-media.test.ts`
+- `src/lib/whatsapp/encryption.test.ts`
+- Automation runner/idempotency suites
+- Flow runner/resume suites
+- webhook/status/broadcast integration coverage as OW-2/OW-6 touch those boundaries
+
+Full CI remains mandatory; focused tests are not a substitute.
+
+## 11. Extraction order frozen by OW-0
+
+1. OW-1: additive provider-neutral connection/message identity schema + RLS.
+2. OW-2: provider contract/router + Meta adapter with no behavior change.
+3. Migrate manual/public send and prove parity.
+4. Migrate Automation/agent/business sends and prove idempotency parity.
+5. Migrate Flow sends and prove resume/persistence parity.
+6. Migrate Broadcast provider call while preserving reservation/recovery/finalization.
+7. Only then allow OpenWA selection for production business sends.
+8. OW-6 normalizes OpenWA inbound events into the shared WACRM business pipeline.
+
+## 12. OW-0 Definition of Done
+
+- [x] current branch HEAD reverified before audit
+- [x] major outbound call-site families mapped
+- [x] manual/public send path mapped
+- [x] Automation send path mapped
+- [x] Flow send path mapped
+- [x] Broadcast transport/idempotency/recovery path mapped
+- [x] inbound/status/business dispatch responsibilities mapped
+- [x] migration/RLS evolution audited
+- [x] latest migration sequence identified (`079_service_platform_phase6_transport.sql`)
+- [x] security/tenant boundary frozen
+- [x] provider contract semantics frozen
+- [x] normalized error model frozen
+- [x] capability matrix validated against selected OpenWA gateway
+- [x] selected OpenWA repository disambiguated
+- [x] OpenWA HMAC/retry/idempotency/session/health baseline validated
+- [x] Meta-only semantics assigned to adapter boundary
+- [x] focused regression families frozen
+- [x] successful Meta regression baseline evidence recorded
+- [x] runtime comparison confirms OW-0 changes are documentation-only
+- [x] OW-1/OW-2 implementation order and gates frozen
+
+## 13. Exit decision
+
+**PASS. OW-0 is complete and may be closed.**
+
+This is architecture/audit readiness only. It does not mean OpenWA implementation, TEST live acceptance, bounded pilot or production readiness is complete.
+
+Next executable phase: **OW-1 — Provider-neutral connection/data model + RLS**, using a new additive migration after `079_service_platform_phase6_transport.sql`, followed by clean migration verification, cross-tenant tests and a fresh Meta regression gate.
