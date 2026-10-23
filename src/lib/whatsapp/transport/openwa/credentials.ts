@@ -1,9 +1,22 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
+
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { WhatsAppTransportError } from '../types'
 import { OpenWAClient, type OpenWAClientConfig } from './client'
 
-interface SupabaseLike {
-  from(table: string): any
+interface OpenWAConnectionRow {
+  id: string
+  account_id: string
+  provider: 'openwa'
+}
+
+interface OpenWACredentialRow {
+  connection_id: string
+  account_id: string
+  provider: 'openwa'
+  base_url: string
+  api_key_encrypted: string
+  webhook_secret_encrypted: string | null
 }
 
 export interface ResolvedOpenWACredentials {
@@ -15,7 +28,7 @@ export interface ResolvedOpenWACredentials {
 }
 
 export async function resolveOpenWACredentials(
-  db: SupabaseLike,
+  db: SupabaseClient,
   accountId: string,
   connectionId: string,
 ): Promise<ResolvedOpenWACredentials> {
@@ -31,6 +44,7 @@ export async function resolveOpenWACredentials(
     throw new WhatsAppTransportError('authentication_or_configuration', 'OpenWA connection is not configured for this account', connectionError)
   }
 
+  const scopedConnection = connection as OpenWAConnectionRow
   const { data: credential, error: credentialError } = await db
     .from('whatsapp_connection_credentials')
     .select('connection_id, account_id, provider, base_url, api_key_encrypted, webhook_secret_encrypted')
@@ -43,7 +57,8 @@ export async function resolveOpenWACredentials(
     throw new WhatsAppTransportError('authentication_or_configuration', 'OpenWA credentials are not configured for this connection', credentialError)
   }
 
-  if (credential.connection_id !== connection.id || credential.account_id !== accountId) {
+  const scopedCredential = credential as OpenWACredentialRow
+  if (scopedCredential.connection_id !== scopedConnection.id || scopedCredential.account_id !== accountId) {
     throw new WhatsAppTransportError('authentication_or_configuration', 'OpenWA credential scope mismatch')
   }
 
@@ -51,9 +66,9 @@ export async function resolveOpenWACredentials(
     return {
       accountId,
       connectionId,
-      baseUrl: credential.base_url,
-      apiKey: decrypt(credential.api_key_encrypted),
-      webhookSecret: credential.webhook_secret_encrypted ? decrypt(credential.webhook_secret_encrypted) : undefined,
+      baseUrl: scopedCredential.base_url,
+      apiKey: decrypt(scopedCredential.api_key_encrypted),
+      webhookSecret: scopedCredential.webhook_secret_encrypted ? decrypt(scopedCredential.webhook_secret_encrypted) : undefined,
     }
   } catch (error) {
     throw new WhatsAppTransportError('authentication_or_configuration', 'OpenWA credentials could not be decrypted', error)
@@ -61,7 +76,7 @@ export async function resolveOpenWACredentials(
 }
 
 export async function resolveOpenWAClient(
-  db: SupabaseLike,
+  db: SupabaseClient,
   accountId: string,
   connectionId: string,
   options: Pick<OpenWAClientConfig, 'timeoutMs' | 'allowedHosts' | 'fetchImpl'> = {},
