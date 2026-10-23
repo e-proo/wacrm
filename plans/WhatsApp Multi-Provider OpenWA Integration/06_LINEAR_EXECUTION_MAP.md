@@ -13,8 +13,9 @@ Purpose: plan, implement, verify and roll out the provider-neutral WhatsApp laye
 ## Current execution status
 - OW-0 — Baseline & Contract Freeze: COMPLETE.
 - OW-1 — Provider-Neutral Data Model: COMPLETE at implementation + TEST + CI verified.
-- OW-2 — Meta Adapter Extraction: NEXT / current execution phase.
-- OW-3 through OW-14: not started; preserve dependency gates.
+- OW-2 — Meta Adapter Extraction: COMPLETE at implementation + CI verified.
+- OW-3 — OpenWA Client & Credential Boundary: NEXT / current execution phase.
+- OW-4 through OW-14: not started; preserve dependency gates.
 
 OW-1 Linear issue:
 - `SOF-29 — OW-1 — Implement provider-neutral WhatsApp connection data model and tenant RLS`
@@ -22,6 +23,16 @@ OW-1 Linear issue:
 - Verified implementation HEAD before documentation commits: `31fa9f998099733cd3788c85f151c14444d1eb3c`
 - Migrations run `40012212695`: success
 - CI run `40012212709` / #781: success
+
+OW-2 Linear issue:
+- `SOF-30 — OW-2 — Extract Meta behind provider-neutral WhatsApp transport boundary`
+- Closure level: implementation complete + CI verified
+- Verified implementation HEAD before closure documentation commits: `431eed953c06c2c55f4bb80b6445d16464682e67`
+- CI run `40025933870` / #799: `completed/success`
+- No OW-2 schema migration; no OpenWA runtime routing enabled.
+- Meta low-level API remains behind `src/lib/whatsapp/transport/meta-adapter.ts`.
+- Manual/public, automation/agent/business, Flow, broadcast delivery and broadcast resume are behind the transport boundary.
+- Legacy Meta IDs and WACRM-owned idempotency/reservation/recovery/finalization remain compatible.
 
 ## Milestones / phases
 - OW-0 Baseline & Contract Freeze
@@ -62,4 +73,4 @@ GitHub code/current branch is the implementation source of truth. CI/TEST eviden
 
 Phase issues should link to this plan directory and, where relevant, exact implementation commits, migrations and CI runs. The implementation source of truth remains `refactor/service-platform-v2`.
 
-OW-1 closure does not imply production readiness. NOTE-001 and later live acceptance, bounded pilot and rollout gates remain open concerns for their appropriate phases.
+OW-2 closure does not imply live OpenWA acceptance or production readiness. NOTE-001 and OW-3 through OW-14 remain open gates for their appropriate phases.
