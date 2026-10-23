@@ -1,6 +1,6 @@
 # WACRM — WhatsApp Multi-Provider + OpenWA Integration
 
-Status: EXECUTION IN PROGRESS — OW-0, OW-1 and OW-2 closed; OW-3 is the current engineering phase.
+Status: EXECUTION IN PROGRESS — OW-0 through OW-3 closed; OW-4 is the current engineering phase.
 
 ## Objective
 Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Meta WhatsApp Cloud API as the official/default production transport. WACRM remains the source of truth for contacts, conversations, messages, campaigns, automations, agents, business policy, audit, and idempotency.
@@ -11,12 +11,16 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 - Planning baseline HEAD at plan creation: `e05792f90775fa01e17b20614e1a98511017d002`
 - OW-1 verified implementation HEAD: `31fa9f998099733cd3788c85f151c14444d1eb3c`
 - OW-2 verified implementation HEAD: `431eed953c06c2c55f4bb80b6445d16464682e67`
-- OW-2 closure CI: GitHub CI #799 / run `40025933870` = `completed/success`
-- Current execution phase: `OW-3 — OpenWA Client & Credential Boundary`
+- OW-3 verified implementation HEAD: `92d394a9931b45d97b1c83a9146cc3dbf6edda72`
+- OW-3 closure CI: GitHub CI #810 / run `40030486765` = `completed/success`
+- OW-3 migration gate: Migrations #404 / run `40029970213` = `completed/success`
+- Current execution phase: `OW-4 — Session Lifecycle & QR Onboarding`
 - Existing outbound core: `src/lib/whatsapp/send-message.ts`
 - Existing low-level Meta client: `src/lib/whatsapp/meta-api.ts`
 - Provider-neutral transport contract: `src/lib/whatsapp/transport/types.ts`
 - Meta transport adapter/resolver: `src/lib/whatsapp/transport/meta-adapter.ts`
+- OpenWA REST client: `src/lib/whatsapp/transport/openwa/client.ts`
+- OpenWA credential resolver: `src/lib/whatsapp/transport/openwa/credentials.ts`
 - Existing inbound Meta webhook: `src/app/api/whatsapp/webhook/route.ts`
 - Existing inbound media mirror: `src/lib/whatsapp/mirror-inbound-media.ts`
 - Existing messaging architecture: `docs/architecture/messaging-business-events.md`
@@ -28,27 +32,37 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 | OW-0 | COMPLETE | contract/baseline freeze; no runtime behavior change |
 | OW-1 | COMPLETE | implementation complete + TEST verified + CI verified |
 | OW-2 | COMPLETE | implementation complete + CI verified; zero-regression Meta extraction gate passed |
-| OW-3 | CURRENT / READY TO EXECUTE | OpenWA server-side client + credential/security contract; no runtime routing yet |
-| OW-4..OW-14 | NOT STARTED | gated by preceding phases |
+| OW-3 | COMPLETE | implementation complete + TEST migration/security evidence + CI verified |
+| OW-4 | CURRENT / READY TO EXECUTE | tenant-safe session lifecycle and QR onboarding; no outbound production routing |
+| OW-5..OW-14 | NOT STARTED | gated by preceding phases |
 
 ### OW-2 closure evidence
 - Final implementation HEAD: `431eed953c06c2c55f4bb80b6445d16464682e67`.
 - GitHub CI #799 / run `40025933870`: `completed/success`, covering branch lint, typecheck, tests and build.
 - No schema migration was introduced by OW-2; OW-1 remains the provider-neutral schema baseline.
-- `src/lib/whatsapp/meta-api.ts` remains the low-level Meta Graph implementation.
-- `src/lib/whatsapp/transport/types.ts` defines the provider-neutral request/result/error contract.
-- `src/lib/whatsapp/transport/meta-adapter.ts` owns Meta-specific resolution, credential access, phone-variant behavior and Graph dispatch.
 - Manual/dashboard/public sends, automation/agent/business sends, Flow sends, broadcast initial delivery and broadcast resume are routed through the Meta transport boundary.
 - Existing WACRM idempotency/reservation/recovery/finalization ownership is preserved; OpenWA runtime routing is not enabled.
-- New Meta sends persist provider-neutral identity while retaining legacy Meta message identifiers for compatibility.
 - Linear closure issue: `SOF-30`.
 
-OW-2 closure is not live OpenWA acceptance and does not mean production/GA readiness. NOTE-001 and OW-3..OW-14 remain separate gates.
+### OW-3 closure evidence
+- Final implementation HEAD before documentation commits: `92d394a9931b45d97b1c83a9146cc3dbf6edda72`.
+- GitHub CI #810 / run `40030486765`: `completed/success`; lint, typecheck, tests and build all passed.
+- Migrations #404 / run `40029970213`: `completed/success`; clean-database replay and existing verification suites passed.
+- TEST received the additive encrypted credential-store migration successfully.
+- `145_openwa_connection_credentials.sql` creates a server-only credential boundary separate from non-secret `provider_metadata`.
+- `146_openwa_connection_credentials_deny_policies.sql` makes anon/authenticated denial explicit while table privileges remain revoked.
+- Supabase security advisor was rechecked after TEST migration; the temporary additional `rls_enabled_no_policy` finding from the credential table was eliminated, leaving the pre-existing NOTE-001 debt rather than adding new debt.
+- `src/lib/whatsapp/transport/openwa/client.ts` provides HTTPS-only/SSRF-restricted endpoint validation, strict timeouts, redirect denial, authenticated requests, correlation/idempotency propagation, normalized transport errors, redaction, status lookup and text-send primitives for later phases.
+- Provider timeouts map to `ambiguous_outcome`, preserving the no-blind-resend reconciliation rule.
+- `src/lib/whatsapp/transport/openwa/credentials.ts` resolves credentials only after account + connection + provider scoping and decrypts secrets server-side.
+- Unit coverage includes URL/SSRF validation, allowlisted controlled self-hosting, auth/rate errors, timeout ambiguity, malformed responses, missing provider message IDs, recursive secret redaction and tenant/credential scope mismatch.
+- No OpenWA business-caller/runtime routing was enabled in OW-3.
+- Linear closure issue: `SOF-31`.
+
+OW-3 closure is not live OpenWA acceptance and does not mean production/GA readiness. NOTE-001 and OW-4..OW-14 remain separate gates.
 
 ## Architectural decision
 WACRM exposes a provider-neutral WhatsApp transport boundary. Provider values are initially `meta_cloud` and `openwa`. OpenWA engine (`whatsapp-web.js` or `baileys`) is provider-internal metadata, not a top-level WACRM transport.
-
-Target flow:
 
 ```text
 WACRM business/agent/automation caller
@@ -74,7 +88,6 @@ Inbound providers converge into one normalized WACRM message/event path before C
 - Do not add groups/channels/calls/catalog/presence to the first production scope.
 
 ## Phase map
-
 | Phase | Name | Primary gate |
 |---|---|---|
 | OW-0 | Baseline & Contract Freeze | architecture/compatibility |
@@ -106,13 +119,12 @@ Every implementation phase from OW-1 onward must prove that existing Meta behavi
 7. Async webhook processing: acknowledge quickly, then process through a runtime-safe mechanism; do not perform AI fan-out before acknowledgement.
 8. OpenWA risk: WhatsApp Web automation is unofficial and must have explicit UI/ops warnings, rate controls, restriction handling, and bounded rollout.
 
-## Data-model baseline after OW-1
-OW-1 froze and verified the additive provider-neutral model:
+## Data-model baseline after OW-3
 - `whatsapp_connections`: account-scoped provider-neutral connection record supporting `meta_cloud` and `openwa`.
-- Existing `whatsapp_config` remains compatible; credentials were not destructively moved.
-- OpenWA session/instance/engine state has explicit provider-neutral connection fields where routing/search requires them.
-- `messages` and `broadcast_recipients` have additive `provider`, `connection_id`, and `provider_message_id` identity while preserving legacy Meta IDs.
-- RLS and authenticated table grants are both present; RLS remains the tenant/role authorization boundary.
+- Existing `whatsapp_config` remains compatible; Meta credentials were not destructively moved.
+- `whatsapp_connection_credentials`: server-only encrypted OpenWA credential store with explicit anon/authenticated denial.
+- `messages` and `broadcast_recipients` retain additive provider-neutral identity while preserving legacy Meta IDs.
+- OpenWA credentials are not stored in `provider_metadata`, logs, or browser-facing payloads.
 
 ## Initial MVP capability envelope
 Required before live acceptance: session creation, QR, connection state/recovery, inbound/outbound text, replies, inbound/outbound image/video/audio/document, delivery/read status where provider supplies it, logout/disconnect, restriction detection, signed webhooks, deduplication, idempotent send semantics, and WACRM-owned safety limits.
@@ -139,4 +151,4 @@ Deferred: groups, channels, calls, presence, labels, catalogs, OpenWA automation
 `production ready` requires all preceding levels, bounded pilot evidence, operational rollback/monitoring, unresolved security debt review (including NOTE-001), and explicit release approval.
 
 ## Execution rule
-Before implementing OW-3 or any later phase, re-read its detailed file, verify current branch HEAD and affected code/schema, then execute only that phase. Update the plan whenever current repository evidence changes the baseline.
+Before implementing OW-4 or any later phase, re-read its detailed file, verify current branch HEAD and affected code/schema, then execute only that phase. Update the plan whenever current repository evidence changes the baseline.
