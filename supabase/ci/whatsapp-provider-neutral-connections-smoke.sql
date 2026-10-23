@@ -118,3 +118,4 @@ begin
 end $$;
 
 rollback;
+-- CI trigger.
