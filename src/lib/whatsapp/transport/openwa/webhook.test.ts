@@ -92,7 +92,7 @@ describe('OpenWA webhook intake', () => {
   it('rejects missing webhook credentials and invalid signatures', async () => {
     const { db } = dbFixture()
     mockedResolveCredentials.mockResolvedValueOnce({
-      accountId: 'account-1', connectionId: 'connection-1', baseUrl: 'https://openwa.example.com', apiKey: 'api-key', webhookSecret: null,
+      accountId: 'account-1', connectionId: 'connection-1', baseUrl: 'https://openwa.example.com', apiKey: 'api-key',
     })
     await expect(verifyAndReserveOpenWAWebhook(db as never, {
       rawBody, signature: signature(), timestamp, nowMs,
