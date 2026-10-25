@@ -17,7 +17,7 @@ function signature() {
 }
 
 function dbFixture(options: { connection?: unknown; connectionError?: unknown; insertError?: unknown } = {}) {
-  const connection = options.connection ?? {
+  const connection = Object.prototype.hasOwnProperty.call(options, 'connection') ? options.connection : {
     id: 'connection-1',
     account_id: 'account-1',
     provider: 'openwa',
