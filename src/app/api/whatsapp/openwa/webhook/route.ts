@@ -1,6 +1,9 @@
 import { after, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+import { normalizeOpenWAInboundMessage } from '@/lib/whatsapp/inbound-normalization'
+import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
+
 import {
   markOpenWAWebhookProcessed,
   verifyAndReserveOpenWAWebhook,
@@ -37,12 +40,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, duplicate: true })
   }
 
-  const { connectionId, envelope } = reservation
+  const { accountId, connectionId, envelope } = reservation
   after(async () => {
     try {
-      // OW-5 owns authenticated intake + durable dedup only. OW-6 will route
-      // accepted envelopes into the shared normalized inbound business path.
-      await markOpenWAWebhookProcessed(adminDb(), connectionId, envelope.eventId)
+      const db = adminDb()
+      const normalized = normalizeOpenWAInboundMessage(envelope, connectionId)
+      if (normalized) {
+        const { data: account, error: accountError } = await db
+          .from('accounts')
+          .select('owner_user_id')
+          .eq('id', accountId)
+          .maybeSingle()
+        if (accountError || !account?.owner_user_id) {
+          throw new Error('OpenWA account owner could not be resolved')
+        }
+
+        await processNormalizedInboundMessage(
+          normalized.message,
+          normalized.contact,
+          accountId,
+          connectionId,
+          account.owner_user_id,
+          '',
+          false,
+        )
+      }
+      await markOpenWAWebhookProcessed(db, connectionId, envelope.eventId)
     } catch (error) {
       const safeMessage = error instanceof Error ? error.message : 'OpenWA webhook processing failed'
       try {
