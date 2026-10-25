@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply OW-6 shared inbound refactor
-        run: python scripts/ow6-refactor.py
+        run: python scripts/ow6-refactor-v2.py
       - name: Commit refactor
         run: |
           git config user.name github-actions[bot]
