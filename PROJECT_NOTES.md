@@ -95,3 +95,15 @@ This file is the canonical place for important findings that are **outside the s
 - **Net-tree verification:** comparing merge base `4a80fb72...` to rollback baseline head `99e070c5...` returns `files=[]`. Therefore the eight commits leave no net content delta that must be ported into the transition branch.
 - **Conclusion:** there is no currently missing rollback-baseline fix hidden by the commit-graph divergence. The transition branch may remain graph-diverged without requiring those eight commits to be cherry-picked.
 - **Final Phase 6 safeguard:** repeat the compare on the final acceptance head before any merge/rebase/release decision; if baseline changes later, classify any new baseline-only content before proceeding.
+
+### NOTE-007 — OW-4 live OpenWA TEST session/QR acceptance deferred
+
+- **Status:** open / deferred external acceptance gate
+- **Recorded:** 2026-10-25
+- **Discovered during:** OpenWA OW-4 closure
+- **Scope:** live TEST acceptance for OpenWA session lifecycle and QR onboarding; implementation itself is complete.
+- **Implementation evidence:** OW-4 implementation HEAD `ccb421426bf8e3dcc305db3a2ad5faaba6230711`; GitHub CI #822 / run `40031691828` completed successfully with lint, typecheck, tests and build green.
+- **Current TEST evidence:** `wacrm test` has no `openwa` connection and no OpenWA credential record, so a real session/QR proof cannot currently be produced.
+- **External dependency:** a reachable non-production OpenWA service plus server-side API credential is required to execute the live session creation and short-lived QR acceptance scenario.
+- **Safety constraints while deferred:** OW-4 remains `implementation complete + CI verified`, not `TEST verified`; no production enablement is implied. Later implementation phases may proceed, but they must not claim live OpenWA acceptance or production readiness based on this deferred gate. OpenWA outbound business routing remains disabled until its planned phase and acceptance conditions.
+- **Return-to-work criteria:** provision/configure a reachable TEST OpenWA endpoint and server-side credential, create an account-scoped non-production OpenWA connection, verify authorized-admin QR display with no-store/expiry behavior, record the evidence, then mark the OW-4 TEST acceptance gate satisfied.
