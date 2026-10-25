@@ -1,0 +1,31 @@
+name: OW6 Refactor Bootstrap
+
+on:
+  push:
+    branches: [refactor/service-platform-v2]
+    paths:
+      - '.github/workflows/ow6-refactor-bootstrap.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refactor/service-platform-v2
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Apply OW-6 shared inbound refactor
+        run: python scripts/ow6-refactor.py
+      - name: Commit refactor
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/api/whatsapp/webhook/route.ts src/app/api/whatsapp/openwa/webhook/route.ts src/lib/whatsapp/inbound-processor.ts
+          git diff --cached --check
+          git commit -m "feat(openwa): unify inbound business processing"
+          git push origin HEAD:refactor/service-platform-v2
