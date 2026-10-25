@@ -62,6 +62,20 @@ vi.mock('@supabase/supabase-js', () => ({
                 }),
             }),
           }
+        case 'whatsapp_connections':
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: { id: 'meta-connection-1' },
+                      error: null,
+                    }),
+                }),
+              }),
+            }),
+          }
         case 'trusted_admin_identities':
           return {
             select: () => ({

@@ -79,9 +79,9 @@ describe('Task reply integration boundaries', () => {
     )
   })
 
-  it('keeps trusted-admin routing before task correlation in the webhook', () => {
+  it('keeps trusted-admin routing before task correlation in the shared inbound processor', () => {
     const source = readFileSync(
-      new URL('../../../app/api/whatsapp/webhook/route.ts', import.meta.url),
+      new URL('../../whatsapp/inbound-processor.ts', import.meta.url),
       'utf8',
     )
 
@@ -96,7 +96,7 @@ describe('Task reply integration boundaries', () => {
 
   it('allows Meta replay recovery only through idempotent task correlation', () => {
     const source = readFileSync(
-      new URL('../../../app/api/whatsapp/webhook/route.ts', import.meta.url),
+      new URL('../../whatsapp/inbound-processor.ts', import.meta.url),
       'utf8',
     )
 
