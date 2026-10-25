@@ -3,6 +3,7 @@ import type { OpenWAWebhookEnvelope } from '@/lib/whatsapp/transport/openwa/webh
 export type InboundWhatsAppProvider = 'meta_cloud' | 'openwa'
 
 export interface NormalizedInboundMessage {
+  id: string
   provider: InboundWhatsAppProvider
   connectionId: string
   providerMessageId: string
@@ -39,9 +40,7 @@ export interface NormalizedInbound {
   contact: NormalizedInboundContact
 }
 
-interface MetaMessageLike extends Omit<NormalizedInboundMessage, 'provider' | 'connectionId' | 'providerMessageId'> {
-  id: string
-}
+interface MetaMessageLike extends Omit<NormalizedInboundMessage, 'provider' | 'connectionId' | 'providerMessageId'> {}
 
 export function normalizeMetaInboundMessage(
   message: MetaMessageLike,
@@ -140,6 +139,7 @@ export function normalizeOpenWAInboundMessage(
     from
 
   const normalized: NormalizedInboundMessage = {
+    id: providerMessageId,
     provider: 'openwa',
     connectionId,
     providerMessageId,
