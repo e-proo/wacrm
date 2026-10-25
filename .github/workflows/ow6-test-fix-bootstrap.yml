@@ -1,0 +1,29 @@
+name: OW6 Test Fix Bootstrap
+on:
+  push:
+    branches: [refactor/service-platform-v2]
+    paths:
+      - scripts/ow6-fix-tests.py
+      - .github/workflows/ow6-test-fix-bootstrap.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refactor/service-platform-v2
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python scripts/ow6-fix-tests.py
+      - run: git diff --check
+      - name: Commit test fixes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/api/whatsapp/webhook/route.test.ts src/lib/ai/tasks/reply-correlation.test.ts
+          git diff --cached --quiet && exit 0
+          git commit -m "test(openwa): align inbound regression fixtures with OW-6"
+          git push origin HEAD:refactor/service-platform-v2
