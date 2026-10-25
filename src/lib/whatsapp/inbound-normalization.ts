@@ -40,7 +40,7 @@ export interface NormalizedInbound {
   contact: NormalizedInboundContact
 }
 
-interface MetaMessageLike extends Omit<NormalizedInboundMessage, 'provider' | 'connectionId' | 'providerMessageId'> {}
+type MetaMessageLike = Omit<NormalizedInboundMessage, 'provider' | 'connectionId' | 'providerMessageId'>
 
 export function normalizeMetaInboundMessage(
   message: MetaMessageLike,
