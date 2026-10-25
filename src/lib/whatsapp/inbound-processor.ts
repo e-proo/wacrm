@@ -71,7 +71,7 @@ async function flagBroadcastReplyIfAny(accountId: string, contactId: string) {
 }
 
 /**
- * Resolve a Meta-side message_id into the matching internal UUID, scoped
+ * Resolve a provider message id into the matching internal UUID, scoped
  * to one conversation. Returns null when we never received the parent
  * (e.g. a swipe-reply to a message older than this CRM install).
  */
@@ -101,7 +101,7 @@ async function lookupInternalIdByMetaId(
  * skipped so the webhook still acks 200 to Meta.
  */
 async function handleReaction(
-  message: WhatsAppMessage,
+  message: NormalizedInboundMessage,
   conversationId: string,
   contactId: string
 ) {
@@ -746,7 +746,7 @@ export async function processNormalizedInboundMessage(
 }
 
 async function parseMessageContent(
-  message: WhatsAppMessage,
+  message: NormalizedInboundMessage,
   accessToken: string,
   // Tenancy + opt-out for the media mirror. Null disables mirroring
   // entirely, which is what the account-level toggle does.
