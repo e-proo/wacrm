@@ -6,24 +6,12 @@ import { mirrorOpenWAInboundMedia } from './inbound-media'
 vi.mock('./credentials', () => ({ resolveOpenWAClient: vi.fn() }))
 
 function db(): SupabaseClient { return { from() { const b: Record<string, unknown> = { select: () => b, eq: () => b, maybeSingle: async () => ({ data: { session_id: 'sess-1' }, error: null }) }; return b } } as unknown as SupabaseClient }
-function storage(upload = vi.fn(async () => ({ error: null }))) { return { upload, api: { from: () => ({ upload, getPublicUrl: () => ({ data: { publicUrl: 'https://storage.example/media' } }) }) } } }
+type UploadResult = { error: null | { message: string } }
+function storage(upload: ReturnType<typeof vi.fn<() => Promise<UploadResult>>> = vi.fn(async () => ({ error: null }))) { return { upload, api: { from: () => ({ upload, getPublicUrl: () => ({ data: { publicUrl: 'https://storage.example/media' } }) }) } } }
 
 describe('OpenWA inbound media mirror', () => {
-  it('downloads with scoped OpenWA client and mirrors into WACRM storage', async () => {
-    const downloadMedia = vi.fn(async () => ({ buffer: Buffer.from('abc'), contentType: 'image/jpeg', contentLength: 3 })); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never })
-    const s = storage(); const result = await mirrorOpenWAInboundMedia({ db: db(), storage: s.api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'image', media: { id: 'media-1', mime_type: 'image/jpeg', file_size: 3 }, messageTimestamp: '1792950000' })
-    expect(result).toBe('https://storage.example/media'); expect(downloadMedia).toHaveBeenCalledWith('sess-1', 'media-1', 'media:media-1'); expect(s.upload).toHaveBeenCalledTimes(1)
-  })
-  it('rejects MIME mismatch before provider download', async () => {
-    const downloadMedia = vi.fn(); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never })
-    await expect(mirrorOpenWAInboundMedia({ db: db(), storage: storage().api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'image', media: { id: 'media-1', mime_type: 'application/pdf' }, messageTimestamp: '1' })).rejects.toMatchObject({ code: 'invalid_request' }); expect(downloadMedia).not.toHaveBeenCalled()
-  })
-  it('rejects declared oversize before provider download', async () => {
-    const downloadMedia = vi.fn(); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never })
-    await expect(mirrorOpenWAInboundMedia({ db: db(), storage: storage().api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'document', media: { id: 'media-1', mime_type: 'application/pdf', file_size: MEDIA_MAX_BYTES + 1 }, messageTimestamp: '1' })).rejects.toMatchObject({ code: 'invalid_request' }); expect(downloadMedia).not.toHaveBeenCalled()
-  })
-  it('returns null when controlled storage upload fails', async () => {
-    const downloadMedia = vi.fn(async () => ({ buffer: Buffer.from('abc'), contentType: 'application/pdf', contentLength: 3 })); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never })
-    const s = storage(vi.fn(async () => ({ error: { message: 'storage down' } }))); await expect(mirrorOpenWAInboundMedia({ db: db(), storage: s.api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'document', media: { id: 'media-1', mime_type: 'application/pdf' }, messageTimestamp: '1' })).resolves.toBeNull()
-  })
+  it('downloads with scoped OpenWA client and mirrors into WACRM storage', async () => { const downloadMedia = vi.fn(async () => ({ buffer: Buffer.from('abc'), contentType: 'image/jpeg', contentLength: 3 })); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); const s = storage(); const result = await mirrorOpenWAInboundMedia({ db: db(), storage: s.api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'image', media: { id: 'media-1', mime_type: 'image/jpeg', file_size: 3 }, messageTimestamp: '1792950000' }); expect(result).toBe('https://storage.example/media'); expect(downloadMedia).toHaveBeenCalledWith('sess-1', 'media-1', 'media:media-1'); expect(s.upload).toHaveBeenCalledTimes(1) })
+  it('rejects MIME mismatch before provider download', async () => { const downloadMedia = vi.fn(); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); await expect(mirrorOpenWAInboundMedia({ db: db(), storage: storage().api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'image', media: { id: 'media-1', mime_type: 'application/pdf' }, messageTimestamp: '1' })).rejects.toMatchObject({ code: 'invalid_request' }); expect(downloadMedia).not.toHaveBeenCalled() })
+  it('rejects declared oversize before provider download', async () => { const downloadMedia = vi.fn(); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); await expect(mirrorOpenWAInboundMedia({ db: db(), storage: storage().api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'document', media: { id: 'media-1', mime_type: 'application/pdf', file_size: MEDIA_MAX_BYTES + 1 }, messageTimestamp: '1' })).rejects.toMatchObject({ code: 'invalid_request' }); expect(downloadMedia).not.toHaveBeenCalled() })
+  it('returns null when controlled storage upload fails', async () => { const downloadMedia = vi.fn(async () => ({ buffer: Buffer.from('abc'), contentType: 'application/pdf', contentLength: 3 })); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); const s = storage(vi.fn(async (): Promise<UploadResult> => ({ error: { message: 'storage down' } }))); await expect(mirrorOpenWAInboundMedia({ db: db(), storage: s.api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'document', media: { id: 'media-1', mime_type: 'application/pdf' }, messageTimestamp: '1' })).resolves.toBeNull() })
 })
