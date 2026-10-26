@@ -1,12 +1,13 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { describe, expect, it, vi } from 'vitest'
 import { GuardedOpenWATransport } from './guardrails'
-import { WhatsAppTransportError, type WhatsAppTransport } from './types'
+import { WhatsAppTransportError, type WhatsAppTransport, type WhatsAppTransportSendResult } from './types'
 
 const request = { accountId: 'acc-1', connectionId: 'conn-1', recipient: '967700000001', content: { kind: 'text' as const, text: 'hi' }, idempotencyKey: 'idem-1' }
 
-function setup(reservation: Record<string, unknown>, sendImpl?: () => Promise<any>) {
+function setup(reservation: Record<string, unknown>, sendImpl?: () => Promise<WhatsAppTransportSendResult>) {
   const rpc = vi.fn().mockResolvedValueOnce({ data: reservation, error: null }).mockResolvedValue({ data: null, error: null })
-  const db = { rpc } as any
+  const db = { rpc } as unknown as SupabaseClient
   const inner: WhatsAppTransport = { provider: 'openwa', send: vi.fn(sendImpl ?? (async () => ({ provider: 'openwa', connectionId: 'conn-1', providerMessageId: 'p-1' }))) }
   return { rpc, inner, guarded: new GuardedOpenWATransport(db, inner) }
 }
@@ -22,7 +23,7 @@ describe('OW-10 OpenWA guardrail transport', () => {
     const { guarded, rpc } = setup({ allowed: true, wait_ms: 0 })
     await guarded.send({ ...request, workload: 'broadcast' })
     expect(rpc).toHaveBeenNthCalledWith(1, 'reserve_openwa_guardrail_send', expect.objectContaining({ p_account_id: 'acc-1', p_connection_id: 'conn-1', p_workload: 'broadcast' }))
-    const args = rpc.mock.calls[0][1]
+    const args = rpc.mock.calls[0][1] as Record<string, unknown>
     expect(args.p_recipient_hash).toMatch(/^[a-f0-9]{64}$/)
     expect(JSON.stringify(args)).not.toContain(request.recipient)
     expect(rpc).toHaveBeenNthCalledWith(2, 'record_openwa_guardrail_outcome', expect.objectContaining({ p_success: true }))
@@ -36,8 +37,8 @@ describe('OW-10 OpenWA guardrail transport', () => {
   })
 
   it('fails closed if guardrail reservation cannot be persisted', async () => {
-    const db = { rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'db unavailable' } }) } as any
-    const inner = { provider: 'openwa', send: vi.fn() } as any
+    const db = { rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'db unavailable' } }) } as unknown as SupabaseClient
+    const inner: WhatsAppTransport = { provider: 'openwa', send: vi.fn() }
     await expect(new GuardedOpenWATransport(db, inner).send(request)).rejects.toMatchObject({ code: 'retryable_provider_failure' })
     expect(inner.send).not.toHaveBeenCalled()
   })
