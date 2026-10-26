@@ -1,18 +1,5 @@
 name: Migrations
 
-# Replaces the "Supabase Preview" check, which never worked: it fired
-# only on migration changes and then either 404'd in four seconds
-# ("Postgres config not found") or hung forever waiting on a branch
-# action, because two stale dashboard integrations were pointed at this
-# repo and neither could provision. It never applied a migration, so
-# every `supabase/migrations/*.sql` file in this repo has shipped
-# unexecuted by CI.
-#
-# This job does the thing that check only claimed to: boot a clean
-# Postgres and replay every migration, in order, from nothing. It needs
-# no secrets and no Supabase account — the CLI runs the database in a
-# container on the runner.
-
 on:
   pull_request:
     paths:
@@ -34,89 +21,63 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - name: Install the Supabase CLI
         uses: supabase/setup-cli@v1
         with:
           version: 2.113.0
-
       - name: Start Postgres
         run: supabase db start
-
       - name: Replay every migration from scratch
         run: supabase db reset --local --no-seed
-
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
-
       - name: Verify OW-1 provider-neutral WhatsApp schema and RLS
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/whatsapp-provider-neutral-connections-smoke.sql
-
+      - name: Verify OW-10 OpenWA safety guardrails
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-guardrails-smoke.sql
       - name: Verify Agent Task platform behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-platform-smoke.sql
-
       - name: Verify Agent Task orchestrator behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-orchestrator-smoke.sql
-
       - name: Verify Agent Target resolution behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-target-resolution-smoke.sql
-
       - name: Verify Agent Outbound messaging policy
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-outbound-messaging-policy-smoke.sql
-
       - name: Verify Agent Task reply correlation
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-reply-correlation-smoke.sql
-
       - name: Verify Agent Outbound capabilities
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-outbound-capabilities-smoke.sql
-
       - name: Verify Agent Builder V2 persistence
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-builder-v2-smoke.sql
-
       - name: Verify generic Agent Task creation
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-creation-smoke.sql
-
       - name: Verify Agent Task scheduling and Business Event triggers
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-trigger-smoke.sql
-
       - name: Seed shared Agent Task account fixture
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-shared-account-fixture.sql
-
       - name: Verify Agent Task budgets and abuse protection
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-guardrails-smoke.sql
-
       - name: Verify Agent Task audit and observability
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-observability-smoke.sql
-
       - name: Verify Agent Task security acceptance
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-security-acceptance-smoke.sql
-
       - name: Verify Agent Task full integration chain
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-full-integration-smoke.sql
-
       - name: Verify Agent Task crash recovery
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-crash-recovery-smoke.sql
-
       - name: Verify Agent Task guarded TEST cutover
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-cutover-smoke.sql
-
       - name: Verify Service Platform legacy notification contraction
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/service-platform-legacy-notification-contraction-smoke.sql
-
       - name: Verify Coverage sourcing business outcome
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/coverage-sourcing-agent-smoke.sql
-
       - name: Verify Intents controlled cutover safety
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/intents-cutover-smoke.sql
-
       - name: Verify FX V2 Phase 2 domain behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-2-smoke.sql
-
       - name: Verify FX V2 Phase 6 messaging behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-6-messaging-smoke.sql
-
       - name: Verify FX V2 Phase 7 legacy cleanup
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/fx-v2-phase-7-legacy-cleanup-smoke.sql
-
       - name: Verify Agent Task authenticated RLS isolation
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-rls-smoke.sql
