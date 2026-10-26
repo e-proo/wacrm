@@ -1,0 +1,25 @@
+name: OW9 Meta Status Bootstrap
+on:
+  push:
+    branches: [refactor/service-platform-v2]
+    paths:
+      - '.github/workflows/ow9-meta-status-bootstrap.yml'
+permissions:
+  contents: write
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/service-platform-v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/ow9-integrate-meta-status.py
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/api/whatsapp/webhook/route.ts
+          git commit -m "refactor(openwa): route Meta statuses through neutral lifecycle"
+          git push
