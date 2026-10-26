@@ -92,3 +92,14 @@ Tests: sent/delivered/read/failed where available, duplicate status, out-of-orde
 
 ### Exit gate for OW-5..OW-9
 Each phase requires its focused suite plus Meta regression gate. OW-9 closes only when OpenWA text/reply/media/status flows are deterministic on TEST fixtures and no cross-tenant or duplicate-delivery defect remains.
+
+### OW-9 closure evidence — 2026-10-26
+
+- Implementation head before this documentation sync: `dec770736c0b6051e6f7295f34ba63711f055fd5`.
+- Provider-neutral status lifecycle is implemented in `src/lib/whatsapp/status-lifecycle.ts` with account + connection + provider-message scoping, forward-only transitions, terminal failure handling, bounded diagnostics, and independent message/broadcast-recipient reconciliation.
+- Meta status webhooks route through `src/lib/whatsapp/meta-status.ts` and the same lifecycle using the webhook `phone_number_id` → account → `meta_cloud` connection identity; the legacy unscoped `message_id` status updater was removed.
+- OpenWA status/ack webhook events route through the signed/deduplicated OpenWA webhook intake into the same lifecycle.
+- OpenWA ambiguous sends expose explicit idempotency-key reconciliation via `OpenWAClient.reconcileOutbound`; a timeout remains `ambiguous_outcome` and is not converted into a blind resend.
+- Focused tests cover Meta/OpenWA vocabulary, sent/delivered/read/failed semantics, duplicate/backward transitions, unknown message, wrong tenant/connection, broadcast-only status correlation, secret redaction, reconciliation found/not-found, timeout and provider failure behavior.
+- GitHub CI #903 / run `40379728734` completed successfully: Lint, Typecheck, Test, Build all green.
+- Closure level: **implementation complete + CI/TEST-fixture verified**. Live OpenWA acceptance is not claimed; NOTE-007 remains the external live-session/QR acceptance dependency. Production readiness is not claimed while NOTE-001 remains open.
