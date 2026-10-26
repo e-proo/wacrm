@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
@@ -13,7 +14,7 @@ import {
   templateBodyParams,
   templateContentText,
 } from '@/lib/whatsapp/template-body';
-import { resolveMetaTransport } from '@/lib/whatsapp/transport/meta-adapter';
+import { resolveConversationTransport } from '@/lib/whatsapp/transport/router';
 import {
   WhatsAppTransportError,
   type WhatsAppMediaKind,
@@ -22,12 +23,7 @@ import {
 } from '@/lib/whatsapp/transport/types';
 
 export const MEDIA_KINDS = ['image', 'video', 'document', 'audio'] as const;
-export const VALID_MESSAGE_TYPES = [
-  'text',
-  'template',
-  'interactive',
-  ...MEDIA_KINDS,
-] as const;
+export const VALID_MESSAGE_TYPES = ['text', 'template', 'interactive', ...MEDIA_KINDS] as const;
 
 export class SendMessageError extends Error {
   readonly code: string;
@@ -52,6 +48,8 @@ export interface SendMessageParams {
   templateMessageParams?: WhatsAppTemplateSendParams;
   interactivePayload?: InteractiveMessagePayload | null;
   replyToMessageId?: string | null;
+  connectionId?: string | null;
+  idempotencyKey?: string | null;
 }
 
 export interface SendMessageResult {
@@ -68,88 +66,57 @@ export function validateSendMessageParams(params: {
 }): void {
   const { messageType, contentText, mediaUrl, templateName, interactivePayload } = params;
   if (!messageType) throw new SendMessageError('bad_request', 'message_type is required', 400);
-
   const isMediaKind = (MEDIA_KINDS as readonly string[]).includes(messageType);
-  if (!(VALID_MESSAGE_TYPES as readonly string[]).includes(messageType)) {
-    throw new SendMessageError('bad_request', `Unsupported message_type \"${messageType}\"`, 400);
-  }
-  if (messageType === 'text' && !contentText) {
-    throw new SendMessageError('bad_request', 'content_text is required for text messages', 400);
-  }
-  if (messageType === 'template' && !templateName) {
-    throw new SendMessageError('bad_request', 'template_name is required for template messages', 400);
-  }
+  if (!(VALID_MESSAGE_TYPES as readonly string[]).includes(messageType)) throw new SendMessageError('bad_request', `Unsupported message_type "${messageType}"`, 400);
+  if (messageType === 'text' && !contentText) throw new SendMessageError('bad_request', 'content_text is required for text messages', 400);
+  if (messageType === 'template' && !templateName) throw new SendMessageError('bad_request', 'template_name is required for template messages', 400);
   if (messageType === 'interactive') {
     const result = validateInteractivePayload(interactivePayload);
     if (!result.ok) throw new SendMessageError('bad_request', result.error, 400);
   }
-  if (isMediaKind && !mediaUrl) {
-    throw new SendMessageError('bad_request', `media_url is required for ${messageType} messages`, 400);
-  }
-  if (
-    isMediaKind &&
-    messageType !== 'audio' &&
-    typeof contentText === 'string' &&
-    contentText.length > 1024
-  ) {
+  if (isMediaKind && !mediaUrl) throw new SendMessageError('bad_request', `media_url is required for ${messageType} messages`, 400);
+  if (isMediaKind && messageType !== 'audio' && typeof contentText === 'string' && contentText.length > 1024) {
     throw new SendMessageError('bad_request', 'Caption exceeds the 1024-character limit', 400);
   }
 }
 
 function mapTransportError(error: unknown): SendMessageError {
-  if (error instanceof WhatsAppTransportError && error.code === 'authentication_or_configuration') {
-    return new SendMessageError(
-      'whatsapp_not_configured',
-      'WhatsApp not configured. Please set up your WhatsApp integration first.',
-      400
-    );
+  if (error instanceof WhatsAppTransportError) {
+    if (error.code === 'authentication_or_configuration') return new SendMessageError('whatsapp_not_configured', error.message, 400);
+    if (error.code === 'invalid_request' || error.code === 'unsupported_capability') return new SendMessageError(error.code, error.message, 400);
+    if (error.code === 'connection_restricted') return new SendMessageError(error.code, error.message, 409);
+    if (error.code === 'ambiguous_outcome') return new SendMessageError(error.code, error.message, 409);
+    if (error.code === 'recipient_invalid_or_unreachable') return new SendMessageError(error.code, error.message, 422);
+    if (error.code === 'rate_limited') return new SendMessageError(error.code, error.message, 429);
+    return new SendMessageError(error.code, error.message, 502);
   }
-  const message = error instanceof Error ? error.message : 'Unknown Meta API error';
-  return new SendMessageError('meta_error', `Meta API error: ${message}`, 502);
+  return new SendMessageError('provider_error', error instanceof Error ? error.message : 'WhatsApp provider error', 502);
 }
 
-export async function sendMessageToConversation(
-  db: SupabaseClient,
-  accountId: string,
-  params: SendMessageParams
-): Promise<SendMessageResult> {
+export async function sendMessageToConversation(db: SupabaseClient, accountId: string, params: SendMessageParams): Promise<SendMessageResult> {
   const {
-    conversationId,
-    messageType,
-    contentText,
-    mediaUrl,
-    filename,
-    templateName,
-    templateLanguage,
-    templateParams,
-    templateMessageParams,
-    interactivePayload,
-    replyToMessageId,
+    conversationId, messageType, contentText, mediaUrl, filename, templateName,
+    templateLanguage, templateParams, templateMessageParams, interactivePayload,
+    replyToMessageId, connectionId, idempotencyKey,
   } = params;
-
-  if (!conversationId) {
-    throw new SendMessageError('bad_request', 'conversation_id is required', 400);
-  }
+  if (!conversationId) throw new SendMessageError('bad_request', 'conversation_id is required', 400);
   validateSendMessageParams({ messageType, contentText, mediaUrl, templateName, interactivePayload });
   const isMediaKind = (MEDIA_KINDS as readonly string[]).includes(messageType);
 
   const { data: conversation, error: convError } = await db
-    .from('conversations')
-    .select('*, contact:contacts(*)')
-    .eq('id', conversationId)
-    .eq('account_id', accountId)
-    .single();
-  if (convError || !conversation) {
-    throw new SendMessageError('not_found', 'Conversation not found', 404);
-  }
-
+    .from('conversations').select('*, contact:contacts(*)')
+    .eq('id', conversationId).eq('account_id', accountId).single();
+  if (convError || !conversation) throw new SendMessageError('not_found', 'Conversation not found', 404);
   const contact = conversation.contact;
-  if (!contact?.phone) {
-    throw new SendMessageError('bad_request', 'Contact phone number not found', 400);
-  }
+  if (!contact?.phone) throw new SendMessageError('bad_request', 'Contact phone number not found', 400);
   const sanitizedPhone = sanitizePhoneForMeta(contact.phone);
-  if (!isValidE164(sanitizedPhone)) {
-    throw new SendMessageError('bad_request', 'Invalid phone number format', 400);
+  if (!isValidE164(sanitizedPhone)) throw new SendMessageError('bad_request', 'Invalid phone number format', 400);
+
+  let resolved;
+  try {
+    resolved = await resolveConversationTransport(db, accountId, conversationId, connectionId);
+  } catch (error) {
+    throw mapTransportError(error);
   }
 
   let contextMessageId: string | undefined;
@@ -157,62 +124,70 @@ export async function sendMessageToConversation(
     const { data: parent, error: parentError } = await db
       .from('messages')
       .select('message_id, provider_message_id, provider, connection_id, conversation_id')
-      .eq('id', replyToMessageId)
-      .eq('conversation_id', conversationId)
-      .maybeSingle();
-    if (parentError || !parent) {
-      throw new SendMessageError('bad_request', 'reply_to_message_id not found in this conversation', 400);
+      .eq('id', replyToMessageId).eq('conversation_id', conversationId).maybeSingle();
+    if (parentError || !parent) throw new SendMessageError('bad_request', 'reply_to_message_id not found in this conversation', 400);
+    if (parent.connection_id && parent.connection_id !== resolved.connectionId) {
+      throw new SendMessageError('invalid_request', 'Reply target belongs to a different WhatsApp connection', 400);
+    }
+    if (parent.provider && parent.provider !== resolved.transport.provider) {
+      throw new SendMessageError('invalid_request', 'Reply target belongs to a different WhatsApp provider', 400);
     }
     contextMessageId = parent.provider_message_id || parent.message_id || undefined;
-    if (!contextMessageId) {
-      console.warn('[send-message] reply target has no provider message id; sending without context');
-    }
+    if (!contextMessageId) throw new SendMessageError('invalid_request', 'Reply target has no provider-native message identity', 400);
   }
 
   let templateRow: MessageTemplate | null = null;
   let sendLanguage = templateLanguage || 'en_US';
   if (messageType === 'template' && templateName) {
-    const resolved = await resolveTemplateRow(db, accountId, templateName, templateLanguage);
-    if (resolved.malformed) {
-      throw new SendMessageError(
-        'template_malformed',
-        'Template row is malformed locally — run "Sync from Meta" in Settings to repair it.',
-        500
-      );
-    }
-    templateRow = resolved.row;
-    sendLanguage = resolved.language;
+    if (resolved.transport.provider !== 'meta_cloud') throw new SendMessageError('unsupported_capability', 'OpenWA does not use Meta approved-template policy', 400);
+    const template = await resolveTemplateRow(db, accountId, templateName, templateLanguage);
+    if (template.malformed) throw new SendMessageError('template_malformed', 'Template row is malformed locally — run "Sync from Meta" in Settings to repair it.', 500);
+    templateRow = template.row;
+    sendLanguage = template.language;
   }
 
   let content: WhatsAppTransportContent;
-  if (messageType === 'template') {
-    content = {
-      kind: 'template',
-      templateName: templateName!,
-      language: sendLanguage,
-      template: templateRow ?? undefined,
-      messageParams: templateMessageParams,
-      params: templateParams || [],
-    };
-  } else if (isMediaKind) {
-    content = {
-      kind: 'media',
-      mediaKind: messageType as WhatsAppMediaKind,
-      link: mediaUrl!,
-      caption: contentText || undefined,
-      filename: filename || undefined,
-    };
-  } else if (messageType === 'interactive') {
-    content = { kind: 'interactive', payload: interactivePayload! };
-  } else {
-    content = { kind: 'text', text: contentText! };
+  if (messageType === 'template') content = { kind: 'template', templateName: templateName!, language: sendLanguage, template: templateRow ?? undefined, messageParams: templateMessageParams, params: templateParams || [] };
+  else if (isMediaKind) content = { kind: 'media', mediaKind: messageType as WhatsAppMediaKind, link: mediaUrl!, caption: contentText || undefined, filename: filename || undefined };
+  else if (messageType === 'interactive') content = { kind: 'interactive', payload: interactivePayload! };
+  else content = { kind: 'text', text: contentText! };
+
+  if (resolved.transport.provider === 'openwa' && content.kind !== 'text') {
+    throw new SendMessageError('unsupported_capability', 'OW-7 OpenWA outbound supports text and replies only', 400);
   }
 
-  let resolved;
-  try {
-    resolved = await resolveMetaTransport(db, accountId);
-  } catch (error) {
-    throw mapTransportError(error);
+  const sendKey = idempotencyKey?.trim() || randomUUID();
+  const persistedText = messageType === 'interactive'
+    ? interactivePayload!.body
+    : messageType === 'template'
+      ? templateContentText(templateRow, templateBodyParams(templateParams, templateMessageParams), contentText)
+      : (contentText ?? null);
+
+  const pendingInsert = await db.from('messages').insert({
+    conversation_id: conversationId,
+    sender_type: 'agent',
+    content_type: messageType,
+    content_text: persistedText,
+    media_url: mediaUrl || null,
+    template_name: templateName || null,
+    interactive_payload: messageType === 'interactive' ? interactivePayload : null,
+    provider: resolved.transport.provider,
+    connection_id: resolved.connectionId,
+    status: 'pending',
+    reply_to_message_id: replyToMessageId || null,
+    outbound_idempotency_key: sendKey,
+  }).select('id, message_id, provider_message_id, status').maybeSingle();
+
+  let messageRecord = pendingInsert.data;
+  if (pendingInsert.error || !messageRecord) {
+    const { data: existing } = await db.from('messages')
+      .select('id, message_id, provider_message_id, status')
+      .eq('conversation_id', conversationId).eq('outbound_idempotency_key', sendKey).maybeSingle();
+    if (existing?.provider_message_id || existing?.message_id) {
+      return { messageId: existing.id, whatsappMessageId: existing.provider_message_id || existing.message_id };
+    }
+    if (existing) throw new SendMessageError('ambiguous_outcome', 'An outbound send with this idempotency key is already pending reconciliation', 409);
+    throw new SendMessageError('db_error', `Failed to reserve outbound send identity: ${pendingInsert.error?.message ?? 'unknown error'}`, 500);
   }
 
   let sendResult;
@@ -223,102 +198,40 @@ export async function sendMessageToConversation(
       recipient: sanitizedPhone,
       content,
       replyToProviderMessageId: contextMessageId,
+      idempotencyKey: sendKey,
     });
   } catch (error) {
-    console.error(
-      '[send-message] Meta transport send failed:',
-      error instanceof Error ? error.message : error
-    );
+    const transportError = error instanceof WhatsAppTransportError ? error : null;
+    if (transportError?.code !== 'ambiguous_outcome') {
+      await db.from('messages').update({ status: 'failed' }).eq('id', messageRecord.id).eq('conversation_id', conversationId);
+    }
     throw mapTransportError(error);
   }
 
   const waMessageId = sendResult.providerMessageId;
-  const workingPhone =
-    typeof sendResult.providerMetadata?.workingRecipient === 'string'
-      ? sendResult.providerMetadata.workingRecipient
-      : sanitizedPhone;
+  const { data: saved, error: saveError } = await db.from('messages').update({
+    message_id: waMessageId,
+    provider: sendResult.provider,
+    connection_id: sendResult.connectionId,
+    provider_message_id: waMessageId,
+    status: 'sent',
+  }).eq('id', messageRecord.id).eq('conversation_id', conversationId).select('id').single();
+  if (saveError || !saved) throw new SendMessageError('ambiguous_outcome', `Provider accepted the message but WACRM could not finalize persistence: ${saveError?.message ?? 'unknown error'}`, 409);
+  messageRecord = { ...messageRecord, id: saved.id };
 
+  const workingPhone = typeof sendResult.providerMetadata?.workingRecipient === 'string' ? sendResult.providerMetadata.workingRecipient : sanitizedPhone;
   if (workingPhone !== sanitizedPhone) {
-    console.log(`[send-message] Auto-corrected contact phone: ${sanitizedPhone} → ${workingPhone}`);
-    await db
-      .from('contacts')
-      .update({ phone: workingPhone })
-      .eq('id', contact.id)
-      .eq('account_id', accountId);
+    await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id).eq('account_id', accountId);
   }
 
-  const persistedText =
-    messageType === 'interactive'
-      ? interactivePayload!.body
-      : messageType === 'template'
-        ? templateContentText(
-            templateRow,
-            templateBodyParams(templateParams, templateMessageParams),
-            contentText
-          )
-        : (contentText ?? null);
-
-  const { data: messageRecord, error: msgError } = await db
-    .from('messages')
-    .insert({
-      conversation_id: conversationId,
-      sender_type: 'agent',
-      content_type: messageType,
-      content_text: persistedText,
-      media_url: mediaUrl || null,
-      template_name: templateName || null,
-      interactive_payload: messageType === 'interactive' ? interactivePayload : null,
-      message_id: waMessageId,
-      provider: sendResult.provider,
-      connection_id: sendResult.connectionId,
-      provider_message_id: waMessageId,
-      status: 'sent',
-      reply_to_message_id: replyToMessageId || null,
-    })
-    .select()
-    .single();
-
-  if (msgError) {
-    console.error('[send-message] error inserting sent message:', msgError);
-    throw new SendMessageError(
-      'db_error',
-      `Message sent to Meta but failed to save to DB: ${msgError.message}`,
-      500
-    );
-  }
-
-  const lastMessageText =
-    messageType === 'interactive'
-      ? interactivePayloadPreviewText(interactivePayload!)
-      : persistedText || `[${messageType}]`;
-
-  await db
-    .from('conversations')
-    .update({
-      last_message_text: lastMessageText,
-      last_message_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', conversationId)
-    .eq('account_id', accountId);
+  const lastMessageText = messageType === 'interactive' ? interactivePayloadPreviewText(interactivePayload!) : persistedText || `[${messageType}]`;
+  await db.from('conversations').update({ last_message_text: lastMessageText, last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', conversationId).eq('account_id', accountId);
 
   try {
-    const { error: pauseErr } = await supabaseAdmin()
-      .from('flow_runs')
-      .update({
-        status: 'paused_by_agent',
-        ended_at: new Date().toISOString(),
-        end_reason: 'agent_replied',
-      })
-      .eq('account_id', accountId)
-      .eq('contact_id', contact.id)
-      .eq('status', 'active');
+    const { error: pauseErr } = await supabaseAdmin().from('flow_runs').update({ status: 'paused_by_agent', ended_at: new Date().toISOString(), end_reason: 'agent_replied' }).eq('account_id', accountId).eq('contact_id', contact.id).eq('status', 'active');
     if (pauseErr) console.error('[flows] pause-on-agent-send failed:', pauseErr.message);
   } catch (error) {
-    console.error(
-      '[flows] pause-on-agent-send threw:',
-      error instanceof Error ? error.message : error
-    );
+    console.error('[flows] pause-on-agent-send threw:', error instanceof Error ? error.message : error);
   }
 
   return { messageId: messageRecord.id, whatsappMessageId: waMessageId };
