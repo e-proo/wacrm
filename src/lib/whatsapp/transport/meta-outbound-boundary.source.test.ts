@@ -1,24 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-
-function source(path: string) {
-  return readFileSync(new URL(path, import.meta.url), 'utf8')
-}
-
-describe('OW-6 legacy Meta outbound isolation', () => {
-  it('guards automation text/template sends before Meta transport resolution', () => {
-    const text = source('../../automations/meta-send.ts')
-    const guard = text.indexOf('await assertConversationAllowsMetaOutbound')
-    const resolve = text.indexOf('await resolveMetaTransport')
-    expect(guard).toBeGreaterThan(-1)
-    expect(resolve).toBeGreaterThan(guard)
-  })
-
-  it('guards Flow sends before Meta transport resolution', () => {
-    const text = source('../../flows/meta-send.ts')
-    const guard = text.indexOf('await assertConversationAllowsMetaOutbound')
-    const resolve = text.indexOf('await resolveMetaTransport')
-    expect(guard).toBeGreaterThan(-1)
-    expect(resolve).toBeGreaterThan(guard)
-  })
+function source(path: string) { return readFileSync(new URL(path, import.meta.url), 'utf8') }
+describe('OW-11 provider-neutral outbound isolation', () => {
+  it('automation text resolves the conversation transport and keeps Meta templates Meta-only', () => { const text=source('../../automations/meta-send.ts'); expect(text).toContain('resolveConversationTransport'); expect(text).not.toContain('resolveMetaTransport'); expect(text).toContain("resolved.transport.provider!=='meta_cloud'"); expect(text).toContain('OpenWA does not use Meta approved-template policy') })
+  it('Flow sends resolve the conversation transport and fail closed for OpenWA Meta-only interactive payloads', () => { const text=source('../../flows/meta-send.ts'); expect(text).toContain('resolveConversationTransport'); expect(text).not.toContain('resolveMetaTransport'); expect(text).toContain("resolved.transport.provider === 'openwa'"); expect(text).toContain("content.kind === 'interactive' || content.kind === 'template'") })
 })
