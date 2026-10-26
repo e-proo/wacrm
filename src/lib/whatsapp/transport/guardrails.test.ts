@@ -8,7 +8,8 @@ const request = { accountId: 'acc-1', connectionId: 'conn-1', recipient: '967700
 function setup(reservation: Record<string, unknown>, sendImpl?: () => Promise<WhatsAppTransportSendResult>) {
   const rpc = vi.fn().mockResolvedValueOnce({ data: reservation, error: null }).mockResolvedValue({ data: null, error: null })
   const db = { rpc } as unknown as SupabaseClient
-  const inner: WhatsAppTransport = { provider: 'openwa', send: vi.fn(sendImpl ?? (async () => ({ provider: 'openwa', connectionId: 'conn-1', providerMessageId: 'p-1' }))) }
+  const defaultSend = async (): Promise<WhatsAppTransportSendResult> => ({ provider: 'openwa', connectionId: 'conn-1', providerMessageId: 'p-1' })
+  const inner: WhatsAppTransport = { provider: 'openwa', send: vi.fn(sendImpl ?? defaultSend) }
   return { rpc, inner, guarded: new GuardedOpenWATransport(db, inner) }
 }
 
@@ -18,7 +19,6 @@ describe('OW-10 OpenWA guardrail transport', () => {
     await expect(guarded.send(request)).rejects.toMatchObject({ code: 'connection_restricted' })
     expect(inner.send).not.toHaveBeenCalled()
   })
-
   it('reserves and records success without exposing recipient in audit arguments', async () => {
     const { guarded, rpc } = setup({ allowed: true, wait_ms: 0 })
     await guarded.send({ ...request, workload: 'broadcast' })
@@ -28,14 +28,12 @@ describe('OW-10 OpenWA guardrail transport', () => {
     expect(JSON.stringify(args)).not.toContain(request.recipient)
     expect(rpc).toHaveBeenNthCalledWith(2, 'record_openwa_guardrail_outcome', expect.objectContaining({ p_success: true }))
   })
-
   it('records provider failure and preserves the original transport error', async () => {
     const providerError = new WhatsAppTransportError('connection_restricted', 'logged out')
     const { guarded, rpc } = setup({ allowed: true, wait_ms: 0 }, async () => { throw providerError })
     await expect(guarded.send(request)).rejects.toBe(providerError)
     expect(rpc).toHaveBeenNthCalledWith(2, 'record_openwa_guardrail_outcome', expect.objectContaining({ p_success: false, p_reason: 'connection_restricted' }))
   })
-
   it('fails closed if guardrail reservation cannot be persisted', async () => {
     const db = { rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'db unavailable' } }) } as unknown as SupabaseClient
     const inner: WhatsAppTransport = { provider: 'openwa', send: vi.fn() }
