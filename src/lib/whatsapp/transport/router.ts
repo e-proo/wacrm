@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveMetaTransport } from './meta-adapter'
 import { resolveOpenWATransport } from './openwa/adapter'
+import { GuardedOpenWATransport } from './guardrails'
 import { WhatsAppTransportError, type WhatsAppProvider, type WhatsAppTransport } from './types'
 
 interface ConnectionRow { id: string; account_id: string; provider: WhatsAppProvider }
@@ -11,7 +12,10 @@ export async function resolveWhatsAppTransport(db: SupabaseClient, accountId: st
   const { data, error } = await db.from('whatsapp_connections').select('id, account_id, provider').eq('id', connectionId).eq('account_id', accountId).maybeSingle()
   if (error || !data) throw new WhatsAppTransportError('authentication_or_configuration', 'WhatsApp connection is not configured for this account', error)
   const connection = data as ConnectionRow
-  if (connection.provider === 'openwa') return resolveOpenWATransport(db, accountId, connection.id)
+  if (connection.provider === 'openwa') {
+    const resolved = await resolveOpenWATransport(db, accountId, connection.id)
+    return { connectionId: resolved.connectionId, transport: new GuardedOpenWATransport(db, resolved.transport) }
+  }
   if (connection.provider === 'meta_cloud') {
     const resolved = await resolveMetaTransport(db, accountId)
     if (resolved.connectionId !== connection.id) throw new WhatsAppTransportError('authentication_or_configuration', 'Resolved Meta connection does not match the requested WACRM connection')

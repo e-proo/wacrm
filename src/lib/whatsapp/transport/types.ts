@@ -3,6 +3,7 @@ import type { MessageTemplate } from '@/types'
 
 export type WhatsAppProvider = 'meta_cloud' | 'openwa'
 export type WhatsAppMediaKind = 'image' | 'video' | 'document' | 'audio'
+export type WhatsAppSendWorkload = 'manual' | 'automation' | 'broadcast' | 'agent' | 'api'
 
 /** Provider-neutral per-send template values. */
 export interface WhatsAppTemplateSendParams {
@@ -39,6 +40,8 @@ export interface WhatsAppTransportSendRequest {
   content: WhatsAppTransportContent
   replyToProviderMessageId?: string
   idempotencyKey?: string
+  /** Used only by provider safety policy. Business callers never choose an OpenWA engine. */
+  workload?: WhatsAppSendWorkload
 }
 
 export interface WhatsAppTransportSendResult {
