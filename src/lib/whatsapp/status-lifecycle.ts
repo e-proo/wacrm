@@ -22,6 +22,11 @@ export function isForwardStatusTransition(current: string, incoming: WhatsAppDel
   return currentLevel < 0 || incomingLevel > currentLevel
 }
 
+export function normalizeMetaStatus(raw: string): WhatsAppDeliveryStatus | null {
+  const value = raw.trim().toLowerCase()
+  return ['sent', 'delivered', 'read', 'failed'].includes(value) ? value as WhatsAppDeliveryStatus : null
+}
+
 export function normalizeOpenWAStatus(raw: string): WhatsAppDeliveryStatus | null {
   const value = raw.trim().toLowerCase().replace(/[\s_-]+/g, '.')
   if (['sent', 'server.ack', 'ack.server', 'ack'].includes(value)) return 'sent'
@@ -49,11 +54,17 @@ export function parseOpenWAStatusEvent(data: unknown): { providerMessageId: stri
 }
 
 export async function applyWhatsAppStatus(db: SupabaseClient, input: NormalizedWhatsAppStatus): Promise<'updated' | 'ignored' | 'unknown'> {
+  // Service-role access is not a tenancy boundary. Pin the supplied connection
+  // to the account before touching any message or broadcast state.
+  const { data: connection, error: connectionError } = await db.from('whatsapp_connections').select('id').eq('id', input.connectionId).eq('account_id', input.accountId).eq('provider', input.provider).maybeSingle()
+  if (connectionError) throw connectionError
+  if (!connection) return 'unknown'
+
   const { data: message, error } = await db.from('messages').select('id, conversation_id, status').eq('provider', input.provider).eq('connection_id', input.connectionId).eq('provider_message_id', input.providerMessageId).maybeSingle()
   if (error) throw error
   if (!message) return 'unknown'
   if (!isForwardStatusTransition(message.status, input.status)) return 'ignored'
-  const { error: updateError } = await db.from('messages').update({ status: input.status }).eq('id', message.id).eq('connection_id', input.connectionId).eq('provider', input.provider)
+  const { error: updateError } = await db.from('messages').update({ status: input.status }).eq('id', message.id).eq('connection_id', input.connectionId).eq('provider', input.provider).eq('provider_message_id', input.providerMessageId)
   if (updateError) throw updateError
 
   const { data: recipient, error: recipientError } = await db.from('broadcast_recipients').select('id, status').eq('connection_id', input.connectionId).eq('provider', input.provider).eq('provider_message_id', input.providerMessageId).maybeSingle()
@@ -66,7 +77,7 @@ export async function applyWhatsAppStatus(db: SupabaseClient, input: NormalizedW
     if (input.status === 'delivered') update.delivered_at = ts
     if (input.status === 'read') update.read_at = ts
     if (input.status === 'failed' && input.diagnostic) update.error_message = input.diagnostic
-    const { error: updateRecipientError } = await db.from('broadcast_recipients').update(update).eq('id', recipient.id).eq('connection_id', input.connectionId).eq('provider', input.provider)
+    const { error: updateRecipientError } = await db.from('broadcast_recipients').update(update).eq('id', recipient.id).eq('connection_id', input.connectionId).eq('provider', input.provider).eq('provider_message_id', input.providerMessageId)
     if (updateRecipientError) throw updateRecipientError
   }
   return 'updated'
