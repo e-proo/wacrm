@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { mirrorInboundMedia } from '@/lib/whatsapp/mirror-inbound-media'
+import { mirrorOpenWAInboundMedia } from '@/lib/whatsapp/transport/openwa/inbound-media'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { reopenClosedConversation } from '@/lib/conversations/reopen'
@@ -785,6 +786,25 @@ async function parseMessageContent(
     mediaId: string,
     fileName?: string | null
   ): Promise<string | null> => {
+    if (message.provider === 'openwa') {
+      if (!mirror) return null
+      const media = message.type === 'image' ? message.image : message.type === 'video' ? message.video : message.type === 'document' ? message.document : message.type === 'audio' ? message.audio : null
+      if (!media || !['image', 'video', 'document', 'audio'].includes(message.type)) return null
+      try {
+        return await mirrorOpenWAInboundMedia({
+          db: supabaseAdmin(),
+          storage: supabaseAdmin().storage,
+          accountId: mirror.accountId,
+          connectionId: message.connectionId,
+          kind: message.type as 'image' | 'video' | 'document' | 'audio',
+          media,
+          messageTimestamp: message.timestamp,
+        })
+      } catch (error) {
+        console.error('[openwa-media] inbound mirror failed', { connectionId: message.connectionId, mediaId })
+        return null
+      }
+    }
     try {
       const info = await getMediaUrl({ mediaId, accessToken })
 

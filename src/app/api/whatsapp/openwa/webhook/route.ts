@@ -62,7 +62,7 @@ export async function POST(request: Request) {
           connectionId,
           account.owner_user_id,
           '',
-          false,
+          true,
         )
       }
       await markOpenWAWebhookProcessed(db, connectionId, envelope.eventId)
