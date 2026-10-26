@@ -89,6 +89,25 @@ describe('OpenWA webhook intake', () => {
     expect(mockedResolveCredentials).not.toHaveBeenCalled()
   })
 
+  it('rejects inactive sessions before credential lookup or reservation', async () => {
+    const { db, receiptQuery } = dbFixture({
+      connection: {
+        id: 'connection-1',
+        account_id: 'account-1',
+        provider: 'openwa',
+        session_id: 'session-1',
+        instance_id: 'instance-1',
+        status: 'disconnected',
+      },
+    })
+
+    await expect(verifyAndReserveOpenWAWebhook(db as never, {
+      rawBody, signature: signature(), timestamp, nowMs,
+    })).rejects.toThrow('OpenWA session is not active')
+    expect(mockedResolveCredentials).not.toHaveBeenCalled()
+    expect(receiptQuery.insert).not.toHaveBeenCalled()
+  })
+
   it('rejects missing webhook credentials and invalid signatures', async () => {
     const { db } = dbFixture()
     mockedResolveCredentials.mockResolvedValueOnce({
