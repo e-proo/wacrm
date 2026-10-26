@@ -1,6 +1,7 @@
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils'
 import { resolveMetaTransport } from '@/lib/whatsapp/transport/meta-adapter'
+import { assertConversationAllowsMetaOutbound } from '@/lib/whatsapp/transport/meta-outbound-boundary'
 import type { WhatsAppMediaKind, WhatsAppTransportContent } from '@/lib/whatsapp/transport/types'
 import { supabaseAdmin } from './admin-client'
 
@@ -61,6 +62,8 @@ async function sendFlowContent(
   content: WhatsAppTransportContent,
 ): Promise<{ providerMessageId: string; connectionId: string; provider: 'meta_cloud'; workingPhone: string }> {
   const db = supabaseAdmin()
+  await assertConversationAllowsMetaOutbound(db, input.accountId, input.conversationId)
+
   const { data: contact, error: contactErr } = await db
     .from('contacts')
     .select('id, phone')
