@@ -78,6 +78,10 @@ export async function verifyAndReserveOpenWAWebhook(
   if (connectionError || !connection) throw new Error('Unknown OpenWA session')
 
   const scoped = connection as OpenWAWebhookConnectionRow
+  if (!['connected', 'ready'].includes(scoped.status)) {
+    throw new Error('OpenWA session is not active')
+  }
+
   const credentials = await resolveOpenWACredentials(db, scoped.account_id, scoped.id)
   if (!credentials.webhookSecret) throw new Error('OpenWA webhook secret is not configured')
 
