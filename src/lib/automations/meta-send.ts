@@ -6,6 +6,7 @@ import {
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils'
 import { resolveTemplateRow, templateContentText } from '@/lib/whatsapp/template-body'
 import { resolveMetaTransport } from '@/lib/whatsapp/transport/meta-adapter'
+import { assertConversationAllowsMetaOutbound } from '@/lib/whatsapp/transport/meta-outbound-boundary'
 import type { WhatsAppTransportContent } from '@/lib/whatsapp/transport/types'
 import { supabaseAdmin } from './admin-client'
 
@@ -53,6 +54,9 @@ interface SendInteractiveArgs {
 export async function engineSendInteractive(
   args: SendInteractiveArgs,
 ): Promise<{ whatsapp_message_id: string }> {
+  const db = supabaseAdmin()
+  await assertConversationAllowsMetaOutbound(db, args.accountId, args.conversationId)
+
   const { payload, accountId, userId, conversationId, contactId } = args
   const common = { accountId, userId, conversationId, contactId }
   if (payload.kind === 'buttons') {
@@ -83,6 +87,8 @@ async function sendViaMeta(input: SendInput): Promise<{
   local_message_id: string
 }> {
   const db = supabaseAdmin()
+  await assertConversationAllowsMetaOutbound(db, input.accountId, input.conversationId)
+
   const { data: contact, error: contactErr } = await db
     .from('contacts')
     .select('id, phone')
