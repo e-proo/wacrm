@@ -5,6 +5,7 @@ import { Loader2, LogOut, QrCode, RefreshCw, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useAuth } from '@/hooks/use-auth'
+import { useWhatsAppLabels } from './whatsapp-labels'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -24,6 +25,7 @@ interface QrState { connectionId: string; value: string; expiresAt: string }
 
 export function OpenWAConnections() {
   const { canEditSettings } = useAuth()
+  const w = useWhatsAppLabels()
   const [connections, setConnections] = useState<OpenWAConnection[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
@@ -38,10 +40,10 @@ export function OpenWAConnections() {
     try {
       const response = await fetch('/api/whatsapp/connections/openwa', { cache: 'no-store' })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.error || 'Failed to load WhatsApp Web connections')
+      if (!response.ok) throw new Error(data.error || w('loadOpenwa'))
       setConnections(data.connections ?? [])
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to load WhatsApp Web connections')
+      toast.error(error instanceof Error ? error.message : w('loadOpenwa'))
     } finally {
       setLoading(false)
     }
@@ -50,7 +52,7 @@ export function OpenWAConnections() {
   useEffect(() => { void load() }, [load])
 
   async function createConnection() {
-    if (!baseUrl.trim() || !apiKey.trim()) return toast.error('OpenWA URL and API key are required')
+    if (!baseUrl.trim() || !apiKey.trim()) return toast.error(w('required'))
     setBusy('create')
     try {
       const response = await fetch('/api/whatsapp/connections/openwa', {
@@ -58,13 +60,13 @@ export function OpenWAConnections() {
         body: JSON.stringify({ base_url: baseUrl.trim(), api_key: apiKey.trim(), display_name: displayName.trim(), engine }),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.error || 'Failed to create WhatsApp Web session')
+      if (!response.ok) throw new Error(data.error || w('createFailed'))
       setApiKey('')
-      toast.success('WhatsApp Web session created. Scan its QR code to authenticate.')
+      toast.success(w('created'))
       await load()
       await showQr(data.connection.id)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to create WhatsApp Web session')
+      toast.error(error instanceof Error ? error.message : w('createFailed'))
     } finally { setBusy(null) }
   }
 
@@ -73,11 +75,11 @@ export function OpenWAConnections() {
     try {
       const response = await fetch(`/api/whatsapp/connections/openwa/${connectionId}/qr`, { cache: 'no-store' })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.error || 'QR is not available')
+      if (!response.ok) throw new Error(data.error || w('qrUnavailable'))
       setQr({ connectionId, value: data.qr, expiresAt: data.expires_at })
     } catch (error) {
       setQr(null)
-      toast.error(error instanceof Error ? error.message : 'QR is not available')
+      toast.error(error instanceof Error ? error.message : w('qrUnavailable'))
     } finally { setBusy(null) }
   }
 
@@ -91,11 +93,11 @@ export function OpenWAConnections() {
         cache: 'no-store',
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.error || `Failed to ${actionName} session`)
+      if (!response.ok) throw new Error(data.error || w('actionFailed'))
       if (actionName === 'logout') setQr(null)
       await load()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : `Failed to ${actionName} session`)
+      toast.error(error instanceof Error ? error.message : w('actionFailed'))
     } finally { setBusy(null) }
   }
 
@@ -104,29 +106,29 @@ export function OpenWAConnections() {
 
   return <div className="mt-6 space-y-4">
     <Card>
-      <CardHeader><CardTitle>WhatsApp Web (OpenWA)</CardTitle><CardDescription>Optional self-hosted transport. Meta Cloud remains the default production provider.</CardDescription></CardHeader>
+      <CardHeader><CardTitle>WhatsApp Web (OpenWA)</CardTitle><CardDescription>{w('openwaDesc')}</CardDescription></CardHeader>
       <CardContent className="space-y-4">
-        <Alert><AlertTitle>Admin-only onboarding</AlertTitle><AlertDescription>The API key is encrypted server-side. QR material is never stored by WACRM and expires quickly.</AlertDescription></Alert>
+        <Alert><AlertTitle>{w('onboarding')}</AlertTitle><AlertDescription>{w('onboardingDesc')}</AlertDescription></Alert>
         <div className="grid gap-3 md:grid-cols-2">
-          <div><Label htmlFor="openwa-name">Name</Label><Input id="openwa-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div>
-          <div><Label htmlFor="openwa-engine">Engine</Label><select id="openwa-engine" className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm" value={engine} onChange={(e) => setEngine(e.target.value as typeof engine)}><option value="baileys">Baileys</option><option value="whatsapp-web.js">whatsapp-web.js</option></select></div>
+          <div><Label htmlFor="openwa-name">{w('name')}</Label><Input id="openwa-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div>
+          <div><Label htmlFor="openwa-engine">{w('engine')}</Label><select id="openwa-engine" className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm" value={engine} onChange={(e) => setEngine(e.target.value as typeof engine)}><option value="baileys">Baileys</option><option value="whatsapp-web.js">whatsapp-web.js</option></select></div>
           <div><Label htmlFor="openwa-url">OpenWA HTTPS URL</Label><Input id="openwa-url" placeholder="https://openwa.example.com" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></div>
-          <div><Label htmlFor="openwa-key">API key</Label><Input id="openwa-key" type="password" autoComplete="new-password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></div>
+          <div><Label htmlFor="openwa-key">{w('apiKey')}</Label><Input id="openwa-key" type="password" autoComplete="new-password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></div>
         </div>
         <Button onClick={createConnection} disabled={busy === 'create'}>{busy === 'create' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create WhatsApp Web session</Button>
       </CardContent>
     </Card>
 
     {connections.map((connection) => <Card key={connection.id}>
-      <CardHeader><CardTitle className="text-base">{connection.display_name || 'WhatsApp Web'}</CardTitle><CardDescription>Status: {connection.status}{connection.phone_identity ? ` · ${connection.phone_identity}` : ''}</CardDescription></CardHeader>
+      <CardHeader><CardTitle className="text-base">{connection.display_name || 'WhatsApp Web'}</CardTitle><CardDescription>{w('status')} {(['creating', 'waiting_qr', 'authenticating', 'ready', 'connected', 'disconnected', 'failed', 'logged_out'] as const).includes(connection.status as 'ready') ? w(connection.status as 'creating' | 'waiting_qr' | 'authenticating' | 'ready' | 'connected' | 'disconnected' | 'failed' | 'logged_out') : connection.status}{connection.phone_identity ? ` · ${connection.phone_identity}` : ''}</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => action(connection.id, 'refresh')}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
-          {['creating', 'waiting_qr', 'authenticating', 'disconnected'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => showQr(connection.id)}><QrCode className="mr-2 h-4 w-4" />Show QR</Button>}
-          {['ready', 'connected', 'disconnected', 'failed'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'reconnect')}><RotateCcw className="mr-2 h-4 w-4" />Reconnect</Button>}
-          {connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'logout')}><LogOut className="mr-2 h-4 w-4" />Log out</Button>}
+          <Button variant="outline" size="sm" onClick={() => action(connection.id, 'refresh')}><RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}</Button>
+          {['creating', 'waiting_qr', 'authenticating', 'disconnected'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => showQr(connection.id)}><QrCode className="mr-2 h-4 w-4" />{w('showQr')}</Button>}
+          {['ready', 'connected', 'disconnected', 'failed'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'reconnect')}><RotateCcw className="mr-2 h-4 w-4" />{w('reconnect')}</Button>}
+          {connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'logout')}><LogOut className="mr-2 h-4 w-4" />{w('logout')}</Button>}
         </div>
-        {qr?.connectionId === connection.id && <div className="rounded-md border p-4"><p className="mb-2 text-sm font-medium">Short-lived QR payload</p><div className="break-all rounded bg-muted p-3 font-mono text-xs" aria-label="OpenWA QR payload">{qr.value}</div><p className="mt-2 text-xs text-muted-foreground">Expires {new Date(qr.expiresAt).toLocaleTimeString()}. Refresh if your WhatsApp client cannot scan it.</p></div>}
+        {qr?.connectionId === connection.id && <div className="rounded-md border p-4"><p className="mb-2 text-sm font-medium">{w('qrPayload')}</p><div className="break-all rounded bg-muted p-3 font-mono text-xs" aria-label="OpenWA QR payload">{qr.value}</div><p className="mt-2 text-xs text-muted-foreground">{w('expires')} {new Date(qr.expiresAt).toLocaleTimeString()}. {w('qrHint')}</p></div>}
       </CardContent>
     </Card>)}
   </div>
