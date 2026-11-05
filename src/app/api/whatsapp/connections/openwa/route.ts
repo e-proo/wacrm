@@ -40,7 +40,6 @@ export async function POST(request: Request) {
     const baseUrl = typeof body.base_url === 'string' ? body.base_url.trim() : ''
     const apiKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
     const displayName = typeof body.display_name === 'string' ? body.display_name.trim() : 'WhatsApp Web'
-    const engine = body.engine === 'whatsapp-web.js' || body.engine === 'baileys' ? body.engine : undefined
     if (!baseUrl || !apiKey) throw new WhatsAppTransportError('invalid_request', 'OpenWA base URL and API key are required')
 
     const allowedHosts = (process.env.OPENWA_ALLOWED_HOSTS ?? '').split(',').map((value) => value.trim()).filter(Boolean)
