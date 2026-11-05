@@ -178,22 +178,28 @@ const labels = {
     "ar": "تعذّر تنفيذ إجراء الجلسة"
   },
   "creating": {
-    "en": "جارٍ الإنشاء"
+    "en": "Creating",
+    "ar": "جارٍ الإنشاء"
   },
   "waiting_qr": {
-    "en": "بانتظار مسح رمز QR"
+    "en": "Waiting for QR",
+    "ar": "بانتظار مسح رمز QR"
   },
   "authenticating": {
-    "en": "جارٍ المصادقة"
+    "en": "Authenticating",
+    "ar": "جارٍ المصادقة"
   },
   "ready": {
-    "en": "جاهز"
+    "en": "Ready",
+    "ar": "جاهز"
   },
   "failed": {
-    "en": "فشل"
+    "en": "Failed",
+    "ar": "فشل"
   },
   "logged_out": {
-    "en": "تم تسجيل الخروج"
+    "en": "Logged out",
+    "ar": "تم تسجيل الخروج"
   }
 } as const
 export type WhatsAppLabel = keyof typeof labels
