@@ -14,6 +14,7 @@ interface OpenWAWebhookConnectionRow {
 
 export interface OpenWAWebhookEnvelope {
   eventId: string
+  timestamp: string
   sessionId: string
   instanceId?: string
   event: string
@@ -40,16 +41,18 @@ export function parseOpenWAWebhookEnvelope(rawBody: string): OpenWAWebhookEnvelo
   }
 
   const body = value as Record<string, unknown>
-  const eventId = typeof body.eventId === 'string' ? body.eventId.trim() : ''
+  // OpenWA idempotencyKey is stable across delivery retries, unlike deliveryId.
+  const eventId = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : ''
+  const timestamp = typeof body.timestamp === 'string' ? body.timestamp.trim() : ''
   const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
   const instanceId = typeof body.instanceId === 'string' ? body.instanceId.trim() : undefined
   const event = typeof body.event === 'string' ? body.event.trim() : ''
 
-  if (!eventId || !sessionId || !event) {
-    throw new Error('OpenWA webhook requires eventId, sessionId, and event')
+  if (!eventId || !timestamp || !sessionId || !event) {
+    throw new Error('OpenWA webhook requires idempotencyKey, timestamp, sessionId, and event')
   }
 
-  return { eventId, sessionId, instanceId: instanceId || undefined, event, data: body.data }
+  return { eventId, timestamp, sessionId, instanceId: instanceId || undefined, event, data: body.data }
 }
 
 export async function verifyAndReserveOpenWAWebhook(
@@ -57,7 +60,6 @@ export async function verifyAndReserveOpenWAWebhook(
   input: {
     rawBody: string
     signature: string | null
-    timestamp: string | null
     nowMs?: number
   },
 ): Promise<ReservedOpenWAWebhook> {
@@ -78,7 +80,8 @@ export async function verifyAndReserveOpenWAWebhook(
   if (connectionError || !connection) throw new Error('Unknown OpenWA session')
 
   const scoped = connection as OpenWAWebhookConnectionRow
-  if (!['connected', 'ready'].includes(scoped.status)) {
+  const lifecycleEvent = ['session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'].includes(envelope.event)
+  if (!['connected', 'ready'].includes(scoped.status) && !lifecycleEvent) {
     throw new Error('OpenWA session is not active')
   }
 
@@ -88,7 +91,7 @@ export async function verifyAndReserveOpenWAWebhook(
   if (!verifyOpenWAWebhookSignature({
     rawBody: input.rawBody,
     signature: input.signature,
-    timestamp: input.timestamp,
+    timestamp: envelope.timestamp,
     secret: credentials.webhookSecret,
     nowMs: input.nowMs,
   })) {
