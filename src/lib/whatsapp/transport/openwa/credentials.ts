@@ -88,6 +88,7 @@ export async function resolveOpenWAClient(
       baseUrl: credentials.baseUrl,
       apiKey: credentials.apiKey,
       ...options,
+      allowedHosts: options.allowedHosts ?? (process.env.OPENWA_ALLOWED_HOSTS ?? '').split(',').map((host) => host.trim()).filter(Boolean),
     }),
   }
 }
