@@ -18,6 +18,7 @@ describe('OpenWA session lifecycle', () => {
     expect(canApplyOpenWAStateTransition('restricted', 'ready')).toBe(false)
     expect(canApplyOpenWAStateTransition('logged_out', 'reconnecting')).toBe(false)
     expect(canApplyOpenWAStateTransition('ready', 'reconnecting')).toBe(true)
+    expect(canApplyOpenWAStateTransition('failed', 'authenticating')).toBe(true)
     expect(canApplyOpenWAStateTransition('reconnecting', 'ready')).toBe(true)
   })
 })
