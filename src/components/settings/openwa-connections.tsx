@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Image from 'next/image'
-import { Loader2, LogOut, QrCode, RefreshCw, RotateCcw } from 'lucide-react'
+import { Loader2, LogOut, QrCode, RefreshCw, RotateCcw, Webhook } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useAuth } from '@/hooks/use-auth'
@@ -101,18 +101,19 @@ export function OpenWAConnections() {
     } finally { setBusy(null) }
   }
 
-  async function action(connectionId: string, actionName: 'refresh' | 'reconnect' | 'logout') {
+  async function action(connectionId: string, actionName: 'refresh' | 'reconnect' | 'logout' | 'configure_webhook') {
     setBusy(`${actionName}:${connectionId}`)
     try {
       const response = await fetch(`/api/whatsapp/connections/openwa/${connectionId}`, {
-        method: actionName === 'logout' ? 'DELETE' : actionName === 'reconnect' ? 'POST' : 'GET',
-        headers: actionName === 'reconnect' ? { 'Content-Type': 'application/json' } : undefined,
-        body: actionName === 'reconnect' ? JSON.stringify({ action: 'reconnect' }) : undefined,
+        method: actionName === 'logout' ? 'DELETE' : actionName === 'refresh' ? 'GET' : 'POST',
+        headers: actionName !== 'refresh' && actionName !== 'logout' ? { 'Content-Type': 'application/json' } : undefined,
+        body: actionName !== 'refresh' && actionName !== 'logout' ? JSON.stringify({ action: actionName }) : undefined,
         cache: 'no-store',
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || w('actionFailed'))
       if (actionName === 'logout') setQr(null)
+      if (actionName === 'configure_webhook') toast.success(w('webhookConfigured'))
       await load()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : w('actionFailed'))
@@ -137,12 +138,13 @@ export function OpenWAConnections() {
     </Card>
 
     {connections.map((connection) => <Card key={connection.id}>
-      <CardHeader><CardTitle className="text-base">{connection.display_name || 'WhatsApp Web'}</CardTitle><CardDescription>{w('status')} {(['creating', 'waiting_qr', 'authenticating', 'ready', 'connected', 'disconnected', 'failed', 'logged_out'] as const).includes(connection.status as 'ready') ? w(connection.status as 'creating' | 'waiting_qr' | 'authenticating' | 'ready' | 'connected' | 'disconnected' | 'failed' | 'logged_out') : connection.status}{connection.phone_identity ? ` · ${connection.phone_identity}` : ''}</CardDescription></CardHeader>
+      <CardHeader><CardTitle className="text-base">{connection.display_name || 'WhatsApp Web'}</CardTitle><CardDescription>{w('status')} {(['creating', 'waiting_qr', 'authenticating', 'ready', 'connected', 'disconnected', 'reconnecting', 'restricted', 'failed', 'logged_out'] as const).includes(connection.status as 'ready') ? w(connection.status as 'creating' | 'waiting_qr' | 'authenticating' | 'ready' | 'connected' | 'disconnected' | 'reconnecting' | 'restricted' | 'failed' | 'logged_out') : connection.status}{connection.phone_identity ? ` · ${connection.phone_identity}` : ''}</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => action(connection.id, 'refresh')}><RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}</Button>
           {['creating', 'waiting_qr', 'authenticating', 'disconnected'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => showQr(connection.id)}><QrCode className="mr-2 h-4 w-4" />{w('showQr')}</Button>}
           {['ready', 'connected', 'disconnected', 'failed'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'reconnect')}><RotateCcw className="mr-2 h-4 w-4" />{w('reconnect')}</Button>}
+          {connection.session_id && connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'configure_webhook')} disabled={busy === `configure_webhook:${connection.id}`}><Webhook className="mr-2 h-4 w-4" />{w('configureWebhook')}</Button>}
           {connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'logout')}><LogOut className="mr-2 h-4 w-4" />{w('logout')}</Button>}
         </div>
         {qr?.connectionId === connection.id && <div className="rounded-md border p-4">
