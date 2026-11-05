@@ -28,6 +28,10 @@ interface OpenWAConnectionRow {
 }
 
 const STATE_ALIASES: Record<string, OpenWAConnectionState> = {
+  created: 'creating',
+  initializing: 'authenticating',
+  action_required: 'failed',
+  stopped: 'disconnected',
   qr: 'waiting_qr',
   qr_ready: 'waiting_qr',
   waiting_for_qr: 'waiting_qr',
