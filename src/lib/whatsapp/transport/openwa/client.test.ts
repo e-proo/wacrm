@@ -130,6 +130,37 @@ describe('OpenWA upstream REST contract', () => {
     await expect(missingId.sendText({ sessionId: 's1', to: 'bad@@', text: 'x' })).rejects.toMatchObject({ code: 'invalid_request' })
   })
 
+  it('treats 409 and 5xx send responses as ambiguous rather than retryable', async () => {
+    for (const status of [409, 500, 503]) {
+      const client = new OpenWAClient({
+        baseUrl: 'https://openwa.example.com', apiKey: 'key',
+        fetchImpl: vi.fn(async () => response(status, { code: 'IDEMPOTENCY_OUTCOME_UNKNOWN' })) as unknown as typeof fetch,
+      })
+      await expect(client.sendText({ sessionId: 's1', to: '123', text: 'hi', idempotencyKey: 'stable-key' }))
+        .rejects.toMatchObject({ code: 'ambiguous_outcome' })
+    }
+  })
+
+  it('registers or updates one signed webhook using upstream endpoints', async () => {
+    const calls: Array<{ path: string; method?: string; body?: Record<string, unknown> }> = []
+    const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const path = (args[0] as URL).pathname
+      const method = args[1]?.method
+      const body = args[1]?.body ? JSON.parse(String(args[1]?.body)) : undefined
+      calls.push({ path, method, body })
+      if (method === 'GET') return response(200, [{ id: 'hook-1', url: 'https://wacrm.example.com/api/whatsapp/openwa/webhook' }])
+      return response(200, { id: 'hook-1' })
+    }) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+    await client.configureWebhook('s1', 'https://wacrm.example.com/api/whatsapp/openwa/webhook', '1234567890123456')
+    expect(calls[0].path).toBe('/api/sessions/s1/webhooks')
+    expect(calls[1].path).toBe('/api/sessions/s1/webhooks/hook-1')
+    expect(calls[1].method).toBe('PUT')
+    expect(calls[1].body).toMatchObject({ secret: '1234567890123456', active: true })
+    await expect(client.configureWebhook('s1', 'https://other.example.com/unsafe', '1234567890123456'))
+      .rejects.toMatchObject({ code: 'invalid_request' })
+  })
+
   it('recursively redacts secrets and QR material', () => {
     expect(redactOpenWAValue({ apiKey: 'a', qr: 'c', signedUrl: 'd', nested: { webhook_secret: 'b', value: 1 } })).toEqual({
       apiKey: '[REDACTED]', qr: '[REDACTED]', signedUrl: '[REDACTED]', nested: { webhook_secret: '[REDACTED]', value: 1 },
