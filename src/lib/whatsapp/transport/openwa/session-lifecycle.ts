@@ -49,11 +49,11 @@ const STATE_ALIASES: Record<string, OpenWAConnectionState> = {
 const ALLOWED_TRANSITIONS: Record<OpenWAConnectionState, ReadonlySet<OpenWAConnectionState>> = {
   creating: new Set(['creating', 'waiting_qr', 'authenticating', 'connected', 'ready', 'restricted', 'failed', 'logged_out']),
   waiting_qr: new Set(['waiting_qr', 'authenticating', 'connected', 'ready', 'restricted', 'failed', 'logged_out']),
-  authenticating: new Set(['authenticating', 'connected', 'ready', 'disconnected', 'reconnecting', 'restricted', 'failed', 'logged_out']),
+  authenticating: new Set(['authenticating', 'waiting_qr', 'connected', 'ready', 'disconnected', 'reconnecting', 'restricted', 'failed', 'logged_out']),
   connected: new Set(['connected', 'ready', 'disconnected', 'reconnecting', 'restricted', 'failed', 'logged_out']),
   ready: new Set(['ready', 'disconnected', 'reconnecting', 'restricted', 'failed', 'logged_out']),
   disconnected: new Set(['disconnected', 'reconnecting', 'waiting_qr', 'authenticating', 'connected', 'ready', 'restricted', 'failed', 'logged_out']),
-  reconnecting: new Set(['reconnecting', 'connected', 'ready', 'disconnected', 'restricted', 'failed', 'logged_out']),
+  reconnecting: new Set(['reconnecting', 'waiting_qr', 'authenticating', 'connected', 'ready', 'disconnected', 'restricted', 'failed', 'logged_out']),
   restricted: new Set(['restricted', 'logged_out']),
   logged_out: new Set(['logged_out']),
   failed: new Set(['failed', 'reconnecting', 'waiting_qr', 'authenticating', 'logged_out']),
