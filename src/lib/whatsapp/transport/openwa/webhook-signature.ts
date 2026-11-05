@@ -1,5 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
+// OpenWA signs exactly the serialized JSON body, without a timestamp prefix.
+// The dispatch timestamp is part of that signed body and bounds replay age.
+// Durable idempotency-key reservations reject duplicate deliveries separately.
 const DEFAULT_TOLERANCE_SECONDS = 5 * 60
 
 export interface OpenWAWebhookVerificationInput {
@@ -19,10 +22,10 @@ function parseSignature(value: string | null): Buffer | null {
 }
 
 function parseTimestamp(value: string | null): number | null {
-  if (!value || !/^\d+$/.test(value)) return null
-  const seconds = Number(value)
-  if (!Number.isSafeInteger(seconds) || seconds <= 0) return null
-  return seconds
+  if (!value) return null
+  const parsedMs = Date.parse(value)
+  if (!Number.isFinite(parsedMs)) return null
+  return Math.floor(parsedMs / 1000)
 }
 
 export function verifyOpenWAWebhookSignature({
@@ -34,20 +37,13 @@ export function verifyOpenWAWebhookSignature({
   toleranceSeconds = DEFAULT_TOLERANCE_SECONDS,
 }: OpenWAWebhookVerificationInput): boolean {
   if (!secret || toleranceSeconds <= 0) return false
-
   const timestampSeconds = parseTimestamp(timestamp)
   const provided = parseSignature(signature)
-  if (!timestampSeconds || !provided) return false
+  if (timestampSeconds === null || !provided) return false
 
   const nowSeconds = Math.floor(nowMs / 1000)
   if (Math.abs(nowSeconds - timestampSeconds) > toleranceSeconds) return false
 
-  // The signed payload is versioned and unambiguous: timestamp + literal dot +
-  // exact raw request body. The OpenWA deployment must be configured to emit
-  // the same contract before this endpoint is enabled.
-  const expected = createHmac('sha256', secret)
-    .update(`${timestampSeconds}.${rawBody}`, 'utf8')
-    .digest()
-
+  const expected = createHmac('sha256', secret).update(rawBody, 'utf8').digest()
   return provided.length === expected.length && timingSafeEqual(provided, expected)
 }
