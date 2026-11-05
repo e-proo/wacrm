@@ -177,6 +177,14 @@ const labels = {
     "en": "QR is not available",
     "ar": "رمز QR غير متاح"
   },
+  "configureWebhook": {
+    "en": "Enable signed webhooks",
+    "ar": "تفعيل Webhooks الموقّعة"
+  },
+  "webhookConfigured": {
+    "en": "OpenWA webhook configured successfully",
+    "ar": "تم إعداد Webhook الخاص بـOpenWA بنجاح"
+  },
   "actionFailed": {
     "en": "Session action failed",
     "ar": "تعذّر تنفيذ إجراء الجلسة"
