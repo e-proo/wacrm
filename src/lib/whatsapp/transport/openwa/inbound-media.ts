@@ -18,7 +18,8 @@ export async function mirrorOpenWAInboundMedia(args: { db: SupabaseClient; stora
   return mirrorInboundMedia({
     storage, accountId, mediaId: media.id, downloadUrl: `openwa://${connectionId}/${encodeURIComponent(media.id)}`, accessToken: '', mimeType: mime, fileSize: media.file_size, fileName: media.filename, messageTimestamp,
     download: async () => {
-      const downloaded = await client.downloadMedia(connection.session_id, media.id, `media:${media.id}`)
+      if (!media.chat_id) throw new WhatsAppTransportError('invalid_request', 'OpenWA media is missing the original chat ID')
+      const downloaded = await client.downloadMedia(connection.session_id, media.id, media.chat_id, `media:${media.id}`)
       if (downloaded.contentLength !== null && downloaded.contentLength > MEDIA_MAX_BYTES) throw new Error('OpenWA media exceeds WACRM storage limit')
       return { buffer: downloaded.buffer, contentType: downloaded.contentType }
     },
