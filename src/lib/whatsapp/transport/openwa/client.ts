@@ -82,6 +82,29 @@ export class OpenWAClient {
     }
     return { qr }
   }
+  async configureWebhook(sessionId: string, url: string, secret: string, correlationId?: string): Promise<void> {
+    if (!secret || secret.length < 16) throw new WhatsAppTransportError('invalid_request', 'OpenWA webhook signing secret is too short')
+    // The webhook URL is deployment-controlled, not supplied by an agent or end user.
+    const endpoint = validateOpenWABaseUrl(url)
+    if (endpoint.pathname !== '/api/whatsapp/openwa/webhook') {
+      throw new WhatsAppTransportError('invalid_request', 'OpenWA webhook URL must target the WACRM OpenWA intake route')
+    }
+    const prefix = `/api/sessions/${encodeURIComponent(sessionId)}/webhooks`
+    const existing = await this.request<Array<{ id: string; url: string }>>(prefix, { correlationId })
+    if (!Array.isArray(existing)) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA returned an invalid webhook list')
+    const matching = existing.find((item) => item.url === url)
+    const payload = {
+      url, secret, events: ['message.received', 'message.ack', 'message.failed', 'message.receipt',
+        'session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'],
+    }
+    if (matching) {
+      await this.request(`${prefix}/${encodeURIComponent(matching.id)}`, {
+        method: 'PUT', correlationId, body: { ...payload, active: true },
+      })
+    } else {
+      await this.request(prefix, { method: 'POST', correlationId, body: payload })
+    }
+  }
   async startSession(sessionId: string, correlationId?: string): Promise<OpenWASessionStatus> {
     const response = await this.request<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(sessionId)}/start`, { method: 'POST', correlationId })
     return sessionFromGateway(response)
