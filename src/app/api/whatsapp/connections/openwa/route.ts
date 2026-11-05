@@ -45,17 +45,13 @@ export async function POST(request: Request) {
 
     const allowedHosts = (process.env.OPENWA_ALLOWED_HOSTS ?? '').split(',').map((value) => value.trim()).filter(Boolean)
     const validatedUrl = validateOpenWABaseUrl(baseUrl, allowedHosts)
-    const sessionId = randomUUID()
+    // The real OpenWA gateway generates its own session ID. The name must be
+    // deterministic for manual reconciliation if a create request times out.
     const connectionId = randomUUID()
-
-    const { data: duplicate } = await adminDb
-      .from('whatsapp_connections')
-      .select('id')
-      .eq('account_id', accountId)
-      .eq('provider', 'openwa')
-      .eq('session_id', sessionId)
-      .maybeSingle()
-    if (duplicate) throw new WhatsAppTransportError('connection_restricted', 'OpenWA session already exists')
+    const sessionName = `wacrm-${connectionId.replace(/-/g, '')}`
+    if (body.engine !== undefined) {
+      throw new WhatsAppTransportError('invalid_request', 'OpenWA engine is selected in the gateway deployment, not per session')
+    }
 
     const { error: connectionError } = await adminDb.from('whatsapp_connections').insert({
       id: connectionId,
@@ -63,11 +59,12 @@ export async function POST(request: Request) {
       provider: 'openwa',
       display_name: displayName || 'WhatsApp Web',
       status: 'creating',
-      session_id: sessionId,
-      engine: engine ?? null,
+      session_id: null,
+      engine: null,
     })
     if (connectionError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to create OpenWA connection', connectionError)
 
+    let remoteCreateAttempted = false
     try {
       const { error: credentialError } = await adminDb.from('whatsapp_connection_credentials').insert({
         connection_id: connectionId,
@@ -79,19 +76,35 @@ export async function POST(request: Request) {
       if (credentialError) throw credentialError
 
       const { client } = await resolveOpenWAClient(adminDb, accountId, connectionId, { allowedHosts })
-      const created = await client.createSession({ sessionId, engine, correlationId: connectionId, idempotencyKey: connectionId })
-      const status = normalizeOpenWAConnectionState(created.status)
+      remoteCreateAttempted = true
+      const created = await client.createSession({ name: sessionName, correlationId: connectionId })
+      const { error: createdUpdateError } = await adminDb
+        .from('whatsapp_connections')
+        .update({ session_id: created.sessionId, status: normalizeOpenWAConnectionState(created.status), phone_identity: created.phoneIdentity ?? null })
+        .eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+      if (createdUpdateError) throw createdUpdateError
+
+      // OpenWA returns "created" after POST /sessions; an explicit start is
+      // necessary before it will issue a QR code.
+      const started = await client.startSession(created.sessionId!, connectionId)
+      const status = normalizeOpenWAConnectionState(started.status)
       const { error: updateError } = await adminDb
         .from('whatsapp_connections')
-        .update({ status, phone_identity: created.phoneIdentity ?? null })
-        .eq('id', connectionId)
-        .eq('account_id', accountId)
-        .eq('provider', 'openwa')
+        .update({ status, phone_identity: started.phoneIdentity ?? null })
+        .eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
       if (updateError) throw updateError
 
-      return NextResponse.json({ connection: { id: connectionId, session_id: sessionId, status, engine: engine ?? null } }, { status: 201, headers: noStore })
+      return NextResponse.json({ connection: { id: connectionId, session_id: created.sessionId, status, engine: null } }, { status: 201, headers: noStore })
     } catch (error) {
-      await adminDb.from('whatsapp_connections').delete().eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+      if (remoteCreateAttempted) {
+        // A timeout can mean OpenWA created the session. Keep the scoped
+        // record and credential for reconciliation; never blindly re-create.
+        await adminDb.from('whatsapp_connections').update({ status: 'failed' })
+          .eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+      } else {
+        await adminDb.from('whatsapp_connections').delete()
+          .eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+      }
       throw error
     }
   } catch (error) {
