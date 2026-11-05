@@ -56,7 +56,7 @@ const ALLOWED_TRANSITIONS: Record<OpenWAConnectionState, ReadonlySet<OpenWAConne
   reconnecting: new Set(['reconnecting', 'connected', 'ready', 'disconnected', 'restricted', 'failed', 'logged_out']),
   restricted: new Set(['restricted', 'logged_out']),
   logged_out: new Set(['logged_out']),
-  failed: new Set(['failed', 'reconnecting', 'waiting_qr', 'logged_out']),
+  failed: new Set(['failed', 'reconnecting', 'waiting_qr', 'authenticating', 'logged_out']),
 }
 
 export function normalizeOpenWAConnectionState(value: unknown): OpenWAConnectionState {
