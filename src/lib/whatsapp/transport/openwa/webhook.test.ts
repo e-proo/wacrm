@@ -7,13 +7,13 @@ import { parseOpenWAWebhookEnvelope, verifyAndReserveOpenWAWebhook } from './web
 vi.mock('./credentials', () => ({ resolveOpenWACredentials: vi.fn() }))
 
 const mockedResolveCredentials = vi.mocked(resolveOpenWACredentials)
-const rawBody = JSON.stringify({ eventId: 'evt-1', sessionId: 'session-1', instanceId: 'instance-1', event: 'message', data: { text: 'hello' } })
-const timestamp = '1700000000'
-const nowMs = 1700000000 * 1000
+const rawBody = JSON.stringify({ idempotencyKey: 'evt-1', deliveryId: 'attempt-1', timestamp: '2026-10-26T18:00:00.000Z', sessionId: 'session-1', instanceId: 'instance-1', event: 'message', data: { text: 'hello' } })
+const timestamp = '2026-10-26T18:00:00.000Z'
+const nowMs = Date.parse(timestamp)
 const webhookSecret = 'webhook-secret'
 
 function signature() {
-  return createHmac('sha256', webhookSecret).update(`${timestamp}.${rawBody}`, 'utf8').digest('hex')
+  return createHmac('sha256', webhookSecret).update(rawBody, 'utf8').digest('hex')
 }
 
 function dbFixture(options: { connection?: unknown; connectionError?: unknown; insertError?: unknown } = {}) {
@@ -62,13 +62,13 @@ describe('OpenWA webhook intake', () => {
       eventId: 'evt-1', sessionId: 'session-1', instanceId: 'instance-1', event: 'message',
     })
     expect(() => parseOpenWAWebhookEnvelope('{')).toThrow('Invalid OpenWA webhook JSON')
-    expect(() => parseOpenWAWebhookEnvelope('{}')).toThrow('requires eventId, sessionId, and event')
+    expect(() => parseOpenWAWebhookEnvelope('{}')).toThrow('requires idempotencyKey, timestamp, sessionId, and event')
   })
 
   it('resolves session identity first, verifies signature, and reserves the event', async () => {
     const { db, connectionQuery, receiptQuery } = dbFixture()
     const result = await verifyAndReserveOpenWAWebhook(db as never, {
-      rawBody, signature: signature(), timestamp, nowMs,
+      rawBody, signature: signature(), nowMs,
     })
 
     expect(connectionQuery.eq).toHaveBeenCalledWith('provider', 'openwa')
@@ -84,7 +84,7 @@ describe('OpenWA webhook intake', () => {
   it('rejects unknown sessions before accepting an event', async () => {
     const { db } = dbFixture({ connection: null })
     await expect(verifyAndReserveOpenWAWebhook(db as never, {
-      rawBody, signature: signature(), timestamp, nowMs,
+      rawBody, signature: signature(), nowMs,
     })).rejects.toThrow('Unknown OpenWA session')
     expect(mockedResolveCredentials).not.toHaveBeenCalled()
   })
@@ -102,7 +102,7 @@ describe('OpenWA webhook intake', () => {
     })
 
     await expect(verifyAndReserveOpenWAWebhook(db as never, {
-      rawBody, signature: signature(), timestamp, nowMs,
+      rawBody, signature: signature(), nowMs,
     })).rejects.toThrow('OpenWA session is not active')
     expect(mockedResolveCredentials).not.toHaveBeenCalled()
     expect(receiptQuery.insert).not.toHaveBeenCalled()
@@ -114,21 +114,21 @@ describe('OpenWA webhook intake', () => {
       accountId: 'account-1', connectionId: 'connection-1', baseUrl: 'https://openwa.example.com', apiKey: 'api-key',
     })
     await expect(verifyAndReserveOpenWAWebhook(db as never, {
-      rawBody, signature: signature(), timestamp, nowMs,
+      rawBody, signature: signature(), nowMs,
     })).rejects.toThrow('webhook secret is not configured')
 
     mockedResolveCredentials.mockResolvedValueOnce({
       accountId: 'account-1', connectionId: 'connection-1', baseUrl: 'https://openwa.example.com', apiKey: 'api-key', webhookSecret,
     })
     await expect(verifyAndReserveOpenWAWebhook(db as never, {
-      rawBody, signature: '0'.repeat(64), timestamp, nowMs,
+      rawBody, signature: '0'.repeat(64), nowMs,
     })).rejects.toThrow('Invalid OpenWA webhook signature')
   })
 
   it('treats the receipt unique constraint as an idempotent duplicate', async () => {
     const { db } = dbFixture({ insertError: { code: '23505' } })
     const result = await verifyAndReserveOpenWAWebhook(db as never, {
-      rawBody, signature: signature(), timestamp, nowMs,
+      rawBody, signature: signature(), nowMs,
     })
     expect(result.duplicate).toBe(true)
   })
@@ -136,7 +136,7 @@ describe('OpenWA webhook intake', () => {
   it('fails closed when durable reservation cannot be written', async () => {
     const { db } = dbFixture({ insertError: { code: 'XX000' } })
     await expect(verifyAndReserveOpenWAWebhook(db as never, {
-      rawBody, signature: signature(), timestamp, nowMs,
+      rawBody, signature: signature(), nowMs,
     })).rejects.toThrow('receipt could not be reserved')
   })
 })
