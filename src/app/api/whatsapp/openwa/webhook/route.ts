@@ -5,21 +5,24 @@ import { normalizeOpenWAInboundMessage } from '@/lib/whatsapp/inbound-normalizat
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
 import { applyWhatsAppStatus, parseOpenWAStatusEvent } from '@/lib/whatsapp/status-lifecycle'
 import { markOpenWAWebhookProcessed, verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
+import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 
 export const maxDuration = 60
 function adminDb() { const url = process.env.NEXT_PUBLIC_SUPABASE_URL; const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; if (!url || !serviceKey) throw new Error('Server database credentials are not configured'); return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } }) }
 
 export async function POST(request: Request) {
-  const rawBody = await request.text(); const signature = request.headers.get('x-openwa-signature'); const timestamp = request.headers.get('x-openwa-timestamp')
+  const rawBody = await request.text(); const signature = request.headers.get('x-openwa-signature')
   let reservation
-  try { reservation = await verifyAndReserveOpenWAWebhook(adminDb(), { rawBody, signature, timestamp }) } catch (error) { const message = error instanceof Error ? error.message : 'Invalid OpenWA webhook'; const status = message.includes('signature') ? 401 : message.includes('Unknown') ? 404 : 400; return NextResponse.json({ error: message }, { status }) }
+  try { reservation = await verifyAndReserveOpenWAWebhook(adminDb(), { rawBody, signature }) } catch (error) { const message = error instanceof Error ? error.message : 'Invalid OpenWA webhook'; const status = message.includes('signature') ? 401 : message.includes('Unknown') ? 404 : 400; return NextResponse.json({ error: message }, { status }) }
   if (reservation.duplicate) return NextResponse.json({ ok: true, duplicate: true })
   const { accountId, connectionId, envelope } = reservation
   after(async () => {
     try {
       const db = adminDb()
       const event = envelope.event.toLowerCase().replace(/[\s_-]+/g, '.')
-      if (['status', 'message.status', 'message.ack', 'ack', 'delivery', 'receipt'].includes(event)) {
+      if (['session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'].includes(event)) {
+        await refreshOpenWAConnectionStatus(db, accountId, connectionId)
+      } else if (['status', 'message.status', 'message.ack', 'message.receipt', 'message.failed', 'ack', 'delivery', 'receipt'].includes(event)) {
         const status = parseOpenWAStatusEvent(envelope.data)
         if (status) await applyWhatsAppStatus(db, { provider: 'openwa', accountId, connectionId, ...status })
       } else {
