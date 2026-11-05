@@ -4,6 +4,7 @@ export type InboundWhatsAppProvider = 'meta_cloud' | 'openwa'
 
 export interface NormalizedInboundMedia {
   id: string
+  chat_id?: string
   mime_type: string
   caption?: string
   filename?: string
@@ -102,19 +103,22 @@ function normalizeOpenWAMedia(message: Record<string, unknown>, kind: 'image' | 
     stringValue(nested?.mediaId) ??
     stringValue(nested?.media_id) ??
     stringValue(message.mediaId) ??
-    stringValue(message.media_id)
+    stringValue(message.media_id) ??
+    stringValue(message.id)
   if (!id) return null
   const mimeType =
     stringValue(nested?.mime_type) ??
     stringValue(nested?.mimeType) ??
+    stringValue(nested?.mimetype) ??
     stringValue(message.mime_type) ??
     stringValue(message.mimeType) ??
     'application/octet-stream'
   const caption = stringValue(nested?.caption) ?? stringValue(message.caption)
   const filename = stringValue(nested?.filename) ?? stringValue(nested?.fileName) ?? stringValue(message.filename)
-  const fileSize = numberValue(nested?.file_size ?? nested?.fileSize ?? message.file_size ?? message.fileSize)
+  const fileSize = numberValue(nested?.file_size ?? nested?.fileSize ?? nested?.sizeBytes ?? message.file_size ?? message.fileSize)
   return {
     id,
+    ...(stringValue(message.chatId) ? { chat_id: stringValue(message.chatId) } : {}),
     mime_type: mimeType,
     ...(caption ? { caption } : {}),
     ...(filename ? { filename } : {}),
@@ -135,7 +139,8 @@ export function normalizeOpenWAInboundMessage(
   const message = nested ?? data
 
   const providerMessageId = stringValue(message.id) ?? stringValue(message.messageId) ?? stringValue(message.message_id) ?? envelope.eventId
-  const from = stringValue(message.from) ?? stringValue(message.sender) ?? stringValue(message.senderId) ?? stringValue(message.sender_id)
+  const rawFrom = stringValue(message.senderPhone) ?? stringValue(message.from) ?? stringValue(message.sender) ?? stringValue(message.senderId) ?? stringValue(message.sender_id)
+  const from = rawFrom?.endsWith('@c.us') ? rawFrom.slice(0, -5) : rawFrom
   if (!from) throw new Error('OpenWA inbound sender is missing')
 
   const rawText = message.text
@@ -149,7 +154,8 @@ export function normalizeOpenWAInboundMessage(
   const type = rawType === 'reaction' || reactionTarget ? 'reaction' : mediaKind ?? 'text'
 
   const replyRecord = record(message.reply)
-  const replyTo = stringValue(message.replyToMessageId) ?? stringValue(message.reply_to_message_id) ?? stringValue(replyRecord?.messageId) ?? stringValue(replyRecord?.id)
+  const quotedMessage = record(message.quotedMessage)
+  const replyTo = stringValue(quotedMessage?.id) ?? stringValue(message.replyToMessageId) ?? stringValue(message.reply_to_message_id) ?? stringValue(replyRecord?.messageId) ?? stringValue(replyRecord?.id)
   const senderName = stringValue(message.senderName) ?? stringValue(message.pushName) ?? stringValue(message.profileName) ?? from
 
   const normalized: NormalizedInboundMessage = {
