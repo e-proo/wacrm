@@ -27,6 +27,15 @@ describe('provider-neutral inbound normalization', () => {
     expect(reaction?.message.reaction).toEqual({ message_id: 'target', emoji: '👍' }); expect(normalizeOpenWAInboundMessage({ eventId: 'evt-status', sessionId: 's', event: 'status', data: {} }, 'c')).toBeNull()
   })
   it('fails closed when an inbound OpenWA message has no sender', () => { expect(() => normalizeOpenWAInboundMessage({ eventId: 'evt-bad', sessionId: 's', event: 'message.received', data: { id: 'x', text: 'hello' } }, 'c')).toThrow('sender') })
-  it('fails closed when an OpenWA media message has no provider media identity', () => { expect(() => normalizeOpenWAInboundMessage({ eventId: 'evt-bad-media', sessionId: 's', event: 'message.received', data: { id: 'x', from: '123', type: 'image', image: { mimeType: 'image/jpeg' } } }, 'c')).toThrow('media identity') })
+  it('maps real OpenWA message media to its message and chat ID without persisting inline bytes', () => {
+    const normalized = normalizeOpenWAInboundMessage({
+      eventId: 'evt-media', sessionId: 's', event: 'message.received',
+      data: { id: 'm-123', from: '967700000001@c.us', chatId: '967700000001@c.us',
+        type: 'image', media: { mimetype: 'image/jpeg', data: 'inline-secret', sizeBytes: 1024 } },
+    }, 'c')
+    expect(normalized?.message.from).toBe('967700000001')
+    expect(normalized?.message.image).toMatchObject({ id: 'm-123', chat_id: '967700000001@c.us', mime_type: 'image/jpeg', file_size: 1024 })
+    expect(JSON.stringify(normalized)).not.toContain('inline-secret')
+  })
   it('normalizes missing timestamps without leaking provider-specific shape', () => { vi.spyOn(Date, 'now').mockReturnValue(1_792_950_000_000); const normalized = normalizeOpenWAInboundMessage({ eventId: 'evt-time', sessionId: 's', event: 'message.received', data: { id: 'x', from: '123', text: 'hello' } }, 'c'); expect(normalized?.message.timestamp).toBe('1792950000'); vi.restoreAllMocks() })
 })
