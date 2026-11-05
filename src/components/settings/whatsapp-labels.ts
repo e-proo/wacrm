@@ -113,6 +113,10 @@ const labels = {
     "en": "Engine",
     "ar": "المحرّك"
   },
+  "baseUrl": {
+    "en": "OpenWA HTTPS URL (ngrok)",
+    "ar": "رابط OpenWA الآمن (ngrok)"
+  },
   "apiKey": {
     "en": "API key",
     "ar": "مفتاح API"
@@ -196,6 +200,14 @@ const labels = {
   "failed": {
     "en": "Failed",
     "ar": "فشل"
+  },
+  "reconnecting": {
+    "en": "Reconnecting",
+    "ar": "جارٍ إعادة الاتصال"
+  },
+  "restricted": {
+    "en": "Restricted",
+    "ar": "مقيّد"
   },
   "logged_out": {
     "en": "Logged out",
