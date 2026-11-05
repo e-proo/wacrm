@@ -4,6 +4,9 @@ import { canApplyOpenWAStateTransition, normalizeOpenWAConnectionState } from '.
 
 describe('OpenWA session lifecycle', () => {
   it('normalizes provider-specific status aliases', () => {
+    expect(normalizeOpenWAConnectionState('created')).toBe('creating')
+    expect(normalizeOpenWAConnectionState('initializing')).toBe('authenticating')
+    expect(normalizeOpenWAConnectionState('action_required')).toBe('failed')
     expect(normalizeOpenWAConnectionState('qr_ready')).toBe('waiting_qr')
     expect(normalizeOpenWAConnectionState('authenticated')).toBe('connected')
     expect(normalizeOpenWAConnectionState('online')).toBe('ready')
