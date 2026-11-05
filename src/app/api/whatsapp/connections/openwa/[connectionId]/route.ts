@@ -1,4 +1,8 @@
+import { randomBytes } from 'node:crypto'
 import { NextResponse } from 'next/server'
+
+import { encrypt } from '@/lib/whatsapp/encryption'
+import { resolveOpenWAClient } from '@/lib/whatsapp/transport/openwa/credentials'
 
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
 import { logoutOpenWAConnection, reconnectOpenWAConnection, refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
@@ -29,6 +33,28 @@ export async function POST(request: Request, context: Context) {
     const { connectionId } = await context.params
     const { accountId, adminDb } = await requireOpenWASessionAdmin()
     const body = await request.json() as Record<string, unknown>
+    if (body.action === 'configure_webhook') {
+      const webhookUrl = process.env.OPENWA_WEBHOOK_URL?.trim()
+      if (!webhookUrl) {
+        throw new WhatsAppTransportError('invalid_request', 'Configure OPENWA_WEBHOOK_URL with your public WACRM webhook URL first')
+      }
+      const { data: connection, error: connectionError } = await adminDb.from('whatsapp_connections')
+        .select('session_id').eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa').maybeSingle()
+      if (connectionError || !connection?.session_id) throw new WhatsAppTransportError('invalid_request', 'OpenWA session was not found for this account', connectionError)
+
+      const { credentials, client } = await resolveOpenWAClient(adminDb, accountId, connectionId)
+      const secret = credentials.webhookSecret ?? randomBytes(32).toString('hex')
+      if (!credentials.webhookSecret) {
+        // Persist the signing key before enabling delivery: there must never
+        // be a window in which OpenWA sends events WACRM cannot verify.
+        const { error: secretError } = await adminDb.from('whatsapp_connection_credentials')
+          .update({ webhook_secret_encrypted: encrypt(secret) })
+          .eq('connection_id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+        if (secretError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to save OpenWA webhook signing secret', secretError)
+      }
+      await client.configureWebhook(connection.session_id, webhookUrl, secret, connectionId)
+      return NextResponse.json({ enabled: true }, { headers: noStore })
+    }
     if (body.action === 'reconnect') return NextResponse.json(await reconnectOpenWAConnection(adminDb, accountId, connectionId), { headers: noStore })
     if (body.action === 'pause' || body.action === 'resume') {
       const paused = body.action === 'pause'
