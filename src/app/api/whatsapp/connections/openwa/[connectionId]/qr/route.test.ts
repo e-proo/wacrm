@@ -18,18 +18,21 @@ const request = () => new Request('https://wacrm.example.com/api/whatsapp/connec
 
 function fakeDb(connection: { session_id: string; status: string } | null) {
   const filters: Record<string, string> = {}
-  const query = {
-    select: vi.fn(() => query),
-    eq: vi.fn((field: string, value: string) => {
-      filters[field] = value
-      return query
-    }),
-    maybeSingle: vi.fn(async () => ({
-      data: filters.id === 'connection-1' && filters.account_id === 'account-1' && filters.provider === 'openwa'
-        ? connection : null,
-      error: null,
-    })),
+  const query = {} as {
+    select: ReturnType<typeof vi.fn>
+    eq: ReturnType<typeof vi.fn>
+    maybeSingle: ReturnType<typeof vi.fn>
   }
+  query.select = vi.fn(() => query)
+  query.eq = vi.fn((field: string, value: string) => {
+    filters[field] = value
+    return query
+  })
+  query.maybeSingle = vi.fn(async () => ({
+    data: filters.id === 'connection-1' && filters.account_id === 'account-1' && filters.provider === 'openwa'
+      ? connection : null,
+    error: null,
+  }))
   const db = { from: vi.fn(() => query) }
   return { db, query }
 }
