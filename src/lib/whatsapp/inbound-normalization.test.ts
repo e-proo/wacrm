@@ -7,6 +7,30 @@ describe('provider-neutral inbound normalization', () => {
     const openwa = normalizeOpenWAInboundMessage({ timestamp: '2026-10-26T18:00:00.000Z', eventId: 'evt-1', sessionId: 'session-1', event: 'message.received', data: { id: 'w-1', from: '967700000001', timestamp: '1792950000', text: 'hello', pushName: 'Customer' } }, 'openwa-connection')
     expect(openwa).not.toBeNull(); expect(openwa?.message.type).toBe(meta.message.type); expect(openwa?.message.from).toBe(meta.message.from); expect(openwa?.message.timestamp).toBe(meta.message.timestamp); expect(openwa?.message.text?.body).toBe(meta.message.text?.body); expect(openwa?.contact).toEqual(meta.contact); expect(meta.message.provider).toBe('meta_cloud'); expect(openwa?.message.provider).toBe('openwa')
   })
+  it('preserves the exact OpenWA 1:1 LID chat while keeping senderPhone distinct', () => {
+    const normalized = normalizeOpenWAInboundMessage({
+      timestamp: '2026-10-26T18:00:00.000Z', eventId: 'evt-lid', sessionId: 's', event: 'message.received',
+      data: { id: 'm-lid', from: '63256345444412@lid', chatId: '63256345444412@lid', senderPhone: '967700000001', text: 'hello' },
+    }, 'conn')
+    expect(normalized?.message).toMatchObject({ from: '967700000001', providerChatId: '63256345444412@lid' })
+  })
+
+  it('never turns a group sender or mismatched JID into a one-to-one OpenWA recipient', () => {
+    const base = { timestamp: '2026-10-26T18:00:00.000Z', eventId: 'evt', sessionId: 's', event: 'message.received' }
+    const group = normalizeOpenWAInboundMessage({ ...base, data: { id: 'm', from: '63256345444412@lid', chatId: '120363123456789@g.us', text: 'group' } }, 'conn')
+    const mismatch = normalizeOpenWAInboundMessage({ ...base, data: { id: 'm2', from: '63256345444412@lid', chatId: '967700000001@c.us', text: 'mismatch' } }, 'conn')
+    expect(group?.message.providerChatId).toBeUndefined()
+    expect(mismatch?.message.providerChatId).toBeUndefined()
+  })
+
+  it('keeps an explicit phone JID without deriving an address from phone digits alone', () => {
+    const base = { timestamp: '2026-10-26T18:00:00.000Z', eventId: 'evt', sessionId: 's', event: 'message.received' }
+    const explicit = normalizeOpenWAInboundMessage({ ...base, data: { id: 'm', from: '967700000001@c.us', chatId: '967700000001@c.us', text: 'hello' } }, 'conn')
+    const missing = normalizeOpenWAInboundMessage({ ...base, data: { id: 'm2', from: '967700000001', text: 'hello' } }, 'conn')
+    expect(explicit?.message.providerChatId).toBe('967700000001@c.us')
+    expect(missing?.message.providerChatId).toBeUndefined()
+  })
+
   it('normalizes OpenWA reply context and preserves provider identity', () => {
     const normalized = normalizeOpenWAInboundMessage({ timestamp: '2026-10-26T18:00:00.000Z', eventId: 'evt-2', sessionId: 'session-2', instanceId: 'instance-1', event: 'message', data: { messageId: 'msg-2', sender: '15551234567', body: 'reply', replyToMessageId: 'parent-1', timestamp: 1792950000000 } }, 'connection-2')
     expect(normalized?.message).toMatchObject({ provider: 'openwa', connectionId: 'connection-2', providerMessageId: 'msg-2', from: '15551234567', timestamp: '1792950000', context: { id: 'parent-1' } })

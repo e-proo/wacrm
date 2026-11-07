@@ -294,6 +294,9 @@ export async function processNormalizedInboundMessage(
         provider: message.provider,
         connection_id: message.connectionId,
         provider_message_id: message.providerMessageId,
+        // OpenWA @lid is a privacy/chat JID, not a phone. Persist the signed
+        // gateway chat identity alongside the provider-scoped inbound row.
+        ...(message.provider === 'openwa' ? { provider_chat_id: message.providerChatId ?? null } : {}),
         status: 'delivered',
         created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
         reply_to_message_id: replyToInternalId,

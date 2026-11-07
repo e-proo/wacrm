@@ -34,6 +34,16 @@ describe('OpenWA upstream REST contract', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
+  it('sends a verified LID unchanged, never fabricating a phone JID', async () => {
+    const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      expect(JSON.parse(String(args[1]?.body))).toEqual({ chatId: '63256345444412@lid', text: 'safe reply' })
+      return response(201, { messageId: 'lid-reply-1' })
+    }) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+    expect((await client.sendText({ sessionId: 's', to: '63256345444412@lid', text: 'safe reply', idempotencyKey: 'lid-1' })).providerMessageId).toBe('lid-reply-1')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
   it('uses the kind-specific media route and flat upstream DTO', async () => {
     const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
       expect((args[0] as URL).pathname).toBe('/api/sessions/s1/messages/send-document')

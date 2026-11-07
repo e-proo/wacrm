@@ -33,6 +33,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
       - name: Verify OW-1 provider-neutral WhatsApp schema and RLS
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/whatsapp-provider-neutral-connections-smoke.sql
+      - name: Verify OpenWA native chat identity schema
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-chat-identity-smoke.sql
       - name: Verify OW-10 OpenWA safety guardrails
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-guardrails-smoke.sql
       - name: Verify Agent Task platform behavior

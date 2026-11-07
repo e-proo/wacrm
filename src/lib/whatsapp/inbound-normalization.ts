@@ -17,6 +17,8 @@ export interface NormalizedInboundMessage {
   connectionId: string
   providerMessageId: string
   providerEventId?: string
+  /** Provider-native 1:1 chat destination, separate from the CRM phone identity. */
+  providerChatId?: string
   from: string
   recipient?: string
   timestamp: string
@@ -126,6 +128,11 @@ function normalizeOpenWAMedia(message: Record<string, unknown>, kind: 'image' | 
   }
 }
 
+/** Never infer a phone number from the digits of a WhatsApp privacy LID. */
+function openWAOneToOneChatId(value: string | undefined): string | undefined {
+  return value && /^[0-9]{5,20}@(c\.us|lid)$/.test(value) ? value : undefined
+}
+
 export function normalizeOpenWAInboundMessage(
   envelope: OpenWAWebhookEnvelope,
   connectionId: string,
@@ -139,8 +146,17 @@ export function normalizeOpenWAInboundMessage(
   const message = nested ?? data
 
   const providerMessageId = stringValue(message.id) ?? stringValue(message.messageId) ?? stringValue(message.message_id) ?? envelope.eventId
-  const rawFrom = stringValue(message.senderPhone) ?? stringValue(message.from) ?? stringValue(message.sender) ?? stringValue(message.senderId) ?? stringValue(message.sender_id)
+  const providerSender = stringValue(message.from) ?? stringValue(message.sender) ?? stringValue(message.senderId) ?? stringValue(message.sender_id)
+  const rawFrom = stringValue(message.senderPhone) ?? providerSender
   const from = rawFrom?.endsWith('@c.us') ? rawFrom.slice(0, -5) : rawFrom
+  const explicitChatId = stringValue(message.chatId)
+  const sourceSenderJid = openWAOneToOneChatId(providerSender)
+  // A group/channel chat is never a 1:1 recipient. If the gateway supplies
+  // both sender and chat JIDs, reject a mismatch instead of guessing.
+  const candidateChatId = explicitChatId ? openWAOneToOneChatId(explicitChatId) : sourceSenderJid
+  const providerChatId = candidateChatId && (!sourceSenderJid || candidateChatId === sourceSenderJid)
+    ? candidateChatId
+    : undefined
   if (!from) throw new Error('OpenWA inbound sender is missing')
 
   const rawText = message.text
@@ -164,6 +180,7 @@ export function normalizeOpenWAInboundMessage(
     connectionId,
     providerMessageId,
     providerEventId: envelope.eventId,
+    ...(providerChatId ? { providerChatId } : {}),
     from,
     recipient: stringValue(message.to) ?? stringValue(message.recipient),
     timestamp: timestampSeconds(message.timestamp ?? message.ts ?? message.createdAt),
