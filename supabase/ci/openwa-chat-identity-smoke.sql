@@ -26,6 +26,21 @@ BEGIN
   IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.messages'::regclass) THEN
     RAISE EXCEPTION 'RLS unexpectedly disabled on messages';
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'messages_openwa_chat_identity_server_only'
+      AND tgrelid = 'public.messages'::regclass
+      AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'OpenWA chat identity server-only trigger is missing';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc
+    WHERE oid = 'public.enforce_openwa_chat_identity_write_boundary()'::regprocedure
+      AND NOT prosecdef
+  ) THEN
+    RAISE EXCEPTION 'OpenWA chat identity trigger must be SECURITY INVOKER';
+  END IF;
   RAISE NOTICE 'OpenWA inbound chat identity smoke passed';
 END $openwa_chat_identity$;
 
