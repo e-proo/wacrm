@@ -5,6 +5,8 @@ on:
   # Manual dispatch is also available when the workflow exists on the default branch.
   workflow_dispatch:
   pull_request:
+    # A human moving the OW-4 verification PR out of draft can explicitly trigger CI.
+    types: [opened, reopened, synchronize, ready_for_review]
     branches: [main, refactor/service-platform-v2]
   push:
     branches: [main, refactor/service-platform-v2]
