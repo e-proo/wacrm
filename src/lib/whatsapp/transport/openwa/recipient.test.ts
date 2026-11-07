@@ -45,17 +45,19 @@ describe('account- and connection-scoped OpenWA chat recipient', () => {
     await expect(resolveOpenWAConversationRecipient(db, input)).resolves.toBe('967700000001@c.us')
   })
 
-  it.each([null, { provider_chat_id: null }, { provider_chat_id: '120363123456@g.us' }, { provider_chat_id: '63256345444412@lid@c.us' }])(
-    'blocks an inbound row with missing or unsafe chat destination: %j', async (inbound) => {
-      const { db } = fixture({ inbound: inbound as { provider_chat_id: unknown } | null })
-      // A null row means no inbound exists, so only non-null invalid rows are blocked.
-      if (inbound === null) {
-        await expect(resolveOpenWAConversationRecipient(db, input)).resolves.toBe(input.fallbackPhone)
-      } else {
-        await expect(resolveOpenWAConversationRecipient(db, input)).rejects.toMatchObject({ code: 'connection_restricted' })
-      }
-    },
-  )
+  it('allows a verified outbound-only phone number when the connection has no prior inbound', async () => {
+    const { db } = fixture({ inbound: null })
+    await expect(resolveOpenWAConversationRecipient(db, input)).resolves.toBe(input.fallbackPhone)
+  })
+
+  it.each([
+    { provider_chat_id: null },
+    { provider_chat_id: '120363123456@g.us' },
+    { provider_chat_id: '63256345444412@lid@c.us' },
+  ])('blocks an existing inbound with missing or unsafe chat destination: %j', async (inbound) => {
+    const { db } = fixture({ inbound })
+    await expect(resolveOpenWAConversationRecipient(db, input)).rejects.toMatchObject({ code: 'connection_restricted' })
+  })
 
   it('does not use a recipient or connection outside the current account', async () => {
     const { db, from } = fixture({ account: 'other-account' })
