@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resolveOpenWACredentials } from './credentials'
-import { parseOpenWAWebhookEnvelope, verifyAndReserveOpenWAWebhook } from './webhook'
+import { classifyOpenWAWebhookRejection, parseOpenWAWebhookEnvelope, verifyAndReserveOpenWAWebhook } from './webhook'
 
 vi.mock('./credentials', () => ({ resolveOpenWACredentials: vi.fn() }))
 
@@ -133,10 +133,26 @@ describe('OpenWA webhook intake', () => {
     expect(result.duplicate).toBe(true)
   })
 
-  it('fails closed when durable reservation cannot be written', async () => {
-    const { db } = dbFixture({ insertError: { code: 'XX000' } })
-    await expect(verifyAndReserveOpenWAWebhook(db as never, {
-      rawBody, signature: signature(), nowMs,
-    })).rejects.toThrow('receipt could not be reserved')
+  it('fails closed and logs only the database error code when reservation cannot be written', async () => {
+    const logger = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { db } = dbFixture({ insertError: { code: '42P01', message: 'secret database contents' } })
+      await expect(verifyAndReserveOpenWAWebhook(db as never, {
+        rawBody, signature: signature(), nowMs,
+      })).rejects.toThrow('receipt could not be reserved')
+      expect(logger).toHaveBeenCalledWith('[openwa-webhook] receipt reservation rejected', { dbCode: '42P01' })
+      expect(JSON.stringify(logger.mock.calls)).not.toContain('secret database contents')
+    } finally {
+      logger.mockRestore()
+    }
+  })
+
+  it('classifies intake failures using safe fixed reason codes', () => {
+    expect(classifyOpenWAWebhookRejection(new Error('OpenWA session is not active'))).toBe('inactive_session')
+    expect(classifyOpenWAWebhookRejection(new Error('OpenWA webhook receipt could not be reserved'))).toBe('receipt_reservation_failed')
+    expect(classifyOpenWAWebhookRejection(new Error('OpenWA webhook requires idempotencyKey, timestamp, sessionId, and event'))).toBe('missing_envelope_fields')
+    expect(classifyOpenWAWebhookRejection(new Error('Invalid OpenWA webhook signature'))).toBe('invalid_signature')
+    expect(classifyOpenWAWebhookRejection(new Error('Authorization: Bearer sensitive-key'))).toBe('unexpected_error')
+    expect(classifyOpenWAWebhookRejection(null)).toBe('unexpected_error')
   })
 })

@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import { normalizeOpenWAInboundMessage } from '@/lib/whatsapp/inbound-normalization'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
 import { applyWhatsAppStatus, parseOpenWAStatusEvent } from '@/lib/whatsapp/status-lifecycle'
-import { markOpenWAWebhookProcessed, verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
+import { classifyOpenWAWebhookRejection, markOpenWAWebhookProcessed, verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
 import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 
 export const maxDuration = 60
@@ -13,7 +13,18 @@ function adminDb() { const url = process.env.NEXT_PUBLIC_SUPABASE_URL; const ser
 export async function POST(request: Request) {
   const rawBody = await request.text(); const signature = request.headers.get('x-openwa-signature')
   let reservation
-  try { reservation = await verifyAndReserveOpenWAWebhook(adminDb(), { rawBody, signature }) } catch (error) { const message = error instanceof Error ? error.message : 'Invalid OpenWA webhook'; const status = message.includes('signature') ? 401 : message.includes('Unknown') ? 404 : 400; return NextResponse.json({ error: message }, { status }) }
+  try {
+    reservation = await verifyAndReserveOpenWAWebhook(adminDb(), { rawBody, signature })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid OpenWA webhook'
+    const status = message.includes('signature') ? 401 : message.includes('Unknown') ? 404 : 400
+    // Log only a fixed reason code. Never log webhook bodies, HMAC values, credentials, or untrusted errors.
+    console.warn('[openwa-webhook] intake rejected', {
+      status,
+      reason: classifyOpenWAWebhookRejection(error),
+    })
+    return NextResponse.json({ error: message }, { status })
+  }
   if (reservation.duplicate) return NextResponse.json({ ok: true, duplicate: true })
   const { accountId, connectionId, envelope } = reservation
   after(async () => {

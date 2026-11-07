@@ -28,6 +28,31 @@ export interface ReservedOpenWAWebhook {
   duplicate: boolean
 }
 
+/**
+ * Stable diagnostic categories for rejected intake requests.
+ * Intentionally do not return arbitrary exception text to logs: some upstream
+ * errors can contain request details or credentials.
+ */
+export function classifyOpenWAWebhookRejection(error: unknown): string {
+  if (!(error instanceof Error)) return 'unexpected_error'
+  switch (error.message) {
+    case 'Invalid OpenWA webhook JSON': return 'invalid_json'
+    case 'Invalid OpenWA webhook payload': return 'invalid_payload'
+    case 'OpenWA webhook requires idempotencyKey, timestamp, sessionId, and event': return 'missing_envelope_fields'
+    case 'Unknown OpenWA session': return 'unknown_session'
+    case 'OpenWA session is not active': return 'inactive_session'
+    case 'OpenWA webhook secret is not configured': return 'missing_webhook_secret'
+    case 'Invalid OpenWA webhook signature': return 'invalid_signature'
+    case 'OpenWA webhook receipt could not be reserved': return 'receipt_reservation_failed'
+    case 'OpenWA connection is not configured for this account': return 'missing_connection'
+    case 'OpenWA credentials are not configured for this connection': return 'missing_credentials'
+    case 'OpenWA credential scope mismatch': return 'credential_scope_mismatch'
+    case 'OpenWA credentials could not be decrypted': return 'credential_decryption_failed'
+    case 'Server database credentials are not configured': return 'server_db_configuration_missing'
+    default: return 'unexpected_error'
+  }
+}
+
 export function parseOpenWAWebhookEnvelope(rawBody: string): OpenWAWebhookEnvelope {
   let value: unknown
   try {
@@ -114,6 +139,9 @@ export async function verifyAndReserveOpenWAWebhook(
     return { accountId: scoped.account_id, connectionId: scoped.id, envelope, duplicate: true }
   }
 
+  // PostgreSQL/PostgREST error codes are safe to log; their free-form messages and hints are not.
+  const dbCode = typeof code === 'string' && /^[a-zA-Z0-9_]{3,12}$/.test(code) ? code : 'unknown'
+  console.error('[openwa-webhook] receipt reservation rejected', { dbCode })
   throw new Error('OpenWA webhook receipt could not be reserved')
 }
 
