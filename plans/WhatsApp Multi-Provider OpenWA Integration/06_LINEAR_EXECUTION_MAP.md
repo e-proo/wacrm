@@ -14,7 +14,7 @@ Purpose: plan, implement, verify and roll out the provider-neutral WhatsApp laye
 - OW-1 — Provider-Neutral Data Model: COMPLETE at implementation + TEST + CI verified.
 - OW-2 — Meta Adapter Extraction: COMPLETE at implementation + CI verified.
 - OW-3 — OpenWA Client & Credential Boundary: COMPLETE at implementation + TEST/migration/security evidence + CI verified.
-- OW-4 — Session Lifecycle & QR Onboarding (SOF-33): live TEST session creation, QR, Ready VERIFIED; In Progress pending current-HEAD CI/Meta regression.
+- OW-4 — Session Lifecycle & QR Onboarding (SOF-33): **Done** at implementation complete + live TEST create/QR/Ready verified + current merge-HEAD CI/Migrations/Meta regression green.
 - OW-5 through OW-11 (SOF-34..SOF-40): implementation phase issues Done with historical CI/TEST evidence; not a claim of full live acceptance.
 - OW-12 (SOF-41): current execution phase, In Progress with partial live TEST: Webhook 202, inbound, native @lid, agent outbound and read ack verified.
 - OW-13/OW-14: not started; no pilot/production rollout approval.
@@ -74,7 +74,7 @@ GitHub code/current branch is the implementation source of truth. CI/TEST eviden
 
 Phase issues should link to this plan directory and, where relevant, exact implementation commits, migrations and CI runs. The implementation source of truth remains `refactor/service-platform-v2`.
 
-Phase implementation closure never implies OW-12 live acceptance or production readiness. SOF-33 remains open for the current-HEAD CI gate; SOF-41 remains open for untested live scenarios. NOTE-001 is still a production-readiness dependency. See the 2026-11-07 Linear evidence document linked below.
+Phase implementation closure never implies OW-12 full live acceptance or production readiness. SOF-33 closure gate is verified at merge HEAD `c87fd13c`; SOF-41 stays In Progress for untested live scenarios. NOTE-001 remains a production-readiness dependency. See the 2026-11-07 Linear evidence document linked below.
 
 
 ## Live TEST / Linear reconciliation — 2026-11-07
@@ -82,5 +82,5 @@ Phase implementation closure never implies OW-12 live acceptance or production r
 - Latest implementation HEAD before documentation sync: `91e628e03aa8e615b8a6c5e5ca924a1e062e849f`.
 - Current Linear project status updated from Planned to In Progress; OW-0..OW-12 issue-to-milestone mappings reconciled. SOF-32 remains Duplicate of SOF-33.
 - Canonical 2026-11-07 evidence: [OpenWA live TEST checkpoint](https://linear.app/eproo/document/openwa-live-test-checkpoint-2026-11-07-ow-4-ow-12-1e473cda8576).
-- OW-4 live session/QR/Ready verified but its `fresh CI/Meta regression` closure criterion is not yet satisfied by a run on the current implementation. Keep SOF-33 In Progress until an acceptable new CI result is linked.
+- OW-4 live TEST create/QR/Ready verified; the fresh CI/Meta regression gate is satisfied after [PR #3](https://github.com/e-proo/wacrm/pull/3) merged at `c87fd13cf68df1cc6757fd910a7761e9110ff411` on 2026-11-07. [CI #42410328689](https://github.com/e-proo/wacrm/actions/runs/42410328689) and [Migrations #42410328723](https://github.com/e-proo/wacrm/actions/runs/42410328723) both `completed/success` on exact merge HEAD, including OW-4 QR/tenant/credential smoke. TEST additive migration `152_openwa_service_role_credential_grants.sql` applied and role permissions verified. SOF-33 is eligible for Done at `implementation complete + TEST QR/session verified + CI verified`.
 - OW-12 has partial live acceptance and cannot close. `@lid` routing fix and TEST migrations `147`, `148`, `150`, `151` are recorded with read receipt success, outstanding old ambiguous send and untested scenarios.

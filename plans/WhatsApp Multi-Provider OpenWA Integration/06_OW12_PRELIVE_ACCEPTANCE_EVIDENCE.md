@@ -97,3 +97,14 @@ The **2026-10-26** statements above about zero OpenWA sessions and a missing liv
 - **Evidence level:** OW-4 live session/QR happy-path verified; OW-12 live text+AI+read happy-path partially verified. NOT complete OW-12 acceptance. Media, quoted reply, restart/reconnect, duplicate, ambiguous reconciliation, automation, bounded broadcast, live tenant isolation and concurrent Meta regression remain to be proven.
 - **Current-head CI missing:** Last visible green branch CI run 42123370242 applies to `bbab5812`, before the new inbound/outbound LID routing fixes. Do not close SOF-33 or SOF-41 on the strength of the historic run.
 - **Source record:** [Linear OpenWA Live TEST Checkpoint](https://linear.app/eproo/document/openwa-live-test-checkpoint-2026-11-07-ow-4-ow-12-1e473cda8576). No Production changes. NOTE-001 remains open for production approval.
+
+
+## OW-4 closure gate reconciliation — 2026-11-07
+
+This is an **OW-4** phase-closure addendum, not evidence that all OW-12 live acceptance scenarios have passed.
+
+- Live TEST WACRM admin created an OpenWA session, obtained a secure short-lived QR, and connected through to `ready` as documented above; original NOTE-007 external TEST dependency is resolved.
+- [PR #3](https://github.com/e-proo/wacrm/pull/3) merged into `refactor/service-platform-v2` at `c87fd13cf68df1cc6757fd910a7761e9110ff411`.
+- Both GitHub Actions workflows on the exact merge commit passed: [CI #42410328689](https://github.com/e-proo/wacrm/actions/runs/42410328689) lint, typecheck, focused OW-4 session/QR + Meta regression, full tests, build = success; [Migrations #42410328723](https://github.com/e-proo/wacrm/actions/runs/42410328723) clean database replay, OW-4 session/credential/RLS gate, remaining schema/integration smoke checks = success.
+- Clean-replay-only lack of `service_role` credential grants was corrected additively by `152_openwa_service_role_credential_grants.sql`. Migration applied to TEST and validated: `service_role` CRUD, no `anon` or `authenticated` SELECT, credentials table RLS enabled. No Production changes.
+- Therefore SOF-33/OW-4 closure level: **implementation complete + live TEST session/QR verified + CI verified**. OW-12 remains **In Progress / partially live verified** with media/restart/reconciliation/automation/broadcast/tenant/Meta-live cases still outstanding and a historical ambiguous `sending` row requiring safe reconciliation.

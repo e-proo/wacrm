@@ -1,6 +1,6 @@
 # WACRM — WhatsApp Multi-Provider + OpenWA Integration
 
-Status: EXECUTION IN PROGRESS — OW-0..OW-3 and OW-5..OW-11 phase issues closed; OW-4 live session/QR happy-path TEST verified but formal closure awaits fresh current-HEAD CI/Meta regression; OW-12 partial live acceptance In Progress; OW-13/OW-14 not started. Checkpoint 2026-11-07.
+Status: EXECUTION IN PROGRESS — OW-0..OW-11 implementation phases closed (including OW-4: implementation complete + TEST QR/session verified + CI verified); OW-12 remains partial live acceptance In Progress; OW-13/OW-14 not started. Closure checkpoint 2026-11-07.
 
 ## Objective
 Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Meta WhatsApp Cloud API as the official/default production transport. WACRM remains the source of truth for CRM/business logic/agents/automations/broadcasts/audit/idempotency.
@@ -13,7 +13,10 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 - OW-3 verified implementation HEAD: `92d394a9931b45d97b1c83a9146cc3dbf6edda72`
 - OW-4 implementation HEAD: `ccb421426bf8e3dcc305db3a2ad5faaba6230711`
 - OW-4 implementation CI: GitHub CI #822 / run `40031691828` = `completed/success` (lint, typecheck, tests, build)
-- Current execution phase: `OW-12 — Live TEST Acceptance` (partial; SOF-41). OW-4 SOF-33 remains open pending current-HEAD CI.
+- OW-4 closure verified implementation merge HEAD: `c87fd13cf68df1cc6757fd910a7761e9110ff411` (PR #3; CI and clean replay passed).
+- OW-4 current-HEAD GitHub CI: [run 42410328689](https://github.com/e-proo/wacrm/actions/runs/42410328689) = `completed/success` (lint, typecheck, OW-4/Meta gate, all tests, build).
+- OW-4 current-HEAD GitHub Migrations: [run 42410328723](https://github.com/e-proo/wacrm/actions/runs/42410328723) = `completed/success` (full clean replay and OW-4 security smoke).
+- Current execution phase: `OW-12 — Live TEST Acceptance` (partial; SOF-41). OW-4 SOF-33 closure gate passed; phase to be recorded Done in Linear.
 - Project-wide Supabase security debt remains tracked by `PROJECT_NOTES.md` NOTE-001 and is a production-readiness dependency.
 
 ## Verified execution status
@@ -23,7 +26,7 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 | OW-1 | COMPLETE | implementation complete + TEST verified + CI verified |
 | OW-2 | COMPLETE | implementation complete + CI verified; Meta regression gate passed |
 | OW-3 | COMPLETE | implementation complete + TEST migration/security evidence + CI verified |
-| OW-4 | IMPLEMENTATION COMPLETE; historical CI GREEN; live session/QR TEST happy path VERIFIED | fresh current-HEAD CI/Meta regression missing; SOF-33 In Progress |
+| OW-4 | COMPLETE — implementation + live TEST QR/session + CI verified | [merge CI #42410328689](https://github.com/e-proo/wacrm/actions/runs/42410328689), [merge Migrations #42410328723](https://github.com/e-proo/wacrm/actions/runs/42410328723); add-on TEST migration 152 verified; not OW-12 full live acceptance |
 | OW-5..OW-11 | IMPLEMENTATION ISSUES DONE | prior implementation + CI gates (SOF-34..SOF-40); not OW-12 live acceptance |
 | OW-12 | LIVE TEST PARTIALLY VERIFIED | session/QR/ready, Webhook 202, inbound text, AI reply and read receipt verified; remaining acceptance matrix open |
 | OW-13 | NOT STARTED | bounded pilot cannot begin before OW-12 complete |
@@ -45,7 +48,7 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 
 The original external provider prerequisite was **exercised successfully** on TEST: WACRM created an OpenWA session (HTTP 201), fetched a short-lived QR through an authenticated admin-only, account-scoped, no-store API (HTTP 200), and displayed the connection in `ready`. TEST now has two OpenWA `ready` connections plus a distinct Meta `connected` connection. The original deferral in NOTE-007 is resolved for this happy path.
 
-OW-4 remains **In Progress**, not formally closed: the phase's fresh CI/Meta regression exit gate is not established for current branch implementation HEAD `91e628e03aa8e615b8a6c5e5ca924a1e062e849f`. Historical OW-4 CI [#822](https://github.com/e-proo/wacrm/actions/runs/40031691828) succeeded at `ccb4214`; latest visible green branch-wide CI [run 42123370242](https://github.com/e-proo/wacrm/actions/runs/42123370242) applies to older HEAD `bbab5812`. No GitHub Actions run was found for the new LID fixes at `91e628e`. Close only after the current-head lint/typecheck/tests/build/clean migration replay and Meta regression evidence is verified.
+OW-4 closure gate **PASSED on 2026-11-07**: verification [PR #3](https://github.com/e-proo/wacrm/pull/3) merged to the designated development branch at `c87fd13cf68df1cc6757fd910a7761e9110ff411`. On the exact merge commit, GitHub Actions [CI #42410328689](https://github.com/e-proo/wacrm/actions/runs/42410328689) was `completed/success` for lint/typecheck, focused OW-4 session/QR and Meta regression, complete tests and build; [Migrations #42410328723](https://github.com/e-proo/wacrm/actions/runs/42410328723) was `completed/success` for clean Supabase replay, OW-4 tenant/credential/RLS smoke and all existing smoke checks. Earlier PR-head green runs ([CI #42409821758](https://github.com/e-proo/wacrm/actions/runs/42409821758) and [Migrations #42409821723](https://github.com/e-proo/wacrm/actions/runs/42409821723)) corroborate, but the merge-HEAD runs are the closure evidence. Migration `152_openwa_service_role_credential_grants.sql` was applied to TEST, with service-role-only credential privileges and RLS verified; no Production changes. Closure level is **implementation complete + TEST session/QR verified + CI verified**; this is not general OW-12 live acceptance or production readiness.
 
 OW-12 remains open: signed inbound was accepted (`202`), a prior `PGRST205` TEST schema gap was repaired by applying existing migrations `147` and `148`, and a provider-native `@lid` outbound misrouting defect was repaired at current implementation HEAD using additive migrations `150`/`151`. The new AI response reached `read` in TEST, while an older ambiguous `sending` row still requires safe reconciliation. The complete live media/reconnect/duplicate/automation/broadcast/tenant/Meta matrix is not yet passed. See [dated Linear evidence](https://linear.app/eproo/document/openwa-live-test-checkpoint-2026-11-07-ow-4-ow-12-1e473cda8576).
 
