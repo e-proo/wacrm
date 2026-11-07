@@ -1,6 +1,6 @@
 # WACRM — WhatsApp Multi-Provider + OpenWA Integration
 
-Status: EXECUTION IN PROGRESS — OW-0 through OW-3 closed; OW-4 implementation complete and CI verified, awaiting live TEST session/QR acceptance before closure.
+Status: EXECUTION IN PROGRESS — OW-0..OW-3 and OW-5..OW-11 phase issues closed; OW-4 live session/QR happy-path TEST verified but formal closure awaits fresh current-HEAD CI/Meta regression; OW-12 partial live acceptance In Progress; OW-13/OW-14 not started. Checkpoint 2026-11-07.
 
 ## Objective
 Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Meta WhatsApp Cloud API as the official/default production transport. WACRM remains the source of truth for CRM/business logic/agents/automations/broadcasts/audit/idempotency.
@@ -13,7 +13,7 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 - OW-3 verified implementation HEAD: `92d394a9931b45d97b1c83a9146cc3dbf6edda72`
 - OW-4 implementation HEAD: `ccb421426bf8e3dcc305db3a2ad5faaba6230711`
 - OW-4 implementation CI: GitHub CI #822 / run `40031691828` = `completed/success` (lint, typecheck, tests, build)
-- Current execution phase: `OW-4 — Session Lifecycle & QR Onboarding`
+- Current execution phase: `OW-12 — Live TEST Acceptance` (partial; SOF-41). OW-4 SOF-33 remains open pending current-HEAD CI.
 - Project-wide Supabase security debt remains tracked by `PROJECT_NOTES.md` NOTE-001 and is a production-readiness dependency.
 
 ## Verified execution status
@@ -23,8 +23,11 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 | OW-1 | COMPLETE | implementation complete + TEST verified + CI verified |
 | OW-2 | COMPLETE | implementation complete + CI verified; Meta regression gate passed |
 | OW-3 | COMPLETE | implementation complete + TEST migration/security evidence + CI verified |
-| OW-4 | IMPLEMENTATION COMPLETE / CI VERIFIED | live TEST session creation + QR acceptance still required by phase exit gate |
-| OW-5..OW-14 | NOT STARTED | gated by preceding phases |
+| OW-4 | IMPLEMENTATION COMPLETE; historical CI GREEN; live session/QR TEST happy path VERIFIED | fresh current-HEAD CI/Meta regression missing; SOF-33 In Progress |
+| OW-5..OW-11 | IMPLEMENTATION ISSUES DONE | prior implementation + CI gates (SOF-34..SOF-40); not OW-12 live acceptance |
+| OW-12 | LIVE TEST PARTIALLY VERIFIED | session/QR/ready, Webhook 202, inbound text, AI reply and read receipt verified; remaining acceptance matrix open |
+| OW-13 | NOT STARTED | bounded pilot cannot begin before OW-12 complete |
+| OW-14 | NOT STARTED | production decision requires pilot, security and ops evidence |
 
 ## OW-4 implementation evidence
 - OpenWA REST client exposes create/status/QR/reconnect/logout session primitives while retaining the OW-3 timeout, SSRF, redaction and error boundary.
@@ -38,8 +41,13 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 - Unit coverage includes session client methods plus normalized state alias/terminal-transition behavior.
 - GitHub CI #822 / run `40031691828` passed lint, typecheck, tests and build at implementation HEAD `ccb421426bf8e3dcc305db3a2ad5faaba6230711`.
 
-## OW-4 remaining closure gate
-The detailed OW-4 plan requires TEST to create a non-production OpenWA session and safely display a short-lived QR to an authorized admin. That is a live external-provider acceptance step: it requires a reachable TEST OpenWA service and its server-side API credential. Until that evidence exists, OW-4 is **implementation complete + CI verified**, not `TEST verified`/closed.
+## OW-4 live TEST closure checkpoint — 2026-11-07
+
+The original external provider prerequisite was **exercised successfully** on TEST: WACRM created an OpenWA session (HTTP 201), fetched a short-lived QR through an authenticated admin-only, account-scoped, no-store API (HTTP 200), and displayed the connection in `ready`. TEST now has two OpenWA `ready` connections plus a distinct Meta `connected` connection. The original deferral in NOTE-007 is resolved for this happy path.
+
+OW-4 remains **In Progress**, not formally closed: the phase's fresh CI/Meta regression exit gate is not established for current branch implementation HEAD `91e628e03aa8e615b8a6c5e5ca924a1e062e849f`. Historical OW-4 CI [#822](https://github.com/e-proo/wacrm/actions/runs/40031691828) succeeded at `ccb4214`; latest visible green branch-wide CI [run 42123370242](https://github.com/e-proo/wacrm/actions/runs/42123370242) applies to older HEAD `bbab5812`. No GitHub Actions run was found for the new LID fixes at `91e628e`. Close only after the current-head lint/typecheck/tests/build/clean migration replay and Meta regression evidence is verified.
+
+OW-12 remains open: signed inbound was accepted (`202`), a prior `PGRST205` TEST schema gap was repaired by applying existing migrations `147` and `148`, and a provider-native `@lid` outbound misrouting defect was repaired at current implementation HEAD using additive migrations `150`/`151`. The new AI response reached `read` in TEST, while an older ambiguous `sending` row still requires safe reconciliation. The complete live media/reconnect/duplicate/automation/broadcast/tenant/Meta matrix is not yet passed. See [dated Linear evidence](https://linear.app/eproo/document/openwa-live-test-checkpoint-2026-11-07-ow-4-ow-12-1e473cda8576).
 
 ## Architectural decision
 Meta Cloud remains the official/default production provider. OpenWA is an optional self-hosted transport. WACRM owns CRM/business logic/agents/automations/broadcasts/audit/idempotency; OpenWA owns linked-device transport/session mechanics only. Provider values are `meta_cloud` and `openwa`; OpenWA engines are `whatsapp-web.js` and `baileys` metadata, never business-caller choices.

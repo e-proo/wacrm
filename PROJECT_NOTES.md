@@ -98,12 +98,14 @@ This file is the canonical place for important findings that are **outside the s
 
 ### NOTE-007 — OW-4 live OpenWA TEST session/QR acceptance deferred
 
-- **Status:** open / deferred external acceptance gate
+- **Status:** live external TEST session/QR prerequisite resolved on 2026-11-07; OW-4 formal closure awaits fresh current-HEAD CI/Meta regression
 - **Recorded:** 2026-10-25
 - **Discovered during:** OpenWA OW-4 closure
 - **Scope:** live TEST acceptance for OpenWA session lifecycle and QR onboarding; implementation itself is complete.
 - **Implementation evidence:** OW-4 implementation HEAD `ccb421426bf8e3dcc305db3a2ad5faaba6230711`; GitHub CI #822 / run `40031691828` completed successfully with lint, typecheck, tests and build green.
-- **Current TEST evidence:** `wacrm test` has no `openwa` connection and no OpenWA credential record, so a real session/QR proof cannot currently be produced.
+- **Historical TEST evidence at deferral (2026-10-25):** `wacrm test` had no `openwa` connection and no OpenWA credential record, so a real session/QR proof could not be produced then. Superseded by the 2026-11-07 live checkpoint below.
 - **External dependency:** a reachable non-production OpenWA service plus server-side API credential is required to execute the live session creation and short-lived QR acceptance scenario.
 - **Safety constraints while deferred:** OW-4 remains `implementation complete + CI verified`, not `TEST verified`; no production enablement is implied. Later implementation phases may proceed, but they must not claim live OpenWA acceptance or production readiness based on this deferred gate. OpenWA outbound business routing remains disabled until its planned phase and acceptance conditions.
 - **Return-to-work criteria:** provision/configure a reachable TEST OpenWA endpoint and server-side credential, create an account-scoped non-production OpenWA connection, verify authorized-admin QR display with no-store/expiry behavior, record the evidence, then mark the OW-4 TEST acceptance gate satisfied.
+- **Live checkpoint — 2026-11-07:** Real local OpenWA connected to WACRM via separate HTTPS Cloudflare tunnels; WACRM connection create 201, QR 200, authorized UI Ready; current TEST has two `openwa/ready` sessions and Meta still connected. Code confirms admin/tenant-scoped no-store, <=60s QR endpoint. The original missing external provider proof is now satisfied for this OW-4 happy path.
+- **Formal phase status:** SOF-33 remains In Progress because the current implementation HEAD `91e628e03aa8e615b8a6c5e5ca924a1e062e849f` has no current-HEAD CI/Meta regression run yet. Historical OW-4 CI #822 green is not proof for new later commits. OW-12 partial live acceptance is documented separately in [Linear](https://linear.app/eproo/document/openwa-live-test-checkpoint-2026-11-07-ow-4-ow-12-1e473cda8576); old `sending` response needs reconciliation and OW-13 pilot remains blocked. This note tracks historical external dependency resolution, **not full OW-12 or production readiness**.

@@ -83,3 +83,17 @@ Not allowed to claim:
 ## Deferred dependency
 
 The live dependency remains tracked by `PROJECT_NOTES.md` NOTE-007 and Linear SOF-41. When a real TEST OpenWA endpoint + credential + non-critical WhatsApp number become available, resume this file by appending live timestamps, redacted connection/provider identifiers, scenario results, CI/migration state and any incidents/reconciliation evidence.
+
+---
+
+## Superseding live TEST checkpoint — 2026-11-07 (addendum)
+
+The **2026-10-26** statements above about zero OpenWA sessions and a missing live external dependency are preserved as historical pre-live evidence. They are **no longer a description of the current TEST environment**.
+
+- Tested two local services linked via separate HTTPS Cloudflare quick tunnels. WACRM created an OpenWA session (HTTP 201), returned an authorized short-lived QR (HTTP 200), and displayed Ready. TEST now holds two `openwa/ready` connections plus one separate `meta_cloud/connected` connection.
+- Early signed Webhooks failed 400 with `PGRST205` (receipt table absent). Existing migrations `147_openwa_webhook_event_receipts.sql` and `148_whatsapp_outbound_idempotency.sql` were applied to TEST, with PostgREST schema refresh. Webhooks then returned `202`.
+- AI agent execution initially succeeded but OpenWA outbound returned 400 due to a misaddressed `@lid` chat. Fix: persist verified original `messages.provider_chat_id`, route only within the account+conversation+connection scope, fail closed on legacy/untrusted identity, protect JID via server-only constraint/trigger; additive migrations `150_openwa_inbound_chat_identity.sql` and `151_openwa_chat_identity_server_only.sql` applied to TEST. Implementation HEAD `91e628e03aa8e615b8a6c5e5ca924a1e062e849f`.
+- Live retest logs: `POST /api/whatsapp/openwa/webhook 202`, `[ai dispatch] SENT` and provider ID referencing `@lid`. TEST DB: new inbound `delivered` with `provider_chat_id @lid`; bot reply `read`. One earlier bot row still `sending` without provider ID and must not be blind-resubmitted.
+- **Evidence level:** OW-4 live session/QR happy-path verified; OW-12 live text+AI+read happy-path partially verified. NOT complete OW-12 acceptance. Media, quoted reply, restart/reconnect, duplicate, ambiguous reconciliation, automation, bounded broadcast, live tenant isolation and concurrent Meta regression remain to be proven.
+- **Current-head CI missing:** Last visible green branch CI run 42123370242 applies to `bbab5812`, before the new inbound/outbound LID routing fixes. Do not close SOF-33 or SOF-41 on the strength of the historic run.
+- **Source record:** [Linear OpenWA Live TEST Checkpoint](https://linear.app/eproo/document/openwa-live-test-checkpoint-2026-11-07-ow-4-ow-12-1e473cda8576). No Production changes. NOTE-001 remains open for production approval.
