@@ -1,7 +1,10 @@
 name: Migrations
 
 on:
+  workflow_dispatch:
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches: [main, refactor/service-platform-v2]
     paths:
       - 'supabase/**'
       - '.github/workflows/migrations.yml'
@@ -31,6 +34,8 @@ jobs:
         run: supabase db reset --local --no-seed
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
+      - name: Verify OW-4 session, credential and tenant schema gate
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-ow4-session-closure-smoke.sql
       - name: Verify OW-1 provider-neutral WhatsApp schema and RLS
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/whatsapp-provider-neutral-connections-smoke.sql
       - name: Verify OpenWA native chat identity schema
