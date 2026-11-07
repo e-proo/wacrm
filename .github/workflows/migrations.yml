@@ -3,6 +3,7 @@ name: Migrations
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
     branches: [main, refactor/service-platform-v2]
     paths:
       - 'supabase/**'
