@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # PRs targeting the active development branch must be testable before merge.
+  # Manual dispatch is also available when the workflow exists on the default branch.
+  workflow_dispatch:
   pull_request:
-    branches: [main]
+    branches: [main, refactor/service-platform-v2]
   push:
     branches: [main, refactor/service-platform-v2]
 
@@ -45,6 +48,17 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: OW-4 session/QR onboarding + Meta regression gate
+        run: |
+          npx vitest run \
+            'src/app/api/whatsapp/connections/openwa/[connectionId]/qr/route.test.ts' \
+            src/lib/whatsapp/transport/openwa/client.test.ts \
+            src/lib/whatsapp/transport/openwa/credentials.test.ts \
+            src/lib/whatsapp/transport/openwa/session-lifecycle.test.ts \
+            src/lib/whatsapp/transport/router.test.ts \
+            src/lib/whatsapp/transport/meta-outbound-boundary.test.ts \
+            src/lib/whatsapp/inbound-normalization.test.ts
 
       - name: Test
         run: npm test
