@@ -29,10 +29,32 @@ export async function processOpenWAOwnSentEcho(input: {
   if (!chatId || !/^[0-9]{5,20}@(c\.us|lid)$/.test(chatId)) return 'ignored'
 
   const { data: existing, error: existingError } = await db.from('messages')
-    .select('id').eq('provider', 'openwa').eq('connection_id', connectionId)
+    .select('id, conversation_id, media_url').eq('provider', 'openwa').eq('connection_id', connectionId)
     .eq('provider_message_id', message.providerMessageId).maybeSingle()
   if (existingError) throw existingError
-  if (existing) return 'existing'
+  if (existing) {
+    // A prior echo can persist before the gateway archives its attachment.
+    // Replays may fill only the missing media URL, never duplicate the row
+    // or invoke the customer inbound/automation pipeline.
+    if (!existing.media_url && ['image', 'video', 'audio', 'document'].includes(message.type)) {
+      const { data: scopedConversation, error: scopeError } = await db.from('conversations')
+        .select('id').eq('id', existing.conversation_id).eq('account_id', accountId).maybeSingle()
+      if (scopeError) throw scopeError
+      if (scopedConversation) {
+        try {
+          await hydrateOpenWAInboundMessageMedia({
+            db, storage, accountId, conversationId: scopedConversation.id,
+            inboundMessageId: existing.id, message, signedInlineMedia,
+          })
+        } catch (error) {
+          console.warn('[openwa-echo] replay media hydration unavailable', {
+            kind: message.type, code: error instanceof Error ? error.name : 'unknown',
+          })
+        }
+      }
+    }
+    return 'existing'
+  }
 
   let conversationId: string | null = null
   if (chatId.endsWith('@lid')) {
