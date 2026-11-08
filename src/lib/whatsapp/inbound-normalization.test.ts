@@ -68,6 +68,20 @@ describe('provider-neutral inbound normalization', () => {
     expect(normalized?.message.image).toMatchObject({ id: 'm-123', chat_id: '967700000001@c.us', mime_type: 'image/jpeg', file_size: 1024 })
     expect(JSON.stringify(normalized)).not.toContain('inline-secret')
   })
+  it('uses only a verified signed one-to-one chat identity for media archive fallback', () => {
+    const base = { event: 'message.received', eventId: 'media-fallback', sessionId: 's', timestamp: '2026-11-08T19:00:00Z' }
+    const valid = normalizeOpenWAInboundMessage({
+      ...base, data: { id: 'img-1', from: '12345678901@lid', senderPhone: '967700000001',
+        chatId: '12345678901@lid', type: 'image', media: { mimeType: 'image/jpeg' } },
+    }, 'conn')
+    expect(valid?.message.image?.chat_id).toBe('12345678901@lid')
+    const mismatch = normalizeOpenWAInboundMessage({
+      ...base, data: { id: 'img-2', from: '12345678901@lid', senderPhone: '967700000001',
+        chatId: '967700000001@c.us', type: 'image', media: { mimeType: 'image/jpeg' } },
+    }, 'conn')
+    expect(mismatch?.message.image?.chat_id).toBeUndefined()
+  })
+
   it('handles a linked-device message.sent as own sent, never as inbound customer', () => {
     const echo = normalizeOpenWAOwnSentMessage({
       event: 'message.sent', eventId: 'sent-1', timestamp: '2026-11-08T19:00:00Z', sessionId: 'session',
