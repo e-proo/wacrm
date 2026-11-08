@@ -35,7 +35,7 @@ vi.mock('@/lib/whatsapp/meta-api', async (importOriginal) => ({ ...(await import
 vi.mock('@/lib/whatsapp/encryption', () => ({ decrypt: (v: string) => v, encrypt: (v: string) => v, isLegacyFormat: () => false }));
 vi.mock('@/lib/flows/admin-client', () => ({ supabaseAdmin: () => ({ from: () => ({ update: () => ({ eq: () => ({ eq: () => ({ eq: async () => ({ error: null }) }) }) }) }) }) }));
 
-interface CapturedWrites { message?: Record<string, unknown>; conversation?: Record<string, unknown>; }
+interface CapturedWrites { message?: Record<string, unknown>; messageInsert?: Record<string, unknown>; conversation?: Record<string, unknown>; }
 function sendPathDb(templateRows: unknown[], captured: CapturedWrites): SupabaseClient {
   const conversation = { id: 'cv-1', account_id: 'acct-1', contact: { id: 'ct-1', account_id: 'acct-1', phone: '+15551234567' } };
   const config = { id: 'cfg-1', account_id: 'acct-1', phone_number_id: 'pn-1', access_token: 'token' };
@@ -45,10 +45,10 @@ function sendPathDb(templateRows: unknown[], captured: CapturedWrites): Supabase
     const builder: Record<string, unknown> = {};
     const chain = () => builder;
     builder.select = chain; builder.eq = chain; builder.not = chain; builder.order = chain; builder.limit = chain;
-    builder.insert = (row: Record<string, unknown>) => { insertedMessage = table === 'messages'; if (table === 'messages') captured.message = row; return builder; };
+    builder.insert = (row: Record<string, unknown>) => { insertedMessage = table === 'messages'; if (table === 'messages') { captured.message = row; captured.messageInsert = row; } return builder; };
     builder.update = (row: Record<string, unknown>) => { if (table === 'conversations') captured.conversation = row; if (table === 'messages') captured.message = { ...(captured.message || {}), ...row }; return builder; };
     builder.maybeSingle = async () => {
-      if (table === 'messages') return insertedMessage ? { data: { id: 'msg-1', status: 'pending' }, error: null } : { data: null, error: null };
+      if (table === 'messages') return insertedMessage ? { data: { id: 'msg-1', status: 'sending' }, error: null } : { data: null, error: null };
       if (table === 'whatsapp_connections') return { data: connection, error: null };
       if (table === 'whatsapp_config') return { data: config, error: null };
       return { data: null, error: null };
@@ -64,7 +64,7 @@ const TEMPLATE_ROW = { id: 'tpl-1', user_id: 'u-1', name: 'order_update', catego
 describe('sendMessageToConversation — template persistence (#483)', () => {
   it('stores the substituted body when the caller sends no text', async () => {
     const captured: CapturedWrites = {}; const result = await sendMessageToConversation(sendPathDb([TEMPLATE_ROW], captured), 'acct-1', { conversationId: 'cv-1', messageType: 'template', templateName: 'order_update', templateParams: ['A123', 'Friday'] });
-    expect(result.whatsappMessageId).toBe('wamid.1'); expect(captured.message?.content_text).toBe('Your order A123 ships on Friday'); expect(captured.message).toMatchObject({ message_id: 'wamid.1', provider: 'meta_cloud', connection_id: 'conn-meta-1', provider_message_id: 'wamid.1' }); expect(captured.message?.template_name).toBe('order_update'); expect(captured.conversation?.last_message_text).toBe('Your order A123 ships on Friday');
+    expect(result.whatsappMessageId).toBe('wamid.1'); expect(captured.messageInsert?.status).toBe('sending'); expect(captured.message?.content_text).toBe('Your order A123 ships on Friday'); expect(captured.message).toMatchObject({ message_id: 'wamid.1', provider: 'meta_cloud', connection_id: 'conn-meta-1', provider_message_id: 'wamid.1' }); expect(captured.message?.template_name).toBe('order_update'); expect(captured.conversation?.last_message_text).toBe('Your order A123 ships on Friday');
   });
   it('reads body values out of the structured params shape too', async () => { const captured: CapturedWrites = {}; await sendMessageToConversation(sendPathDb([TEMPLATE_ROW], captured), 'acct-1', { conversationId: 'cv-1', messageType: 'template', templateName: 'order_update', templateMessageParams: { body: ['B456', 'Monday'] } }); expect(captured.message?.content_text).toBe('Your order B456 ships on Monday'); });
   it("does not override the composer's pre-rendered text", async () => { const captured: CapturedWrites = {}; await sendMessageToConversation(sendPathDb([TEMPLATE_ROW], captured), 'acct-1', { conversationId: 'cv-1', messageType: 'template', templateName: 'order_update', templateParams: ['A123', 'Friday'], contentText: 'rendered by the composer' }); expect(captured.message?.content_text).toBe('rendered by the composer'); });

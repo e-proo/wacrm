@@ -247,10 +247,15 @@ function InboxPageInner() {
                     ...c,
                     last_message_text: newMsg.content_text ?? "",
                     last_message_at: newMsg.created_at,
+                    // The webhook atomically bumps unread_count in the
+                    // database. Its conversation UPDATE can reach us before
+                    // or after this message INSERT; incrementing here would
+                    // double-count (including messages sent by agents/bots).
+                    // Keep the DB value until that authoritative UPDATE.
                     unread_count:
                       activeConversation?.id === newMsg.conversation_id
                         ? 0
-                        : c.unread_count + 1,
+                        : c.unread_count,
                   }
                 : c,
             ),
