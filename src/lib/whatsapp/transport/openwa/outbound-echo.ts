@@ -97,6 +97,7 @@ export async function processOpenWAOwnSentEcho(input: {
     provider: 'openwa',
     connection_id: connectionId,
     provider_message_id: message.providerMessageId,
+    provider_chat_id: chatId,
     status: 'sent',
     created_at: Number.isFinite(createdAt.valueOf()) ? createdAt.toISOString() : new Date().toISOString(),
   }, { onConflict: 'conversation_id,message_id', ignoreDuplicates: true }).select('id')
