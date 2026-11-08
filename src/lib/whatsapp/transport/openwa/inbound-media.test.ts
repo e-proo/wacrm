@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { MEDIA_MAX_BYTES } from '@/lib/storage/upload-media'
+import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 import { createHash } from 'node:crypto'
 import { resolveOpenWAClient } from './credentials'
 import { hydrateOpenWAInboundMessageMedia, mirrorOpenWAInboundMedia } from './inbound-media'
@@ -14,6 +15,20 @@ describe('OpenWA inbound media mirror', () => {
   it('downloads with scoped OpenWA client and mirrors into WACRM storage', async () => { const downloadMedia = vi.fn(async () => ({ buffer: Buffer.from('abc'), contentType: 'image/jpeg', contentLength: 3 })); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); const s = storage(); const result = await mirrorOpenWAInboundMedia({ db: db(), storage: s.api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'image', media: { id: 'media-1', chat_id: '123@c.us', mime_type: 'image/jpeg', file_size: 3 }, messageTimestamp: '1792950000' }); expect(result).toBe('https://storage.example/media'); expect(downloadMedia).toHaveBeenCalledWith('sess-1', 'media-1', '123@c.us', 'media:media-1'); expect(s.upload).toHaveBeenCalledTimes(1) })
   it('rejects MIME mismatch before provider download', async () => { const downloadMedia = vi.fn(); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); await expect(mirrorOpenWAInboundMedia({ db: db(), storage: storage().api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'image', media: { id: 'media-1', mime_type: 'application/pdf' }, messageTimestamp: '1' })).rejects.toMatchObject({ code: 'invalid_request' }); expect(downloadMedia).not.toHaveBeenCalled() })
   it('rejects declared oversize before provider download', async () => { const downloadMedia = vi.fn(); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); await expect(mirrorOpenWAInboundMedia({ db: db(), storage: storage().api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'document', media: { id: 'media-1', mime_type: 'application/pdf', file_size: MEDIA_MAX_BYTES + 1 }, messageTimestamp: '1' })).rejects.toMatchObject({ code: 'invalid_request' }); expect(downloadMedia).not.toHaveBeenCalled() })
+  it('retries a read-only 404 while the gateway media archive becomes ready', async () => {
+    const downloadMedia = vi.fn()
+      .mockRejectedValueOnce(new WhatsAppTransportError('invalid_request', 'OpenWA request rejected (404)'))
+      .mockResolvedValueOnce({ buffer: Buffer.from('abc'), contentType: 'application/pdf', contentLength: 3 })
+    vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never })
+    const result = await mirrorOpenWAInboundMedia({
+      db: db(), storage: storage().api as never, accountId: 'acct-1', connectionId: 'conn-1',
+      kind: 'document', media: { id: 'doc-1', chat_id: '123@c.us', mime_type: 'application/pdf' },
+      messageTimestamp: '1792950000',
+    })
+    expect(result).toBe('https://storage.example/media')
+    expect(downloadMedia).toHaveBeenCalledTimes(2)
+  })
+
   it('returns null when controlled storage upload fails', async () => { const downloadMedia = vi.fn(async () => ({ buffer: Buffer.from('abc'), contentType: 'application/pdf', contentLength: 3 })); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); const s = storage(vi.fn(async (): Promise<UploadResult> => ({ error: { message: 'storage down' } }))); await expect(mirrorOpenWAInboundMedia({ db: db(), storage: s.api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'document', media: { id: 'media-1', chat_id: '123@c.us', mime_type: 'application/pdf' }, messageTimestamp: '1' })).resolves.toBeNull() })
 })
 
@@ -46,7 +61,7 @@ describe('OpenWA media hydration after message persistence', () => {
     })).toBe(true)
     expect(updates).toEqual([{ media_url: 'https://storage.example/media' }])
     expect(s.upload).toHaveBeenCalledTimes(1)
-    const path = s.upload.mock.calls[0]?.[0] as string
+    const path = (s.upload.mock.calls[0] as unknown as [string])[0]
     expect(path).toContain(createHash('sha256').update('conn-1:native@c.us_123').digest('hex').slice(0, 20))
     expect(path).not.toContain('native@c.us')
   })
