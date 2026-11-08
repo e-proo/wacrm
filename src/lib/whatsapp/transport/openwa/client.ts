@@ -82,7 +82,7 @@ export class OpenWAClient {
     const controller = new AbortController()
     // Media archives (especially video) can take longer than control-plane
     // JSON calls through a tunnel. Keep the limit bounded for webhook workers.
-    const timeout = setTimeout(() => controller.abort(), Math.max(this.timeoutMs, MEDIA_DOWNLOAD_TIMEOUT_MS))
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? MEDIA_DOWNLOAD_TIMEOUT_MS)
     try {
       const response = await this.fetchImpl(target, { headers: { accept: '*/*', authorization: `Bearer ${this.config.apiKey}`, ...(correlationId ? { 'x-correlation-id': correlationId } : {}) }, signal: controller.signal, redirect: 'error' })
       if (!response.ok) throw mapHttpError(response.status)
