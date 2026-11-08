@@ -456,6 +456,24 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
+  // Opening an OpenWA conversation should also mark it read on WhatsApp,
+  // not merely clear WACRM's unread_count. The server verifies agent role,
+  // tenant, connection and the signed inbound 1:1 JID before any write.
+  useEffect(() => {
+    if (!conversationId || !user?.id) return;
+    void fetch("/api/whatsapp/openwa/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversation_id: conversationId }),
+    }).then(async (response) => {
+      if (!response.ok && response.status !== 403) {
+        console.warn("[openwa-read] WhatsApp read acknowledgement unavailable", response.status);
+      }
+    }).catch(() => {
+      console.warn("[openwa-read] WhatsApp read acknowledgement request failed");
+    });
+  }, [conversationId, user?.id]);
+
   // Opening a thread is also viewing its assignment/request notifications.
   // The conversation unread_count and the notifications.read_at badge are
   // separate DB states; clearing one must not leave the other as "unread".
