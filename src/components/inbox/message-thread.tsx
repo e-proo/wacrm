@@ -581,15 +581,17 @@ export function MessageThread({
 
         if (!res.ok) {
           const reason = data?.error || `HTTP ${res.status}`;
-          console.error("Failed to send media:", reason);
-          toast.error(`Failed to send: ${reason}`);
           const unknownOutcome = res.status === 409 && data?.code === "ambiguous_outcome";
+          if (unknownOutcome) {
+            console.warn("OpenWA send outcome uncertain; do not resend automatically");
+            toast.warning("The attachment may have been delivered. Check WhatsApp before sending it again.");
+          } else {
+            console.error("Failed to send media:", reason);
+            toast.error(`Failed to send: ${reason}`);
+          }
           // A 409 ambiguous_outcome is NOT proof of failure. Keep the
           // uploaded bytes available for reconciliation, never blind resend.
           onUpdateMessage(tempId, { status: unknownOutcome ? "sending" : "failed" });
-          if (unknownOutcome) {
-            toast.error("Delivery is uncertain. Check WhatsApp before retrying.");
-          }
           // Delete only when the server explicitly reports a pre-send error.
           // Provider/network/500 outcomes may have sent the attachment.
           if (["bad_request", "not_found", "whatsapp_not_configured", "unsupported_capability"].includes(data?.code)) {

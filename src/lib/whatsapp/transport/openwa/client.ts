@@ -2,6 +2,7 @@ import { WhatsAppTransportError, type WhatsAppMediaKind } from '../types'
 
 const DEFAULT_TIMEOUT_MS = 10_000
 const MEDIA_DOWNLOAD_TIMEOUT_MS = 30_000
+const MEDIA_SEND_TIMEOUT_MS = 75_000
 const REDACTED = '[REDACTED]'
 export interface OpenWAClientConfig { baseUrl: string; apiKey: string; timeoutMs?: number; allowedHosts?: readonly string[]; fetchImpl?: typeof fetch }
 export interface OpenWARequestOptions { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown; correlationId?: string; idempotencyKey?: string; timeoutMs?: number }
@@ -133,7 +134,7 @@ export class OpenWAClient {
     if (!Array.isArray(existing)) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA returned an invalid webhook list')
     const matching = existing.find((item) => item.url === url)
     const payload = {
-      url, secret, events: ['message.received', 'message.ack', 'message.failed', 'message.receipt',
+      url, secret, events: ['message.received', 'message.sent', 'message.ack', 'message.failed', 'message.receipt',
         'session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'],
     }
     if (matching) {
@@ -163,12 +164,26 @@ export class OpenWAClient {
     if (!providerMessageId) throw new WhatsAppTransportError('ambiguous_outcome', 'OpenWA send response is missing a provider message id')
     return { providerMessageId, raw: redactOpenWAValue(response) as Record<string, unknown> }
   }
+  async markChatRead(sessionId: string, chatId: string): Promise<void> {
+    // Acknowledges WhatsApp-side read state for one validated one-to-one
+    // chat. Never derive @c.us from an @lid, and never auto-resend sends.
+    if (!/^[0-9]{5,20}@(c\.us|lid)$/.test(chatId)) {
+      throw new WhatsAppTransportError('invalid_request', 'OpenWA read receipt requires a verified one-to-one chat ID')
+    }
+    await this.request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/chats/read`, {
+      method: 'POST', body: { chatId },
+    })
+  }
   async sendMedia(request: OpenWASendMediaRequest, correlationId?: string): Promise<OpenWASendMediaResult> {
     if (!['image', 'video', 'document', 'audio'].includes(request.kind)) throw new WhatsAppTransportError('unsupported_capability', 'Unsupported OpenWA media kind')
     if (!request.link) throw new WhatsAppTransportError('invalid_request', 'OpenWA media send requires a WACRM media URL')
     if (request.caption && request.kind !== 'audio' && request.caption.length > 1024) throw new WhatsAppTransportError('invalid_request', 'OpenWA media caption exceeds 1024 characters')
     const response = await this.request<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(request.sessionId)}/messages/send-${request.kind}`, {
       method: 'POST', correlationId, idempotencyKey: request.idempotencyKey,
+      // Gateway may fetch remote video, generate thumbnails and wait for
+      // Chromium media metadata. This control-plane POST is not equivalent
+      // to a 10s JSON request. Keep an explicit timeout override for tests.
+      timeoutMs: this.config.timeoutMs ?? MEDIA_SEND_TIMEOUT_MS,
       body: {
         chatId: gatewayChatId(request.to), url: request.link,
         ...(request.kind !== 'audio' && request.caption ? { caption: request.caption } : {}),
