@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveMetaTransport } from './meta-adapter'
 import { resolveOpenWATransport } from './openwa/adapter'
 import { GuardedOpenWATransport } from './guardrails'
+import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { WhatsAppTransportError, type WhatsAppProvider, type WhatsAppTransport } from './types'
 
 interface ConnectionRow { id: string; account_id: string; provider: WhatsAppProvider }
@@ -13,8 +14,12 @@ export async function resolveWhatsAppTransport(db: SupabaseClient, accountId: st
   if (error || !data) throw new WhatsAppTransportError('authentication_or_configuration', 'WhatsApp connection is not configured for this account', error)
   const connection = data as ConnectionRow
   if (connection.provider === 'openwa') {
-    const resolved = await resolveOpenWATransport(db, accountId, connection.id)
-    return { connectionId: resolved.connectionId, transport: new GuardedOpenWATransport(db, resolved.transport) }
+    // Caller-scoped DB above authorizes access to this connection. Only
+    // after that check may server-only credential reads and guardrail RPCs
+    // use service_role (migrations 149/152); never widen client grants.
+    const serverDb = supabaseAdmin()
+    const resolved = await resolveOpenWATransport(serverDb, accountId, connection.id)
+    return { connectionId: resolved.connectionId, transport: new GuardedOpenWATransport(serverDb, resolved.transport) }
   }
   if (connection.provider === 'meta_cloud') {
     const resolved = await resolveMetaTransport(db, accountId)
