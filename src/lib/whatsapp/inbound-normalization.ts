@@ -198,10 +198,11 @@ export function normalizeOpenWAInboundMessage(
   } else if (mediaKind) {
     const media = normalizeOpenWAMedia(message, mediaKind)
     if (!media) throw new Error(`OpenWA ${mediaKind} message is missing provider media identity`)
-    // Some gateways omit media.chatId even though the signed message carries
-    // the verified 1:1 chat JID. Reuse only that validated identity for the
-    // scoped read-only archive download; never infer it from a phone/LID.
-    if (!media.chat_id && providerChatId) media.chat_id = providerChatId
+    // A media descriptor's chat ID is not independently trusted. Only the
+    // sender/chat pair validated above may authorize an archive download.
+    // A mismatched chat ID must not survive into a privileged media fetch.
+    if (providerChatId) media.chat_id = providerChatId
+    else delete media.chat_id
     normalized[mediaKind] = media
     if (replyTo) normalized.context = { id: replyTo }
   } else {
