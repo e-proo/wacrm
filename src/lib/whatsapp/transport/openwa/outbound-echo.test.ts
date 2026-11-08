@@ -95,7 +95,7 @@ describe('OpenWA own-sent phone/API echo', () => {
 
   it('does not turn an unmapped @lid into a fake phone contact', async () => {
     const t = fixture()
-    const message = { ...base.message, providerChatId: '12345678901@lid' } as never
+    const message = { ...(base.message as unknown as Record<string, unknown>), providerChatId: '12345678901@lid' } as never
     expect(await processOpenWAOwnSentEcho({ ...base, db: t.db, message })).toBe('ignored')
     expect(findOrCreateContact).not.toHaveBeenCalled()
     expect(t.writes).toHaveLength(0)
@@ -103,7 +103,7 @@ describe('OpenWA own-sent phone/API echo', () => {
 
   it('rejects provider connection mismatches without looking up contacts', async () => {
     const t = fixture()
-    const message = { ...base.message, connectionId: 'other-conn' } as never
+    const message = { ...(base.message as unknown as Record<string, unknown>), connectionId: 'other-conn' } as never
     expect(await processOpenWAOwnSentEcho({ ...base, db: t.db, message })).toBe('ignored')
     expect(findOrCreateContact).not.toHaveBeenCalled()
   })
