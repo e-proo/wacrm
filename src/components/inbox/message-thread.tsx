@@ -49,6 +49,7 @@ import {
   type SendMediaPayload,
 } from "./message-composer";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
+import { markConversationNotificationsRead } from "@/lib/inbox/notification-read";
 import { TemplatePicker } from "./template-picker";
 import { AiThreadBanner } from "./ai-thread-banner";
 import { buildReplyPreview } from "./reply-quote";
@@ -454,6 +455,21 @@ export function MessageThread({
         if (error) console.error("Failed to reset unread_count:", error);
       });
   }, [conversationId, hasUnread]);
+
+  // Opening a thread is also viewing its assignment/request notifications.
+  // The conversation unread_count and the notifications.read_at badge are
+  // separate DB states; clearing one must not leave the other as "unread".
+  // Explicit account + user + conversation filters backstop notification RLS.
+  useEffect(() => {
+    if (!conversationId || !conversation?.account_id || !user?.id) return;
+    void markConversationNotificationsRead(createClient(), {
+      accountId: conversation.account_id,
+      conversationId,
+      userId: user.id,
+    }).catch((error: unknown) => {
+      console.error("Failed to mark conversation notifications read:", error);
+    });
+  }, [conversationId, conversation?.account_id, user?.id]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {

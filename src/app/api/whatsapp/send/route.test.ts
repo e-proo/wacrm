@@ -26,7 +26,7 @@ function makeSupabaseMock() {
     }
     const insertResult = () => {
       if (table === 'conversations') return { data: { id: 'conv-new', account_id: 'acct-1', contact_id: 'contact-1', contact: CONTACT }, error: null }
-      if (table === 'messages') return { data: { id: 'msg-1', status: 'pending' }, error: null }
+      if (table === 'messages') return { data: { id: 'msg-1', status: 'sending' }, error: null }
       return { data: null, error: null }
     }
     const terminal = () => Promise.resolve(didInsert ? insertResult() : selectResult())
@@ -69,7 +69,7 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
     const res = await postContactTemplate(); const json = await res.json()
     expect(res.status).toBe(200); expect(json.success).toBe(true); expect(json.whatsapp_message_id).toBe('wamid-1')
     expect(conversationInserts).toHaveLength(1); expect(sendTemplateMessage).toHaveBeenCalledTimes(1)
-    expect(messageInserts[0]).toMatchObject({ conversation_id: 'conv-new', content_type: 'template', template_name: 'order_update', sender_type: 'agent', provider: 'meta_cloud', connection_id: 'conn-meta-1', status: 'pending' })
+    expect(messageInserts[0]).toMatchObject({ conversation_id: 'conv-new', content_type: 'template', template_name: 'order_update', sender_type: 'agent', provider: 'meta_cloud', connection_id: 'conn-meta-1', status: 'sending' })
     expect(messageInserts[0].outbound_idempotency_key).toEqual(expect.any(String))
     expect(messageUpdates).toContainEqual(expect.objectContaining({ message_id: 'wamid-1', provider: 'meta_cloud', connection_id: 'conn-meta-1', provider_message_id: 'wamid-1', status: 'sent' }))
   })
