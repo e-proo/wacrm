@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 
 import { normalizeOpenWAInboundMessage, normalizeOpenWAOwnSentMessage } from '@/lib/whatsapp/inbound-normalization'
 import { processOpenWAOwnSentEcho } from '@/lib/whatsapp/transport/openwa/outbound-echo'
+import { extractOpenWASignedInlineMedia } from '@/lib/whatsapp/transport/openwa/webhook-media'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
 import { applyWhatsAppStatus, parseOpenWAStatusEvent } from '@/lib/whatsapp/status-lifecycle'
 import { classifyOpenWAWebhookRejection, markOpenWAWebhookProcessed, verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
@@ -46,6 +47,7 @@ export async function POST(request: Request) {
           await processOpenWAOwnSentEcho({
             db, storage: db.storage, accountId, connectionId,
             ownerUserId: account.owner_user_id, message: ownSent,
+            signedInlineMedia: extractOpenWASignedInlineMedia(envelope),
           })
         }
       } else {
@@ -53,7 +55,7 @@ export async function POST(request: Request) {
         if (normalized) {
           const { data: account, error: accountError } = await db.from('accounts').select('owner_user_id').eq('id', accountId).maybeSingle()
           if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
-          await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true)
+          await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true, extractOpenWASignedInlineMedia(envelope))
         }
       }
       await markOpenWAWebhookProcessed(db, connectionId, envelope.eventId)

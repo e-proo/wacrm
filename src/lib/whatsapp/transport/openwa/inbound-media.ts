@@ -8,8 +8,8 @@ import { resolveOpenWAClient } from './credentials'
 
 const ALLOWED_PREFIXES: Record<string, readonly string[]> = { image: ['image/'], video: ['video/'], audio: ['audio/'], document: ['application/', 'text/'] }
 
-export async function mirrorOpenWAInboundMedia(args: { db: SupabaseClient; storage: MirrorStorage; accountId: string; connectionId: string; kind: 'image' | 'video' | 'audio' | 'document'; media: NormalizedInboundMedia; messageTimestamp: string }): Promise<string | null> {
-  const { db, storage, accountId, connectionId, kind, media, messageTimestamp } = args
+export async function mirrorOpenWAInboundMedia(args: { db: SupabaseClient; storage: MirrorStorage; accountId: string; connectionId: string; kind: 'image' | 'video' | 'audio' | 'document'; media: NormalizedInboundMedia; messageTimestamp: string; signedInlineMedia?: string }): Promise<string | null> {
+  const { db, storage, accountId, connectionId, kind, media, messageTimestamp, signedInlineMedia } = args
   const mime = normalizeMimeType(media.mime_type)
   if (!mime || !ALLOWED_PREFIXES[kind].some((prefix) => mime.startsWith(prefix))) throw new WhatsAppTransportError('invalid_request', `OpenWA ${kind} MIME type is not allowed`)
   if (typeof media.file_size === 'number' && media.file_size > MEDIA_MAX_BYTES) throw new WhatsAppTransportError('invalid_request', 'OpenWA media exceeds WACRM storage limit')
@@ -23,6 +23,17 @@ export async function mirrorOpenWAInboundMedia(args: { db: SupabaseClient; stora
   return mirrorInboundMedia({
     storage, accountId, mediaId: stableMediaId, downloadUrl: `openwa://${connectionId}/${encodeURIComponent(media.id)}`, accessToken: '', mimeType: mime, fileSize: media.file_size, fileName: media.filename, messageTimestamp,
     download: async () => {
+      // Prefer signed inline bytes when OpenWA omitted archiving the
+      // gateway-side copy. Bound size and syntax; never log or forward
+      // base64 to CRM agents, webhooks or the browser.
+      if (signedInlineMedia && signedInlineMedia.length <= Math.ceil(MEDIA_MAX_BYTES * 4 / 3) + 4
+        && signedInlineMedia.length % 4 === 0
+        && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(signedInlineMedia)) {
+        const bytes = Buffer.from(signedInlineMedia, 'base64')
+        if (bytes.length > 0 && bytes.length <= MEDIA_MAX_BYTES) {
+          return { buffer: bytes, contentType: mime }
+        }
+      }
       if (!media.chat_id) throw new WhatsAppTransportError('invalid_request', 'OpenWA media is missing the original chat ID')
       // The archive may be created just after the signed webhook is
       // dispatched. Retry only read-only 404s, never POST/send requests.
@@ -54,8 +65,9 @@ export async function hydrateOpenWAInboundMessageMedia(args: {
   conversationId: string
   inboundMessageId: string
   message: NormalizedInboundMessage
+  signedInlineMedia?: string
 }): Promise<boolean> {
-  const { db, storage, accountId, conversationId, inboundMessageId, message } = args
+  const { db, storage, accountId, conversationId, inboundMessageId, message, signedInlineMedia } = args
   if (message.provider !== 'openwa') return false
   const kind = message.type
   if (kind !== 'image' && kind !== 'video' && kind !== 'audio' && kind !== 'document') return false
@@ -69,7 +81,7 @@ export async function hydrateOpenWAInboundMessageMedia(args: {
 
   const mediaUrl = await mirrorOpenWAInboundMedia({
     db, storage, accountId, connectionId: message.connectionId, kind, media,
-    messageTimestamp: message.timestamp,
+    messageTimestamp: message.timestamp, signedInlineMedia,
   })
   if (!mediaUrl) return false
   const { error: updateError } = await db.from('messages').update({ media_url: mediaUrl })

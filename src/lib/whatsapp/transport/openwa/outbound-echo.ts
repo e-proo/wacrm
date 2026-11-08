@@ -21,8 +21,9 @@ export async function processOpenWAOwnSentEcho(input: {
   connectionId: string
   ownerUserId: string
   message: NormalizedInboundMessage
+  signedInlineMedia?: string
 }): Promise<'inserted' | 'existing' | 'ignored'> {
-  const { db, storage, accountId, connectionId, ownerUserId, message } = input
+  const { db, storage, accountId, connectionId, ownerUserId, message, signedInlineMedia } = input
   if (message.provider !== 'openwa' || message.connectionId !== connectionId) return 'ignored'
   const chatId = message.providerChatId
   if (!chatId || !/^[0-9]{5,20}@(c\.us|lid)$/.test(chatId)) return 'ignored'
@@ -84,7 +85,7 @@ export async function processOpenWAOwnSentEcho(input: {
   if (media) {
     try {
       await hydrateOpenWAInboundMessageMedia({
-        db, storage, accountId, conversationId, inboundMessageId: insertedId, message,
+        db, storage, accountId, conversationId, inboundMessageId: insertedId, message, signedInlineMedia,
       })
     } catch (error) {
       console.warn('[openwa-echo] own-sent media hydration unavailable', {
