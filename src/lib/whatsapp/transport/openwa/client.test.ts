@@ -101,7 +101,7 @@ describe('OpenWA upstream REST contract', () => {
     }) as unknown as typeof fetch
     const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
     await client.configureWebhook('s', 'https://wacrm.example.com/api/whatsapp/openwa/webhook', '1234567890123456')
-    const post = fetchImpl.mock.calls.find((args) => args[1]?.method === 'POST')
+    const post = vi.mocked(fetchImpl).mock.calls.find((args) => args[1]?.method === 'POST')
     expect(JSON.parse(String(post?.[1]?.body)).events).toContain('message.sent')
   })
 
