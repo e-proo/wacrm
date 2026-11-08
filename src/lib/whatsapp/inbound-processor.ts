@@ -167,7 +167,10 @@ export async function processNormalizedInboundMessage(
   accessToken: string,
   // Per-account opt-out for the inbound-media mirror (migration 039).
   // See parseMessageContent for what it turns off.
-  mirrorMedia: boolean
+  mirrorMedia: boolean,
+  // Signed OpenWA webhook may carry small inline media bytes. Never include
+  // these bytes in NormalizedInboundMessage sent to agents/automations.
+  signedInlineMedia?: string,
 ) {
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
@@ -366,6 +369,7 @@ export async function processNormalizedInboundMessage(
         conversationId: conversation.id,
         inboundMessageId,
         message,
+        signedInlineMedia,
       })
     } catch (error) {
       console.warn('[openwa-media] hydration failed', {
@@ -992,7 +996,7 @@ interface ContactOutcome {
   wasCreated: boolean
 }
 
-async function findOrCreateContact(
+export async function findOrCreateContact(
   accountId: string,
   configOwnerUserId: string,
   phone: string,
@@ -1052,7 +1056,7 @@ async function findOrCreateContact(
   return { contact: newContact, wasCreated: true }
 }
 
-async function findOrCreateConversation(
+export async function findOrCreateConversation(
   accountId: string,
   configOwnerUserId: string,
   contactId: string,

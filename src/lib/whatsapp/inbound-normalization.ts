@@ -207,3 +207,26 @@ export function normalizeOpenWAInboundMessage(
 
   return { message: normalized, contact: { profile: { name: senderName }, wa_id: from } }
 }
+
+// An OpenWA message.sent event represents a write from the linked phone or
+// the gateway. It must NEVER enter the inbound customer/AI pipeline.
+// Reuse the same safe content normalization, with the authenticated
+// provider-native chat as the remote peer rather than the account's own JID.
+export function normalizeOpenWAOwnSentMessage(
+  envelope: OpenWAWebhookEnvelope,
+  connectionId: string,
+): NormalizedInboundMessage | null {
+  if (envelope.event.toLowerCase().replace(/[\s_-]+/g, '.') !== 'message.sent') return null
+  const data = record(envelope.data)
+  const message = record(data?.message) ?? data
+  if (!message || message.fromMe === false || message.isGroup === true) return null
+  const chatId = openWAOneToOneChatId(stringValue(message.chatId))
+  if (!chatId) return null
+  const remote = chatId.endsWith('@c.us') ? chatId.slice(0, -5) : chatId
+  const normalized = normalizeOpenWAInboundMessage({
+    ...envelope,
+    event: 'message.received',
+    data: { ...message, from: chatId, sender: chatId, senderPhone: remote, chatId },
+  }, connectionId)
+  return normalized?.message ?? null
+}

@@ -1,4 +1,8 @@
 import { NextResponse } from 'next/server'
+
+// Video sends can wait on OpenWA's media fetch/processing. Keep the HTTP
+// function alive beyond the bounded 75s upstream media POST timeout.
+export const maxDuration = 90
 import { createClient } from '@/lib/supabase/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import {

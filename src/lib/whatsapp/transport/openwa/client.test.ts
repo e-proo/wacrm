@@ -94,6 +94,46 @@ describe('OpenWA upstream REST contract', () => {
     }
   })
 
+  it('subscribes to the own-device message.sent echo', async () => {
+    const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      if (args[1]?.method === 'GET') return response(200, [])
+      return response(201, { id: 'hook-1' })
+    }) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+    await client.configureWebhook('s', 'https://wacrm.example.com/api/whatsapp/openwa/webhook', '1234567890123456')
+    const post = vi.mocked(fetchImpl).mock.calls.find((args) => args[1]?.method === 'POST')
+    expect(JSON.parse(String(post?.[1]?.body)).events).toContain('message.sent')
+  })
+
+  it('marks only a validated 1:1 chat as read via the OpenWA API', async () => {
+    const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      expect((args[0] as URL).pathname).toBe('/api/sessions/s/chats/read')
+      expect(args[1]?.method).toBe('POST')
+      expect(JSON.parse(String(args[1]?.body))).toEqual({ chatId: '12345678901@lid' })
+      return response(200, { success: true })
+    }) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+    await client.markChatRead('s', '12345678901@lid')
+    await expect(client.markChatRead('s', '12345678901@g.us')).rejects.toMatchObject({ code: 'invalid_request' })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('permits an OpenWA media send longer than 10s without losing its successful identity', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => new Promise<Response>((resolve, reject) => {
+        args[1]?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })
+        setTimeout(() => resolve(response(201, { messageId: 'native-video-1' })), 15_000)
+      })) as unknown as typeof fetch
+      const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+      const pending = client.sendMedia({ sessionId: 's', to: '12345678901', kind: 'video', link: 'https://storage.example/v.mp4', idempotencyKey: 'video-key' })
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect((await pending).providerMessageId).toBe('native-video-1')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('never invents an idempotency lookup or resends after an ambiguous send', async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch
     const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })

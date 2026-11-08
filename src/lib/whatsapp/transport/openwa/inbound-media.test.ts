@@ -12,6 +12,22 @@ type UploadResult = { error: null | { message: string } }
 function storage(upload: ReturnType<typeof vi.fn<() => Promise<UploadResult>>> = vi.fn(async () => ({ error: null }))) { return { upload, api: { from: () => ({ upload, getPublicUrl: () => ({ data: { publicUrl: 'https://storage.example/media' } }) }) } } }
 
 describe('OpenWA inbound media mirror', () => {
+  it('stores a signed small PDF inline even when gateway archive GET is unavailable', async () => {
+    const downloadMedia = vi.fn()
+    vi.mocked(resolveOpenWAClient).mockResolvedValue({
+      credentials:{} as never, client:{downloadMedia} as never,
+    })
+    const s = storage()
+    const result = await mirrorOpenWAInboundMedia({
+      db:db(), storage:s.api as never, accountId:'acct-1', connectionId:'conn-1',
+      kind:'document', media:{id:'pdf-1',mime_type:'application/pdf',filename:'report.pdf'},
+      messageTimestamp:'1792950000', signedInlineMedia:Buffer.from('%PDF-1.4').toString('base64'),
+    })
+    expect(result).toBe('https://storage.example/media')
+    expect(downloadMedia).not.toHaveBeenCalled()
+    expect(s.upload).toHaveBeenCalledTimes(1)
+  })
+
   it('downloads with scoped OpenWA client and mirrors into WACRM storage', async () => { const downloadMedia = vi.fn(async () => ({ buffer: Buffer.from('abc'), contentType: 'image/jpeg', contentLength: 3 })); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); const s = storage(); const result = await mirrorOpenWAInboundMedia({ db: db(), storage: s.api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'image', media: { id: 'media-1', chat_id: '123@c.us', mime_type: 'image/jpeg', file_size: 3 }, messageTimestamp: '1792950000' }); expect(result).toBe('https://storage.example/media'); expect(downloadMedia).toHaveBeenCalledWith('sess-1', 'media-1', '123@c.us', 'media:media-1'); expect(s.upload).toHaveBeenCalledTimes(1) })
   it('rejects MIME mismatch before provider download', async () => { const downloadMedia = vi.fn(); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); await expect(mirrorOpenWAInboundMedia({ db: db(), storage: storage().api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'image', media: { id: 'media-1', mime_type: 'application/pdf' }, messageTimestamp: '1' })).rejects.toMatchObject({ code: 'invalid_request' }); expect(downloadMedia).not.toHaveBeenCalled() })
   it('rejects declared oversize before provider download', async () => { const downloadMedia = vi.fn(); vi.mocked(resolveOpenWAClient).mockResolvedValue({ credentials: {} as never, client: { downloadMedia } as never }); await expect(mirrorOpenWAInboundMedia({ db: db(), storage: storage().api as never, accountId: 'acct-1', connectionId: 'conn-1', kind: 'document', media: { id: 'media-1', mime_type: 'application/pdf', file_size: MEDIA_MAX_BYTES + 1 }, messageTimestamp: '1' })).rejects.toMatchObject({ code: 'invalid_request' }); expect(downloadMedia).not.toHaveBeenCalled() })

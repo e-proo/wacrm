@@ -456,6 +456,32 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
+  // New customer messages can arrive while the thread is already open.
+  // Re-acknowledge only when its latest incoming identity changes, not for
+  // outbound messages or unrelated UI renders.
+  const lastVisibleInboundId = useMemo(
+    () => [...messages].reverse().find((m) => m.sender_type === "customer")?.id ?? null,
+    [messages],
+  );
+
+  // Opening an OpenWA conversation should also mark it read on WhatsApp,
+  // not merely clear WACRM's unread_count. The server verifies agent role,
+  // tenant, connection and the signed inbound 1:1 JID before any write.
+  useEffect(() => {
+    if (!conversationId || !user?.id || !lastVisibleInboundId) return;
+    void fetch("/api/whatsapp/openwa/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversation_id: conversationId }),
+    }).then(async (response) => {
+      if (!response.ok && response.status !== 403) {
+        console.warn("[openwa-read] WhatsApp read acknowledgement unavailable", response.status);
+      }
+    }).catch(() => {
+      console.warn("[openwa-read] WhatsApp read acknowledgement request failed");
+    });
+  }, [conversationId, user?.id, lastVisibleInboundId]);
+
   // Opening a thread is also viewing its assignment/request notifications.
   // The conversation unread_count and the notifications.read_at badge are
   // separate DB states; clearing one must not leave the other as "unread".
@@ -581,15 +607,17 @@ export function MessageThread({
 
         if (!res.ok) {
           const reason = data?.error || `HTTP ${res.status}`;
-          console.error("Failed to send media:", reason);
-          toast.error(`Failed to send: ${reason}`);
           const unknownOutcome = res.status === 409 && data?.code === "ambiguous_outcome";
+          if (unknownOutcome) {
+            console.warn("OpenWA send outcome uncertain; do not resend automatically");
+            toast.warning("The attachment may have been delivered. Check WhatsApp before sending it again.");
+          } else {
+            console.error("Failed to send media:", reason);
+            toast.error(`Failed to send: ${reason}`);
+          }
           // A 409 ambiguous_outcome is NOT proof of failure. Keep the
           // uploaded bytes available for reconciliation, never blind resend.
           onUpdateMessage(tempId, { status: unknownOutcome ? "sending" : "failed" });
-          if (unknownOutcome) {
-            toast.error("Delivery is uncertain. Check WhatsApp before retrying.");
-          }
           // Delete only when the server explicitly reports a pre-send error.
           // Provider/network/500 outcomes may have sent the attachment.
           if (["bad_request", "not_found", "whatsapp_not_configured", "unsupported_capability"].includes(data?.code)) {
