@@ -120,7 +120,7 @@ function normalizeOpenWAMedia(message: Record<string, unknown>, kind: 'image' | 
   const fileSize = numberValue(nested?.file_size ?? nested?.fileSize ?? nested?.sizeBytes ?? message.file_size ?? message.fileSize)
   return {
     id,
-    ...(stringValue(message.chatId) ? { chat_id: stringValue(message.chatId) } : {}),
+    ...(stringValue(message.chatId) ?? stringValue(nested?.chatId) ? { chat_id: stringValue(message.chatId) ?? stringValue(nested?.chatId) } : {}),
     mime_type: mimeType,
     ...(caption ? { caption } : {}),
     ...(filename ? { filename } : {}),
@@ -166,7 +166,8 @@ export function normalizeOpenWAInboundMessage(
   const reactionRecord = record(message.reaction)
   const reactionTarget = stringValue(reactionRecord?.message_id) ?? stringValue(reactionRecord?.messageId) ?? stringValue(message.reactionMessageId)
   const reactionEmoji = stringValue(reactionRecord?.emoji) ?? stringValue(message.emoji)
-  const mediaKind = rawType && ['image', 'video', 'document', 'audio'].includes(rawType) ? rawType as 'image' | 'video' | 'document' | 'audio' : null
+  const normalizedMediaType = rawType === 'voice' ? 'audio' : rawType === 'file' ? 'document' : rawType
+  const mediaKind = normalizedMediaType && ['image', 'video', 'document', 'audio'].includes(normalizedMediaType) ? normalizedMediaType as 'image' | 'video' | 'document' | 'audio' : null
   const type = rawType === 'reaction' || reactionTarget ? 'reaction' : mediaKind ?? 'text'
 
   const replyRecord = record(message.reply)

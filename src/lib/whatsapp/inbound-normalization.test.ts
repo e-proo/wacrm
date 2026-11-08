@@ -46,6 +46,13 @@ describe('provider-neutral inbound normalization', () => {
     expect(normalized?.message[type]).toMatchObject({ id: type === 'video' ? 'vid-1' : type === 'image' ? 'img-1' : type === 'audio' ? 'aud-1' : 'doc-1' })
     expect(JSON.stringify(normalized)).not.toContain('raw-base64-must-not-propagate')
   })
+  it('normalizes OpenWA voice and file payloads into supported attachment types', () => {
+    const envelope = { eventId: 'evt-alias', timestamp: '2026-11-08T19:34:00Z', sessionId: 'sess', event: 'message.received' }
+    const voice = normalizeOpenWAInboundMessage({ ...envelope, data: { id: 'v1', from: '123@c.us', chatId: '123@c.us', type: 'voice', media: { mimetype: 'audio/ogg', sizeBytes: 125 } } }, 'conn')
+    const file = normalizeOpenWAInboundMessage({ ...envelope, data: { id: 'd1', from: '123@c.us', chatId: '123@c.us', type: 'file', media: { mimetype: 'application/pdf', filename: 'invoice.pdf' } } }, 'conn')
+    expect(voice?.message).toMatchObject({ type: 'audio', audio: { id: 'v1', mime_type: 'audio/ogg' } })
+    expect(file?.message).toMatchObject({ type: 'document', document: { id: 'd1', filename: 'invoice.pdf' } })
+  })
   it('normalizes reactions and ignores non-message events', () => {
     const reaction = normalizeOpenWAInboundMessage({ timestamp: '2026-10-26T18:00:00.000Z', eventId: 'evt-r', sessionId: 's', event: 'message.received', data: { id: 'r1', from: '123', type: 'reaction', reaction: { messageId: 'target', emoji: '👍' } } }, 'c')
     expect(reaction?.message.reaction).toEqual({ message_id: 'target', emoji: '👍' }); expect(normalizeOpenWAInboundMessage({ timestamp: '2026-10-26T18:00:00.000Z', eventId: 'evt-status', sessionId: 's', event: 'status', data: {} }, 'c')).toBeNull()

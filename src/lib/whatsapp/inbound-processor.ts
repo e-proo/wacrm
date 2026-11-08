@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { mirrorInboundMedia } from '@/lib/whatsapp/mirror-inbound-media'
-import { mirrorOpenWAInboundMedia } from '@/lib/whatsapp/transport/openwa/inbound-media'
+import { hydrateOpenWAInboundMessageMedia } from '@/lib/whatsapp/transport/openwa/inbound-media'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { reopenClosedConversation } from '@/lib/conversations/reopen'
@@ -350,6 +350,30 @@ export async function processNormalizedInboundMessage(
   if (!inboundMessageId) {
     console.error('[webhook] inbound message id missing after persistence')
     return
+  }
+
+  // OpenWA media must NEVER block the initial message INSERT. The gateway may
+  // be slow to archive a video/document, or may mark the bytes unavailable.
+  // Persist the message first, then hydrate its media URL. A redelivery of the
+  // signed event may safely fill a still-empty URL without re-running business
+  // side effects; stable storage paths make this idempotent.
+  if (message.provider === 'openwa' && mirrorMedia) {
+    try {
+      await hydrateOpenWAInboundMessageMedia({
+        db: supabaseAdmin(),
+        storage: supabaseAdmin().storage,
+        accountId,
+        conversationId: conversation.id,
+        inboundMessageId,
+        message,
+      })
+    } catch (error) {
+      console.warn('[openwa-media] hydration failed', {
+        connectionId: message.connectionId,
+        kind: message.type,
+        code: error instanceof Error ? error.name : 'unknown',
+      })
+    }
   }
 
   // Update conversation. The unread bump is done DB-side (migration 037's
@@ -789,25 +813,9 @@ async function parseMessageContent(
     mediaId: string,
     fileName?: string | null
   ): Promise<string | null> => {
-    if (message.provider === 'openwa') {
-      if (!mirror) return null
-      const media = message.type === 'image' ? message.image : message.type === 'video' ? message.video : message.type === 'document' ? message.document : message.type === 'audio' ? message.audio : null
-      if (!media || !['image', 'video', 'document', 'audio'].includes(message.type)) return null
-      try {
-        return await mirrorOpenWAInboundMedia({
-          db: supabaseAdmin(),
-          storage: supabaseAdmin().storage,
-          accountId: mirror.accountId,
-          connectionId: message.connectionId,
-          kind: message.type as 'image' | 'video' | 'document' | 'audio',
-          media,
-          messageTimestamp: message.timestamp,
-        })
-      } catch (error) {
-        console.error('[openwa-media] inbound mirror failed', { connectionId: message.connectionId, mediaId })
-        return null
-      }
-    }
+    // For OpenWA, defer potentially slow media download until AFTER the
+    // idempotent inbound message INSERT. Meta's existing behavior is unchanged.
+    if (message.provider === 'openwa') return null
     try {
       const info = await getMediaUrl({ mediaId, accessToken })
 
