@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { normalizeMetaInboundMessage, normalizeOpenWAInboundMessage } from './inbound-normalization'
+import { normalizeMetaInboundMessage, normalizeOpenWAInboundMessage, normalizeOpenWAOwnSentMessage } from './inbound-normalization'
 
 describe('provider-neutral inbound normalization', () => {
   it('normalizes equivalent Meta and OpenWA text into equivalent business fields', () => {
@@ -68,5 +68,30 @@ describe('provider-neutral inbound normalization', () => {
     expect(normalized?.message.image).toMatchObject({ id: 'm-123', chat_id: '967700000001@c.us', mime_type: 'image/jpeg', file_size: 1024 })
     expect(JSON.stringify(normalized)).not.toContain('inline-secret')
   })
+  it('handles a linked-device message.sent as own sent, never as inbound customer', () => {
+    const echo = normalizeOpenWAOwnSentMessage({
+      event: 'message.sent', eventId: 'sent-1', timestamp: '2026-11-08T19:00:00Z', sessionId: 'session',
+      data: { id: 'native1', fromMe: true, from: '99999999999@c.us',
+        chatId: '12345678901@c.us', body: 'From my phone', type: 'text' },
+    }, 'conn')
+    expect(echo).toMatchObject({
+      id: 'native1', provider: 'openwa', connectionId: 'conn',
+      providerChatId: '12345678901@c.us', from: '12345678901',
+      text: { body: 'From my phone' },
+    })
+    expect(normalizeOpenWAInboundMessage({
+      event: 'message.sent', eventId: 'sent-1', timestamp: '2026-11-08T19:00:00Z', sessionId: 'session',
+      data: { id: 'native1', fromMe: true, from: '99999999999@c.us', chatId: '12345678901@c.us', type: 'text' },
+    }, 'conn')).toBeNull()
+    expect(normalizeOpenWAOwnSentMessage({
+      event: 'message.sent', eventId: 'sent-2', timestamp: '2026-11-08T19:00:00Z', sessionId: 'session',
+      data: { id: 'native2', fromMe: false, chatId: '12345678901@c.us' },
+    }, 'conn')).toBeNull()
+    expect(normalizeOpenWAOwnSentMessage({
+      event: 'message.sent', eventId: 'sent-3', timestamp: '2026-11-08T19:00:00Z', sessionId: 'session',
+      data: { id: 'native3', fromMe: true, chatId: '120363123456789@g.us' },
+    }, 'conn')).toBeNull()
+  })
+
   it('normalizes missing timestamps without leaking provider-specific shape', () => { vi.spyOn(Date, 'now').mockReturnValue(1_792_950_000_000); const normalized = normalizeOpenWAInboundMessage({ timestamp: '2026-10-26T18:00:00.000Z', eventId: 'evt-time', sessionId: 's', event: 'message.received', data: { id: 'x', from: '123', text: 'hello' } }, 'c'); expect(normalized?.message.timestamp).toBe('1792950000'); vi.restoreAllMocks() })
 })

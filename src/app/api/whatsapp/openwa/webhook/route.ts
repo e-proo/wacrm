@@ -1,7 +1,8 @@
 import { after, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-import { normalizeOpenWAInboundMessage } from '@/lib/whatsapp/inbound-normalization'
+import { normalizeOpenWAInboundMessage, normalizeOpenWAOwnSentMessage } from '@/lib/whatsapp/inbound-normalization'
+import { processOpenWAOwnSentEcho } from '@/lib/whatsapp/transport/openwa/outbound-echo'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
 import { applyWhatsAppStatus, parseOpenWAStatusEvent } from '@/lib/whatsapp/status-lifecycle'
 import { classifyOpenWAWebhookRejection, markOpenWAWebhookProcessed, verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
@@ -36,6 +37,17 @@ export async function POST(request: Request) {
       } else if (['status', 'message.status', 'message.ack', 'message.receipt', 'message.failed', 'ack', 'delivery', 'receipt'].includes(event)) {
         const status = parseOpenWAStatusEvent(envelope.data)
         if (status) await applyWhatsAppStatus(db, { provider: 'openwa', accountId, connectionId, ...status })
+      } else if (event === 'message.sent') {
+        const ownSent = normalizeOpenWAOwnSentMessage(envelope, connectionId)
+        if (ownSent) {
+          const { data: account, error: accountError } = await db.from('accounts')
+            .select('owner_user_id').eq('id', accountId).maybeSingle()
+          if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
+          await processOpenWAOwnSentEcho({
+            db, storage: db.storage, accountId, connectionId,
+            ownerUserId: account.owner_user_id, message: ownSent,
+          })
+        }
       } else {
         const normalized = normalizeOpenWAInboundMessage(envelope, connectionId)
         if (normalized) {

@@ -992,7 +992,7 @@ interface ContactOutcome {
   wasCreated: boolean
 }
 
-async function findOrCreateContact(
+export async function findOrCreateContact(
   accountId: string,
   configOwnerUserId: string,
   phone: string,
@@ -1052,7 +1052,7 @@ async function findOrCreateContact(
   return { contact: newContact, wasCreated: true }
 }
 
-async function findOrCreateConversation(
+export async function findOrCreateConversation(
   accountId: string,
   configOwnerUserId: string,
   contactId: string,
