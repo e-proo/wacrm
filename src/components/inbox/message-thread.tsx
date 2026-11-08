@@ -456,11 +456,19 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
+  // New customer messages can arrive while the thread is already open.
+  // Re-acknowledge only when its latest incoming identity changes, not for
+  // outbound messages or unrelated UI renders.
+  const lastVisibleInboundId = useMemo(
+    () => [...messages].reverse().find((m) => m.sender_type === "customer")?.id ?? null,
+    [messages],
+  );
+
   // Opening an OpenWA conversation should also mark it read on WhatsApp,
   // not merely clear WACRM's unread_count. The server verifies agent role,
   // tenant, connection and the signed inbound 1:1 JID before any write.
   useEffect(() => {
-    if (!conversationId || !user?.id) return;
+    if (!conversationId || !user?.id || !lastVisibleInboundId) return;
     void fetch("/api/whatsapp/openwa/read", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -472,7 +480,7 @@ export function MessageThread({
     }).catch(() => {
       console.warn("[openwa-read] WhatsApp read acknowledgement request failed");
     });
-  }, [conversationId, user?.id]);
+  }, [conversationId, user?.id, lastVisibleInboundId]);
 
   // Opening a thread is also viewing its assignment/request notifications.
   // The conversation unread_count and the notifications.read_at badge are
