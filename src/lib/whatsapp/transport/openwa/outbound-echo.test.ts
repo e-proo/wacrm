@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { processOpenWAOwnSentEcho } from './outbound-echo'
 import { findOrCreateContact, findOrCreateConversation } from '@/lib/whatsapp/inbound-processor'
+import { hydrateOpenWAInboundMessageMedia } from './inbound-media'
 
 vi.mock('@/lib/whatsapp/inbound-processor', () => ({
   findOrCreateContact: vi.fn(),
@@ -21,7 +22,7 @@ function fixture(opts: { existing?: boolean; lidMapping?: boolean } = {}) {
       q.order = () => q
       q.limit = () => q
       q.maybeSingle = async () => ({
-        data: table === 'messages' && opts.existing ? { id: 'native-row' }
+        data: table === 'messages' && opts.existing ? { id: 'native-row', conversation_id: 'conv-1', media_url: null }
           : table === 'messages' && opts.lidMapping ? { conversation_id: 'conv-1' }
           : table === 'conversations' ? { id: 'conv-1' } : null,
         error: null,
@@ -67,6 +68,21 @@ describe('OpenWA own-sent phone/API echo', () => {
     expect(t.writes).toHaveLength(0)
   })
 
+  it('rehydrates an existing own-sent media echo without duplicating the message', async () => {
+    const t = fixture({ existing: true })
+    const message = {
+      ...(base.message as unknown as Record<string, unknown>),
+      type: 'image', image: { id: 'media-1', mime_type: 'image/jpeg', chat_id: '12345678901@c.us' },
+    } as never
+    vi.mocked(hydrateOpenWAInboundMessageMedia).mockResolvedValue(true)
+    expect(await processOpenWAOwnSentEcho({ ...base, db: t.db, message })).toBe('existing')
+    expect(hydrateOpenWAInboundMessageMedia).toHaveBeenCalledWith(expect.objectContaining({
+      accountId: 'acct-1', conversationId: 'conv-1', inboundMessageId: 'native-row',
+    }))
+    expect(t.writes).toHaveLength(0)
+    expect(findOrCreateContact).not.toHaveBeenCalled()
+  })
+
   it('persists one own-device message as agent, never a customer unread', async () => {
     const t = fixture()
     // Supabase .upsert(...).select('id') resolves with insertedRows.
@@ -87,6 +103,7 @@ describe('OpenWA own-sent phone/API echo', () => {
     expect(t.writes[0]).toMatchObject({
       sender_type: 'agent', status: 'sent', provider: 'openwa',
       provider_message_id: 'native-1', message_id: 'native-1', connection_id: 'conn-1',
+      provider_chat_id: '12345678901@c.us',
     })
     expect(t.writes[0]).not.toHaveProperty('outbound_idempotency_key')
     expect(t.updates).toHaveLength(1)
