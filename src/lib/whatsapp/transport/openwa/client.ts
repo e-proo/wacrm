@@ -1,6 +1,7 @@
 import { WhatsAppTransportError, type WhatsAppMediaKind } from '../types'
 
 const DEFAULT_TIMEOUT_MS = 10_000
+const MEDIA_DOWNLOAD_TIMEOUT_MS = 30_000
 const REDACTED = '[REDACTED]'
 export interface OpenWAClientConfig { baseUrl: string; apiKey: string; timeoutMs?: number; allowedHosts?: readonly string[]; fetchImpl?: typeof fetch }
 export interface OpenWARequestOptions { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown; correlationId?: string; idempotencyKey?: string; timeoutMs?: number }
@@ -79,7 +80,9 @@ export class OpenWAClient {
     if (!chatId || !messageId) throw new WhatsAppTransportError('invalid_request', 'OpenWA media requires the original chat and message IDs')
     const target = this.target(`/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(chatId)}/${encodeURIComponent(messageId)}/media`)
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
+    // Media archives (especially video) can take longer than control-plane
+    // JSON calls through a tunnel. Keep the limit bounded for webhook workers.
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? MEDIA_DOWNLOAD_TIMEOUT_MS)
     try {
       const response = await this.fetchImpl(target, { headers: { accept: '*/*', authorization: `Bearer ${this.config.apiKey}`, ...(correlationId ? { 'x-correlation-id': correlationId } : {}) }, signal: controller.signal, redirect: 'error' })
       if (!response.ok) throw mapHttpError(response.status)

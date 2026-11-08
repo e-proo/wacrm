@@ -76,6 +76,24 @@ describe('OpenWA upstream REST contract', () => {
     expect(result.contentLength).toBe(3)
   })
 
+  it('allows a 15-second archive download without the 10-second JSON timeout aborting it', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => new Promise<Response>((resolve, reject) => {
+        args[1]?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+        setTimeout(() => resolve(new Response(new Uint8Array([1, 2, 3]), {
+          status: 200, headers: { 'content-type': 'video/mp4', 'content-length': '3' },
+        })), 15_000)
+      })) as unknown as typeof fetch
+      const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+      const pending = client.downloadMedia('session', 'video-msg', '123@c.us')
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect((await pending).contentType).toBe('video/mp4')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('never invents an idempotency lookup or resends after an ambiguous send', async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch
     const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })

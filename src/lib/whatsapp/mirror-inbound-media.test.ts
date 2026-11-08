@@ -261,6 +261,19 @@ describe("mirrorInboundMedia", () => {
     expect(url).toBeNull();
   });
 
+  it("uses the actual MIME when an OpenWA document has generic metadata", async () => {
+    const { storage, uploads } = fakeStorage();
+    await mirrorInboundMedia({
+      ...BASE,
+      storage,
+      mimeType: "application/octet-stream",
+      fileName: "report.pdf",
+      download: fakeDownload(1024, "application/pdf"),
+    });
+    expect(uploads[0].options.contentType).toBe("application/pdf");
+    expect(uploads[0].path).toMatch(/\.pdf$/);
+  });
+
   it("falls back to the download's content type when Meta gave none", async () => {
     const { storage, uploads } = fakeStorage();
 

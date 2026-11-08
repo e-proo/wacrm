@@ -567,20 +567,28 @@ export function MessageThread({
           const reason = data?.error || `HTTP ${res.status}`;
           console.error("Failed to send media:", reason);
           toast.error(`Failed to send: ${reason}`);
-          onUpdateMessage(tempId, { status: "failed" });
-          // The upload never reached the recipient — GC the orphaned
-          // object rather than leaving it in the public bucket forever.
-          void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(() => {});
+          const unknownOutcome = res.status === 409 && data?.code === "ambiguous_outcome";
+          // A 409 ambiguous_outcome is NOT proof of failure. Keep the
+          // uploaded bytes available for reconciliation, never blind resend.
+          onUpdateMessage(tempId, { status: unknownOutcome ? "sending" : "failed" });
+          if (unknownOutcome) {
+            toast.error("Delivery is uncertain. Check WhatsApp before retrying.");
+          }
+          // Delete only when the server explicitly reports a pre-send error.
+          // Provider/network/500 outcomes may have sent the attachment.
+          if (["bad_request", "not_found", "whatsapp_not_configured", "unsupported_capability"].includes(data?.code)) {
+            void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(() => {});
+          }
           return;
         }
 
         onUpdateMessage(tempId, { status: "sent" });
       } catch (err) {
-        console.error("Failed to send media:", err);
-        const reason = err instanceof Error ? err.message : "network error";
-        toast.error(`Failed to send: ${reason}`);
-        onUpdateMessage(tempId, { status: "failed" });
-        void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(() => {});
+        console.error("Media request outcome uncertain:", err);
+        toast.error("Network error. The attachment may have been sent; verify before retrying.");
+        // The request may have reached OpenWA before the browser lost its
+        // connection. Preserve the media and optimistic pending state.
+        onUpdateMessage(tempId, { status: "sending" });
       }
     },
     [conversation, onNewMessage, onUpdateMessage],

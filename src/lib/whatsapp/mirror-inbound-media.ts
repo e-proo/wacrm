@@ -191,9 +191,13 @@ export async function mirrorInboundMedia(
     // Meta's metadata MIME wins over the CDN response header: it's what
     // the message row records, so mirroring it keeps `media_type` and
     // the stored object describing the same thing.
+    // Some OpenWA document events declare a generic octet-stream MIME;
+    // prefer the gateway's actual download content type in that case so
+    // PDF/DOCX files can meet the Storage bucket's exact MIME allow-list.
     const uploadType =
-      normalizedMime ??
+      (normalizedMime && normalizedMime !== "application/octet-stream" ? normalizedMime : null) ??
       normalizeMimeType(contentType) ??
+      normalizedMime ??
       "application/octet-stream";
 
     const objectName = mirrorFileName({
