@@ -5,7 +5,7 @@ import { normalizeOpenWAInboundMessage, normalizeOpenWAOwnSentMessage } from '@/
 import { processOpenWAOwnSentEcho } from '@/lib/whatsapp/transport/openwa/outbound-echo'
 import { extractOpenWASignedInlineMedia } from '@/lib/whatsapp/transport/openwa/webhook-media'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
-import { applyWhatsAppStatus, parseOpenWAStatusEvent } from '@/lib/whatsapp/status-lifecycle'
+import { applyOpenWAStatusWithRetry, parseOpenWAStatusEvent } from '@/lib/whatsapp/status-lifecycle'
 import { classifyOpenWAWebhookRejection, markOpenWAWebhookProcessed, verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
 import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 
@@ -37,7 +37,16 @@ export async function POST(request: Request) {
         await refreshOpenWAConnectionStatus(db, accountId, connectionId)
       } else if (['status', 'message.status', 'message.ack', 'message.receipt', 'message.failed', 'ack', 'delivery', 'receipt'].includes(event)) {
         const status = parseOpenWAStatusEvent(envelope.data)
-        if (status) await applyWhatsAppStatus(db, { provider: 'openwa', accountId, connectionId, ...status })
+        if (status) {
+          const result = await applyOpenWAStatusWithRetry(db, { provider: 'openwa', accountId, connectionId, ...status })
+          if (result === 'unknown') {
+            // No provider payload, recipient or message contents in logs.
+            // Long-running ambiguous sends must be reconciled, not resent.
+            console.warn('[openwa-webhook] unmatched delivery receipt', { connectionId, status: status.status })
+          }
+        } else {
+          console.warn('[openwa-webhook] unrecognized delivery receipt', { connectionId, event })
+        }
       } else if (event === 'message.sent') {
         const ownSent = normalizeOpenWAOwnSentMessage(envelope, connectionId)
         if (ownSent) {
