@@ -63,7 +63,7 @@ describe('OpenWA conversation connection selection', () => {
     const accountScoped = predicates.filter((row) =>
       row.table === 'conversations' || row.table === 'whatsapp_connections' || row.table === 'whatsapp_connection_credentials')
     expect(accountScoped.every((row) => row.column === 'account_id' || row.column === 'id' || row.column === 'provider' || row.column === 'phone_identity')).toBe(true)
-    expect(accountScoped.filter((row) => row.column === 'account_id')).toHaveLength(3)
+    expect(accountScoped.filter((row) => row.column === 'account_id')).toHaveLength(4)
     expect(accountScoped.filter((row) => row.column === 'account_id').every((row) => row.value === 'acct-1')).toBe(true)
     expect(JSON.stringify(result)).not.toContain('session_id')
     expect(JSON.stringify(result)).not.toContain('api_key')
