@@ -109,7 +109,7 @@ export async function verifyAndReserveOpenWAWebhook(
   if (connectionError || !connection) throw new Error('Unknown OpenWA session')
 
   const scoped = connection as OpenWAWebhookConnectionRow
-  if (scoped.instance_id && scoped.instance_id !== envelope.instanceId) {
+  if (envelope.instanceId && scoped.instance_id && scoped.instance_id !== envelope.instanceId) {
     throw new Error('Unknown OpenWA session')
   }
   const lifecycleEvent = ['session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'].includes(envelope.event)
