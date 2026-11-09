@@ -178,6 +178,43 @@ describe('OpenWA upstream REST contract', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['ENOTFOUND', 'DNS lookup failed'],
+    ['EAI_AGAIN', 'DNS lookup failed'],
+    ['ECONNREFUSED', 'Connection refused'],
+    ['ECONNRESET', 'Connection interrupted'],
+    ['UND_ERR_CONNECT_TIMEOUT', 'Connection timed out'],
+    ['CERT_HAS_EXPIRED', 'TLS verification failed'],
+  ])('classifies safe nested network code %s without exposing private error details', async (code, label) => {
+    const internal = Object.assign(new Error('private tunnel host and token=secret'), { code })
+    const outer = Object.assign(new TypeError('fetch failed'), { cause: internal })
+    const fetchImpl = vi.fn(async () => { throw outer }) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+    await expect(client.request('/api/sessions')).rejects.toMatchObject({
+      code: 'retryable_provider_failure',
+      message: `OpenWA network request failed (${label})`,
+    })
+    await expect(client.createSession({ name: 'test-1' })).rejects.toMatchObject({
+      code: 'ambiguous_outcome',
+      message: `OpenWA network request failed (${label}); outcome requires reconciliation`,
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('classifies gateway start POST network errors as ambiguous, not a confirmed failed session', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('private hostname'), { code: 'ENOTFOUND' }),
+      })
+    }) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+    await expect(client.startSession('s1')).rejects.toMatchObject({
+      code: 'ambiguous_outcome',
+      message: 'OpenWA network request failed (DNS lookup failed); outcome requires reconciliation',
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
   it('creates named sessions, starts them, fetches real PNG QR and logs out on actual routes', async () => {
     const png = 'data:image/png;base64,aGVsbG8='
     const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
