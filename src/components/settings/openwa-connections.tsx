@@ -32,6 +32,7 @@ interface QrState { connectionId: string; value: string; expiresAt: string }
 interface OpenWAApiPayload extends Record<string, unknown> {
   error?: string
   code?: string
+  reachable?: boolean
   stage?: string
   reconciliation_required?: boolean
   connections?: OpenWAConnection[]
@@ -78,6 +79,24 @@ export function OpenWAConnections() {
   }, [canEditSettings])
 
   useEffect(() => { void load() }, [load])
+
+  async function checkGateway() {
+    if (!baseUrl.trim() || !apiKey.trim()) return toast.error(w('required'))
+    setBusy('check')
+    try {
+      const response = await fetch('/api/whatsapp/connections/openwa/check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base_url: baseUrl.trim(), api_key: apiKey.trim() }),
+      })
+      const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
+      if (!response.ok || !data.reachable) throw new Error(data.error || w('gatewayCheckFailed'))
+      toast.success(w('gatewayCheckSuccess'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : w('gatewayCheckFailed'))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   async function createConnection() {
     if (!baseUrl.trim() || !apiKey.trim()) return toast.error(w('required'))
@@ -171,7 +190,16 @@ export function OpenWAConnections() {
           <div><Label htmlFor="openwa-url">{w('baseUrl')}</Label><Input id="openwa-url" placeholder="https://openwa.example.com" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></div>
           <div><Label htmlFor="openwa-key">{w('apiKey')}</Label><Input id="openwa-key" type="password" autoComplete="new-password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></div>
         </div>
-        <Button onClick={createConnection} disabled={busy === 'create'}>{busy === 'create' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{w('create')}</Button>
+        {baseUrl.toLowerCase().includes('.trycloudflare.com') && <Alert>
+          <AlertDescription>{w('quickTunnelWarning')}</AlertDescription>
+        </Alert>}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={checkGateway} disabled={busy !== null}>
+            {busy === 'check' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {w('gatewayCheck')}
+          </Button>
+          <Button onClick={createConnection} disabled={busy !== null}>{busy === 'create' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{w('create')}</Button>
+        </div>
       </CardContent>
     </Card>
 
