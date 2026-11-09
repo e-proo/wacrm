@@ -40,6 +40,7 @@ export function classifyOpenWAWebhookRejection(error: unknown): string {
     case 'Invalid OpenWA webhook payload': return 'invalid_payload'
     case 'OpenWA webhook requires idempotencyKey, timestamp, sessionId, and event': return 'missing_envelope_fields'
     case 'Unknown OpenWA session': return 'unknown_session'
+    case 'OpenWA instance binding failed': return 'instance_binding_failed'
     case 'OpenWA session is not active': return 'inactive_session'
     case 'OpenWA webhook secret is not configured': return 'missing_webhook_secret'
     case 'Invalid OpenWA webhook signature': return 'invalid_signature'
@@ -99,12 +100,18 @@ export async function verifyAndReserveOpenWAWebhook(
     .eq('provider', 'openwa')
     .eq('session_id', envelope.sessionId)
 
-  if (envelope.instanceId) query = query.eq('instance_id', envelope.instanceId)
-
+  // Older WACRM session records predate instance binding. A signed event
+  // from that session can establish the first instance identity, but an
+  // unsigned or wrong-instance event must never be able to claim it.
+  // A duplicated session ID across tenants remains ambiguous and fails
+  // closed through maybeSingle rather than guessing an account.
   const { data: connection, error: connectionError } = await query.maybeSingle()
   if (connectionError || !connection) throw new Error('Unknown OpenWA session')
 
   const scoped = connection as OpenWAWebhookConnectionRow
+  if (scoped.instance_id && scoped.instance_id !== envelope.instanceId) {
+    throw new Error('Unknown OpenWA session')
+  }
   const lifecycleEvent = ['session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'].includes(envelope.event)
   if (!['connected', 'ready'].includes(scoped.status) && !lifecycleEvent) {
     throw new Error('OpenWA session is not active')
@@ -121,6 +128,34 @@ export async function verifyAndReserveOpenWAWebhook(
     nowMs: input.nowMs,
   })) {
     throw new Error('Invalid OpenWA webhook signature')
+  }
+
+  if (envelope.instanceId && !scoped.instance_id) {
+    // Bind legacy rows only after a valid HMAC. Account/connection/provider
+    // scope and NULL CAS protect against cross-tenant or concurrent rebinds.
+    const { data: pinned, error: pinError } = await db
+      .from('whatsapp_connections')
+      .update({ instance_id: envelope.instanceId })
+      .eq('id', scoped.id)
+      .eq('account_id', scoped.account_id)
+      .eq('provider', 'openwa')
+      .is('instance_id', null)
+      .select('id')
+      .maybeSingle()
+    if (pinError) throw new Error('OpenWA instance binding failed')
+    if (!pinned) {
+      // A concurrent valid event may already have bound this same instance.
+      const { data: current, error: currentError } = await db
+        .from('whatsapp_connections')
+        .select('instance_id')
+        .eq('id', scoped.id)
+        .eq('account_id', scoped.account_id)
+        .eq('provider', 'openwa')
+        .maybeSingle()
+      if (currentError || current?.instance_id !== envelope.instanceId) {
+        throw new Error('Unknown OpenWA session')
+      }
+    }
   }
 
   const { error: insertError } = await db.from('whatsapp_webhook_event_receipts').insert({
