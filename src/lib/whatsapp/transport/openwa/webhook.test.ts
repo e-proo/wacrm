@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resolveOpenWACredentials } from './credentials'
-import { classifyOpenWAWebhookRejection, parseOpenWAWebhookEnvelope, verifyAndReserveOpenWAWebhook } from './webhook'
+import { classifyOpenWAWebhookRejection, parseOpenWAWebhookEnvelope, verifyAndReserveOpenWAWebhook, markOpenWAWebhookProcessed } from './webhook'
 
 vi.mock('./credentials', () => ({ resolveOpenWACredentials: vi.fn() }))
 
@@ -16,7 +16,7 @@ function signature() {
   return createHmac('sha256', webhookSecret).update(rawBody, 'utf8').digest('hex')
 }
 
-function dbFixture(options: { connection?: unknown; connectionError?: unknown; insertError?: unknown } = {}) {
+function dbFixture(options: { connection?: unknown; connectionError?: unknown; insertError?: unknown; receipt?: unknown; claimed?: unknown } = {}) {
   const connection = Object.prototype.hasOwnProperty.call(options, 'connection') ? options.connection : {
     id: 'connection-1',
     account_id: 'account-1',
@@ -34,9 +34,23 @@ function dbFixture(options: { connection?: unknown; connectionError?: unknown; i
   connectionQuery.select.mockReturnValue(connectionQuery)
   connectionQuery.eq.mockReturnValue(connectionQuery)
 
+  let reclaiming = false
   const receiptQuery = {
     insert: vi.fn().mockResolvedValue({ error: options.insertError ?? null }),
+    select: vi.fn(), eq: vi.fn(), is: vi.fn(), update: vi.fn(),
+    maybeSingle: vi.fn(async () => ({
+      data: reclaiming ? (options.claimed === undefined ? { id: 'receipt-1' } : options.claimed)
+        : (options.receipt === undefined ? {
+          processed_at: '2026-10-26T17:59:00Z', received_at: '2026-10-26T17:58:00Z',
+          processing_token: null, processing_started_at: null, processing_attempts: 1,
+        } : options.receipt),
+      error: null,
+    })),
   }
+  receiptQuery.select.mockReturnValue(receiptQuery)
+  receiptQuery.eq.mockReturnValue(receiptQuery)
+  receiptQuery.is.mockReturnValue(receiptQuery)
+  receiptQuery.update.mockImplementation(() => { reclaiming = true; return receiptQuery })
 
   const db = {
     from: vi.fn((table: string) => table === 'whatsapp_connections' ? connectionQuery : receiptQuery),
@@ -218,6 +232,74 @@ describe('OpenWA webhook intake', () => {
       rawBody, signature: signature(), nowMs,
     })
     expect(result.duplicate).toBe(true)
+  })
+
+  it('does not acknowledge a concurrent incomplete receipt while its lease is active', async () => {
+    const { db, receiptQuery } = dbFixture({ insertError: { code: '23505' }, receipt: {
+      processed_at: null, processing_started_at: '2026-10-26T17:59:50Z',
+      processing_token: 'active-worker', received_at: '2026-10-26T17:59:50Z',
+      processing_attempts: 1,
+    } })
+    const result = await verifyAndReserveOpenWAWebhook(db as never, { rawBody, signature: signature(), nowMs })
+    expect(result).toMatchObject({ duplicate: false, inFlight: true })
+    expect(receiptQuery.update).not.toHaveBeenCalled()
+  })
+
+  it('reclaims an expired reservation via compare-and-set and preserves scope', async () => {
+    const { db, receiptQuery } = dbFixture({ insertError: { code: '23505' }, receipt: {
+      processed_at: null, processing_started_at: '2026-10-26T17:55:00Z',
+      processing_token: 'expired-worker', received_at: '2026-10-26T17:55:00Z',
+      processing_attempts: 2,
+    } })
+    const result = await verifyAndReserveOpenWAWebhook(db as never, { rawBody, signature: signature(), nowMs })
+    expect(result.duplicate).toBe(false)
+    expect(result.inFlight).toBeUndefined()
+    expect(result.processingToken).toMatch(/^[0-9a-f-]{36}$/)
+    expect(receiptQuery.update).toHaveBeenCalledWith(expect.objectContaining({
+      processing_attempts: 3, processing_token: result.processingToken,
+      processing_error: null,
+    }))
+    expect(receiptQuery.eq).toHaveBeenCalledWith('account_id', 'account-1')
+    expect(receiptQuery.eq).toHaveBeenCalledWith('processing_token', 'expired-worker')
+    expect(receiptQuery.is).toHaveBeenCalledWith('processed_at', null)
+  })
+
+  it('recovers legacy unfinished receipts without tokens only after their lease expires', async () => {
+    const { db, receiptQuery } = dbFixture({ insertError: { code: '23505' }, receipt: {
+      processed_at: null, processing_started_at: null, processing_token: null,
+      received_at: '2026-10-26T17:50:00Z', processing_attempts: 0,
+    } })
+    const result = await verifyAndReserveOpenWAWebhook(db as never, { rawBody, signature: signature(), nowMs })
+    expect(result.processingToken).toBeTruthy()
+    expect(receiptQuery.is).toHaveBeenCalledWith('processing_token', null)
+    expect(receiptQuery.is).toHaveBeenCalledWith('processing_started_at', null)
+  })
+
+  it('does not concurrently process an expired receipt when CAS is lost', async () => {
+    const { db } = dbFixture({ insertError: { code: '23505' }, receipt: {
+      processed_at: null, processing_started_at: '2026-10-26T17:55:00Z',
+      processing_token: 'expired-worker', received_at: '2026-10-26T17:55:00Z',
+      processing_attempts: 2,
+    }, claimed: null })
+    const result = await verifyAndReserveOpenWAWebhook(db as never, { rawBody, signature: signature(), nowMs })
+    expect(result).toMatchObject({ duplicate: false, inFlight: true })
+    expect(result.processingToken).toBeUndefined()
+  })
+
+  it('finalizes only the current tenant-scoped lease and retains failures as pending', async () => {
+    const { db, receiptQuery } = dbFixture()
+    await markOpenWAWebhookProcessed(db as never, 'account-1', 'connection-1', 'evt-1', 'lease-1')
+    expect(receiptQuery.update).toHaveBeenCalledWith(expect.objectContaining({
+      processing_error: null, processing_started_at: null,
+      processed_at: expect.any(String),
+    }))
+    expect(receiptQuery.eq).toHaveBeenCalledWith('processing_token', 'lease-1')
+    expect(receiptQuery.eq).toHaveBeenCalledWith('account_id', 'account-1')
+    await markOpenWAWebhookProcessed(db as never, 'account-1', 'connection-1', 'evt-1', 'lease-1', 'retryable_provider_failure')
+    expect(receiptQuery.update).toHaveBeenLastCalledWith({
+      processing_error: 'retryable_provider_failure', processed_at: null,
+      processing_started_at: null,
+    })
   })
 
   it('fails closed and logs only the database error code when reservation cannot be written', async () => {
