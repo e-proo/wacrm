@@ -43,7 +43,7 @@ export async function listConversationOpenWASendConnections(
   }
 
   const { data: candidates, error: candidateError } = await db.from('whatsapp_connections')
-    .select('id, display_name, status, session_id')
+    .select('id, display_name, status, session_id, phone_identity')
     .eq('account_id', accountId).eq('provider', 'openwa')
     .eq('phone_identity', current.phone_identity)
     .in('status', ['ready', 'connected'])
@@ -66,7 +66,7 @@ export async function listConversationOpenWASendConnections(
   }))
   return {
     current_connection_id: inbound.connection_id,
-    options: candidates.filter((candidate) => hosts.has(candidate.id)).map((candidate) => ({
+    options: candidates.filter((candidate) => candidate.phone_identity === current.phone_identity && hosts.has(candidate.id)).map((candidate) => ({
       id: candidate.id, display_name: candidate.display_name ?? 'WhatsApp Web',
       status: candidate.status, gateway_host: hosts.get(candidate.id) ?? '',
     })),
