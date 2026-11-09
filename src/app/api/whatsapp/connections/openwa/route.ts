@@ -8,6 +8,10 @@ import { resolveOpenWAClient } from '@/lib/whatsapp/transport/openwa/credentials
 import { normalizeOpenWAConnectionState } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
+// Creating the gateway session and starting its browser are two separate
+// bounded operations; avoid cutting off the successful remote create.
+export const maxDuration = 120
+
 const noStore = { 'Cache-Control': 'no-store, private, max-age=0' }
 
 function errorResponse(error: unknown, diagnostics?: { stage?: string; reconciliation_required?: boolean }) {
