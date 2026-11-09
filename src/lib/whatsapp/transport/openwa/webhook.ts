@@ -194,7 +194,7 @@ export async function verifyAndReserveOpenWAWebhook(
   }
 
   const match = () => db.from('whatsapp_webhook_event_receipts')
-    .select('processed_at, processing_started_at, processing_token, processing_attempts, received_at')
+    .select('processed_at, processing_started_at, processing_token, processing_attempts, processing_error, received_at')
     .eq('account_id', scoped.account_id)
     .eq('connection_id', scoped.id)
     .eq('provider', 'openwa')
@@ -210,7 +210,7 @@ export async function verifyAndReserveOpenWAWebhook(
 
   const startedAt = existing.processing_started_at ?? existing.received_at
   const startedMs = typeof startedAt === 'string' ? Date.parse(startedAt) : NaN
-  if (Number.isFinite(startedMs) && nowMs - startedMs < WEBHOOK_LEASE_MS && nowMs >= startedMs) {
+  if (!existing.processing_error && Number.isFinite(startedMs) && nowMs - startedMs < WEBHOOK_LEASE_MS && nowMs >= startedMs) {
     return { accountId: scoped.account_id, connectionId: scoped.id, envelope, duplicate: false, inFlight: true }
   }
 
