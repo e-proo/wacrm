@@ -125,6 +125,22 @@ const labels = {
     "en": "Create WhatsApp Web session",
     "ar": "إنشاء جلسة واتساب ويب"
   },
+  "gatewayCheck": {
+    "en": "Test OpenWA connection",
+    "ar": "اختبار اتصال OpenWA"
+  },
+  "gatewayCheckSuccess": {
+    "en": "OpenWA gateway connection and API authentication succeeded",
+    "ar": "نجح الاتصال بخدمة OpenWA والمصادقة عبر API"
+  },
+  "gatewayCheckFailed": {
+    "en": "OpenWA gateway connection test failed",
+    "ar": "فشل اختبار الاتصال بخدمة OpenWA"
+  },
+  "quickTunnelWarning": {
+    "en": "Cloudflare Quick Tunnel links are temporary. After restarting the tunnel, confirm the current URL and test the gateway before creating a new session.",
+    "ar": "روابط Cloudflare Quick Tunnel مؤقتة. بعد إعادة تشغيل النفق تأكد من الرابط الحالي واختبر الخدمة قبل إنشاء جلسة جديدة."
+  },
   "status": {
     "en": "Status:",
     "ar": "الحالة:"
