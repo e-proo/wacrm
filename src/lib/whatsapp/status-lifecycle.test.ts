@@ -13,6 +13,21 @@ describe('provider-neutral status lifecycle', () => {
   it.each([['sent','sent'],['delivered','delivered'],['read','read'],['failed','failed']])('normalizes Meta %s to %s', (raw, expected) => expect(normalizeMetaStatus(raw)).toBe(expected))
   it('ignores unknown provider vocabulary', () => { expect(normalizeOpenWAStatus('mystery')).toBeNull(); expect(normalizeMetaStatus('mystery')).toBeNull() })
   it('enforces forward-only lifecycle and terminal failure semantics', () => { expect(isForwardStatusTransition('pending','sent')).toBe(true); expect(isForwardStatusTransition('pending','failed')).toBe(true); expect(isForwardStatusTransition('sending','sent')).toBe(true); expect(isForwardStatusTransition('sending','failed')).toBe(true); expect(isForwardStatusTransition('sent','delivered')).toBe(true); expect(isForwardStatusTransition('delivered','sent')).toBe(false); expect(isForwardStatusTransition('read','failed')).toBe(false); expect(isForwardStatusTransition('failed','read')).toBe(false) })
+  it.each([
+    [1, 'sent'], [2, 'delivered'], [3, 'read'], [4, 'read'],
+    ['2', 'delivered'], [-1, 'failed'],
+  ])('parses WhatsApp numeric ACK %s as %s', (ack, status) => {
+    expect(parseOpenWAStatusEvent({ messageId: 'native-media-1', ack })?.status).toBe(status)
+  })
+  it('parses an ACK wrapped in a provider message with native message identity', () => {
+    expect(parseOpenWAStatusEvent({
+      message: { id: 'native-video-1', ack: 3 }, timestamp: 1792950000,
+    })).toMatchObject({ providerMessageId: 'native-video-1', status: 'read' })
+  })
+  it('rejects unrecognized ACK values rather than guessing delivery', () => {
+    expect(parseOpenWAStatusEvent({ messageId: 'm', ack: 0 })).toBeNull()
+    expect(parseOpenWAStatusEvent({ messageId: 'm', ack: 99 })).toBeNull()
+  })
   it('parses bounded diagnostics without secrets', () => { const parsed = parseOpenWAStatusEvent({ messageId: 'm1', status: 'failed', error: 'token=secret-value provider rejected' }); expect(parsed).toMatchObject({ providerMessageId: 'm1', status: 'failed' }); expect(parsed?.diagnostic).not.toContain('secret-value') })
   it('updates message and broadcast recipient only through provider+connection identity', async () => { const mock = db({ id: 'row1', conversation_id: 'c', status: 'sent' }, { id: 'r1', status: 'sent' }); await expect(applyWhatsAppStatus(mock.client, { provider: 'openwa', accountId: 'acct', connectionId: 'conn', providerMessageId: 'ow1', status: 'delivered', timestamp: '1792950000' })).resolves.toBe('updated'); expect(mock.updates).toEqual(expect.arrayContaining([{ table: 'messages', value: { status: 'delivered' } }, { table: 'broadcast_recipients', value: expect.objectContaining({ status: 'delivered' }) }])) })
   it('updates a broadcast recipient even when no inbox message row exists', async () => { const mock = db(null, { id: 'r1', status: 'sent' }); await expect(applyWhatsAppStatus(mock.client, { provider: 'meta_cloud', accountId: 'acct', connectionId: 'conn', providerMessageId: 'wamid-1', status: 'delivered', timestamp: '1792950000' })).resolves.toBe('updated'); expect(mock.updates).toEqual([{ table: 'broadcast_recipients', value: expect.objectContaining({ status: 'delivered' }) }]) })
