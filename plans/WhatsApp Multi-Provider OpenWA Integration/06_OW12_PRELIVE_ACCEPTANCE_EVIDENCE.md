@@ -108,3 +108,20 @@ This is an **OW-4** phase-closure addendum, not evidence that all OW-12 live acc
 - Both GitHub Actions workflows on the exact merge commit passed: [CI #42410328689](https://github.com/e-proo/wacrm/actions/runs/42410328689) lint, typecheck, focused OW-4 session/QR + Meta regression, full tests, build = success; [Migrations #42410328723](https://github.com/e-proo/wacrm/actions/runs/42410328723) clean database replay, OW-4 session/credential/RLS gate, remaining schema/integration smoke checks = success.
 - Clean-replay-only lack of `service_role` credential grants was corrected additively by `152_openwa_service_role_credential_grants.sql`. Migration applied to TEST and validated: `service_role` CRUD, no `anon` or `authenticated` SELECT, credentials table RLS enabled. No Production changes.
 - Therefore SOF-33/OW-4 closure level: **implementation complete + live TEST session/QR verified + CI verified**. OW-12 remains **In Progress / partially live verified** with media/restart/reconciliation/automation/broadcast/tenant/Meta-live cases still outstanding and a historical ambiguous `sending` row requiring safe reconciliation.
+
+## Media ACK remediation and TEST verification checkpoint — 2026-11-09
+
+- Source branch verified at `bbd4257` before remediation. CI run `42631069794` failed on a numeric-string ACK test; corrected regex in `d31878e`.
+- OpenWA status parser now accepts numeric ACK -1/1/2/3/4 and nested message identities, preserving provider+connection scoping. The webhook also performs a bounded **database lookup only** retry when a provider receipt precedes persistence of its message ID; no provider resend is performed. The bounded retry does **not** reconcile long ambiguous timeouts.
+- Live TEST Supabase (`pqirsnfupofhulmewakq`) read-only aggregate at checkpoint: 8 agent-originated OpenWA rows over the preceding 7 days: 3 `read` (2 text, 1 image), 1 `sent` document, and 4 `sending` without provider IDs (2 text, 1 image, 1 video). These 4 are **unresolved**, not proof of failed delivery, and must not be blindly resent or marked delivered.
+- The same TEST project had 194 OpenWA webhook receipt reservations over the preceding 48 hours with zero recorded processing errors. This does **not** prove receipt status parsing or actual read acknowledgment; unmatched/unrecognized ACK events previously lacked safe diagnostic logs.
+- Current-head CI and live media read/delivery acceptance are **pending**. No Production modifications.
+
+### Operator live TEST run (record actual results before closure)
+
+1. Pull the verified HEAD after CI success and restart the WACRM TEST server; keep the existing OpenWA session and webhook signing configuration. Confirm the provider connection is `ready`.
+2. Send **one new** text, image, video and document from WACRM to a dedicated TEST recipient. For each, record the local message row ID, returned provider message ID (redacted), `sent` time and subsequent `delivered`/`read` transitions. Open the messages on the recipient device after initial delivery.
+3. Check server logs for `[openwa-webhook] unmatched delivery receipt` or `unrecognized delivery receipt` (safe metadata only). A delivered/read event should match the same `provider_message_id` and `connection_id`. If an event is never emitted by the upstream gateway, do not fabricate read status.
+4. Inspect TEST database `messages` rows for these **new** message IDs. Expect `sent -> delivered -> read` where the gateway emits both receipts, or `sent -> read` if only a read event is emitted. Confirm `provider_message_id` is present and no duplicate messages were sent.
+5. Independently execute remaining OW-12 live matrix: reply context, audio, session restart/reconnect, webhook replay, ambiguous reconciliation, automation, bounded broadcast, cross-tenant negatives and Meta regression while OpenWA is active. Attach timestamps and redacted evidence to SOF-41.
+6. Never automatically retry the 4 historical `sending` rows without provider-side reconciliation. Leave OW-12 open until all applicable gates are evidenced.
