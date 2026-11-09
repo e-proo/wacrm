@@ -55,6 +55,12 @@ import { AiThreadBanner } from "./ai-thread-banner";
 import { buildReplyPreview } from "./reply-quote";
 import { renderTemplateBody } from "@/lib/whatsapp/template-body";
 import { toast } from "sonner";
+import { useWhatsAppLabels } from "@/components/settings/whatsapp-labels";
+
+interface ConversationSendConnections {
+  current_connection_id: string | null;
+  options: { id: string; display_name: string; status: string; gateway_host: string }[];
+}
 
 interface ReplyDraft {
   id: string;
@@ -168,6 +174,7 @@ export function MessageThread({
   const t = useTranslations("Inbox.messageThread");
   const tTimer = useTranslations("Inbox.sessionTimer");
   const tQuote = useTranslations("Inbox.replyQuote");
+  const w = useWhatsAppLabels();
 
   const { user } = useAuth();
   const { getPresence, getRow, now } = usePresence();
@@ -272,6 +279,28 @@ export function MessageThread({
   });
 
   const conversationId = conversation?.id;
+  const [openWAConnectionChoices, setOpenWAConnectionChoices] = useState<ConversationSendConnections | null>(null);
+  const [manualConnection, setManualConnection] = useState<{ conversationId: string; connectionId: string } | null>(null);
+  const selectedConnectionId = manualConnection?.conversationId === conversationId ? manualConnection.connectionId : undefined;
+
+  useEffect(() => {
+    if (!conversationId) return;
+    let cancelled = false;
+    void fetch(`/api/whatsapp/conversations/send-connections?conversation_id=${encodeURIComponent(conversationId)}`, {
+      cache: "no-store",
+    }).then(async (response) => {
+      if (!response.ok) throw new Error("connection options unavailable");
+      return await response.json() as ConversationSendConnections;
+    }).then((data) => {
+      if (!cancelled) setOpenWAConnectionChoices(data);
+    }).catch(() => {
+      // Never guess or silently switch an unavailable connection.
+      if (!cancelled) setOpenWAConnectionChoices(null);
+    });
+    return () => { cancelled = true; };
+  }, [conversationId, resyncToken]);
+
+
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
 
   const mediaMessageId =
@@ -472,7 +501,10 @@ export function MessageThread({
     void fetch("/api/whatsapp/openwa/read", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: conversationId }),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        ...(selectedConnectionId ? { connection_id: selectedConnectionId } : {}),
+      }),
     }).then(async (response) => {
       if (!response.ok && response.status !== 403) {
         // A JSON 404 means the conversation is outside the current account;
@@ -488,7 +520,7 @@ export function MessageThread({
     }).catch(() => {
       console.warn("[openwa-read] WhatsApp read acknowledgement request failed");
     });
-  }, [conversationId, user?.id, lastVisibleInboundId]);
+  }, [conversationId, user?.id, lastVisibleInboundId, selectedConnectionId]);
 
   // Opening a thread is also viewing its assignment/request notifications.
   // The conversation unread_count and the notifications.read_at badge are
@@ -539,6 +571,7 @@ export function MessageThread({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             conversation_id: conversation.id,
+            ...(selectedConnectionId ? { connection_id: selectedConnectionId } : {}),
             message_type: "text",
             content_text: text,
             reply_to_message_id: replyToId,
@@ -573,7 +606,7 @@ export function MessageThread({
         onUpdateMessage(tempId, { status: "sending" });
       }
     },
-    [conversation, onNewMessage, onUpdateMessage]
+    [conversation, onNewMessage, onUpdateMessage, selectedConnectionId]
   );
 
   const handleSendMedia = useCallback(
@@ -609,6 +642,7 @@ export function MessageThread({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             conversation_id: conversation.id,
+            ...(selectedConnectionId ? { connection_id: selectedConnectionId } : {}),
             message_type: payload.kind,
             media_url: payload.mediaUrl,
             content_text: contentText,
@@ -649,7 +683,7 @@ export function MessageThread({
         onUpdateMessage(tempId, { status: "sending" });
       }
     },
-    [conversation, onNewMessage, onUpdateMessage],
+    [conversation, onNewMessage, onUpdateMessage, selectedConnectionId],
   );
 
   const handleSendInteractive = useCallback(
@@ -1051,6 +1085,42 @@ export function MessageThread({
                 className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
               />
             </button>
+          )}
+
+          {/* A deliberate, human-selected override for the same WhatsApp
+              phone. Old messages retain their own connection IDs and reads
+              never reuse a chat JID from a different session. */}
+          {openWAConnectionChoices && openWAConnectionChoices.options.length > 1 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="inline-flex max-w-44 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+                title={w("conversationConnectionCaution")}
+              >
+                <span className="truncate">
+                  {selectedConnectionId
+                    ? openWAConnectionChoices.options.find((item) => item.id === selectedConnectionId)?.gateway_host
+                      ?? w("conversationConnectionAlternative")
+                    : w("conversationConnectionAutomatic")}
+                </span>
+                <ChevronDown className="h-3 w-3 shrink-0" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-w-80 border-border bg-popover">
+                <DropdownMenuItem onClick={() => setManualConnection(null)}>
+                  {w("conversationConnectionAutomatic")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {openWAConnectionChoices.options.map((item) => (
+                  <DropdownMenuItem
+                    key={item.id}
+                    onClick={() => setManualConnection({ conversationId: conversationId!, connectionId: item.id })}
+                    className="flex flex-col items-start gap-0.5"
+                  >
+                    <span className="truncate text-xs font-medium">{item.gateway_host || item.display_name}</span>
+                    <span className="text-[10px] text-muted-foreground">{item.display_name} · {item.status}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
 
           {/* Status dropdown */}
