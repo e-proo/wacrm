@@ -10,11 +10,16 @@ import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
 const noStore = { 'Cache-Control': 'no-store, private, max-age=0' }
 
-function errorResponse(error: unknown) {
-  const message = error instanceof Error ? error.message : 'OpenWA session request failed'
+function errorResponse(error: unknown, diagnostics?: { stage?: string; reconciliation_required?: boolean }) {
+  // Only intentionally classified transport errors may be shown to clients.
+  // Raw Supabase/provider exceptions can contain credentials or private URLs.
+  const message = error instanceof WhatsAppTransportError ? error.message : 'OpenWA session request failed'
   const code = error instanceof WhatsAppTransportError ? error.code : 'retryable_provider_failure'
-  const status = code === 'authentication_or_configuration' ? 403 : code === 'invalid_request' ? 400 : code === 'connection_restricted' ? 409 : 502
-  return NextResponse.json({ error: message, code }, { status, headers: noStore })
+  const status = code === 'authentication_or_configuration' ? 403
+    : code === 'invalid_request' ? 400
+    : code === 'connection_restricted' || code === 'ambiguous_outcome' ? 409
+    : code === 'rate_limited' ? 429 : 502
+  return NextResponse.json({ error: message, code, ...diagnostics }, { status, headers: noStore })
 }
 
 export async function GET() {
@@ -22,7 +27,7 @@ export async function GET() {
     const { accountId, userDb } = await requireOpenWASessionAdmin()
     const { data, error } = await userDb
       .from('whatsapp_connections')
-      .select('id, display_name, phone_identity, status, session_id, instance_id, engine, connected_at, disconnected_at, restricted_at, created_at, updated_at')
+      .select('id, display_name, phone_identity, status, session_id, instance_id, engine, provider_metadata, connected_at, disconnected_at, restricted_at, created_at, updated_at')
       .eq('account_id', accountId)
       .eq('provider', 'openwa')
       .order('created_at', { ascending: false })
@@ -64,6 +69,7 @@ export async function POST(request: Request) {
     if (connectionError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to create OpenWA connection', connectionError)
 
     let remoteCreateAttempted = false
+    let stage: 'credentials' | 'gateway_create' | 'save_created' | 'gateway_start' | 'save_started' = 'credentials'
     try {
       const { error: credentialError } = await adminDb.from('whatsapp_connection_credentials').insert({
         connection_id: connectionId,
@@ -75,8 +81,10 @@ export async function POST(request: Request) {
       if (credentialError) throw credentialError
 
       const { client } = await resolveOpenWAClient(adminDb, accountId, connectionId, { allowedHosts })
+      stage = 'gateway_create'
       remoteCreateAttempted = true
       const created = await client.createSession({ name: sessionName, correlationId: connectionId })
+      stage = 'save_created'
       const { error: createdUpdateError } = await adminDb
         .from('whatsapp_connections')
         .update({ session_id: created.sessionId, status: normalizeOpenWAConnectionState(created.status), phone_identity: created.phoneIdentity ?? null })
@@ -85,8 +93,10 @@ export async function POST(request: Request) {
 
       // OpenWA returns "created" after POST /sessions; an explicit start is
       // necessary before it will issue a QR code.
+      stage = 'gateway_start'
       const started = await client.startSession(created.sessionId!, connectionId)
       const status = normalizeOpenWAConnectionState(started.status)
+      stage = 'save_started'
       const { error: updateError } = await adminDb
         .from('whatsapp_connections')
         .update({ status, phone_identity: started.phoneIdentity ?? null })
@@ -95,16 +105,28 @@ export async function POST(request: Request) {
 
       return NextResponse.json({ connection: { id: connectionId, session_id: created.sessionId, status, engine: null } }, { status: 201, headers: noStore })
     } catch (error) {
+      // A successful POST may have created a remote session even if the
+      // response timed out, and a start failure may leave it running.
+      // Record only safe error category/stage, retain credentials for
+      // operator reconciliation, never automatically retry POST /sessions.
+      const safeCode = error instanceof WhatsAppTransportError ? error.code : 'retryable_provider_failure'
       if (remoteCreateAttempted) {
-        // A timeout can mean OpenWA created the session. Keep the scoped
-        // record and credential for reconciliation; never blindly re-create.
-        await adminDb.from('whatsapp_connections').update({ status: 'failed' })
-          .eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+        const { error: persistError } = await adminDb.from('whatsapp_connections').update({
+          status: 'failed',
+          provider_metadata: {
+            onboarding_stage: stage,
+            onboarding_failure_code: safeCode,
+            onboarding_reconciliation_required: true,
+          },
+        }).eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+        if (persistError) {
+          console.error('[openwa-session] could not persist onboarding outcome', { stage, code: safeCode })
+        }
       } else {
         await adminDb.from('whatsapp_connections').delete()
           .eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
       }
-      throw error
+      return errorResponse(error, { stage, reconciliation_required: remoteCreateAttempted })
     }
   } catch (error) {
     return errorResponse(error)
