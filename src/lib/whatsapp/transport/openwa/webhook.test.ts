@@ -115,6 +115,7 @@ describe('OpenWA webhook intake', () => {
       rawBody, signature: '0'.repeat(64), nowMs,
     })).rejects.toThrow('Invalid OpenWA webhook signature')
     expect(legacy.db.from).toHaveBeenCalledTimes(1)
+    mockedResolveCredentials.mockClear()
     const conflict = dbFixture({ connection: {
       id: 'connection-1', account_id: 'account-1', provider: 'openwa',
       session_id: 'session-1', instance_id: 'other-instance', status: 'connected',
