@@ -280,9 +280,9 @@ export function MessageThread({
 
   const conversationId = conversation?.id;
   const [openWAConnectionChoices, setOpenWAConnectionChoices] = useState<{ conversationId: string; data: ConversationSendConnections } | null>(null);
-  const activeOpenWAChoices = openWAConnectionChoices?.conversationId === conversationId ? openWAConnectionChoices.data : null;
+  const activeOpenWAChoices = openWAConnectionChoices && openWAConnectionChoices.conversationId === conversationId ? openWAConnectionChoices.data : null;
   const [manualConnection, setManualConnection] = useState<{ conversationId: string; connectionId: string } | null>(null);
-  const selectedConnectionId = manualConnection?.conversationId === conversationId ? manualConnection.connectionId : undefined;
+  const selectedConnectionId = manualConnection && manualConnection.conversationId === conversationId ? manualConnection.connectionId : undefined;
 
   useEffect(() => {
     if (!conversationId) return;
