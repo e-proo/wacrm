@@ -475,7 +475,15 @@ export function MessageThread({
       body: JSON.stringify({ conversation_id: conversationId }),
     }).then(async (response) => {
       if (!response.ok && response.status !== 403) {
-        console.warn("[openwa-read] WhatsApp read acknowledgement unavailable", response.status);
+        // A JSON 404 means the conversation is outside the current account;
+        // an HTML 404 means the local Next.js API route was not served.
+        // Log only a bounded error code, never provider payloads/credentials.
+        const json = response.headers.get("content-type")?.includes("json");
+        const payload = json ? await response.json().catch(() => null) : null;
+        const reason = typeof payload?.code === "string" && /^[a-z_]{1,48}$/.test(payload.code)
+          ? payload.code
+          : !json ? "non_json_api_response" : "api_rejected";
+        console.warn("[openwa-read] WhatsApp read acknowledgement unavailable", response.status, reason);
       }
     }).catch(() => {
       console.warn("[openwa-read] WhatsApp read acknowledgement request failed");
