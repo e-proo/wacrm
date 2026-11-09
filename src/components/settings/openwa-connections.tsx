@@ -37,6 +37,7 @@ export function OpenWAConnections() {
   const w = useWhatsAppLabels()
   const [connections, setConnections] = useState<OpenWAConnection[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -58,8 +59,11 @@ export function OpenWAConnections() {
       const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
       if (!response.ok) throw new Error(data.error || w('loadOpenwa'))
       setConnections(data.connections ?? [])
+      setLoadError(null)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : w('loadOpenwa'))
+      const reason = error instanceof Error ? error.message : w('loadOpenwa')
+      setLoadError(reason)
+      toast.error(reason)
     } finally {
       setLoading(false)
     }
@@ -131,6 +135,14 @@ export function OpenWAConnections() {
 
   if (!canEditSettings) return null
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
+  if (loadError) {
+    // An unavailable API is not evidence that this tenant has zero sessions.
+    // Never encourage admins to create duplicate sessions after a failed list.
+    return <div className="mt-6 space-y-3">
+      <Alert variant="destructive"><AlertTitle>{w('loadOpenwa')}</AlertTitle><AlertDescription>{loadError}</AlertDescription></Alert>
+      <Button variant="outline" onClick={() => { setLoading(true); void load() }}><RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}</Button>
+    </div>
+  }
 
   return <div className="mt-6 space-y-4">
     <Card>
