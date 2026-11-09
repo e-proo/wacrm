@@ -29,6 +29,7 @@ describe('OpenWA read-only gateway check', () => {
       expect((args[0] as URL).pathname).toBe('/api/sessions')
       expect(args[1]?.method).toBe('GET')
       expect((args[1]?.headers as Record<string, string>).authorization).toBe('Bearer secret-key')
+      expect((args[1]?.headers as Record<string, string>)['x-api-key']).toBe('secret-key')
       return new Response(JSON.stringify([{ id: 'private-session-id', phone: 'private-phone' }]), {
         status: 200, headers: { 'content-type': 'application/json' },
       })
