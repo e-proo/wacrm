@@ -1,6 +1,9 @@
 import { WhatsAppTransportError, type WhatsAppMediaKind } from '../types'
 
 const DEFAULT_TIMEOUT_MS = 10_000
+// Session initialization can spawn a browser and create its profile. The
+// 10-second control-plane default is too short for this non-repeatable POST.
+const SESSION_CREATE_TIMEOUT_MS = 45_000
 const MEDIA_DOWNLOAD_TIMEOUT_MS = 30_000
 const MEDIA_SEND_TIMEOUT_MS = 75_000
 const REDACTED = '[REDACTED]'
@@ -126,6 +129,10 @@ export class OpenWAClient {
   async createSession(request: OpenWASessionCreateRequest): Promise<OpenWASessionCreateResult> {
     const response = await this.request<Record<string, unknown>>('/api/sessions', {
       method: 'POST', correlationId: request.correlationId,
+      // A timeout here is ambiguous: the gateway may have created a session.
+      // Do NOT automatically retry. Keep the deterministic name for
+      // operator-side reconciliation of this one attempt.
+      timeoutMs: this.config.timeoutMs ?? SESSION_CREATE_TIMEOUT_MS,
       body: { name: request.name },
     })
     const session = sessionFromGateway(response)
