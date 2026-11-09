@@ -541,10 +541,17 @@ export function MessageThread({
 
         if (!res.ok) {
           const reason = payload?.error || `HTTP ${res.status}`;
-          console.error("Failed to send message:", reason);
-          toast.error(`Failed to send: ${reason}`);
-          // Mark the optimistic bubble as failed so the user sees what happened
-          onUpdateMessage(tempId, { status: "failed" });
+          const unknownOutcome = res.status === 409 && payload?.code === "ambiguous_outcome";
+          if (unknownOutcome) {
+            console.warn("OpenWA text send outcome uncertain; reconcile before retrying");
+            toast.warning("Message delivery is uncertain. Check WhatsApp before sending again.");
+          } else {
+            console.error("Failed to send message:", reason);
+            toast.error(`Failed to send: ${reason}`);
+          }
+          // A transport timeout may occur after WhatsApp accepts the text.
+          // Do not present a confirmed failure or encourage blind resend.
+          onUpdateMessage(tempId, { status: unknownOutcome ? "sending" : "failed" });
           return;
         }
 
@@ -553,10 +560,9 @@ export function MessageThread({
         // flip status to 'sent' so the UI stops showing "sending".
         onUpdateMessage(tempId, { status: "sent" });
       } catch (err) {
-        console.error("Failed to send message:", err);
-        const reason = err instanceof Error ? err.message : "network error";
-        toast.error(`Failed to send: ${reason}`);
-        onUpdateMessage(tempId, { status: "failed" });
+        console.error("Text send request outcome uncertain:", err);
+        toast.warning("Network error. The message may have been delivered; check WhatsApp before retrying.");
+        onUpdateMessage(tempId, { status: "sending" });
       }
     },
     [conversation, onNewMessage, onUpdateMessage]
