@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { resolveOpenWACredentials } from './credentials'
@@ -26,7 +27,13 @@ export interface ReservedOpenWAWebhook {
   connectionId: string
   envelope: OpenWAWebhookEnvelope
   duplicate: boolean
+  inFlight?: boolean
+  processingToken?: string
 }
+
+// The handler runs for at most 60 seconds. A lease is longer than the
+// request lifetime so a concurrent gateway retry cannot duplicate work.
+const WEBHOOK_LEASE_MS = 90_000
 
 /**
  * Stable diagnostic categories for rejected intake requests.
@@ -158,43 +165,110 @@ export async function verifyAndReserveOpenWAWebhook(
     }
   }
 
-  const { error: insertError } = await db.from('whatsapp_webhook_event_receipts').insert({
+  const nowMs = input.nowMs ?? Date.now()
+  const processingToken = randomUUID()
+  const processingStartedAt = new Date(nowMs).toISOString()
+  const receiptKey = {
     account_id: scoped.account_id,
     connection_id: scoped.id,
-    provider: 'openwa',
+    provider: 'openwa' as const,
     provider_event_id: envelope.eventId,
+  }
+  const { error: insertError } = await db.from('whatsapp_webhook_event_receipts').insert({
+    ...receiptKey,
+    processing_started_at: processingStartedAt,
+    processing_token: processingToken,
+    processing_attempts: 1,
   })
 
   if (!insertError) {
-    return { accountId: scoped.account_id, connectionId: scoped.id, envelope, duplicate: false }
+    return { accountId: scoped.account_id, connectionId: scoped.id, envelope, duplicate: false, processingToken }
   }
 
   const code = (insertError as { code?: string }).code
-  if (code === '23505') {
+  if (code !== '23505') {
+    // PostgreSQL error codes are safe to log; free-form DB errors are not.
+    const dbCode = typeof code === 'string' && /^[a-zA-Z0-9_]{3,12}$/.test(code) ? code : 'unknown'
+    console.error('[openwa-webhook] receipt reservation rejected', { dbCode })
+    throw new Error('OpenWA webhook receipt could not be reserved')
+  }
+
+  const match = () => db.from('whatsapp_webhook_event_receipts')
+    .select('processed_at, processing_started_at, processing_token, processing_attempts, received_at')
+    .eq('account_id', scoped.account_id)
+    .eq('connection_id', scoped.id)
+    .eq('provider', 'openwa')
+    .eq('provider_event_id', envelope.eventId)
+
+  const { data: existing, error: readError } = await match().maybeSingle()
+  if (readError || !existing) throw new Error('OpenWA webhook receipt could not be reserved')
+  if (existing.processed_at) {
+    // Historical rows with processed_at set are terminal; never rerun old
+    // business side effects even if a legacy processing_error was recorded.
     return { accountId: scoped.account_id, connectionId: scoped.id, envelope, duplicate: true }
   }
 
-  // PostgreSQL/PostgREST error codes are safe to log; their free-form messages and hints are not.
-  const dbCode = typeof code === 'string' && /^[a-zA-Z0-9_]{3,12}$/.test(code) ? code : 'unknown'
-  console.error('[openwa-webhook] receipt reservation rejected', { dbCode })
-  throw new Error('OpenWA webhook receipt could not be reserved')
+  const startedAt = existing.processing_started_at ?? existing.received_at
+  const startedMs = typeof startedAt === 'string' ? Date.parse(startedAt) : NaN
+  if (Number.isFinite(startedMs) && nowMs - startedMs < WEBHOOK_LEASE_MS && nowMs >= startedMs) {
+    return { accountId: scoped.account_id, connectionId: scoped.id, envelope, duplicate: false, inFlight: true }
+  }
+
+  // Recover a stale reservation only with an atomic compare-and-set.
+  // A concurrent retry must not be able to seize another live worker's
+  // lease. Legacy rows (NULL token/start) are recoverable on redelivery.
+  let claim = db.from('whatsapp_webhook_event_receipts')
+    .update({
+      processing_started_at: processingStartedAt,
+      processing_token: processingToken,
+      processing_attempts: (Number(existing.processing_attempts) || 0) + 1,
+      processing_error: null,
+    })
+    .eq('account_id', scoped.account_id)
+    .eq('connection_id', scoped.id)
+    .eq('provider', 'openwa')
+    .eq('provider_event_id', envelope.eventId)
+    .is('processed_at', null)
+  claim = existing.processing_token
+    ? claim.eq('processing_token', existing.processing_token)
+    : claim.is('processing_token', null)
+  claim = existing.processing_started_at
+    ? claim.eq('processing_started_at', existing.processing_started_at)
+    : claim.is('processing_started_at', null)
+  const { data: claimed, error: claimError } = await claim.select('id').maybeSingle()
+  if (claimError) throw new Error('OpenWA webhook receipt could not be reserved')
+  if (!claimed) return { accountId: scoped.account_id, connectionId: scoped.id, envelope, duplicate: false, inFlight: true }
+  return { accountId: scoped.account_id, connectionId: scoped.id, envelope, duplicate: false, processingToken }
 }
 
+/** Only the current lease owner can acknowledge processing. A failed
+ * attempt remains pending for a signed gateway retry; do not acknowledge
+ * it as completed or store untrusted exception messages in the ledger. */
 export async function markOpenWAWebhookProcessed(
   db: SupabaseClient,
+  accountId: string,
   connectionId: string,
   providerEventId: string,
-  processingError?: string,
+  processingToken: string,
+  processingErrorCode?: string,
 ): Promise<void> {
-  const { error } = await db
+  const safeCode = typeof processingErrorCode === 'string' && /^[a-z_]{1,64}$/.test(processingErrorCode)
+    ? processingErrorCode
+    : processingErrorCode ? 'processing_failed' : null
+  const { data, error } = await db
     .from('whatsapp_webhook_event_receipts')
     .update({
-      processed_at: new Date().toISOString(),
-      processing_error: processingError ? processingError.slice(0, 1000) : null,
+      processed_at: safeCode ? null : new Date().toISOString(),
+      processing_started_at: null,
+      processing_error: safeCode,
     })
+    .eq('account_id', accountId)
     .eq('connection_id', connectionId)
     .eq('provider', 'openwa')
     .eq('provider_event_id', providerEventId)
+    .eq('processing_token', processingToken)
+    .select('id')
+    .maybeSingle()
 
-  if (error) throw new Error('OpenWA webhook receipt could not be finalized')
+  if (error || !data) throw new Error('OpenWA webhook receipt could not be finalized')
 }
