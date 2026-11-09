@@ -14,14 +14,14 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null) as { conversation_id?: unknown } | null
     const conversationId = typeof body?.conversation_id === 'string' ? body.conversation_id : ''
     if (!/^[0-9a-f-]{36}$/i.test(conversationId)) {
-      return NextResponse.json({ error: 'Valid conversation_id required' }, { status: 400 })
+      return NextResponse.json({ error: 'Valid conversation_id required', code: 'invalid_conversation_id' }, { status: 400 })
     }
 
     const { data: conversation, error: conversationError } = await supabase
       .from('conversations').select('id').eq('id', conversationId)
       .eq('account_id', accountId).maybeSingle()
     if (conversationError || !conversation) {
-      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Conversation not found', code: 'conversation_not_found' }, { status: 404 })
     }
 
     const { data: inbound, error: inboundError } = await supabase
