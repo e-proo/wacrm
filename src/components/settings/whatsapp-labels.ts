@@ -129,6 +129,22 @@ const labels = {
     "en": "Test OpenWA connection",
     "ar": "اختبار اتصال OpenWA"
   },
+  "sendViaOpenwa": {
+    "en": "Send via OpenWA",
+    "ar": "الإرسال عبر OpenWA"
+  },
+  "conversationConnectionAutomatic": {
+    "en": "Conversation connection",
+    "ar": "اتصال المحادثة"
+  },
+  "conversationConnectionAlternative": {
+    "en": "Select a connected session",
+    "ar": "اختر جلسة متصلة"
+  },
+  "conversationConnectionCaution": {
+    "en": "Choose a current connection only after checking the gateway; existing messages keep their original session.",
+    "ar": "اختر اتصالاً حاليًا بعد التحقق من الخدمة؛ الرسائل القديمة تبقى مرتبطة بجلستها الأصلية."
+  },
   "gatewayCheckSuccess": {
     "en": "OpenWA gateway connection and API authentication succeeded",
     "ar": "نجح الاتصال بخدمة OpenWA والمصادقة عبر API"
