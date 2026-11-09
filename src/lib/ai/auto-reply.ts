@@ -15,6 +15,8 @@ interface DispatchArgs {
   accountId: string
   conversationId: string
   contactId: string
+  /** Persisted inbound row identity; stable across webhook retries. */
+  inboundMessageId?: string
   /** The account's WhatsApp config owner, used for the outbound send's
    *  audit columns (mirrors how the flow runner passes it through). */
   configOwnerUserId: string
@@ -200,6 +202,7 @@ export async function dispatchInboundToAiReply(
         contactId,
         text,
         aiGenerated: true,
+        ...(args.inboundMessageId ? { engineIdempotencyKey: `ai-reply:${args.inboundMessageId}` } : {}),
       })
       console.info(
         `[ai auto-reply] replied conv=${conversationId.slice(0, 8)} tokens=${usage?.totalTokens ?? 'n/a'}`,
