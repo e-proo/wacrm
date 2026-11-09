@@ -73,12 +73,83 @@ describe('OpenWA webhook intake', () => {
 
     expect(connectionQuery.eq).toHaveBeenCalledWith('provider', 'openwa')
     expect(connectionQuery.eq).toHaveBeenCalledWith('session_id', 'session-1')
-    expect(connectionQuery.eq).toHaveBeenCalledWith('instance_id', 'instance-1')
+    expect(connectionQuery.eq).not.toHaveBeenCalledWith('instance_id', 'instance-1')
     expect(mockedResolveCredentials).toHaveBeenCalledWith(db, 'account-1', 'connection-1')
     expect(receiptQuery.insert).toHaveBeenCalledWith(expect.objectContaining({
       account_id: 'account-1', connection_id: 'connection-1', provider: 'openwa', provider_event_id: 'evt-1',
     }))
     expect(result.duplicate).toBe(false)
+  })
+
+  it('pins an older unbound session instance only after signed verification', async () => {
+    const { db, connectionQuery, receiptQuery } = dbFixture({ connection: {
+      id: 'connection-1', account_id: 'account-1', provider: 'openwa',
+      session_id: 'session-1', instance_id: null, status: 'connected',
+    } })
+    const pinQuery = {
+      update: vi.fn(), eq: vi.fn(), is: vi.fn(), select: vi.fn(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'connection-1' }, error: null }),
+    }
+    pinQuery.update.mockReturnValue(pinQuery)
+    pinQuery.eq.mockReturnValue(pinQuery)
+    pinQuery.is.mockReturnValue(pinQuery)
+    pinQuery.select.mockReturnValue(pinQuery)
+    let connectionLookups = 0
+    db.from.mockImplementation((table: string) => table !== 'whatsapp_connections'
+      ? receiptQuery
+      : (++connectionLookups === 1 ? connectionQuery : pinQuery))
+    const reserved = await verifyAndReserveOpenWAWebhook(db as never, { rawBody, signature: signature(), nowMs })
+    expect(reserved.connectionId).toBe('connection-1')
+    expect(pinQuery.update).toHaveBeenCalledWith({ instance_id: 'instance-1' })
+    expect(pinQuery.eq).toHaveBeenCalledWith('account_id', 'account-1')
+    expect(pinQuery.eq).toHaveBeenCalledWith('provider', 'openwa')
+    expect(pinQuery.is).toHaveBeenCalledWith('instance_id', null)
+  })
+
+  it('never binds an unverified instance or accepts a conflicting stored instance', async () => {
+    const legacy = dbFixture({ connection: {
+      id: 'connection-1', account_id: 'account-1', provider: 'openwa',
+      session_id: 'session-1', instance_id: null, status: 'connected',
+    } })
+    await expect(verifyAndReserveOpenWAWebhook(legacy.db as never, {
+      rawBody, signature: '0'.repeat(64), nowMs,
+    })).rejects.toThrow('Invalid OpenWA webhook signature')
+    expect(legacy.db.from).toHaveBeenCalledTimes(1)
+    const conflict = dbFixture({ connection: {
+      id: 'connection-1', account_id: 'account-1', provider: 'openwa',
+      session_id: 'session-1', instance_id: 'other-instance', status: 'connected',
+    } })
+    await expect(verifyAndReserveOpenWAWebhook(conflict.db as never, {
+      rawBody, signature: signature(), nowMs,
+    })).rejects.toThrow('Unknown OpenWA session')
+    expect(mockedResolveCredentials).not.toHaveBeenCalled()
+  })
+
+  it('rejects a concurrent legacy session binding to a different instance', async () => {
+    const { db, connectionQuery, receiptQuery } = dbFixture({ connection: {
+      id: 'connection-1', account_id: 'account-1', provider: 'openwa',
+      session_id: 'session-1', instance_id: null, status: 'connected',
+    } })
+    const pin = {
+      update: vi.fn(), eq: vi.fn(), is: vi.fn(), select: vi.fn(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    }
+    pin.update.mockReturnValue(pin); pin.eq.mockReturnValue(pin)
+    pin.is.mockReturnValue(pin); pin.select.mockReturnValue(pin)
+    const reread = {
+      select: vi.fn(), eq: vi.fn(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: { instance_id: 'other-instance' }, error: null }),
+    }
+    reread.select.mockReturnValue(reread); reread.eq.mockReturnValue(reread)
+    let lookups = 0
+    db.from.mockImplementation((table: string) => {
+      if (table !== 'whatsapp_connections') return receiptQuery
+      return [connectionQuery, pin, reread][lookups++]
+    })
+    await expect(verifyAndReserveOpenWAWebhook(db as never, {
+      rawBody, signature: signature(), nowMs,
+    })).rejects.toThrow('Unknown OpenWA session')
+    expect(receiptQuery.insert).not.toHaveBeenCalled()
   })
 
   it('rejects unknown sessions before accepting an event', async () => {
