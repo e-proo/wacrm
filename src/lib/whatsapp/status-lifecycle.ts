@@ -19,7 +19,7 @@ function openWAStatusValue(value: unknown): WhatsAppDeliveryStatus | null {
   }
   if (typeof value !== 'string') return null
   const raw = value.trim()
-  if (/^-?\\d+$/.test(raw)) return openWAStatusValue(Number(raw))
+  if (/^-?\d+$/.test(raw)) return openWAStatusValue(Number(raw))
   return normalizeOpenWAStatus(raw)
 }
 function statusRecord(value: unknown): Record<string, unknown> | null {
