@@ -6,6 +6,7 @@ import { Loader2, LogOut, QrCode, RefreshCw, RotateCcw, Webhook } from 'lucide-r
 import { toast } from 'sonner'
 
 import { useAuth } from '@/hooks/use-auth'
+import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-api-response'
 import { useWhatsAppLabels } from './whatsapp-labels'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,13 @@ interface OpenWAConnection {
 }
 
 interface QrState { connectionId: string; value: string; expiresAt: string }
+interface OpenWAApiPayload extends Record<string, unknown> {
+  error?: string
+  connections?: OpenWAConnection[]
+  connection?: { id: string }
+  qr?: string
+  expires_at?: string
+}
 
 export function OpenWAConnections() {
   const { canEditSettings } = useAuth()
@@ -47,7 +55,7 @@ export function OpenWAConnections() {
     if (!canEditSettings) { setLoading(false); return }
     try {
       const response = await fetch('/api/whatsapp/connections/openwa', { cache: 'no-store' })
-      const data = await response.json()
+      const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
       if (!response.ok) throw new Error(data.error || w('loadOpenwa'))
       setConnections(data.connections ?? [])
     } catch (error) {
@@ -67,12 +75,12 @@ export function OpenWAConnections() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base_url: baseUrl.trim(), api_key: apiKey.trim(), display_name: displayName.trim() }),
       })
-      const data = await response.json()
+      const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
       if (!response.ok) throw new Error(data.error || w('createFailed'))
       setApiKey('')
       toast.success(w('created'))
       await load()
-      await showQr(data.connection.id)
+      if (data.connection?.id) await showQr(data.connection.id)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : w('createFailed'))
     } finally { setBusy(null) }
@@ -85,8 +93,9 @@ export function OpenWAConnections() {
       // retries of session creation or sending messages.
       for (let attempt = 0; attempt < 8; attempt++) {
         const response = await fetch(`/api/whatsapp/connections/openwa/${connectionId}/qr`, { cache: 'no-store' })
-        const data = await response.json()
+        const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
         if (response.ok) {
+          if (!data.qr || !data.expires_at) throw new Error(w('qrUnavailable'))
           setQr({ connectionId, value: data.qr, expiresAt: data.expires_at })
           return
         }
@@ -110,7 +119,7 @@ export function OpenWAConnections() {
         body: actionName !== 'refresh' && actionName !== 'logout' ? JSON.stringify({ action: actionName }) : undefined,
         cache: 'no-store',
       })
-      const data = await response.json()
+      const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
       if (!response.ok) throw new Error(data.error || w('actionFailed'))
       if (actionName === 'logout') setQr(null)
       if (actionName === 'configure_webhook') toast.success(w('webhookConfigured'))
