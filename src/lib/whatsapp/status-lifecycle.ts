@@ -75,3 +75,24 @@ export async function applyWhatsAppStatus(db: SupabaseClient, input: NormalizedW
 
   return updated ? 'updated' : 'ignored'
 }
+
+/**
+ * OpenWA may publish an ACK before the WACRM send request finishes saving
+ * the provider-native ID. Retry only the database lookup; NEVER resend.
+ * This bounded retry covers the common fast-ACK race, not long provider
+ * timeouts (those still require operator reconciliation).
+ */
+export async function applyOpenWAStatusWithRetry(
+  db: SupabaseClient,
+  input: NormalizedWhatsAppStatus,
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<'updated' | 'ignored' | 'unknown'> {
+  let result = await applyWhatsAppStatus(db, input)
+  if (input.provider !== 'openwa') return result
+  for (const delay of [250, 750, 1500, 3000, 5000]) {
+    if (result !== 'unknown') return result
+    await wait(delay)
+    result = await applyWhatsAppStatus(db, input)
+  }
+  return result
+}
