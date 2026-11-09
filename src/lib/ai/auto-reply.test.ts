@@ -119,6 +119,13 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     )
   })
 
+  it('uses the same inbound message identity as the OpenWA send key', async () => {
+    await dispatchInboundToAiReply({ ...ARGS, inboundMessageId: 'inbound-123' })
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({
+      engineIdempotencyKey: 'ai-reply:inbound-123',
+    }))
+  })
+
   it('grounds the reply in retrieved knowledge', async () => {
     h.retrieveKnowledge.mockResolvedValue(['Returns accepted within 30 days.'])
     await dispatchInboundToAiReply(ARGS)
