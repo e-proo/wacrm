@@ -153,6 +153,21 @@ describe('OpenWA webhook intake', () => {
     expect(receiptQuery.insert).not.toHaveBeenCalled()
   })
 
+  it('accepts a correctly signed legacy event that omits optional instanceId', async () => {
+    const withoutInstance = JSON.stringify({
+      idempotencyKey: 'evt-no-instance', timestamp, sessionId: 'session-1',
+      event: 'message.received', data: { text: 'hello' },
+    })
+    const signatureWithoutInstance = createHmac('sha256', webhookSecret)
+      .update(withoutInstance, 'utf8').digest('hex')
+    const { db, receiptQuery } = dbFixture()
+    const result = await verifyAndReserveOpenWAWebhook(db as never, {
+      rawBody: withoutInstance, signature: signatureWithoutInstance, nowMs,
+    })
+    expect(result.envelope.instanceId).toBeUndefined()
+    expect(receiptQuery.insert).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects unknown sessions before accepting an event', async () => {
     const { db } = dbFixture({ connection: null })
     await expect(verifyAndReserveOpenWAWebhook(db as never, {
