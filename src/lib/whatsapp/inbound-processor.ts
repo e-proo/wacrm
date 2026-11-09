@@ -756,6 +756,7 @@ export async function processNormalizedInboundMessage(
         accountId,
         conversationId: conversation.id,
         contactId: contactRecord.id,
+        inboundMessageId,
         configOwnerUserId,
       })
     }
