@@ -204,6 +204,32 @@ describe('OpenWA upstream REST contract', () => {
     await expect(client.logoutSession('s1')).resolves.toBeUndefined()
   })
 
+  it('allows gateway session creation to exceed the 10-second JSON default without a second POST', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => new Promise<Response>((resolve, reject) => {
+        args[1]?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })
+        setTimeout(() => resolve(response(201, { id: 'slow-session', status: 'created' })), 15_000)
+      })) as unknown as typeof fetch
+      const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+      const pending = client.createSession({ name: 'wacrm-deterministic-name' })
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect((await pending).sessionId).toBe('slow-session')
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a timed-out create ambiguous and never retries it', async () => {
+    const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => new Promise<Response>((_resolve, reject) => {
+      args[1]?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })
+    })) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', timeoutMs: 5, fetchImpl })
+    await expect(client.createSession({ name: 'wacrm-single-attempt' })).rejects.toMatchObject({ code: 'ambiguous_outcome' })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects invalid/missing QR material and missing session identity', async () => {
     const qrClient = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl: vi.fn(async () => response(200, { qr: 'text-only' })) as unknown as typeof fetch })
     await expect(qrClient.getSessionQr('s1')).rejects.toMatchObject({ code: 'retryable_provider_failure' })
