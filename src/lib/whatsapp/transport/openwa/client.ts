@@ -20,7 +20,24 @@ function isPrivateIpv4(hostname: string): boolean { const parts = hostname.split
 function isUnsafeHostname(hostname: string): boolean { const host = hostname.toLowerCase().replace(/\.$/, ''); return host === 'localhost' || host === '::1' || host === '0.0.0.0' || host.endsWith('.local') || host.endsWith('.internal') || isPrivateIpv4(host) }
 export function validateOpenWABaseUrl(baseUrl: string, allowedHosts: readonly string[] = []): URL { let url: URL; try { url = new URL(baseUrl) } catch { throw new WhatsAppTransportError('invalid_request', 'OpenWA base URL is invalid') }; if (url.protocol !== 'https:') throw new WhatsAppTransportError('invalid_request', 'OpenWA base URL must use HTTPS'); if (url.username || url.password || url.search || url.hash) throw new WhatsAppTransportError('invalid_request', 'OpenWA base URL must not contain credentials, query, or fragment'); const allow = new Set(allowedHosts.map((host) => host.toLowerCase())); if (isUnsafeHostname(url.hostname) && !allow.has(url.hostname.toLowerCase())) throw new WhatsAppTransportError('invalid_request', 'OpenWA base URL targets a restricted host'); url.pathname = url.pathname.replace(/\/+$/, '') || '/'; return url }
 export function redactOpenWAValue(value: unknown): unknown { if (Array.isArray(value)) return value.map(redactOpenWAValue); if (!value || typeof value !== 'object') return value; return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key,item]) => [key, /token|secret|authorization|api[-_]?key|cookie|qr|signed.?url/i.test(key) ? REDACTED : redactOpenWAValue(item)])) }
-function mapHttpError(status: number): WhatsAppTransportError { if (status === 400 || status === 404 || status === 422) return new WhatsAppTransportError('invalid_request', `OpenWA request rejected (${status})`); if (status === 401 || status === 403) return new WhatsAppTransportError('authentication_or_configuration', `OpenWA authentication failed (${status})`); if (status === 409) return new WhatsAppTransportError('connection_restricted', 'OpenWA connection state rejected the request'); if (status === 429) return new WhatsAppTransportError('rate_limited', 'OpenWA rate limit reached'); if (status >= 500) return new WhatsAppTransportError('retryable_provider_failure', `OpenWA provider failure (${status})`); return new WhatsAppTransportError('permanent_provider_failure', `OpenWA request failed (${status})`) }
+function mapHttpError(status: number, safeCode?: string): WhatsAppTransportError { if (status === 400 || status === 404 || status === 422) return new WhatsAppTransportError('invalid_request', `OpenWA request rejected (${status}${safeCode ? `; code=${safeCode}` : ''})`); if (status === 401 || status === 403) return new WhatsAppTransportError('authentication_or_configuration', `OpenWA authentication failed (${status})`); if (status === 409) return new WhatsAppTransportError('connection_restricted', 'OpenWA connection state rejected the request'); if (status === 429) return new WhatsAppTransportError('rate_limited', 'OpenWA rate limit reached'); if (status >= 500) return new WhatsAppTransportError('retryable_provider_failure', `OpenWA provider failure (${status})`); return new WhatsAppTransportError('permanent_provider_failure', `OpenWA request failed (${status})`) }
+/** Only expose a whitelisted *shape* of upstream error code. Never forward
+ * arbitrary gateway response text, URLs, bearer secrets or HTML to users. */
+async function safeOpenWAErrorCode(response: Response): Promise<string | undefined> {
+  if (!response.headers.get('content-type')?.toLowerCase().includes('json')) return undefined
+  try {
+    const value: unknown = await response.json()
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const data = value as Record<string, unknown>
+    const nested = data.error && typeof data.error === 'object' && !Array.isArray(data.error)
+      ? data.error as Record<string, unknown> : null
+    const code = typeof data.code === 'string' ? data.code : nested?.code
+    if (typeof code !== 'string' || !/^[a-z][a-z0-9_]{2,48}$/i.test(code)) return undefined
+    return code.toUpperCase()
+  } catch {
+    return undefined
+  }
+}
 function requiredString(payload: Record<string, unknown>, keys: string[], message: string): string { for (const key of keys) { const value = payload[key]; if (typeof value === 'string' && value.trim()) return value } throw new WhatsAppTransportError('retryable_provider_failure', message) }
 function gatewayChatId(recipient: string): string {
   const value = recipient.trim().replace(/^\+/, '')
@@ -57,12 +74,17 @@ export class OpenWAClient {
         signal: controller.signal, redirect: 'error',
       })
       if (!response.ok) {
-        // OpenWA can return 409 IDEMPOTENCY_OUTCOME_UNKNOWN or an engine
-        // failure after WhatsApp has accepted a message. Never blind resend.
-        if (canHaveSent && (response.status === 409 || response.status >= 500)) {
+        // Read ONLY the bounded machine-readable error code for diagnostics,
+        // never raw gateway errors or URLs that might expose private media.
+        const safeCode = await safeOpenWAErrorCode(response)
+        // OpenWA may explicitly indicate uncertain outcomes even with a 4xx.
+        // A 409/5xx response to a send is always ambiguous, never retried.
+        const outcomeUnknown = safeCode === 'IDEMPOTENCY_OUTCOME_UNKNOWN'
+          || safeCode === 'SEND_OUTCOME_UNKNOWN'
+        if (canHaveSent && (outcomeUnknown || response.status === 409 || response.status >= 500)) {
           throw new WhatsAppTransportError('ambiguous_outcome', 'OpenWA send outcome is uncertain; reconcile before retrying')
         }
-        throw mapHttpError(response.status)
+        throw mapHttpError(response.status, safeCode)
       }
       if (response.status === 204) return undefined as T
       try { return await response.json() as T }
