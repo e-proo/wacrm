@@ -8,7 +8,39 @@ export function isForwardStatusTransition(current: string, incoming: WhatsAppDel
 export function normalizeMetaStatus(raw: string): WhatsAppDeliveryStatus | null { const value = raw.trim().toLowerCase(); return ['sent','delivered','read','failed'].includes(value) ? value as WhatsAppDeliveryStatus : null }
 export function normalizeOpenWAStatus(raw: string): WhatsAppDeliveryStatus | null { const value = raw.trim().toLowerCase().replace(/[\s_-]+/g, '.'); if (['sent','server.ack','ack.server','ack'].includes(value)) return 'sent'; if (['delivered','delivery','device.ack','ack.device','received'].includes(value)) return 'delivered'; if (['read','played','read.ack','ack.read'].includes(value)) return 'read'; if (['failed','error','undeliverable','rejected'].includes(value)) return 'failed'; return null }
 function safeDiagnostic(value: unknown): string | undefined { if (typeof value !== 'string') return undefined; const clean = value.replace(/bearer\s+\S+/gi, 'Bearer [REDACTED]').replace(/(token|secret|api[-_]?key)\s*[:=]\s*\S+/gi, '$1=[REDACTED]').slice(0, 500); return clean || undefined }
-export function parseOpenWAStatusEvent(data: unknown): { providerMessageId: string; status: WhatsAppDeliveryStatus; timestamp?: string; diagnostic?: string } | null { if (!data || typeof data !== 'object' || Array.isArray(data)) return null; const row = data as Record<string, unknown>; const providerMessageId = [row.messageId,row.message_id,row.id].find((v): v is string => typeof v === 'string' && !!v.trim())?.trim(); const rawStatus = [row.status,row.ack,row.state].find((v): v is string => typeof v === 'string' && !!v.trim()); if (!providerMessageId || !rawStatus) return null; const status = normalizeOpenWAStatus(rawStatus); if (!status) return null; const timestamp = typeof row.timestamp === 'string' || typeof row.timestamp === 'number' ? String(row.timestamp) : undefined; return { providerMessageId, status, timestamp, diagnostic: safeDiagnostic(row.error ?? row.reason ?? row.message) } }
+/** OpenWA engines may report WhatsApp ACK as an integer or string. */
+function openWAStatusValue(value: unknown): WhatsAppDeliveryStatus | null {
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    if (value === -1) return 'failed'
+    if (value === 1) return 'sent'
+    if (value === 2) return 'delivered'
+    if (value === 3 || value === 4) return 'read'
+    return null
+  }
+  if (typeof value !== 'string') return null
+  const raw = value.trim()
+  if (/^-?\\d+$/.test(raw)) return openWAStatusValue(Number(raw))
+  return normalizeOpenWAStatus(raw)
+}
+function statusRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+export function parseOpenWAStatusEvent(data: unknown): { providerMessageId: string; status: WhatsAppDeliveryStatus; timestamp?: string; diagnostic?: string } | null {
+  const row = statusRecord(data)
+  if (!row) return null
+  // The gateway may wrap the ACK in a message object. Never use the event
+  // delivery ID as the WhatsApp message ID.
+  const nested = statusRecord(row.message)
+  const identity = nested ?? row
+  const providerMessageId = [row.messageId, row.message_id, nested?.messageId, nested?.message_id, nested?.id, row.id]
+    .find((v): v is string => typeof v === 'string' && !!v.trim())?.trim()
+  const status = [row.status, row.ack, row.state, nested?.status, nested?.ack, nested?.state]
+    .map(openWAStatusValue).find((value) => value !== null) ?? null
+  if (!providerMessageId || !status) return null
+  const timestampValue = row.timestamp ?? identity.timestamp
+  const timestamp = typeof timestampValue === 'string' || typeof timestampValue === 'number' ? String(timestampValue) : undefined
+  return { providerMessageId, status, timestamp, diagnostic: safeDiagnostic(row.error ?? row.reason ?? nested?.error ?? (typeof row.message === 'string' ? row.message : undefined)) }
+}
 
 export async function applyWhatsAppStatus(db: SupabaseClient, input: NormalizedWhatsAppStatus): Promise<'updated' | 'ignored' | 'unknown'> {
   const { data: connection, error: connectionError } = await db.from('whatsapp_connections').select('id').eq('id', input.connectionId).eq('account_id', input.accountId).eq('provider', input.provider).maybeSingle()
