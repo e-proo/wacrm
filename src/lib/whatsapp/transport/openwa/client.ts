@@ -83,7 +83,7 @@ export class OpenWAClient {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? this.timeoutMs)
     const canHaveSent = options.method === 'POST' && (Boolean(options.idempotencyKey) || options.ambiguousOnFailure === true)
-    const headers: Record<string, string> = { accept: 'application/json', authorization: `Bearer ${this.config.apiKey}` }
+    const headers: Record<string, string> = { accept: 'application/json', authorization: `Bearer ${this.config.apiKey}`, 'x-api-key': this.config.apiKey }
     if (target.hostname.endsWith('.ngrok-free.app')) headers['ngrok-skip-browser-warning'] = '1'
     if (options.body !== undefined) headers['content-type'] = 'application/json'
     if (options.correlationId) headers['x-correlation-id'] = options.correlationId
@@ -130,7 +130,7 @@ export class OpenWAClient {
     // JSON calls through a tunnel. Keep the limit bounded for webhook workers.
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? MEDIA_DOWNLOAD_TIMEOUT_MS)
     try {
-      const response = await this.fetchImpl(target, { headers: { accept: '*/*', authorization: `Bearer ${this.config.apiKey}`, ...(correlationId ? { 'x-correlation-id': correlationId } : {}) }, signal: controller.signal, redirect: 'error' })
+      const response = await this.fetchImpl(target, { headers: { accept: '*/*', authorization: `Bearer ${this.config.apiKey}`, 'x-api-key': this.config.apiKey, ...(correlationId ? { 'x-correlation-id': correlationId } : {}) }, signal: controller.signal, redirect: 'error' })
       if (!response.ok) throw mapHttpError(response.status)
       const lengthHeader = response.headers.get('content-length')
       const length = lengthHeader ? Number(lengthHeader) : NaN
