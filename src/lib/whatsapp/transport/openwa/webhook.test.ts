@@ -245,6 +245,18 @@ describe('OpenWA webhook intake', () => {
     expect(receiptQuery.update).not.toHaveBeenCalled()
   })
 
+  it('retries an explicitly failed event immediately even when its arrival is recent', async () => {
+    const { db } = dbFixture({ insertError: { code: '23505' }, receipt: {
+      processed_at: null, processing_started_at: null,
+      processing_token: 'failed-worker', processing_error: 'processing_failed',
+      received_at: '2026-10-26T17:59:59Z', processing_attempts: 1,
+    } })
+    const result = await verifyAndReserveOpenWAWebhook(db as never, { rawBody, signature: signature(), nowMs })
+    expect(result.duplicate).toBe(false)
+    expect(result.inFlight).toBeUndefined()
+    expect(result.processingToken).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
   it('reclaims an expired reservation via compare-and-set and preserves scope', async () => {
     const { db, receiptQuery } = dbFixture({ insertError: { code: '23505' }, receipt: {
       processed_at: null, processing_started_at: '2026-10-26T17:55:00Z',
