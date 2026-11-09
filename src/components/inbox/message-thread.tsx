@@ -1091,7 +1091,7 @@ export function MessageThread({
           {/* A deliberate, human-selected override for the same WhatsApp
               phone. Old messages retain their own connection IDs and reads
               never reuse a chat JID from a different session. */}
-          {activeOpenWAChoices && activeOpenWAChoices.options.length > 1 && (
+          {activeOpenWAChoices && activeOpenWAChoices.options.length > 0 && (activeOpenWAChoices.options.length > 1 || !activeOpenWAChoices.options.some((item) => item.id === activeOpenWAChoices.current_connection_id)) && (
             <DropdownMenu>
               <DropdownMenuTrigger
                 className="inline-flex max-w-44 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
