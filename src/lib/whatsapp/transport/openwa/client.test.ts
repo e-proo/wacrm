@@ -22,6 +22,7 @@ describe('OpenWA upstream REST contract', () => {
       expect((args[0] as URL).pathname).toBe('/api/sessions/s1/messages/send-text')
       const headers = args[1]?.headers as Record<string, string>
       expect(headers.authorization).toBe('Bearer secret-key')
+      expect(headers['x-api-key']).toBe('secret-key')
       expect(headers['x-correlation-id']).toBe('corr-1')
       expect(headers['idempotency-key']).toBe('idem-1')
       expect(JSON.parse(String(args[1]?.body))).toEqual({ chatId: '967700000000@c.us', text: 'hello', quotedMessageId: 'quoted-1' })
@@ -106,6 +107,7 @@ describe('OpenWA upstream REST contract', () => {
     const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
       expect((args[0] as URL).pathname).toBe('/api/sessions/s1/messages/123%40c.us/m-1/media')
       expect((args[1]?.headers as Record<string,string>).authorization).toBe('Bearer key')
+      expect((args[1]?.headers as Record<string,string>)['x-api-key']).toBe('key')
       return new Response(new Uint8Array([1,2,3]), { status: 200, headers: { 'content-type': 'image/jpeg', 'content-length': '3' } })
     }) as unknown as typeof fetch
     const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
