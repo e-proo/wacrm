@@ -94,7 +94,7 @@ export async function verifyAndReserveOpenWAWebhook(
   // Resolve by OpenWA session identity, then pin every subsequent lookup to
   // the resulting account + connection. Never accept an account identifier
   // from the webhook payload as an authorization boundary.
-  let query = db
+  const query = db
     .from('whatsapp_connections')
     .select('id, account_id, provider, session_id, instance_id, status')
     .eq('provider', 'openwa')
