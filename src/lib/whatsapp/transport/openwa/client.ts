@@ -8,7 +8,7 @@ const MEDIA_DOWNLOAD_TIMEOUT_MS = 30_000
 const MEDIA_SEND_TIMEOUT_MS = 75_000
 const REDACTED = '[REDACTED]'
 export interface OpenWAClientConfig { baseUrl: string; apiKey: string; timeoutMs?: number; allowedHosts?: readonly string[]; fetchImpl?: typeof fetch }
-export interface OpenWARequestOptions { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown; correlationId?: string; idempotencyKey?: string; timeoutMs?: number }
+export interface OpenWARequestOptions { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown; correlationId?: string; idempotencyKey?: string; timeoutMs?: number; ambiguousOnFailure?: boolean }
 export interface OpenWASessionStatus { status: string; sessionId?: string; phoneIdentity?: string; raw?: Record<string, unknown> }
 export interface OpenWASessionCreateRequest { name: string; correlationId?: string; idempotencyKey?: string }
 export interface OpenWASessionCreateResult extends OpenWASessionStatus { qr?: string }
@@ -41,6 +41,24 @@ async function safeOpenWAErrorCode(response: Response): Promise<string | undefin
     return undefined
   }
 }
+/** Classify only known system error *codes* from node/undici, not
+ * untrusted exception messages (which can contain private hostnames/URLs).
+ * A generic failure remains generic. Nested causes are bounded. */
+function safeNetworkFailureKind(error: unknown): 'DNS lookup failed' | 'Connection refused' | 'Connection interrupted' | 'Connection timed out' | 'TLS verification failed' | null {
+  let current: unknown = error
+  for (let depth = 0; depth < 4; depth++) {
+    if (!current || typeof current !== 'object') break
+    const record = current as { code?: unknown; cause?: unknown }
+    const code = typeof record.code === 'string' ? record.code : ''
+    if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'DNS lookup failed'
+    if (code === 'ECONNREFUSED') return 'Connection refused'
+    if (code === 'ECONNRESET' || code === 'EPIPE' || code === 'UND_ERR_SOCKET') return 'Connection interrupted'
+    if (code === 'ETIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT' || code === 'UND_ERR_HEADERS_TIMEOUT') return 'Connection timed out'
+    if (['CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'ERR_TLS_CERT_ALTNAME_INVALID'].includes(code)) return 'TLS verification failed'
+    current = record.cause
+  }
+  return null
+}
 function requiredString(payload: Record<string, unknown>, keys: string[], message: string): string { for (const key of keys) { const value = payload[key]; if (typeof value === 'string' && value.trim()) return value } throw new WhatsAppTransportError('retryable_provider_failure', message) }
 function gatewayChatId(recipient: string): string {
   const value = recipient.trim().replace(/^\+/, '')
@@ -64,7 +82,7 @@ export class OpenWAClient {
     const target = this.target(path)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? this.timeoutMs)
-    const canHaveSent = options.method === 'POST' && Boolean(options.idempotencyKey)
+    const canHaveSent = options.method === 'POST' && (Boolean(options.idempotencyKey) || options.ambiguousOnFailure === true)
     const headers: Record<string, string> = { accept: 'application/json', authorization: `Bearer ${this.config.apiKey}` }
     if (target.hostname.endsWith('.ngrok-free.app')) headers['ngrok-skip-browser-warning'] = '1'
     if (options.body !== undefined) headers['content-type'] = 'application/json'
@@ -99,7 +117,9 @@ export class OpenWAClient {
       if (error instanceof Error && error.name === 'AbortError') {
         throw new WhatsAppTransportError('ambiguous_outcome', 'OpenWA request timed out; outcome requires reconciliation', error)
       }
-      throw new WhatsAppTransportError(canHaveSent ? 'ambiguous_outcome' : 'retryable_provider_failure', 'OpenWA network request failed', error)
+      const detail = safeNetworkFailureKind(error)
+      const message = `OpenWA network request failed${detail ? ` (${detail})` : ''}${canHaveSent ? '; outcome requires reconciliation' : ''}`
+      throw new WhatsAppTransportError(canHaveSent ? 'ambiguous_outcome' : 'retryable_provider_failure', message, error)
     } finally { clearTimeout(timeout) }
   }
   async downloadMedia(sessionId: string, messageId: string, chatId: string, correlationId?: string): Promise<OpenWADownloadMediaResult> {
@@ -133,6 +153,7 @@ export class OpenWAClient {
       // Do NOT automatically retry. Keep the deterministic name for
       // operator-side reconciliation of this one attempt.
       timeoutMs: this.config.timeoutMs ?? SESSION_CREATE_TIMEOUT_MS,
+      ambiguousOnFailure: true,
       body: { name: request.name },
     })
     const session = sessionFromGateway(response)
@@ -175,7 +196,7 @@ export class OpenWAClient {
     }
   }
   async startSession(sessionId: string, correlationId?: string): Promise<OpenWASessionStatus> {
-    const response = await this.request<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(sessionId)}/start`, { method: 'POST', correlationId, timeoutMs: 45_000 })
+    const response = await this.request<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(sessionId)}/start`, { method: 'POST', correlationId, timeoutMs: 45_000, ambiguousOnFailure: true })
     return sessionFromGateway(response)
   }
   reconnectSession(sessionId: string, correlationId?: string): Promise<OpenWASessionStatus> {
