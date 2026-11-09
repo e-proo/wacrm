@@ -65,6 +65,43 @@ describe('OpenWA upstream REST contract', () => {
     expect(result.raw?.signedUrl).toBe('[REDACTED]')
   })
 
+  it('reports a bounded gateway video error code without exposing the response body', async () => {
+    const fetchImpl = vi.fn(async () => response(400, {
+      code: 'MEDIA_DOWNLOAD_FAILED', message: 'token=secret private media URL',
+    })) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+    await expect(client.sendMedia({
+      sessionId: 's1', to: '12345678901', kind: 'video',
+      link: 'https://storage.example/video.mp4', idempotencyKey: 'video-1',
+    })).rejects.toMatchObject({
+      code: 'invalid_request',
+      message: 'OpenWA request rejected (400; code=MEDIA_DOWNLOAD_FAILED)',
+    })
+  })
+
+  it('treats an explicit gateway outcome-unknown code as ambiguous even with HTTP 400', async () => {
+    const fetchImpl = vi.fn(async () => response(400, {
+      code: 'IDEMPOTENCY_OUTCOME_UNKNOWN', message: 'token=secret',
+    })) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+    await expect(client.sendMedia({
+      sessionId: 's1', to: '12345678901', kind: 'video',
+      link: 'https://storage.example/video.mp4', idempotencyKey: 'video-2',
+    })).rejects.toMatchObject({ code: 'ambiguous_outcome' })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('never surfaces an untrusted gateway error message or malformed code', async () => {
+    const fetchImpl = vi.fn(async () => response(400, {
+      code: 'token=super-private', message: 'Authorization: Bearer sensitive',
+    })) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
+    await expect(client.sendMedia({
+      sessionId: 's1', to: '12345678901', kind: 'image',
+      link: 'https://storage.example/image.jpg', idempotencyKey: 'image-1',
+    })).rejects.toMatchObject({ code: 'invalid_request', message: 'OpenWA request rejected (400)' })
+  })
+
   it('downloads the original scoped message media by chat and message ID', async () => {
     const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
       expect((args[0] as URL).pathname).toBe('/api/sessions/s1/messages/123%40c.us/m-1/media')
