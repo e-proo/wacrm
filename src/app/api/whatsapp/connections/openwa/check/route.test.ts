@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
 const h = vi.hoisted(() => ({ requireAdmin: vi.fn() }))
 vi.mock('@/lib/whatsapp/transport/openwa/session-auth', () => ({
@@ -68,13 +69,13 @@ describe('OpenWA read-only gateway check', () => {
   })
 
   it('does not probe the gateway for an unauthorized caller', async () => {
-    h.requireAdmin.mockRejectedValue(new Error('access denied'))
+    h.requireAdmin.mockRejectedValue(new WhatsAppTransportError('authentication_or_configuration', 'Unauthorized'))
     const fetchImpl = vi.fn()
     vi.stubGlobal('fetch', fetchImpl)
     const res = await POST(req())
-    expect(res.status).toBe(502)
+    expect(res.status).toBe(403)
     expect(await res.json()).toEqual({
-      reachable: false, error: 'OpenWA gateway check failed', code: 'retryable_provider_failure',
+      reachable: false, error: 'Unauthorized', code: 'authentication_or_configuration',
     })
     expect(fetchImpl).not.toHaveBeenCalled()
   })
