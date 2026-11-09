@@ -4,6 +4,9 @@ import { NextResponse } from 'next/server'
 // function alive beyond the bounded 75s upstream media POST timeout.
 export const maxDuration = 90
 import { createClient } from '@/lib/supabase/server'
+import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { authorizeConversationOpenWASendConnection } from '@/lib/whatsapp/transport/openwa/conversation-connections'
+import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import {
   checkRateLimit,
@@ -62,6 +65,7 @@ export async function POST(request: Request) {
       template_message_params,
       interactive_payload,
       reply_to_message_id,
+      connection_id: requestedConnectionId,
     } = body
 
     if ((!conversationIdInput && !contact_id) || !message_type) {
@@ -152,6 +156,28 @@ export async function POST(request: Request) {
       )
     }
 
+    // A human agent may explicitly switch an older OpenWA conversation to
+    // a newer, *same-account / same-phone* session. Revalidate on every
+    // send; never trust the options list alone or allow a provider switch.
+    let selectedConnectionId: string | undefined
+    if (requestedConnectionId !== undefined && requestedConnectionId !== null) {
+      if (!conversationIdInput || typeof requestedConnectionId !== 'string'
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedConnectionId)) {
+        return NextResponse.json({ error: 'A valid conversation OpenWA connection is required', code: 'invalid_request' }, { status: 400 })
+      }
+      try {
+        await authorizeConversationOpenWASendConnection(supabaseAdmin(), accountId, conversationId, requestedConnectionId)
+        selectedConnectionId = requestedConnectionId
+      } catch (error) {
+        if (error instanceof WhatsAppTransportError) {
+          return NextResponse.json({ error: error.message, code: error.code }, {
+            status: error.code === 'connection_restricted' ? 409 : 403,
+          })
+        }
+        throw error
+      }
+    }
+
     // Delegate to the shared send core (validates, sends to Meta with
     // phone-variant retry, persists, pauses active flow runs). Its
     // `SendMessageError` carries a machine code + HTTP status; the
@@ -159,6 +185,7 @@ export async function POST(request: Request) {
     try {
       const result = await sendMessageToConversation(supabase, accountId, {
         conversationId,
+        connectionId: selectedConnectionId,
         messageType: message_type,
         contentText: content_text,
         mediaUrl: media_url,
