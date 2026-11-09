@@ -28,7 +28,9 @@ describe('OpenWA chat read acknowledgements', () => {
   beforeEach(() => vi.clearAllMocks())
   it('rejects a cross-tenant conversation before ever reading privileged credentials', async () => {
     vi.mocked(requireRole).mockResolvedValue({ supabase: { from: vi.fn(() => chain(null)) } as never, accountId:ACCOUNT } as never)
-    expect((await POST(request())).status).toBe(404)
+    const response = await POST(request())
+    expect(response.status).toBe(404)
+    expect(await response.json()).toMatchObject({ code: 'conversation_not_found' })
     expect(supabaseAdmin).not.toHaveBeenCalled()
   })
   it('does not fabricate a WhatsApp JID when no verified inbound identity exists', async () => {
