@@ -21,11 +21,19 @@ interface OpenWAConnection {
   status: string
   session_id: string | null
   engine: string | null
+  provider_metadata?: {
+    onboarding_stage?: string
+    onboarding_failure_code?: string
+    onboarding_reconciliation_required?: boolean
+  } | null
 }
 
 interface QrState { connectionId: string; value: string; expiresAt: string }
 interface OpenWAApiPayload extends Record<string, unknown> {
   error?: string
+  code?: string
+  stage?: string
+  reconciliation_required?: boolean
   connections?: OpenWAConnection[]
   connection?: { id: string }
   qr?: string
@@ -80,7 +88,16 @@ export function OpenWAConnections() {
         body: JSON.stringify({ base_url: baseUrl.trim(), api_key: apiKey.trim(), display_name: displayName.trim() }),
       })
       const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
-      if (!response.ok) throw new Error(data.error || w('createFailed'))
+      if (!response.ok) {
+        // Failure after POST /sessions may still leave an upstream session.
+        // Do not invite the user to click "Create" blindly; reconcile first.
+        const reason = data.error || w('createFailed')
+        const stage = typeof data.stage === 'string' && /^[a-z_]{1,40}$/.test(data.stage) ? data.stage : 'unknown'
+        const warning = data.reconciliation_required
+          ? ' Check the existing OpenWA session list and gateway before attempting creation again.'
+          : ''
+        throw new Error(`${reason} (stage=${stage}).${warning}`)
+      }
       setApiKey('')
       toast.success(w('created'))
       await load()
@@ -161,6 +178,14 @@ export function OpenWAConnections() {
     {connections.map((connection) => <Card key={connection.id}>
       <CardHeader><CardTitle className="text-base">{connection.display_name || 'WhatsApp Web'}</CardTitle><CardDescription>{w('status')} {(['creating', 'waiting_qr', 'authenticating', 'ready', 'connected', 'disconnected', 'reconnecting', 'restricted', 'failed', 'logged_out'] as const).includes(connection.status as 'ready') ? w(connection.status as 'creating' | 'waiting_qr' | 'authenticating' | 'ready' | 'connected' | 'disconnected' | 'reconnecting' | 'restricted' | 'failed' | 'logged_out') : connection.status}{connection.phone_identity ? ` · ${connection.phone_identity}` : ''}</CardDescription></CardHeader>
       <CardContent className="space-y-3">
+        {connection.provider_metadata?.onboarding_reconciliation_required && <Alert variant="destructive">
+          <AlertTitle>OpenWA session creation needs reconciliation</AlertTitle>
+          <AlertDescription>
+            The gateway may already have created this session. Do not create another one blindly.
+            {connection.provider_metadata.onboarding_stage ? ` Stage: ${connection.provider_metadata.onboarding_stage}.` : ''}
+            {connection.provider_metadata.onboarding_failure_code ? ` Code: ${connection.provider_metadata.onboarding_failure_code}.` : ''}
+          </AlertDescription>
+        </Alert>}
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => action(connection.id, 'refresh')}><RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}</Button>
           {['creating', 'waiting_qr', 'authenticating', 'disconnected'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => showQr(connection.id)}><QrCode className="mr-2 h-4 w-4" />{w('showQr')}</Button>}
