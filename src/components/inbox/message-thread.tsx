@@ -279,7 +279,8 @@ export function MessageThread({
   });
 
   const conversationId = conversation?.id;
-  const [openWAConnectionChoices, setOpenWAConnectionChoices] = useState<ConversationSendConnections | null>(null);
+  const [openWAConnectionChoices, setOpenWAConnectionChoices] = useState<{ conversationId: string; data: ConversationSendConnections } | null>(null);
+  const activeOpenWAChoices = openWAConnectionChoices?.conversationId === conversationId ? openWAConnectionChoices.data : null;
   const [manualConnection, setManualConnection] = useState<{ conversationId: string; connectionId: string } | null>(null);
   const selectedConnectionId = manualConnection?.conversationId === conversationId ? manualConnection.connectionId : undefined;
 
@@ -292,7 +293,7 @@ export function MessageThread({
       if (!response.ok) throw new Error("connection options unavailable");
       return await response.json() as ConversationSendConnections;
     }).then((data) => {
-      if (!cancelled) setOpenWAConnectionChoices(data);
+      if (!cancelled) setOpenWAConnectionChoices({ conversationId, data });
     }).catch(() => {
       // Never guess or silently switch an unavailable connection.
       if (!cancelled) setOpenWAConnectionChoices(null);
@@ -1090,7 +1091,7 @@ export function MessageThread({
           {/* A deliberate, human-selected override for the same WhatsApp
               phone. Old messages retain their own connection IDs and reads
               never reuse a chat JID from a different session. */}
-          {openWAConnectionChoices && openWAConnectionChoices.options.length > 1 && (
+          {activeOpenWAChoices && activeOpenWAChoices.options.length > 1 && (
             <DropdownMenu>
               <DropdownMenuTrigger
                 className="inline-flex max-w-44 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
@@ -1098,7 +1099,7 @@ export function MessageThread({
               >
                 <span className="truncate">
                   {selectedConnectionId
-                    ? openWAConnectionChoices.options.find((item) => item.id === selectedConnectionId)?.gateway_host
+                    ? activeOpenWAChoices.options.find((item) => item.id === selectedConnectionId)?.gateway_host
                       ?? w("conversationConnectionAlternative")
                     : w("conversationConnectionAutomatic")}
                 </span>
@@ -1109,7 +1110,7 @@ export function MessageThread({
                   {w("conversationConnectionAutomatic")}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                {openWAConnectionChoices.options.map((item) => (
+                {activeOpenWAChoices.options.map((item) => (
                   <DropdownMenuItem
                     key={item.id}
                     onClick={() => setManualConnection({ conversationId: conversationId!, connectionId: item.id })}
