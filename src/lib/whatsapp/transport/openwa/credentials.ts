@@ -38,6 +38,7 @@ export async function resolveOpenWACredentials(
     .eq('id', connectionId)
     .eq('account_id', accountId)
     .eq('provider', 'openwa')
+    .is('archived_at', null)
     .maybeSingle()
 
   if (connectionError || !connection) {
