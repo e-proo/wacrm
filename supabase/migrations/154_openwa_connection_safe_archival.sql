@@ -5,6 +5,46 @@ ALTER TABLE public.whatsapp_connections
   ADD COLUMN IF NOT EXISTS archived_at timestamptz,
   ADD COLUMN IF NOT EXISTS archived_by uuid;
 
+-- Existing tenant admins can update whatsapp_connections through RLS.
+-- Archive status and operator identity are server-owned; a direct browser
+-- table UPDATE must not hide records without revoking stored credentials.
+CREATE OR REPLACE FUNCTION public.guard_openwa_archive_state()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $guard$
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    IF (NEW.archived_at IS DISTINCT FROM OLD.archived_at
+        OR NEW.archived_by IS DISTINCT FROM OLD.archived_by)
+       AND current_user NOT IN ('service_role', 'postgres') THEN
+      RAISE EXCEPTION 'OpenWA archival state is server-managed' USING ERRCODE = '42501';
+    END IF;
+    IF OLD.archived_at IS NOT NULL AND
+       (NEW.archived_at IS DISTINCT FROM OLD.archived_at OR NEW.archived_by IS DISTINCT FROM OLD.archived_by) THEN
+      RAISE EXCEPTION 'Archived OpenWA connection is immutable' USING ERRCODE = '23514';
+    END IF;
+  ELSIF TG_OP = 'DELETE' AND OLD.provider = 'openwa' AND OLD.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Archived OpenWA history anchor cannot be deleted' USING ERRCODE = '23514';
+  END IF;
+  RETURN COALESCE(NEW, OLD);
+END
+$guard$;
+
+REVOKE ALL ON FUNCTION public.guard_openwa_archive_state() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS protect_openwa_archive_update ON public.whatsapp_connections;
+CREATE TRIGGER protect_openwa_archive_update
+BEFORE UPDATE OF archived_at, archived_by ON public.whatsapp_connections
+FOR EACH ROW EXECUTE FUNCTION public.guard_openwa_archive_state();
+
+DROP TRIGGER IF EXISTS protect_openwa_archive_delete ON public.whatsapp_connections;
+CREATE TRIGGER protect_openwa_archive_delete
+BEFORE DELETE ON public.whatsapp_connections
+FOR EACH ROW WHEN (OLD.provider = 'openwa' AND OLD.archived_at IS NOT NULL)
+EXECUTE FUNCTION public.guard_openwa_archive_state();
+
 CREATE INDEX IF NOT EXISTS idx_openwa_live_connections_account
   ON public.whatsapp_connections (account_id, provider, updated_at DESC)
   WHERE provider = 'openwa' AND archived_at IS NULL;
