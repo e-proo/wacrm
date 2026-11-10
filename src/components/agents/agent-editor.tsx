@@ -364,17 +364,24 @@ export function AgentEditor(props: AgentEditorProps) {
   async function saveIdentity() {
     setBusy('identity');
     setNote(null);
+    setActionError(null);
     try {
       const res = await fetch(`/api/ai-agents/${agentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({ name: fName, description: fDesc }),
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'save failed');
+      const json = await readAgentEditorJson<{
+        agent?: { id: string };
+        error?: string;
+      }>(res, locale, 'saveIdentity');
+      if (!res.ok || !json.agent) {
+        throw new Error(`${json.error ?? getAgentAdminUiText(locale, 'saveIdentityFailed')} (HTTP ${res.status})`);
+      }
       setNote(t('savedIdentity'));
       onChanged();
     } catch (e) {
-      setNote(e instanceof Error ? e.message : 'error');
+      setActionError(e instanceof Error ? e.message : getAgentAdminUiText(locale, 'saveIdentityFailed'));
     } finally {
       setBusy(null);
     }
@@ -489,8 +496,13 @@ export function AgentEditor(props: AgentEditorProps) {
           isActive: bActive,
         }),
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'save failed');
-      const json = (await res.json()) as { policy: BudgetPolicy };
+      const json = await readAgentEditorJson<{
+        policy?: BudgetPolicy;
+        error?: string;
+      }>(res, locale, 'saveBudget');
+      if (!res.ok || !json.policy) {
+        throw new Error(`${json.error ?? getAgentAdminUiText(locale, 'saveBudgetFailed')} (HTTP ${res.status})`);
+      }
       const next = new Map(policiesRef.current).set(budgetPeriod, json.policy);
       policiesRef.current = next;
       setPolicies(next);
@@ -554,16 +566,25 @@ export function AgentEditor(props: AgentEditorProps) {
           is_required: tcRequired,
         }),
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'add failed');
+      const json = await readAgentEditorJson<{ testCase?: TestCaseRow; error?: string }>(
+        res, locale, 'addTestCase',
+      );
+      if (!res.ok) {
+        throw new Error(`${json.error ?? getAgentAdminUiText(locale, 'testCaseActionFailed')} (HTTP ${res.status})`);
+      }
       setTcName('');
       setTcMsg1('');
       setTcMsg2('');
       setTcMsg3('');
       setTcRequired(false);
-      const json = (await (await fetch(`/api/ai-agents/${agentId}/test-cases`)).json()) as {
-        testCases: TestCaseRow[];
-      };
-      setTestCases(json.testCases ?? []);
+      const reloadResponse = await fetch(`/api/ai-agents/${agentId}/test-cases`, { cache: 'no-store' });
+      const refreshed = await readAgentEditorJson<{ testCases?: TestCaseRow[]; error?: string }>(
+        reloadResponse, locale, 'loadTestCases',
+      );
+      if (!reloadResponse.ok) {
+        throw new Error(`${refreshed.error ?? getAgentAdminUiText(locale, 'testCaseActionFailed')} (HTTP ${reloadResponse.status})`);
+      }
+      setTestCases(refreshed.testCases ?? []);
     } catch (e) {
       setNote(e instanceof Error ? e.message : 'error');
     } finally {
@@ -576,7 +597,12 @@ export function AgentEditor(props: AgentEditorProps) {
     setNote(null);
     try {
       const res = await fetch(`/api/ai-agents/${agentId}/test-cases/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'delete failed');
+      const json = await readAgentEditorJson<{ ok?: boolean; error?: string }>(
+        res, locale, 'deleteTestCase',
+      );
+      if (!res.ok) {
+        throw new Error(`${json.error ?? getAgentAdminUiText(locale, 'testCaseActionFailed')} (HTTP ${res.status})`);
+      }
       setTestCases(testCases.filter((c) => c.id !== id));
     } catch (e) {
       setNote(e instanceof Error ? e.message : 'error');
@@ -595,7 +621,12 @@ export function AgentEditor(props: AgentEditorProps) {
         `/api/ai-agents/${agentId}/revisions/${revisionId}/validate`,
         { method: 'POST' },
       );
-      const json = (await res.json()) as { ok?: boolean; checks?: CheckResult[] };
+      const json = await readAgentEditorJson<{ ok?: boolean; checks?: CheckResult[]; error?: string }>(
+        res, locale, 'validate',
+      );
+      if (!res.ok && !json.checks?.length) {
+        throw new Error(`${json.error ?? getAgentAdminUiText(locale, 'validateFailed')} (HTTP ${res.status})`);
+      }
       setChecks(json.checks ?? []);
       if (json.ok) {
         setActionError(null);
@@ -618,10 +649,10 @@ export function AgentEditor(props: AgentEditorProps) {
         `/api/ai-agents/${agentId}/revisions/${revisionId}/evaluate`,
         { method: 'POST' },
       );
-      const json = (await res.json()) as {
+      const json = await readAgentEditorJson<{
         evaluation?: { status: string; failed_cases: number };
         error?: string;
-      };
+      }>(res, locale, 'evaluate');
       if (!res.ok || !json.evaluation) throw new Error(json.error ?? 'evaluate failed');
       setNote(
         `${t('simulateResult')}: ${json.evaluation.status} (${t('failedCases')}: ${json.evaluation.failed_cases})`,
@@ -643,7 +674,12 @@ export function AgentEditor(props: AgentEditorProps) {
         `/api/ai-agents/${agentId}/revisions/${revisionId}/publish`,
         { method: 'POST' },
       );
-      const json = (await res.json()) as { error?: string; code?: string; ok?: boolean; checks?: CheckResult[] };
+      const json = await readAgentEditorJson<{
+        error?: string;
+        code?: string;
+        ok?: boolean;
+        checks?: CheckResult[];
+      }>(res, locale, 'publish');
       if (!res.ok) {
         if (json.checks?.length) {
           setChecks(json.checks);
@@ -667,7 +703,12 @@ export function AgentEditor(props: AgentEditorProps) {
       const res = await fetch(`/api/ai-agents/${agentId}/revisions/${revisionId}`, {
         method: 'DELETE',
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'discard failed');
+      const json = await readAgentEditorJson<{ ok?: boolean; error?: string }>(
+        res, locale, 'discard',
+      );
+      if (!res.ok || !json.ok) {
+        throw new Error(`${json.error ?? getAgentAdminUiText(locale, 'discardFailed')} (HTTP ${res.status})`);
+      }
       onClose();
     } catch (e) {
       setNote(e instanceof Error ? e.message : 'error');

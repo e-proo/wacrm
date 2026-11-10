@@ -8,8 +8,16 @@ type Operation =
   | 'loadMembers'
   | 'loadBudget'
   | 'loadTestCases'
+  | 'saveIdentity'
   | 'saveRevision'
-  | 'saveTools';
+  | 'saveTools'
+  | 'saveBudget'
+  | 'addTestCase'
+  | 'deleteTestCase'
+  | 'validate'
+  | 'evaluate'
+  | 'publish'
+  | 'discard';
 
 const labels: Record<Operation, { ar: string; en: string }> = {
   loadRevision: { ar: 'تحميل إعدادات الوكيل', en: 'load agent settings' },
@@ -20,6 +28,14 @@ const labels: Record<Operation, { ar: string; en: string }> = {
   loadTestCases: { ar: 'تحميل حالات الاختبار', en: 'load test cases' },
   saveRevision: { ar: 'حفظ إعدادات الوكيل', en: 'save agent settings' },
   saveTools: { ar: 'حفظ صلاحيات الأدوات', en: 'save tool grants' },
+  saveIdentity: { ar: 'حفظ هوية الوكيل', en: 'save agent identity' },
+  saveBudget: { ar: 'حفظ الميزانية', en: 'save budget' },
+  addTestCase: { ar: 'إضافة الاختبار', en: 'add test case' },
+  deleteTestCase: { ar: 'حذف الاختبار', en: 'delete test case' },
+  validate: { ar: 'التحقق من الوكيل', en: 'validate agent' },
+  evaluate: { ar: 'محاكاة الوكيل', en: 'simulate agent' },
+  publish: { ar: 'نشر النسخة', en: 'publish revision' },
+  discard: { ar: 'حذف المسودة', en: 'discard draft' },
 };
 
 function responseFailure(
@@ -41,9 +57,14 @@ function responseFailure(
         'invalid-json': 'The server returned malformed JSON.',
         'invalid-payload': 'The server returned an unexpected payload.',
       }[reason];
+  const routeHint = status === 404 && reason === 'not-json'
+    ? (ar
+      ? ' تأكد أن الطلب يصل إلى خادم WACRM الصحيح على المنفذ الصحيح، وليس إلى خدمة أخرى أو نسخة قديمة.'
+      : ' Confirm the request reaches the correct WACRM server and port, not another service or an outdated build.')
+    : '';
   return new Error(ar
-    ? `تعذّر ${label}: ${detail} (HTTP ${status}). راجع سجل Next.js وتبويب Network.`
-    : `Could not ${label}: ${detail} (HTTP ${status}). Check the Next.js server log and Network tab.`);
+    ? `تعذّر ${label}: ${detail} (HTTP ${status}). راجع سجل Next.js وتبويب Network.${routeHint}`
+    : `Could not ${label}: ${detail} (HTTP ${status}). Check the Next.js server log and Network tab.${routeHint}`);
 }
 
 export async function readAgentEditorJson<T>(

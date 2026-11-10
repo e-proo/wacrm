@@ -51,6 +51,33 @@ describe('agent editor API response guard', () => {
     )
   })
 
+  it('reports a missing API endpoint for identity with actionable guidance', async () => {
+    const response = new Response('<!DOCTYPE html>', {
+      status: 404,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    })
+    await expect(readAgentEditorJson(response, 'ar', 'saveIdentity')).rejects.toThrow(
+      /حفظ هوية الوكيل.*HTTP 404.*خادم WACRM الصحيح/,
+    )
+  })
+
+  it('handles budget and validation errors without parsing HTML', async () => {
+    const response = new Response('<html>missing</html>', {
+      status: 404,
+      headers: { 'content-type': 'text/html' },
+    })
+    await expect(readAgentEditorJson(response, 'en', 'saveBudget')).rejects.toThrow(
+      /save budget.*HTTP 404.*WACRM server/,
+    )
+    const response2 = new Response('<html>error</html>', {
+      status: 503,
+      headers: { 'content-type': 'text/html' },
+    })
+    await expect(readAgentEditorJson(response2, 'ar', 'validate')).rejects.toThrow(
+      /التحقق من الوكيل.*HTTP 503/,
+    )
+  })
+
   it('isolates optional panel failures from the editor load', async () => {
     const html = new Response('<html>error</html>', {
       status: 200,
