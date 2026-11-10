@@ -34,6 +34,7 @@ export async function GET() {
       .select('id, display_name, phone_identity, status, session_id, instance_id, engine, provider_metadata, connected_at, disconnected_at, restricted_at, created_at, updated_at')
       .eq('account_id', accountId)
       .eq('provider', 'openwa')
+      .is('archived_at', null)
       .order('created_at', { ascending: false })
     if (error) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA connections', error)
     return NextResponse.json({ connections: data ?? [] }, { headers: noStore })
