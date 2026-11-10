@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Image from 'next/image'
-import { Loader2, LogOut, QrCode, RefreshCw, RotateCcw, Webhook } from 'lucide-react'
+import { Loader2, LogOut, QrCode, RefreshCw, RotateCcw, Trash2, Webhook } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useAuth } from '@/hooks/use-auth'
@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface OpenWAConnection {
   id: string
@@ -39,6 +40,7 @@ interface OpenWAApiPayload extends Record<string, unknown> {
   connection?: { id: string }
   qr?: string
   expires_at?: string
+  removed?: boolean
 }
 
 export function OpenWAConnections() {
@@ -52,6 +54,7 @@ export function OpenWAConnections() {
   const [apiKey, setApiKey] = useState('')
   const [displayName, setDisplayName] = useState('WhatsApp Web')
   const [qr, setQr] = useState<QrState | null>(null)
+  const [pendingRemoval, setPendingRemoval] = useState<OpenWAConnection | null>(null)
 
   useEffect(() => {
     if (!qr) return
@@ -169,6 +172,29 @@ export function OpenWAConnections() {
     } finally { setBusy(null) }
   }
 
+  async function removeConnection() {
+    if (!pendingRemoval || busy !== null) return
+    const connection = pendingRemoval
+    setBusy(`remove:${connection.id}`)
+    try {
+      const response = await fetch(`/api/whatsapp/connections/openwa/${connection.id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove_from_wacrm' }),
+        cache: 'no-store',
+      })
+      const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
+      if (!response.ok || !data.removed) throw new Error(data.error || w('removeSessionFailed'))
+      setPendingRemoval(null)
+      setQr((current) => current?.connectionId === connection.id ? null : current)
+      toast.success(w('removeSessionSuccess'))
+      await load()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : w('removeSessionFailed'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   if (!canEditSettings) return null
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
   if (loadError) {
@@ -220,6 +246,10 @@ export function OpenWAConnections() {
           {['disconnected', 'failed'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'reconnect')}><RotateCcw className="mr-2 h-4 w-4" />{w('reconnect')}</Button>}
           {connection.session_id && connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'configure_webhook')} disabled={busy === `configure_webhook:${connection.id}`}><Webhook className="mr-2 h-4 w-4" />{w('configureWebhook')}</Button>}
           {connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'logout')}><LogOut className="mr-2 h-4 w-4" />{w('logout')}</Button>}
+          <Button variant="outline" size="sm" onClick={() => setPendingRemoval(connection)}
+            disabled={busy !== null} className="text-destructive hover:text-destructive">
+            <Trash2 className="mr-2 h-4 w-4" />{w('removeFromWacrm')}
+          </Button>
         </div>
         {qr?.connectionId === connection.id && <div className="rounded-md border p-4">
           <p className="mb-3 text-sm font-medium">{w('qrPayload')}</p>
@@ -228,5 +258,28 @@ export function OpenWAConnections() {
         </div>}
       </CardContent>
     </Card>)}
+    <Dialog open={pendingRemoval !== null} onOpenChange={(open) => { if (!open && busy === null) setPendingRemoval(null) }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{w('removeSessionTitle')}</DialogTitle>
+          <DialogDescription>
+            {pendingRemoval?.display_name || 'WhatsApp Web'}
+            {pendingRemoval?.phone_identity ? ` · ${pendingRemoval.phone_identity}` : ''}
+          </DialogDescription>
+        </DialogHeader>
+        <Alert variant="destructive">
+          <AlertDescription>{w('removeSessionWarning')}</AlertDescription>
+        </Alert>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setPendingRemoval(null)} disabled={busy !== null}>
+            {w('removeSessionCancel')}
+          </Button>
+          <Button variant="destructive" onClick={() => void removeConnection()} disabled={busy !== null || !pendingRemoval}>
+            {busy?.startsWith('remove:') && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {w('removeSessionConfirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 }
