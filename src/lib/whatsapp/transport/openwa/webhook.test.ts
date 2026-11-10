@@ -89,6 +89,7 @@ describe('OpenWA webhook intake', () => {
 
     expect(connectionQuery.eq).toHaveBeenCalledWith('provider', 'openwa')
     expect(connectionQuery.eq).toHaveBeenCalledWith('session_id', 'session-1')
+    expect(connectionQuery.is).toHaveBeenCalledWith('archived_at', null)
     expect(connectionQuery.eq).not.toHaveBeenCalledWith('instance_id', 'instance-1')
     expect(mockedResolveCredentials).toHaveBeenCalledWith(db, 'account-1', 'connection-1')
     expect(receiptQuery.insert).toHaveBeenCalledWith(expect.objectContaining({
