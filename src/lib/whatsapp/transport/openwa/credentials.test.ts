@@ -10,6 +10,7 @@ import { resolveOpenWACredentials } from './credentials'
 type QueryChain = {
   select: ReturnType<typeof vi.fn>
   eq: ReturnType<typeof vi.fn>
+  is: ReturnType<typeof vi.fn>
   maybeSingle: ReturnType<typeof vi.fn>
 }
 
@@ -17,6 +18,7 @@ function query(result: { data: unknown; error: unknown }): QueryChain {
   const chain = {} as QueryChain
   chain.select = vi.fn(() => chain)
   chain.eq = vi.fn(() => chain)
+  chain.is = vi.fn(() => chain)
   chain.maybeSingle = vi.fn(async () => result)
   return chain
 }
