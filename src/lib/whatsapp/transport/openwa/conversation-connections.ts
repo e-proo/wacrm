@@ -47,6 +47,7 @@ export async function listConversationOpenWASendConnections(
     .eq('account_id', accountId).eq('provider', 'openwa')
     .eq('phone_identity', current.phone_identity)
     .in('status', ['ready', 'connected'])
+    .is('archived_at', null)
     .not('session_id', 'is', null)
     .order('updated_at', { ascending: false })
   if (candidateError) throw new WhatsAppTransportError('retryable_provider_failure', 'Could not load OpenWA connection options')
