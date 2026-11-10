@@ -28,7 +28,8 @@ BEGIN
   ELSIF TG_OP = 'DELETE' AND OLD.provider = 'openwa' AND OLD.archived_at IS NOT NULL THEN
     RAISE EXCEPTION 'Archived OpenWA history anchor cannot be deleted' USING ERRCODE = '23514';
   END IF;
-  RETURN COALESCE(NEW, OLD);
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
 END
 $guard$;
 
