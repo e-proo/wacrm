@@ -48,6 +48,7 @@ describe('resolveOpenWACredentials', () => {
     expect(connectionQuery.eq).toHaveBeenCalledWith('id', 'conn-1')
     expect(connectionQuery.eq).toHaveBeenCalledWith('account_id', 'acc-1')
     expect(connectionQuery.eq).toHaveBeenCalledWith('provider', 'openwa')
+    expect(connectionQuery.is).toHaveBeenCalledWith('archived_at', null)
     expect(credentialQuery.eq).toHaveBeenCalledWith('connection_id', 'conn-1')
     expect(credentialQuery.eq).toHaveBeenCalledWith('account_id', 'acc-1')
   })
