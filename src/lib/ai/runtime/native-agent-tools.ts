@@ -1,7 +1,7 @@
 import { AiError, type AiUsage } from '@/lib/ai/types'
 import type { RuntimeConnection } from '@/lib/ai/connections/types'
 import type { PlatformToolManifest } from '@/lib/ai/tools/platform/contracts'
-import { toJsonSchema } from './tool-schema'
+import { isStrictToolJsonSchema, toJsonSchema } from './tool-schema'
 import { providerFetch, providerHttpError, normalizeUsage, toNetworkError } from '@/lib/ai/providers/shared'
 import { joinApiPath } from '@/lib/ai/outbound/url-join'
 import { aiRequestTimeoutMs, MAX_OUTPUT_TOKENS } from '@/lib/ai/defaults'
@@ -144,7 +144,15 @@ async function generateOpenAi(input: NativeAgentGenerateInput): Promise<NativeAg
           messages,
           tools: tools.map((t) => ({
             type: 'function',
-            function: { name: t.name, description: t.description, parameters: t.schema, strict: true },
+            // OpenAI strict mode rejects optional properties and open-ended nested
+            // objects in platform manifests. Preserve each manifest's input
+            // shape and let the server-side grant/argument checks enforce it.
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.schema,
+              strict: isStrictToolJsonSchema(t.schema),
+            },
           })),
           // Some OpenAI-compatible providers keep trying to call a function
           // after a tool-result turn even when the next request supplies an

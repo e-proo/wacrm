@@ -48,6 +48,64 @@ describe('native agent final-turn safety', () => {
   })
 })
 
+describe('OpenAI-compatible strict schema negotiation', () => {
+  it('preserves the twelve real platform tool contracts while selecting strict per schema', async () => {
+    const keys = [
+      'coverage.check_availability',
+      'coverage.find_offers',
+      'coverage.get_rates',
+      'coverage.propose_offer',
+      'coverage.propose_request',
+      'exchange_rates.get_current',
+      'exchange_rates.record_trade_request',
+      'intents.record',
+      'pricing.calculate_quote',
+      'services.get',
+      'services.match_request',
+      'services.search',
+    ]
+    const tools = keys.map((key) => {
+      const manifest = getCurrentPlatformTool(key)
+      if (!manifest) throw new Error('Missing platform tool: ' + key)
+      return manifest
+    })
+    const fetchMock = vi.fn().mockResolvedValue(
+      json(200, { choices: [{ message: { content: 'OK', tool_calls: [] } }] }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(generateNativeAgentTurn({
+      connection: connection('openai', 'https://api.openai.com/v1/'),
+      model: 'nvidia-compatible-fixture',
+      systemPrompt: 'test',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools,
+    })).resolves.toMatchObject({ text: 'OK', toolCalls: [] })
+
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
+      tools: Array<{
+        type: string
+        function: {
+          name: string
+          strict: boolean
+          parameters: { required?: string[]; properties?: Record<string, unknown> }
+        }
+      }>
+      tool_choice: string
+    }
+    expect(payload.tools).toHaveLength(keys.length)
+    expect(payload.tool_choice).toBe('auto')
+    expect(payload.tools.every((entry) => entry.type === 'function')).toBe(true)
+    const byName = new Map(payload.tools.map((entry) => [entry.function.name, entry.function]))
+    expect(byName.get('wacrm__services__get')?.strict).toBe(true)
+    expect(byName.get('wacrm__services__search')?.strict).toBe(false)
+    expect(byName.get('wacrm__services__match_request')?.strict).toBe(false)
+    expect(byName.get('wacrm__coverage__find_offers')?.strict).toBe(false)
+    expect(byName.get('wacrm__services__search')?.parameters.required).toEqual([])
+    expect(byName.get('wacrm__services__search')?.parameters.properties).toHaveProperty('query')
+  })
+})
+
 describe('native provider matrix', () => {
   it('normalizes OpenAI-compatible native tool calls into the shared runtime contract', async () => {
     vi.stubGlobal(

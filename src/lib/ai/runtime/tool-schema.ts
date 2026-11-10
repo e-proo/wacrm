@@ -60,6 +60,56 @@ function argumentToJsonSchema(def: ArgumentSchema): Record<string, unknown> {
 }
 
 /**
+ * Check whether a provider-facing JSON Schema is safe to advertise with
+ * OpenAI's strict function-calling mode. In strict mode every object must
+ * forbid extra keys and mark every declared property required. Optional
+ * compact-manifest arguments and unbounded nested objects are therefore
+ * NOT strict; they remain optional in the existing server-side validator.
+ *
+ * Deliberately conservative for unsupported JSON Schema compositions: a
+ * provider can still use these tools in non-strict mode, while WACRM's
+ * independent runtime grant/argument validation remains authoritative.
+ */
+export function isStrictToolJsonSchema(schema: unknown): boolean {
+  return isRecord(schema) && schema.type === 'object' && strictObject(schema)
+}
+
+function strictObject(schema: Record<string, unknown>): boolean {
+  if (schema.additionalProperties !== false || !isRecord(schema.properties)) return false
+  if (!Array.isArray(schema.required)) return false
+
+  const names = Object.keys(schema.properties)
+  const required = schema.required
+  if (
+    required.length !== names.length ||
+    !required.every((name): name is string =>
+      typeof name === 'string' && Object.prototype.hasOwnProperty.call(schema.properties, name)
+    ) ||
+    new Set(required).size !== names.length
+  ) return false
+
+  return Object.values(schema.properties).every(strictProperty)
+}
+
+function strictProperty(schema: unknown): boolean {
+  if (!isRecord(schema)) return false
+  // Ref/union/conditional schemas need deeper checks than this guard offers.
+  // Prefer non-strict rather than claim compliance we cannot prove.
+  if (['$ref', 'anyOf', 'oneOf', 'allOf', 'not', 'patternProperties'].some((key) => key in schema)) return false
+  const types = typeof schema.type === 'string'
+    ? [schema.type]
+    : Array.isArray(schema.type) && schema.type.every((type) => typeof type === 'string')
+      ? schema.type
+      : []
+  if (types.length < 1 || types.length > 2) return false
+  if (types.length === 2 && (!types.includes('null') || new Set(types).size !== 2)) return false
+  const primaryType = types.find((type) => type !== 'null') ?? 'null'
+  if (primaryType === 'object') return types.length === 1 && strictObject(schema)
+  if (primaryType === 'array') return types.length === 1 && strictProperty(schema.items)
+  return ['string', 'number', 'integer', 'boolean', 'null'].includes(primaryType)
+}
+
+/**
  * Strict top-level validator used even when a provider claims to support
  * strict schemas. Provider output is always untrusted.
  */
