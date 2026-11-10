@@ -177,6 +177,35 @@ const labels = {
     "en": "Log out",
     "ar": "تسجيل الخروج"
   },
+  "removeFromWacrm": {
+    "en": "Remove from WACRM",
+    "ar": "حذف من WACRM"
+  },
+  "removeSessionTitle": {
+    "en": "Remove this OpenWA session?",
+    "ar": "هل تريد حذف جلسة OpenWA؟"
+  },
+  "removeSessionWarning": {
+    "en": "The session will disappear from WACRM and its stored API/webhook keys will be revoked. Existing messages, delivery receipts and audit records will be retained. This does NOT stop or delete the session on the OpenWA server; log out separately if needed. Pending sends or unprocessed webhooks block removal.",
+    "ar": "ستختفي الجلسة من WACRM وتُحذف مفاتيح API وWebhook المخزنة لها. ستبقى الرسائل القديمة وإشعارات حالتها وسجلات التدقيق محفوظة. لن يؤدي ذلك إلى إيقاف الجلسة أو حذفها من خادم OpenWA؛ سجّل الخروج بصورة منفصلة إذا لزم. تُمنع الإزالة في حال وجود رسائل معلّقة أو Webhooks لم تكتمل معالجتها."
+  },
+  "removeSessionConfirm": {
+    "en": "Confirm removal",
+    "ar": "تأكيد الحذف"
+  },
+  "removeSessionCancel": {
+    "en": "Cancel",
+    "ar": "إلغاء"
+  },
+  "removeSessionSuccess": {
+    "en": "OpenWA session removed from WACRM. Message history was preserved.",
+    "ar": "حُذفت جلسة OpenWA من WACRM مع الحفاظ على سجل الرسائل."
+  },
+  "removeSessionFailed": {
+    "en": "Could not remove OpenWA session",
+    "ar": "تعذّر حذف جلسة OpenWA"
+  },
+
   "qrPayload": {
     "en": "Short-lived QR payload",
     "ar": "بيانات رمز QR مؤقتة"
