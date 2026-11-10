@@ -61,7 +61,7 @@ export async function POST(request: Request) {
 
     const { data: connection, error: connectionError } = await db.from('whatsapp_connections')
       .select('session_id, status').eq('id', inbound.connection_id)
-      .eq('account_id', accountId).eq('provider', 'openwa').maybeSingle()
+      .eq('account_id', accountId).eq('provider', 'openwa').is('archived_at', null).maybeSingle()
     if (connectionError || !connection?.session_id || !['connected', 'ready'].includes(connection.status)) {
       return NextResponse.json({ error: 'OpenWA connection unavailable' }, { status: 409 })
     }
