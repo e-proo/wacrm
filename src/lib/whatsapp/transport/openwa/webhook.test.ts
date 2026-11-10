@@ -29,10 +29,12 @@ function dbFixture(options: { connection?: unknown; connectionError?: unknown; i
   const connectionQuery = {
     select: vi.fn(),
     eq: vi.fn(),
+    is: vi.fn(),
     maybeSingle: vi.fn().mockResolvedValue({ data: connection, error: options.connectionError ?? null }),
   }
   connectionQuery.select.mockReturnValue(connectionQuery)
   connectionQuery.eq.mockReturnValue(connectionQuery)
+  connectionQuery.is.mockReturnValue(connectionQuery)
 
   let reclaiming = false
   const receiptQuery = {
