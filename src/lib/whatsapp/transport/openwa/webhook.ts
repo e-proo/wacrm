@@ -106,6 +106,7 @@ export async function verifyAndReserveOpenWAWebhook(
     .select('id, account_id, provider, session_id, instance_id, status')
     .eq('provider', 'openwa')
     .eq('session_id', envelope.sessionId)
+    .is('archived_at', null)
 
   // Older WACRM session records predate instance binding. A signed event
   // from that session can establish the first instance identity, but an
