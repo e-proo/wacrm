@@ -103,8 +103,9 @@ describe('OpenWA session removal from WACRM', () => {
     try {
       const response = await POST(request(), context())
       expect(response.status).toBe(502)
-      expect((await response.json()).code).toBe('archive_failed')
-      expect(JSON.stringify(await response.json().catch(() => ({})))).not.toContain('secret credentials')
+      const payload = await response.json()
+      expect(payload.code).toBe('archive_failed')
+      expect(JSON.stringify(payload)).not.toContain('secret credentials')
       expect(h.logout).not.toHaveBeenCalled()
     } finally { spy.mockRestore() }
   })
