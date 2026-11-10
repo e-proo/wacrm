@@ -15,7 +15,7 @@ const ACCOUNT = 'account-1'
 const CONV = '11111111-1111-4111-8111-111111111111'
 function chain(data: unknown) {
   const q: Record<string, unknown> = {}
-  for (const k of ['select','eq','not','order','limit']) q[k] = vi.fn(() => q)
+  for (const k of ['select','eq','not','order','limit','is']) q[k] = vi.fn(() => q)
   q.maybeSingle = vi.fn(async () => ({ data, error: null }))
   return q
 }
