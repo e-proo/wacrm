@@ -29,7 +29,7 @@ class OpenWAWhatsAppTransport implements WhatsAppTransport {
 }
 
 export async function resolveOpenWATransport(db: SupabaseClient, accountId: string, connectionId: string): Promise<ResolvedOpenWATransport> {
-  const { data, error } = await db.from('whatsapp_connections').select('id, account_id, provider, status, session_id').eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa').maybeSingle()
+  const { data, error } = await db.from('whatsapp_connections').select('id, account_id, provider, status, session_id').eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa').is('archived_at', null).maybeSingle()
   if (error || !data) throw new WhatsAppTransportError('authentication_or_configuration', 'OpenWA connection is not configured for this account', error)
   const connection = data as OpenWAConnectionRow
   if (connection.status !== 'connected' && connection.status !== 'ready') throw new WhatsAppTransportError('connection_restricted', `OpenWA connection is not ready (${connection.status})`)
