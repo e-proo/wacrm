@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getToolCategoryLabel, getToolPermissionLabel, getToolUiText } from '@/lib/ai/ui/platform-i18n';
 import { getAgentAdminUiText, localizeAgentApiError, localizePublishCheck } from '@/lib/ai/ui/agent-admin-i18n';
+import { readAgentEditorJson, tryReadAgentEditorJson } from '@/lib/ai/ui/agent-editor-response';
 import { AgentOutreachBuilder } from './agent-outreach-builder';
 // ============================================================
 // Agent editor — the production control surface for one agent
@@ -146,6 +147,8 @@ export function AgentEditor(props: AgentEditorProps) {
   const [revision, setRevision] = useState<RevisionRow | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [registryOk, setRegistryOk] = useState(false);
+  const [toolsLoadError, setToolsLoadError] = useState<string | null>(null);
+  const [revisionLoadError, setRevisionLoadError] = useState<string | null>(null);
   const [registry, setRegistry] = useState<RegistryTool[]>([]);
   const [grants, setGrants] = useState<Map<string, { permission: string; constraints: Record<string, unknown> }>>(new Map());
   const [connections, setConnections] = useState<ConnectionOption[]>([]);
@@ -204,59 +207,112 @@ export function AgentEditor(props: AgentEditorProps) {
   const [bFallback, setBFallback] = useState('');
   const [bActive, setBActive] = useState(true);
 
+  // Reloading tools is independent of the revision form: retry must not
+  // overwrite in-progress edits to the model, system prompt or identity.
+  const loadTools = useCallback(async () => {
+    setRegistryOk(false);
+    setToolsLoadError(null);
+    setRegistry([]);
+    setGrants(new Map());
+    try {
+      const response = await fetch(
+        `/api/ai-agents/${agentId}/revisions/${revisionId}/tools`,
+        { cache: 'no-store' },
+      );
+      const json = await readAgentEditorJson<{
+        registry?: RegistryTool[];
+        grants?: GrantRow[];
+        error?: string;
+      }>(response, locale, 'loadTools');
+      if (!response.ok) {
+        throw new Error(`${json.error ?? getAgentAdminUiText(locale, 'toolsLoadFailed')} (HTTP ${response.status})`);
+      }
+      if (!Array.isArray(json.registry) || !Array.isArray(json.grants)) {
+        throw new Error(getAgentAdminUiText(locale, 'invalidToolsPayload'));
+      }
+      const map = new Map<string, { permission: string; constraints: Record<string, unknown> }>();
+      for (const grant of json.grants) {
+        map.set(grant.tool_key, {
+          permission: grant.permission,
+          constraints: grant.constraints ?? {},
+        });
+      }
+      setRegistry(json.registry);
+      setGrants(map);
+      setRegistryOk(true);
+    } catch (error) {
+      setToolsLoadError(error instanceof Error ? error.message : getAgentAdminUiText(locale, 'toolsLoadFailed'));
+    }
+  }, [agentId, revisionId, locale]);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setLoadFailed(false);
-    setRegistryOk(false);
-    const [revRes, toolsRes, connRes, memRes, budgetRes, tcRes] = await Promise.all([
-      fetch(`/api/ai-agents/${agentId}/revisions/${revisionId}`, { cache: 'no-store' }).catch(() => null),
-      fetch(`/api/ai-agents/${agentId}/revisions/${revisionId}/tools`, { cache: 'no-store' }).catch(() => null),
-      fetch('/api/ai/connections', { cache: 'no-store' }).catch(() => null),
-      fetch('/api/account/members', { cache: 'no-store' }).catch(() => null),
-      fetch(`/api/ai-agents/${agentId}/budget`, { cache: 'no-store' }).catch(() => null),
-      fetch(`/api/ai-agents/${agentId}/test-cases`, { cache: 'no-store' }).catch(() => null),
-    ]);
-    if (revRes?.ok) {
-      const json = (await revRes.json()) as { revision: RevisionRow };
-      const r = json.revision;
-      setRevision(r);
-      setFModel(r.model ?? '');
-      setFConn(r.provider_connection_id ?? '');
-      setFPrompt(r.system_prompt ?? '');
-      setFStyle(r.response_style ?? 'balanced');
-      setFLang(r.language_policy ?? 'auto');
-      setFTemp(r.temperature === null ? '' : String(r.temperature));
-      setFMaxTok(r.max_output_tokens === null ? '' : String(r.max_output_tokens));
-      setFRounds(String(r.max_tool_rounds ?? 0));
-      setFCap(String(r.max_ai_replies_per_conversation ?? 3));
-      setFHandoff(r.handoff_human_member_id ?? '');
-    } else {
-      setLoadFailed(true);
-    }
-    if (toolsRes?.ok) {
-      const json = (await toolsRes.json()) as { registry: RegistryTool[]; grants: GrantRow[] };
-      setRegistry(json.registry ?? []);
-      const map = new Map<string, { permission: string; constraints: Record<string, unknown> }>();
-      for (const g of json.grants ?? []) {
-        map.set(g.tool_key, { permission: g.permission, constraints: g.constraints ?? {} });
+    setRevisionLoadError(null);
+    const toolsRequest = loadTools();
+    try {
+      const [revRes, connRes, memRes, budgetRes, tcRes] = await Promise.all([
+        fetch(`/api/ai-agents/${agentId}/revisions/${revisionId}`, { cache: 'no-store' }).catch(() => null),
+        fetch('/api/ai/connections', { cache: 'no-store' }).catch(() => null),
+        fetch('/api/account/members', { cache: 'no-store' }).catch(() => null),
+        fetch(`/api/ai-agents/${agentId}/budget`, { cache: 'no-store' }).catch(() => null),
+        fetch(`/api/ai-agents/${agentId}/test-cases`, { cache: 'no-store' }).catch(() => null),
+      ]);
+      try {
+        if (!revRes) throw new Error(getAgentAdminUiText(locale, 'revisionLoadFailed'));
+        const json = await readAgentEditorJson<{
+          revision?: RevisionRow;
+          error?: string;
+        }>(revRes, locale, 'loadRevision');
+        if (!revRes.ok) {
+          throw new Error(`${json.error ?? getAgentAdminUiText(locale, 'revisionLoadFailed')} (HTTP ${revRes.status})`);
+        }
+        if (!json.revision) throw new Error(getAgentAdminUiText(locale, 'invalidRevisionPayload'));
+        const r = json.revision;
+        setRevision(r);
+        setFModel(r.model ?? '');
+        setFConn(r.provider_connection_id ?? '');
+        setFPrompt(r.system_prompt ?? '');
+        setFStyle(r.response_style ?? 'balanced');
+        setFLang(r.language_policy ?? 'auto');
+        setFTemp(r.temperature === null ? '' : String(r.temperature));
+        setFMaxTok(r.max_output_tokens === null ? '' : String(r.max_output_tokens));
+        setFRounds(String(r.max_tool_rounds ?? 0));
+        setFCap(String(r.max_ai_replies_per_conversation ?? 3));
+        setFHandoff(r.handoff_human_member_id ?? '');
+      } catch (error) {
+        setLoadFailed(true);
+        setRevisionLoadError(error instanceof Error ? error.message : getAgentAdminUiText(locale, 'revisionLoadFailed'));
       }
-      setGrants(map);
-      setRegistryOk(true);
+
+      // Secondary panels must not prevent the editor from finishing its load.
+      const connectionsJson = await tryReadAgentEditorJson<{ connections?: ConnectionOption[] }>(
+        connRes, locale, 'loadConnections',
+      );
+      setConnections(Array.isArray(connectionsJson?.connections) ? connectionsJson.connections : []);
+      const membersJson = await tryReadAgentEditorJson<{ members?: MemberOption[] }>(
+        memRes, locale, 'loadMembers',
+      );
+      setMembers(Array.isArray(membersJson?.members) ? membersJson.members : []);
+      const budgetJson = await tryReadAgentEditorJson<{ policies?: BudgetPolicy[] }>(
+        budgetRes, locale, 'loadBudget',
+      );
+      if (Array.isArray(budgetJson?.policies)) {
+        const m = new Map<string, BudgetPolicy>();
+        for (const policy of budgetJson.policies) m.set(policy.period, policy);
+        policiesRef.current = m;
+        setPolicies(m);
+        applyBudgetFromState(budgetPeriodRef.current, m);
+      }
+      const casesJson = await tryReadAgentEditorJson<{ testCases?: TestCaseRow[] }>(
+        tcRes, locale, 'loadTestCases',
+      );
+      setTestCases(Array.isArray(casesJson?.testCases) ? casesJson.testCases : []);
+    } finally {
+      await toolsRequest;
+      setLoading(false);
     }
-    const conns: ConnectionOption[] = connRes?.ok ? (await connRes.json()).connections ?? [] : [];
-    setConnections(conns);
-    if (memRes?.ok) setMembers((await memRes.json()).members ?? []);
-    if (budgetRes?.ok) {
-      const json = (await budgetRes.json()) as { policies: BudgetPolicy[] };
-      const m = new Map<string, BudgetPolicy>();
-      for (const p of json.policies ?? []) m.set(p.period, p);
-      policiesRef.current = m;
-      setPolicies(m);
-      applyBudgetFromState(budgetPeriodRef.current, m);
-    }
-    if (tcRes?.ok) setTestCases((await tcRes.json()).testCases ?? []);
-    setLoading(false);
-  }, [agentId, revisionId]);
+  }, [agentId, revisionId, locale, loadTools]);
 
   useEffect(() => {
     void loadAll();
@@ -361,8 +417,13 @@ export function AgentEditor(props: AgentEditorProps) {
           handoffHumanMemberId: fHandoff || null,
         }),
       });
-      const json = (await res.json()) as { revision?: RevisionRow; error?: string; code?: string };
-      if (!res.ok || !json.revision) throw new Error(localizeAgentApiError(locale, json.code, json.error));
+      const json = await readAgentEditorJson<{ revision?: RevisionRow; error?: string; code?: string }>(
+        res, locale, 'saveRevision',
+      );
+      if (!res.ok || !json.revision) {
+        const message = localizeAgentApiError(locale, json.code, json.error);
+        throw new Error(!res.ok ? `${message} (HTTP ${res.status})` : getAgentAdminUiText(locale, 'saveRevisionFailed'));
+      }
       setRevision(json.revision);
       setFConn(json.revision.provider_connection_id ?? '');
       setFModel(json.revision.model ?? '');
@@ -396,8 +457,12 @@ export function AgentEditor(props: AgentEditorProps) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ grants: payload }),
       });
-      const json = (await res.json()) as { ok?: boolean; count?: number; error?: string };
-      if (!res.ok || !json.ok) throw new Error(json.error ?? 'save failed');
+      const json = await readAgentEditorJson<{ ok?: boolean; count?: number; error?: string }>(
+        res, locale, 'saveTools',
+      );
+      if (!res.ok || !json.ok) {
+        throw new Error(`${json.error ?? getAgentAdminUiText(locale, 'toolsSaveFailed')} (HTTP ${res.status})`);
+      }
       setNote(t('toolsSaved', { count: json.count ?? 0 }));
     } catch (e) {
       setNote(e instanceof Error ? e.message : 'error');
@@ -617,6 +682,7 @@ export function AgentEditor(props: AgentEditorProps) {
         <Card className="border-destructive/40">
           <CardContent className="space-y-3 py-6">
             <p className="text-sm text-destructive">{t('loadFailed')}</p>
+            {revisionLoadError ? <p role="alert" className="text-xs text-destructive">{revisionLoadError}</p> : null}
             <Button size="sm" variant="outline" onClick={() => void loadAll()}>
               {t('retry')}
             </Button>
@@ -842,8 +908,14 @@ export function AgentEditor(props: AgentEditorProps) {
         <section className="space-y-2">
           <h3 className="text-sm font-semibold">{t('tools')}</h3>
           <div className="space-y-1">
-            {registry.length === 0 && !registryOk ? (
-              <p className="text-xs text-destructive">{t('toolsNotLoaded')}</p>
+            {!registryOk ? (
+              <div role="alert" className="space-y-2">
+                <p className="text-xs text-destructive">{t('toolsNotLoaded')}</p>
+                {toolsLoadError ? <p className="text-xs text-destructive">{toolsLoadError}</p> : null}
+                <Button type="button" size="sm" variant="outline" onClick={() => void loadTools()}>
+                  {t('retry')}
+                </Button>
+              </div>
             ) : null}
             {registry.map((tool) => {
               const grant = grants.get(tool.key);
@@ -881,7 +953,7 @@ export function AgentEditor(props: AgentEditorProps) {
               );
             })}
           </div>
-          <Button size="sm" variant="outline" disabled={busy === 'tools'} onClick={() => void saveTools()}>
+          <Button size="sm" variant="outline" disabled={busy === 'tools' || !registryOk} onClick={() => void saveTools()}>
             {busy === 'tools' ? <Loader2 className="me-1 h-3.5 w-3.5 animate-spin" /> : null}
             {t('saveTools')}
           </Button>
