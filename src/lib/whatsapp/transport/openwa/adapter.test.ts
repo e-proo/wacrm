@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveOpenWATransport } from './adapter'
 import { resolveOpenWAClient } from './credentials'
 vi.mock('./credentials', () => ({ resolveOpenWAClient: vi.fn() }))
-function connectionDb(row: Record<string, unknown> | null): SupabaseClient { return { from() { const b: Record<string, unknown> = { select: () => b, eq: () => b, maybeSingle: async () => ({ data: row, error: null }) }; return b } } as unknown as SupabaseClient }
+function connectionDb(row: Record<string, unknown> | null): SupabaseClient { return { from() { const b: Record<string, unknown> = { select: () => b, eq: () => b, is: () => b, maybeSingle: async () => ({ data: row, error: null }) }; return b } } as unknown as SupabaseClient }
 
 describe('OpenWA outbound adapter', () => {
   it('sends text/reply with stable idempotency identity and normalizes provider id', async () => {
