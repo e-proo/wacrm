@@ -154,10 +154,10 @@ describe('OpenWA webhook intake', () => {
     pin.update.mockReturnValue(pin); pin.eq.mockReturnValue(pin)
     pin.is.mockReturnValue(pin); pin.select.mockReturnValue(pin)
     const reread = {
-      select: vi.fn(), eq: vi.fn(),
+      select: vi.fn(), eq: vi.fn(), is: vi.fn(),
       maybeSingle: vi.fn().mockResolvedValue({ data: { instance_id: 'other-instance' }, error: null }),
     }
-    reread.select.mockReturnValue(reread); reread.eq.mockReturnValue(reread)
+    reread.select.mockReturnValue(reread); reread.eq.mockReturnValue(reread); reread.is.mockReturnValue(reread)
     let lookups = 0
     db.from.mockImplementation((table: string) => {
       if (table !== 'whatsapp_connections') return receiptQuery
