@@ -12,7 +12,7 @@ const noStore = { 'Cache-Control': 'no-store, private, max-age=0' }
 type Context = { params: Promise<{ connectionId: string }> }
 
 function errorResponse(error: unknown) {
-  const message = error instanceof Error ? error.message : 'OpenWA session request failed'
+  const message = error instanceof WhatsAppTransportError ? error.message : 'OpenWA session request failed'
   const code = error instanceof WhatsAppTransportError ? error.code : 'retryable_provider_failure'
   const status = code === 'authentication_or_configuration' ? 403 : code === 'invalid_request' ? 404 : code === 'connection_restricted' ? 409 : 502
   return NextResponse.json({ error: message, code }, { status, headers: noStore })
