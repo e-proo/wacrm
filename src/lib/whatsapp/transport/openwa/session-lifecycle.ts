@@ -78,6 +78,7 @@ async function loadOpenWAConnection(db: SupabaseClient, accountId: string, conne
     .eq('id', connectionId)
     .eq('account_id', accountId)
     .eq('provider', 'openwa')
+    .is('archived_at', null)
     .maybeSingle()
 
   if (error || !data) {
