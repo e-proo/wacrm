@@ -31,7 +31,7 @@ export async function GET(_request: Request, context: Context) {
 export async function POST(request: Request, context: Context) {
   try {
     const { connectionId } = await context.params
-    const { accountId, adminDb } = await requireOpenWASessionAdmin()
+    const { accountId, adminDb, user } = await requireOpenWASessionAdmin()
     const body = await request.json() as Record<string, unknown>
     if (body.action === 'configure_webhook') {
       const webhookUrl = process.env.OPENWA_WEBHOOK_URL?.trim()
@@ -55,6 +55,41 @@ export async function POST(request: Request, context: Context) {
       await client.configureWebhook(connection.session_id, webhookUrl, secret, connectionId)
       return NextResponse.json({ enabled: true }, { headers: noStore })
     }
+    if (body.action === 'remove_from_wacrm') {
+      // Admin-only, local removal. Do NOT issue /logout or remote DELETE:
+      // the OpenWA daemon may be offline; this operation revokes only WACRM
+      // credentials while keeping provider message IDs, receipts and audit.
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(connectionId)) {
+        return NextResponse.json({ error: 'Invalid OpenWA connection ID', code: 'invalid_request' }, { status: 400, headers: noStore })
+      }
+      const { data: outcome, error: archiveError } = await adminDb.rpc('archive_openwa_connection', {
+        p_account_id: accountId,
+        p_connection_id: connectionId,
+        p_actor_id: user.id,
+      })
+      if (archiveError) {
+        console.error('[openwa-session] archive operation failed', {
+          dbCode: typeof archiveError.code === 'string' && /^[0-9A-Z]{5}$/.test(archiveError.code) ? archiveError.code : 'unknown',
+        })
+        return NextResponse.json({ error: 'Could not remove OpenWA session from WACRM', code: 'archive_failed' }, { status: 502, headers: noStore })
+      }
+      if (outcome === 'pending_sends' || outcome === 'pending_webhooks') {
+        return NextResponse.json({
+          error: outcome === 'pending_sends'
+            ? 'Pending OpenWA sends require reconciliation before removal'
+            : 'Unfinished signed OpenWA events require reconciliation before removal',
+          code: outcome,
+        }, { status: 409, headers: noStore })
+      }
+      if (outcome === 'not_found') {
+        return NextResponse.json({ error: 'OpenWA session not found', code: outcome }, { status: 404, headers: noStore })
+      }
+      if (outcome === 'archived' || outcome === 'already_archived') {
+        return NextResponse.json({ removed: true, already_removed: outcome === 'already_archived' }, { headers: noStore })
+      }
+      return NextResponse.json({ error: 'OpenWA session could not be removed', code: 'archive_rejected' }, { status: 400, headers: noStore })
+    }
+
     if (body.action === 'reconnect') return NextResponse.json(await reconnectOpenWAConnection(adminDb, accountId, connectionId), { headers: noStore })
     if (body.action === 'pause' || body.action === 'resume') {
       const paused = body.action === 'pause'
