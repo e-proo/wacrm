@@ -17,6 +17,7 @@ function fixture(input: { current?: { provider: string; connection_id: string } 
           return query
         }),
         in: vi.fn(() => query),
+        is: vi.fn(() => query),
         not: vi.fn(() => query),
         order: vi.fn(() => query),
         limit: vi.fn(() => query),
