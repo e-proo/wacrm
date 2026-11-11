@@ -37,8 +37,8 @@ function connectionFixture(status: string, metadata: Record<string, unknown>, re
   const patches: Array<Record<string, unknown>> = []
   const filters: Array<[string, unknown]> = []
   const selectQuery = {
-    eq: (_key: string, _value: unknown) => selectQuery,
-    is: (_key: string, _value: unknown) => selectQuery,
+    eq: () => selectQuery,
+    is: () => selectQuery,
     maybeSingle: async () => ({ data: row, error: null }),
   }
   const updateQuery = {

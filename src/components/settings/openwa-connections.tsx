@@ -248,7 +248,7 @@ export function OpenWAConnections() {
             {w('duplicatePhoneNotice')}
             <span className="block mt-1 break-all text-xs">{w('connectionReference')}: {connection.id} · Session: {connection.session_id || '—'}</span>
           </AlertDescription>
-        </Alert>
+        </Alert>}
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => action(connection.id, 'refresh')}><RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}</Button>
           {['creating', 'waiting_qr', 'authenticating', 'disconnected'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => showQr(connection.id)}><QrCode className="mr-2 h-4 w-4" />{w('showQr')}</Button>}
