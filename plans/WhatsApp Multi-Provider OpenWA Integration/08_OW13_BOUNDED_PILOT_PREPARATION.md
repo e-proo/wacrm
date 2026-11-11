@@ -1,8 +1,8 @@
 # OW-13 — Bounded OpenWA Pilot Preparation and Operational Runbook
 
-**Status: PREPARATION IN PROGRESS (2026-11-11). LIVE PILOT NOT AUTHORIZED.**
+**Status: PREPARATION IN PROGRESS (2026-11-12). TEST schema/security/synthetic SQL verified; LIVE PILOT NOT AUTHORIZED.**
 
-This document prepares the next phase without claiming OW-12 live acceptance, making TEST/Production changes, enabling new outbound traffic or authorizing a pilot.
+This document prepares the next phase without claiming OW-12 live acceptance, enabling new outbound traffic or authorizing a pilot. Additive migration 155 was applied to **TEST only** on 2026-11-11 UTC; **Production remains unchanged**.
 
 ## Source of truth and governance
 
@@ -25,13 +25,13 @@ Preparation may overlap remaining OW-12 tests. **Do not activate OpenWA for cust
 - Five OpenWA guardrail config rows exist. Zero are manually paused and zero have open circuits at this checkpoint. Six guardrail events were observed over the preceding 24 hours, zero blocked or failed in that limited period. This does not prove kill-switch operability or pilot safety.
 - [Offline reconciliation simulation](https://github.com/e-proo/wacrm/commit/b6babdfe7931258c976318fc1adb0bc94ae4dc1c) proves same-key no-blind-resend and unmatched ACK fail-closed in CI; it cannot recover an upstream send outcome. OpenWAClient.reconcileOutbound() deliberately does not invent a provider lookup.
 
-## 2. Verified controls and admission gaps
+## 2. Baseline controls and admission gaps (historical pre-155 inventory; see §11 for current TEST evidence)
 
 | Surface | Existing source evidence | Mandatory preflight work |
 |---|---|---|
 | Provider router | src/lib/whatsapp/transport/router.ts uses account-scoped provider routing; Meta remains default | Prove an out-of-cohort caller cannot opt into OpenWA |
 | Guardrails | src/lib/whatsapp/transport/guardrails.ts and migration 149_openwa_guardrails.sql: server-only caps, pacing, manual_paused, circuit state and audit events | Test admin-only immediate pause/resume, in-flight-send caveat, pilot-specific limits, and telemetry/incident alerts |
-| Pilot cohort | No server-enforced account + connection + recipient allowlist established in examined outbound send path | **BLOCKER**: implement deny-by-default scoped admission before provider send; no UI-only or agent-chosen gate; audit each decision; fail closed on missing policy |
+| Pilot cohort | Historical baseline before migration 155: no server-enforced allowlist in the examined send boundary | **Implemented + CI + TEST SQL verified in §11**; pilot activation and operator-led end-to-end acceptance are still blocked |
 | Workloads | WACRM routes agents/automations/broadcasts through unified transport | Pilot wave 0 disables these workloads; require workload-specific admission before any expansion |
 | Credential and session | Encrypted server-only OpenWA credentials; scoped session and admin QR controls | Rerun current TEST security/tenant checks; avoid raw credentials, QR or personal data in logs |
 | Idempotency / reconciliation | Unique outbound key before send; ambiguous outcomes kept unresolved | **BLOCKER**: trustworthy correlation of verified provider native ID to reserved send; no text/time-based guesses or blind resend |
@@ -68,7 +68,7 @@ All queries and alerts must be account + connection + time-window scoped; report
 
 | Metric | Source of truth | Expected evidence |
 |---|---|---|
-| Scoped admission | Future WACRM allowlist decision audit (not yet implemented) | Allowed/blocked by workload; zero out-of-cohort sends |
+| Scoped admission | whatsapp_openwa_pilot_allowlist + whatsapp_openwa_pilot_admission_events (migration 155; TEST only) | Allowed/blocked by workload; zero out-of-cohort sends |
 | Session uptime/reconnect/restriction | whatsapp_connections and verified OpenWA session events | Ready intervals, disconnect count and recovery time |
 | Outbound delivery | messages (conversation.account_id, connection_id, provider, status, provider_message_id) | counts sending/sent/delivered/read/failed, ACK delay, native identity coverage |
 | Ambiguous/duplicate | messages.outbound_idempotency_key + provider-native proof | unknowns, trustworthy reconciliation, zero confirmed duplicates |
@@ -117,12 +117,24 @@ Final review and decision: NOT STARTED / NOT ACCEPTED
 - **SOF-43 (execution):** Blocked until SOF-41 and SOF-42 are done, every GO item passes, and written activation approval is recorded. Only then may a bounded live pilot be run and judged.
 - **OW-14:** Later independent rollout/security decision after successful pilot. No production-readiness claim from this file.
 
-## 10. SOF-44 implementation checkpoint — 2026-11-11 (CI/TEST still pending)
+## 10. SOF-44 implementation checkpoint — 2026-11-11 (historical baseline; superseded by §11)
 
 Source implementation commits after the initial runbook: [a24032b3](https://github.com/e-proo/wacrm/commit/a24032b3d1554bdaf2d2c1f3cb309b11b1dce7b1), [90ecbe62](https://github.com/e-proo/wacrm/commit/90ecbe6203c72ca54fb7da5a8f97f2ac8e5432bd), [73cdfc49](https://github.com/e-proo/wacrm/commit/73cdfc49902e0cc3dd1220eddc8714dba016174e), [3a9d5590](https://github.com/e-proo/wacrm/commit/3a9d5590061701350dc95a91b45d7ec1c1a6eb10), [938955ac](https://github.com/e-proo/wacrm/commit/938955aca5dc8b0cf1fc646f069e618bb0db7c89), [559ad4f2](https://github.com/e-proo/wacrm/commit/559ad4f2295613bd2275bdd83cf971b7d4694027).
 
 - **Implemented, verification pending:** migration `155_openwa_pilot_admission.sql` adds inactive-by-default server-only hashed recipient/workload allowlist and tenant-scoped decision audit; `supabase/ci/openwa-pilot-admission-smoke.sql` is wired into the Migrations workflow. No policies/recipients are seeded and the runtime opt-in `OPENWA_PILOT_MODE` remains OFF.
 - **Implemented, verification pending:** OpenWA-only send boundary enforces allowlist via service-role RPC when explicitly set to `enforce`; unknown values/error/missing entries DENY; it checks admin pause and revalidates a paced send before provider dispatch. No changes to Meta adapter or business caller APIs.
 - **Implemented, verification pending:** settings list returns only account-scoped paused state to authorized admins; translated admin `Pause sending`/`Resume sending` actions call existing protected API; new tests cover scoped visibility, unauthorized/admin actions, audit failure, allowlist denial, LID identity, mid-wait revocation and Meta routing.
-- **CI and TEST status:** latest runtime HEAD must pass CI including test/build AND clean Migrations smoke before applying additive migration to TEST. No new migration is yet applied to TEST; no live provider send, admission activation, or Production change performed.
-- **Still NO-GO:** operator approval workflow for adding allowlist rows, dry-run pause/resume rehearsal, tested alerting, true provider reconciliation, full OW-12 live acceptance and current-HEAD CI/migrations evidence. No live pilot allowed.
+- **Original checkpoint (now superseded):** at the time of this implementation note, CI/Migrations replay and TEST migration application were pending. See §11 for completed evidence. No live provider send, admission activation or Production change authorized.
+- **Still NO-GO:** operator approval workflow for adding allowlist rows, HTTP/UI operator-led pause/resume rehearsal, tested alerting, true provider reconciliation and full OW-12 live acceptance. No live pilot allowed.
+
+
+## 11. Migration 155 TEST-only acceptance — 2026-11-11 UTC / 2026-11-12 Asia/Aden
+
+- **Source runtime HEAD**: `b0977087f7618b30c9b96e848064c73e5f47f03d` on `refactor/service-platform-v2`. Exact-runtime-head [CI #43101200591](https://github.com/e-proo/wacrm/actions/runs/43101200591) and [Migrations #43101200577](https://github.com/e-proo/wacrm/actions/runs/43101200577) are `completed/success`. A documentation-only follow-up commit needs its own workflow verification; do not reuse runtime CI as evidence for any new runtime changes.
+- **Target**: Supabase `wacrm test` (`pqirsnfupofhulmewakq`, ACTIVE_HEALTHY); **not Production**. Applied the exact SQL from `supabase/migrations/155_openwa_pilot_admission.sql` (Git blob `8dc6472b3481cbf8d613817097fb95a83b2a10da`) via Supabase migration API. Supabase recorded migration version `20261111212013`, name `openwa_pilot_admission`; the repository's `155_` prefix is a source file ordinal, not that remote version.
+- **Schema security checks (TEST)**: RLS enabled on `whatsapp_openwa_pilot_allowlist` and `whatsapp_openwa_pilot_admission_events`; neither `anon` nor `authenticated` has SELECT/INSERT on either table; `service_role` has SELECT. RPC `check_openwa_pilot_admission(uuid,uuid,text,text)` is `SECURITY INVOKER`, executable by `service_role` but not `anon`/`authenticated`.
+- **Transactional test**: Executed the exact `supabase/ci/openwa-pilot-admission-smoke.sql` (blob `5335547b069be5657b2c72f76d4a2a0778eb1bbd`) on TEST with `BEGIN ... ROLLBACK`, PASS: inactive/missing admission denies by default; approved account/connection/recipient/workload permits; wrong tenant, workload, recipient, malformed hash and expired permission deny; successful admission audit checks.
+- **Separate synthetic stop drill**: On a rollback-only synthetic `auth.users` identity, tenant and ready OpenWA connection, `reserve_openwa_guardrail_send` returned allowed before pause, `manual_pause` denial while `manual_paused=true`, and allowed after resume; verified `paused`/`resumed` and blocked audit records. This exercised DB functions and persisted no send reservation; **it did not call the Next.js admin HTTP route or the OpenWA provider and does not prove an in-flight provider POST can be canceled**.
+- **No activation/persistent fixtures**: Post-test SELECT confirmed zero rows in pilot allowlist and admission events, zero active cohort entries, and no remaining synthetic users, connections, guardrails or events. Retain `OPENWA_PILOT_MODE=off`; this is an operator runtime setting, **not independently readable from Supabase**. No historic ambiguous send was retried.
+- **Security debt**: Supabase TEST Security Advisor continues to report prior `NOTE-001` findings. `rls_enabled_no_policy` now lists 5 tables (previously 3), including the two intentionally inaccessible service-only pilot tables. Other existing warning families remain (mutable function search path 16; extension in public 1; anon SECURITY DEFINER executables 22; authenticated SECURITY DEFINER executables 28; leaked-password protection 1). This checkpoint does not establish production readiness.
+- **Outstanding SOF-44/OW-13 gates**: HTTP/UI operator-led pause/resume and authorization negative tests against TEST deployment; alert ownership and rollback runbook rehearsal; full OW-12/SOF-41 live acceptance (media, reconnect/restart, real Meta regression, duplicate/ambiguous/reconciliation, tenant negatives); SOF-42 preparation and explicit approved pilot cohort/time window. SOF-43 live pilot remains **BLOCKED / NO-GO**. No Production/GA claim.
