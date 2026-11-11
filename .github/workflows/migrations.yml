@@ -42,6 +42,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-chat-identity-smoke.sql
       - name: Verify OW-10 OpenWA safety guardrails
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-guardrails-smoke.sql
+      - name: Verify OW-13 pilot allowlist and tenant isolation
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-pilot-admission-smoke.sql
       - name: Verify Agent Task platform behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-platform-smoke.sql
       - name: Verify Agent Task orchestrator behavior
