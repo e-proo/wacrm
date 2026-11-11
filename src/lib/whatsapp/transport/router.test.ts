@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { resolveWhatsAppTransport } from './router'
@@ -52,5 +52,26 @@ describe('provider-neutral outbound router', () => {
     const resolved = { connectionId: 'meta-1', transport: { provider: 'meta_cloud', send: vi.fn() } as never }
     vi.mocked(resolveMetaTransport).mockResolvedValue(resolved)
     expect(await resolveWhatsAppTransport(dbForConnection(null), 'acct-1')).toBe(resolved)
+  })
+})
+
+afterEach(() => vi.unstubAllEnvs())
+
+describe('OW-13 pilot gate does not change Meta routing', () => {
+  it('keeps both default and explicitly requested Meta sends outside OpenWA pilot admission', async () => {
+    vi.clearAllMocks()
+    vi.stubEnv('OPENWA_PILOT_MODE', 'enforce')
+    const send = vi.fn(async () => ({ provider: 'meta_cloud' as const, connectionId: 'meta-1', providerMessageId: 'meta-mock' }))
+    const resolved = { connectionId: 'meta-1', transport: { provider: 'meta_cloud' as const, send } }
+    vi.mocked(resolveMetaTransport).mockResolvedValue(resolved)
+    const db = dbForConnection({ id: 'meta-1', account_id: 'acct-1', provider: 'meta_cloud' })
+    const defaultRoute = await resolveWhatsAppTransport(db, 'acct-1')
+    const explicitRoute = await resolveWhatsAppTransport(db, 'acct-1', 'meta-1')
+    await explicitRoute.transport.send({ accountId: 'acct-1', connectionId: 'meta-1', recipient: '12345678901', content: { kind: 'text', text: 'mock' } })
+    expect(defaultRoute).toBe(resolved)
+    expect(explicitRoute).toBe(resolved)
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(supabaseAdmin).not.toHaveBeenCalled()
+    expect(resolveOpenWATransport).not.toHaveBeenCalled()
   })
 })
