@@ -38,6 +38,7 @@ interface OpenWAApiPayload extends Record<string, unknown> {
   stage?: string
   reconciliation_required?: boolean
   connections?: OpenWAConnection[]
+  pilot?: { enforced: boolean }
   connection?: { id: string }
   qr?: string
   expires_at?: string
@@ -48,6 +49,7 @@ export function OpenWAConnections() {
   const { canEditSettings } = useAuth()
   const w = useWhatsAppLabels()
   const [connections, setConnections] = useState<OpenWAConnection[]>([])
+  const [pilotEnforced, setPilotEnforced] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -72,10 +74,12 @@ export function OpenWAConnections() {
       const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
       if (!response.ok) throw new Error(data.error || w('loadOpenwa'))
       setConnections(data.connections ?? [])
+      setPilotEnforced(typeof data.pilot?.enforced === 'boolean' ? data.pilot.enforced : null)
       setLoadError(null)
     } catch (error) {
       const reason = error instanceof Error ? error.message : w('loadOpenwa')
       setLoadError(reason)
+      setPilotEnforced(null)
       toast.error(reason)
     } finally {
       setLoading(false)
@@ -217,6 +221,10 @@ export function OpenWAConnections() {
       <CardHeader><CardTitle>WhatsApp Web (OpenWA)</CardTitle><CardDescription>{w('openwaDesc')}</CardDescription></CardHeader>
       <CardContent className="space-y-4">
         <Alert><AlertTitle>{w('onboarding')}</AlertTitle><AlertDescription>{w('onboardingDesc')}</AlertDescription></Alert>
+        {pilotEnforced !== null && <Alert variant={pilotEnforced ? 'default' : 'destructive'}>
+          <AlertTitle>{w(pilotEnforced ? 'pilotEnforceOn' : 'pilotEnforceOff')}</AlertTitle>
+          <AlertDescription>{w(pilotEnforced ? 'pilotEnforceOnHint' : 'pilotEnforceOffHint')}</AlertDescription>
+        </Alert>
         <div className="grid gap-3 md:grid-cols-2">
           <div><Label htmlFor="openwa-name">{w('name')}</Label><Input id="openwa-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div>
           <div><Label htmlFor="openwa-url">{w('baseUrl')}</Label><Input id="openwa-url" placeholder="https://openwa.example.com" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></div>
