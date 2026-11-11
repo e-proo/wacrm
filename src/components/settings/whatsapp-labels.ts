@@ -262,6 +262,22 @@ const labels = {
     "en": "OpenWA webhook configured successfully",
     "ar": "تم إعداد Webhook الخاص بـOpenWA بنجاح"
   },
+  "pilotEnforceOn": {
+    "en": "Pilot allowlist enforcement: ON",
+    "ar": "فرض قائمة سماح Pilot: مفعّل"
+  },
+  "pilotEnforceOff": {
+    "en": "Pilot allowlist enforcement: OFF",
+    "ar": "فرض قائمة سماح Pilot: غير مفعّل"
+  },
+  "pilotEnforceOnHint": {
+    "en": "All OpenWA sends on this WACRM instance require server-authorized recipient and workload grants. The stop switch still applies. This does not automatically start a pilot.",
+    "ar": "تتطلب جميع عمليات الإرسال عبر OpenWA في هذه النسخة موافقة المستلم ونوع العمل على الخادم. يظل مفتاح الإيقاف ساريًا. هذا لا يبدأ التجربة تلقائيًا."
+  },
+  "pilotEnforceOffHint": {
+    "en": "The pilot recipient allowlist is NOT being enforced. Do not resume the dedicated TEST pilot connection until the server is restarted in enforce mode and the recipient is approved.",
+    "ar": "قائمة سماح المستلمين الخاصة بالتجربة غير مفروضة. لا تستأنف اتصال TEST المخصص قبل تشغيل الخادم بوضع enforce واعتماد المستلم التجريبي."
+  },
   "pauseSending": {
     "en": "Pause sending",
     "ar": "إيقاف الإرسال"
