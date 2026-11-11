@@ -141,10 +141,13 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     h.requireAdmin.mockResolvedValue({ accountId: 'acct-1', userDb: { from: userFrom }, adminDb: { from: adminFrom } })
     const response = await GET()
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ connections: [
-      { id: 'conn-1', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
-      { id: 'conn-2', status: 'ready', provider: 'openwa', guardrail: { manual_paused: false } },
-    ] })
+    expect(await response.json()).toEqual({
+      connections: [
+        { id: 'conn-1', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
+        { id: 'conn-2', status: 'ready', provider: 'openwa', guardrail: { manual_paused: false } },
+      ],
+      pilot: { enforced: process.env.OPENWA_PILOT_MODE === 'enforce' },
+    })
     expect(connectionFilters).toContainEqual(['account_id', 'acct-1'])
     expect(connectionFilters).toContainEqual(['provider', 'openwa'])
     expect(guardrailFilters).toContainEqual(['account_id', 'acct-1'])
