@@ -77,6 +77,12 @@ async function main() {
     .eq('account_id', ACCOUNT_ID).eq('connection_id', CONNECTION_ID).eq('active', true)
     .gt('expires_at', new Date().toISOString())
   dataOrError(active, 'Active pilot admission lookup')
+  const manualActive = await db.from('whatsapp_openwa_pilot_allowlist')
+    .select('id', { head: true, count: 'exact' })
+    .eq('account_id', ACCOUNT_ID).eq('connection_id', CONNECTION_ID)
+    .eq('workload', 'manual').eq('active', true)
+    .gt('expires_at', new Date().toISOString())
+  dataOrError(manualActive, 'Manual-only approval lookup')
 
   const duplicates = conn.phone_identity
     ? await db.from('whatsapp_connections').select('id', { head: true, count: 'exact' })
@@ -99,6 +105,7 @@ async function main() {
     active: process.env.OPENWA_PILOT_MODE === 'enforce' && guard?.manual_paused === false && (active.count ?? 0) > 0,
     unsettled_outbound: unsettled.count ?? null,
     active_admissions: active.count ?? null,
+    active_manual_approvals: manualActive.count ?? null,
     same_identity_ready_connections: duplicates.count ?? null,
     local_env_pilot_mode: process.env.OPENWA_PILOT_MODE ?? 'off',
     runtime_mode_confirmed: false, // This CLI does not read live Next.js process memory.
@@ -142,7 +149,7 @@ async function main() {
     expect(conn.status === 'ready' || conn.status === 'connected', 'Pilot connection not ready')
     expect(guard?.manual_paused === true, 'Connection must be paused before starting the pilot')
     expect((unsettled.count ?? 0) === 0, 'Ambiguous messages must be reviewed first')
-    expect((active.count ?? 0) === 1, 'Exactly one unexpired manual-only grant is required')
+    expect((active.count ?? 0) === 1 && (manualActive.count ?? 0) === 1, 'Exactly one unexpired manual-only grant is required')
     expect(has('--ack-duplicate-sessions') || (duplicates.count ?? 0) <= 1,
       'Review duplicate OpenWA identity and acknowledge before activation')
     expect((guard.hourly_cap ?? Infinity) <= 3 && (guard.daily_cap ?? Infinity) <= 10 &&
