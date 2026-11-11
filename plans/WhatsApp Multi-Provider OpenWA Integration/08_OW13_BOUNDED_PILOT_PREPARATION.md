@@ -116,3 +116,13 @@ Final review and decision: NOT STARTED / NOT ACCEPTED
 - **SOF-41 (OW-12 in parallel):** Finish outstanding live TEST and true native-outcome reconciliation; no timing-based false closure.
 - **SOF-43 (execution):** Blocked until SOF-41 and SOF-42 are done, every GO item passes, and written activation approval is recorded. Only then may a bounded live pilot be run and judged.
 - **OW-14:** Later independent rollout/security decision after successful pilot. No production-readiness claim from this file.
+
+## 10. SOF-44 implementation checkpoint — 2026-11-11 (CI/TEST still pending)
+
+Source implementation commits after the initial runbook: [a24032b3](https://github.com/e-proo/wacrm/commit/a24032b3d1554bdaf2d2c1f3cb309b11b1dce7b1), [90ecbe62](https://github.com/e-proo/wacrm/commit/90ecbe6203c72ca54fb7da5a8f97f2ac8e5432bd), [73cdfc49](https://github.com/e-proo/wacrm/commit/73cdfc49902e0cc3dd1220eddc8714dba016174e), [3a9d5590](https://github.com/e-proo/wacrm/commit/3a9d5590061701350dc95a91b45d7ec1c1a6eb10), [938955ac](https://github.com/e-proo/wacrm/commit/938955aca5dc8b0cf1fc646f069e618bb0db7c89), [559ad4f2](https://github.com/e-proo/wacrm/commit/559ad4f2295613bd2275bdd83cf971b7d4694027).
+
+- **Implemented, verification pending:** migration `155_openwa_pilot_admission.sql` adds inactive-by-default server-only hashed recipient/workload allowlist and tenant-scoped decision audit; `supabase/ci/openwa-pilot-admission-smoke.sql` is wired into the Migrations workflow. No policies/recipients are seeded and the runtime opt-in `OPENWA_PILOT_MODE` remains OFF.
+- **Implemented, verification pending:** OpenWA-only send boundary enforces allowlist via service-role RPC when explicitly set to `enforce`; unknown values/error/missing entries DENY; it checks admin pause and revalidates a paced send before provider dispatch. No changes to Meta adapter or business caller APIs.
+- **Implemented, verification pending:** settings list returns only account-scoped paused state to authorized admins; translated admin `Pause sending`/`Resume sending` actions call existing protected API; new tests cover scoped visibility, unauthorized/admin actions, audit failure, allowlist denial, LID identity, mid-wait revocation and Meta routing.
+- **CI and TEST status:** latest runtime HEAD must pass CI including test/build AND clean Migrations smoke before applying additive migration to TEST. No new migration is yet applied to TEST; no live provider send, admission activation, or Production change performed.
+- **Still NO-GO:** operator approval workflow for adding allowlist rows, dry-run pause/resume rehearsal, tested alerting, true provider reconciliation, full OW-12 live acceptance and current-HEAD CI/migrations evidence. No live pilot allowed.

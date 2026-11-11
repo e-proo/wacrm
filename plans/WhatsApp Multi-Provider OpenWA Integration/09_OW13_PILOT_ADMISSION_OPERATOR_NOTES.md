@@ -27,3 +27,11 @@ an ambiguous outcome.
 preflight tests + SOF-43 explicit cohort/operator approval, Meta live regression,
 clean-migration replay and emergency stop rehearsal have passed. No production
 pilot is authorized by this implementation.
+
+## Admin emergency stop and validation
+
+- Admin settings UI now displays the server-sourced per-connection pause state and presents localized `Pause sending` and `Resume sending` actions. This is NOT pilot admission or activation.
+- The API checks session-admin permissions and scopes guardrail updates to account + OpenWA connection; audit persistence errors are surfaced rather than silently reported as success.
+- Pre-provider guardrail pause is rechecked for paced sends (and all explicit pilot-mode sends), but a provider POST that has already started may still finish: NEVER assume pause reverses a potentially delivered message.
+- Unit tests and SQL schema smoke were added; they MUST pass on the latest HEAD and clean migration replay before any environment is configured. The additional allowlist table/RPC is not applied to TEST merely because code exists.
+- No admin endpoint to create/approve recipient allowlist entries is exposed in this preparation tranche; activating a cohort requires separately reviewed administrative workflows and explicit approval.
