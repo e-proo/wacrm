@@ -204,3 +204,77 @@ describe('OpenWA signed webhook configuration', () => {
     expect(h.credentials).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('OW-13 tenant-scoped admin pause/resume stop control', () => {
+  const filters: Array<[string, unknown]> = []
+  let existing: { id: string } | null
+  let guardrailUpsert: ReturnType<typeof vi.fn>
+  let auditInsert: ReturnType<typeof vi.fn>
+  let dbFrom: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    filters.length = 0
+    existing = { id: CONNECTION }
+    guardrailUpsert = vi.fn().mockResolvedValue({ error: null })
+    auditInsert = vi.fn().mockResolvedValue({ error: null })
+    const lookup: Record<string, unknown> = {
+      select: () => lookup,
+      eq: (key: string, value: unknown) => { filters.push([key, value]); return lookup },
+      maybeSingle: async () => ({ data: existing, error: null }),
+    }
+    dbFrom = vi.fn((table: string) => {
+      if (table === 'whatsapp_connections') return lookup
+      if (table === 'whatsapp_connection_guardrails') return { upsert: guardrailUpsert }
+      if (table === 'whatsapp_guardrail_events') return { insert: auditInsert }
+      throw new Error('Unexpected table in admin pause simulation')
+    })
+    h.auth.mockResolvedValue({ accountId: ACCOUNT, user: { id: ACTOR }, adminDb: { from: dbFrom } })
+  })
+
+  it.each([
+    ['pause', true, 'paused'],
+    ['resume', false, 'resumed'],
+  ])('updates stop state with admin scope for %s', async (actionName, paused, decision) => {
+    const response = await POST(request(actionName), context())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ connectionId: CONNECTION, manualPaused: paused })
+    expect(filters).toContainEqual(['id', CONNECTION])
+    expect(filters).toContainEqual(['account_id', ACCOUNT])
+    expect(filters).toContainEqual(['provider', 'openwa'])
+    expect(guardrailUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      account_id: ACCOUNT, connection_id: CONNECTION, manual_paused: paused,
+    }), { onConflict: 'connection_id' })
+    expect(auditInsert).toHaveBeenCalledWith(expect.objectContaining({
+      account_id: ACCOUNT, connection_id: CONNECTION,
+      workload: 'manual', decision, reason: 'admin_emergency_control',
+    }))
+    expect(h.logout).not.toHaveBeenCalled()
+  })
+
+  it('rejects a connection absent from the authorized tenant without side effects', async () => {
+    existing = null
+    const response = await POST(request('pause'), context())
+    expect(response.status).toBe(400)
+    expect(guardrailUpsert).not.toHaveBeenCalled()
+    expect(auditInsert).not.toHaveBeenCalled()
+  })
+
+  it('never mutates the protected guardrails when admin authentication fails', async () => {
+    h.auth.mockRejectedValue(new Error('private session'))
+    const response = await POST(request('pause'), context())
+    expect(response.status).toBe(502)
+    expect(dbFrom).not.toHaveBeenCalled()
+    expect(guardrailUpsert).not.toHaveBeenCalled()
+  })
+
+  it('returns an explicit error when the stop audit cannot be persisted', async () => {
+    auditInsert.mockResolvedValue({ error: { code: '23503', message: 'sensitive internal details' } })
+    const response = await POST(request('pause'), context())
+    expect(response.status).toBe(502)
+    const body = await response.json()
+    expect(body.code).toBe('retryable_provider_failure')
+    expect(body.error).toContain('audit record')
+    expect(JSON.stringify(body)).not.toContain('sensitive internal details')
+  })
+})

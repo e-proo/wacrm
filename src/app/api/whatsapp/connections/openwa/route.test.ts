@@ -20,7 +20,7 @@ vi.mock('@/lib/whatsapp/transport/openwa/credentials', () => ({
   resolveOpenWAClient: h.resolveClient,
 }))
 
-import { POST } from './route'
+import { GET, POST } from './route'
 
 function dbFixture() {
   const connection = {
@@ -117,5 +117,61 @@ describe('OpenWA session create outcome safety', () => {
     expect(h.updates[0].session_id).toBe('gateway-session-1')
     expect(h.updates[1].provider_metadata).toMatchObject({ onboarding_stage: 'gateway_start' })
     expect(h.deletes).toHaveLength(0)
+  })
+})
+
+describe('OW-13 admin-only emergency stop visibility', () => {
+  it('returns only account-scoped paused state and no server-only guardrail details', async () => {
+    vi.clearAllMocks()
+    const connectionFilters: Array<[string, unknown]> = []
+    const guardrailFilters: Array<[string, unknown]> = []
+    const connQuery: Record<string, unknown> = {
+      select: () => connQuery,
+      eq: (field: string, value: unknown) => { connectionFilters.push([field, value]); return connQuery },
+      is: () => connQuery,
+      order: async () => ({ data: [{ id: 'conn-1', status: 'ready', provider: 'openwa' }, { id: 'conn-2', status: 'ready', provider: 'openwa' }], error: null }),
+    }
+    const guardrailQuery: Record<string, unknown> = {
+      select: () => guardrailQuery,
+      eq: (field: string, value: unknown) => { guardrailFilters.push([field, value]); return guardrailQuery },
+      then: (resolve: (result: unknown) => unknown) => resolve({ data: [{ connection_id: 'conn-1', manual_paused: true }], error: null }),
+    }
+    const userFrom = vi.fn(() => connQuery)
+    const adminFrom = vi.fn(() => guardrailQuery)
+    h.requireAdmin.mockResolvedValue({ accountId: 'acct-1', userDb: { from: userFrom }, adminDb: { from: adminFrom } })
+    const response = await GET()
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ connections: [
+      { id: 'conn-1', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
+      { id: 'conn-2', status: 'ready', provider: 'openwa', guardrail: { manual_paused: false } },
+    ] })
+    expect(connectionFilters).toContainEqual(['account_id', 'acct-1'])
+    expect(connectionFilters).toContainEqual(['provider', 'openwa'])
+    expect(guardrailFilters).toContainEqual(['account_id', 'acct-1'])
+    expect(adminFrom).toHaveBeenCalledWith('whatsapp_connection_guardrails')
+    expect(response.headers.get('cache-control')).toContain('no-store')
+  })
+
+  it('fails closed instead of pretending no sessions are paused when the protected lookup fails', async () => {
+    vi.clearAllMocks()
+    const connQuery: Record<string, unknown> = {
+      select: () => connQuery,
+      eq: () => connQuery,
+      is: () => connQuery,
+      order: async () => ({ data: [{ id: 'conn-1' }], error: null }),
+    }
+    const guardrailQuery: Record<string, unknown> = {
+      select: () => guardrailQuery,
+      eq: () => guardrailQuery,
+      then: (resolve: (result: unknown) => unknown) => resolve({ data: null, error: { code: 'PGRST202' } }),
+    }
+    h.requireAdmin.mockResolvedValue({
+      accountId: 'acct-1',
+      userDb: { from: () => connQuery },
+      adminDb: { from: () => guardrailQuery },
+    })
+    const response = await GET()
+    expect(response.status).toBe(502)
+    expect((await response.json()).code).toBe('retryable_provider_failure')
   })
 })
