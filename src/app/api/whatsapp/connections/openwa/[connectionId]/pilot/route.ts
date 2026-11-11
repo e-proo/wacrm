@@ -87,7 +87,10 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     checkDb(de, 'duplicates')
     duplicates = count ?? 0
   }
-  const enforced = openWAPilotEnforcementEnabled()
+  // Emergency stop and status must remain available even if the runtime
+  // pilot flag was misconfigured. Unknown values deny activation/sends.
+  let enforced = false
+  try { enforced = openWAPilotEnforcementEnabled() } catch { enforced = false }
   return { connection, guard, grants: grants ?? 0, manualGrants: manualGrants ?? 0, pending: pending ?? 0, duplicates, enforced,
     active: enforced && !guard.manual_paused && (grants ?? 0) > 0 }
 }
