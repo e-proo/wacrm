@@ -5,6 +5,8 @@
  * Usage (Node 22+, from WACRM repository root, PowerShell):
  *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs status
  *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs grant --approver=USER_UUID --consent-confirmed --ack-duplicate-sessions
+ *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs limits --hourly=3 --daily=10 --first-touch=1 --interval-ms=15000 --jitter-ms=3000
+ *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs activate --confirm-activate --runtime-verified --ack-duplicate-sessions
  *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs stop --confirm-stop
  *
  * No outbound WhatsApp send is issued by this utility. The recipient is read
@@ -41,7 +43,7 @@ function canonicalRecipient(value) {
 }
 
 async function main() {
-  expect(['status', 'grant', 'stop'].includes(action), 'Expected status, grant or stop')
+  expect(['status', 'grant', 'limits', 'activate', 'stop'].includes(action), 'Expected status, grant, limits, activate or stop')
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   expect(url && key, 'Missing TEST Supabase URL or server-only service role key')
@@ -61,7 +63,7 @@ async function main() {
   expect(conn && !conn.archived_at && conn.session_id, 'Pilot connection is absent, archived or lacks a session')
 
   const guard = dataOrError(await db.from('whatsapp_connection_guardrails')
-    .select('manual_paused,hourly_cap,daily_cap,first_touch_daily_cap,minimum_interval_ms')
+    .select('manual_paused,hourly_cap,daily_cap,first_touch_daily_cap,minimum_interval_ms,jitter_ms,warmup_hourly_cap,warmup_daily_cap')
     .eq('connection_id', CONNECTION_ID).eq('account_id', ACCOUNT_ID)
     .maybeSingle(), 'Guardrail lookup')
 
@@ -73,6 +75,7 @@ async function main() {
   const active = await db.from('whatsapp_openwa_pilot_allowlist')
     .select('id', { head: true, count: 'exact' })
     .eq('account_id', ACCOUNT_ID).eq('connection_id', CONNECTION_ID).eq('active', true)
+    .gt('expires_at', new Date().toISOString())
   dataOrError(active, 'Active pilot admission lookup')
 
   const duplicates = conn.phone_identity
@@ -91,16 +94,75 @@ async function main() {
     hourly_cap: guard?.hourly_cap ?? null,
     daily_cap: guard?.daily_cap ?? null,
     first_touch_daily_cap: guard?.first_touch_daily_cap ?? null,
+    minimum_interval_ms: guard?.minimum_interval_ms ?? null,
+    jitter_ms: guard?.jitter_ms ?? null,
+    active: process.env.OPENWA_PILOT_MODE === 'enforce' && guard?.manual_paused === false && (active.count ?? 0) > 0,
     unsettled_outbound: unsettled.count ?? null,
     active_admissions: active.count ?? null,
     same_identity_ready_connections: duplicates.count ?? null,
     local_env_pilot_mode: process.env.OPENWA_PILOT_MODE ?? 'off',
-    runtime_mode_confirmed: false,
+    runtime_mode_confirmed: false, // This CLI does not read live Next.js process memory.
   }
 
   if (action === 'status') {
     console.log(JSON.stringify(state, null, 2))
     console.log('Runtime mode is NOT provable from this script. Restart WACRM after changing .env.local.')
+    return
+  }
+
+  if (action === 'limits') {
+    expect(guard?.manual_paused === true, 'Pause the pilot before changing limits')
+    const numberFlag = (prefix, min, max) => {
+      const raw = option(prefix)
+      const value = Number(raw)
+      expect(raw !== undefined && Number.isInteger(value) && value >= min && value <= max,
+        `Expected ${prefix}integer between ${min} and ${max}`)
+      return value
+    }
+    const hourly = numberFlag('--hourly=', 1, 3)
+    const daily = numberFlag('--daily=', 1, 10)
+    const firstTouch = numberFlag('--first-touch=', 0, 1)
+    const interval = numberFlag('--interval-ms=', 15000, 600000)
+    const jitter = numberFlag('--jitter-ms=', 0, 600000)
+    dataOrError(await db.from('whatsapp_connection_guardrails')
+      .update({ hourly_cap: hourly, daily_cap: daily, first_touch_daily_cap: firstTouch,
+        minimum_interval_ms: interval, jitter_ms: jitter,
+        warmup_hourly_cap: hourly, warmup_daily_cap: daily,
+        updated_at: new Date().toISOString() })
+      .eq('account_id', ACCOUNT_ID).eq('connection_id', CONNECTION_ID).eq('manual_paused', true),
+    'Scoped pilot limit update')
+    console.log('TEST pilot limits updated. The connection remains PAUSED.')
+    return
+  }
+
+  if (action === 'activate') {
+    expect(has('--confirm-activate'), 'Explicit --confirm-activate required')
+    expect(has('--runtime-verified'), 'Verify the actual WACRM Settings pilot badge says ON, then add --runtime-verified')
+    expect(process.env.OPENWA_PILOT_MODE === 'enforce', 'Local configuration must set OPENWA_PILOT_MODE=enforce')
+    expect(conn.status === 'ready' || conn.status === 'connected', 'Pilot connection not ready')
+    expect(guard?.manual_paused === true, 'Connection must be paused before starting the pilot')
+    expect((unsettled.count ?? 0) === 0, 'Ambiguous messages must be reviewed first')
+    expect((active.count ?? 0) === 1, 'Exactly one unexpired manual-only grant is required')
+    expect(has('--ack-duplicate-sessions') || (duplicates.count ?? 0) <= 1,
+      'Review duplicate OpenWA identity and acknowledge before activation')
+    expect((guard.hourly_cap ?? Infinity) <= 3 && (guard.daily_cap ?? Infinity) <= 10 &&
+      (guard.first_touch_daily_cap ?? Infinity) <= 1 &&
+      (guard.minimum_interval_ms ?? 0) >= 15000 &&
+      (guard.warmup_hourly_cap ?? Infinity) <= 3 && (guard.warmup_daily_cap ?? Infinity) <= 10,
+    'Configured send limits are unsafe')
+    dataOrError(await db.from('whatsapp_connection_guardrails')
+      .update({ manual_paused: false, updated_at: new Date().toISOString() })
+      .eq('account_id', ACCOUNT_ID).eq('connection_id', CONNECTION_ID).eq('manual_paused', true),
+    'Pilot activation')
+    const audit = await db.from('whatsapp_guardrail_events')
+      .insert({ account_id: ACCOUNT_ID, connection_id: CONNECTION_ID,
+        workload: 'manual', decision: 'resumed', reason: 'ow13_dev_pilot_cli_activate' })
+    if (audit.error) {
+      await db.from('whatsapp_connection_guardrails')
+        .update({ manual_paused: true }).eq('account_id', ACCOUNT_ID).eq('connection_id', CONNECTION_ID)
+      dataOrError(audit, 'Pilot activation audit')
+    }
+    console.log('TEST pilot unpaused for its single consenting, manual-only recipient. No WhatsApp message was sent by the CLI.')
     return
   }
 
