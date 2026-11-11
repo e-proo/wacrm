@@ -138,3 +138,55 @@ Source implementation commits after the initial runbook: [a24032b3](https://gith
 - **No activation/persistent fixtures**: Post-test SELECT confirmed zero rows in pilot allowlist and admission events, zero active cohort entries, and no remaining synthetic users, connections, guardrails or events. Retain `OPENWA_PILOT_MODE=off`; this is an operator runtime setting, **not independently readable from Supabase**. No historic ambiguous send was retried.
 - **Security debt**: Supabase TEST Security Advisor continues to report prior `NOTE-001` findings. `rls_enabled_no_policy` now lists 5 tables (previously 3), including the two intentionally inaccessible service-only pilot tables. Other existing warning families remain (mutable function search path 16; extension in public 1; anon SECURITY DEFINER executables 22; authenticated SECURITY DEFINER executables 28; leaked-password protection 1). This checkpoint does not establish production readiness.
 - **Outstanding SOF-44/OW-13 gates**: HTTP/UI operator-led pause/resume and authorization negative tests against TEST deployment; alert ownership and rollback runbook rehearsal; full OW-12/SOF-41 live acceptance (media, reconnect/restart, real Meta regression, duplicate/ambiguous/reconciliation, tenant negatives); SOF-42 preparation and explicit approved pilot cohort/time window. SOF-43 live pilot remains **BLOCKED / NO-GO**. No Production/GA claim.
+
+
+## 12. Operator-deferred authorization negative test — 2026-11-12 (OPEN, NOT WAIVED)
+
+**Decision:** The operator explicitly chose to defer the TEST live `Agent`/`Viewer` role-negative exercise so that **non-live preparation** of OW-13 can proceed. Deferral is **not acceptance**, a security sign-off, or permission to close SOF-44 or unblock SOF-43. Revisit before any live pilot activation.
+
+**Evidence so far:**
+- Operator reported 6/7 emergency-stop steps PASS: admin pause, reload persistence, HTTP response, new-send denial, resume, and audit log. Agent/Viewer negative remained **not tested**.
+- Independent TEST read-only `whatsapp_guardrail_events` corroborated a single-connection sequence on 2026-11-11 UTC: `paused/admin_emergency_control` at 21:31:49, `blocked/manual_pause` at 21:32:52, `resumed/admin_emergency_control` at 21:33:14.
+- Current `requireOpenWASessionAdmin` and server route enforce `canEditSettings` (owner/admin), with denied auth mapped to HTTP 403, plus CI test coverage. This does not substitute for a real lower-role HTTP check.
+- [CI at documented baseline HEAD `6939977`](https://github.com/e-proo/wacrm/actions/runs/43102712313) completed/success. Migration 155 remained TEST-verified as recorded in §11.
+
+**Deferred acceptance procedure (do not schedule as an automatic send):**
+1. Use a dedicated TEST `Agent` session, then a `Viewer` session, on the **same account** as the tested connection. Do not use production users.
+2. Record a safe baseline of the target connection's `manual_paused`, `updated_at` and latest `whatsapp_guardrail_events`. Keep the connection **paused** while attempting an unauthorized `{"action":"pause"}` so that an authorization bug cannot unintentionally unpause it.
+3. Invoke `POST /api/whatsapp/connections/openwa/{connectionId}` with `{"action":"pause"}` using each role's own authenticated browser session; expect HTTP **403** and no state/audit mutation.
+4. Separately, test a wrong-tenant connection ID and confirm it cannot be mutated. Confirm the target state's persistence with a genuine authorized admin session.
+5. Capture redacted Network evidence (role, HTTP status and short request/response without cookies/tokens), relevant DB before/after counts and time. Mark accepted only when both roles and tenant scope are proven. Do **not** repeat or resend existing ambiguous WhatsApp messages.
+
+**Tracking:** [SOF-44](https://linear.app/eproo/issue/SOF-44/ow-13-prep-enforce-deny-by-default-pilot-allowlist-and-verify-admin) remains In Progress and blocks SOF-43. No lower-role authorization test is claimed as passed.
+
+## 13. OW-13 Pilot Wave 0 preparation package — NO ACTIVATION (2026-11-12)
+
+### Verified non-live TEST baseline
+
+- TEST project `pqirsnfupofhulmewakq` is healthy; **8 non-archived OpenWA connections** of which **5 are `ready`/`connected`**. These are available candidates to evaluate, **not an approved cohort**.
+- **5** guardrail configuration rows; none currently `manual_paused`, no open circuits. Existing configured `hourly_cap=60` and `daily_cap=500` on all five rows. **These are NOT approved pilot caps**: the tentative Wave 1 **3/hour and 10/day** ceilings from §3 must be deliberately set/verified for the approved connection before sending, together with warmup and first-touch caps, pacing and failure circuit thresholds.
+- **0** pilot allowlist rows, **0** active rows, **0** pilot admission audit events. Preserve zero entries in Wave 0.
+- **10** `messages` rows for OpenWA remain `sending` without `provider_message_id`; quarantine from any cohort. Do not resend, reclassify by timing, or assume delivery.
+- `OPENWA_PILOT_MODE` is a server runtime setting, **not observable through the DB**. In code, `off` / unset means the *pilot allowlist is not enforced*; it does **not** globally disable OpenWA transport. Therefore **no live pilot GO** without operator-verified `enforce` on the intended TEST deployment, approved allowlist, role security, and denial evidence. Do **not** change this setting during Wave 0.
+
+### Preparation tasks permitted now (zero new WhatsApp sends)
+
+1. **Select on paper only** one isolated, non-critical TEST account and one dedicated, healthy OpenWA session; identify the accountable owner and backup. Do not select a Production account or add recipients.
+2. **Consent and control**: obtain written approval from any proposed test recipients and the pilot owner; privately record 1–2 controlled identities, with no phone numbers/JIDs/tokens committed to GitHub or Linear. WACRM stores only scoped hashes as specified in migration 155.
+3. **Runtime preflight**: check service URL, signed webhook route/retry posture, session restart/disconnect/runbook, dedicated tunnel/network operator, and that the app targets TEST. This is observation only—no session mutation is required for preparation.
+4. **Safety preflight**: plan explicit per-connection `hourly_cap<=3` and `daily_cap<=10` for a future separately authorized Wave 1; review `first_touch_daily_cap`, `minimum_interval_ms`, `jitter_ms`, `warmup_until` and circuit conditions. Do not change current guardrail rows merely for planning. Prepare a scoped admission `manual`-only proposal; `agent`, `automation`, `api`, `broadcast` remain excluded until individually approved.
+5. **Telemetry preflight**: prepare account+connection+window scoped monitoring from `whatsapp_openwa_pilot_admission_events`, `whatsapp_connection_guardrails`, `whatsapp_guardrail_events`, `messages` and signed webhook receipts; track counts/status/restriction/latency/unknown outcome without plaintext recipients, payloads or credentials. Designate incident observer and on-call backup; no alerting is claimed tested yet.
+6. **Operator STOP rehearsal plan**: record last-verified admin pause/blocked/resume evidence (§12), plan an independent lower-role negative test before activation, reconnect-persistence test, and runbook for already-in-flight provider posts (cannot be retroactively canceled).
+7. **Approval packet**: keep `cohort`, `consent`, `start/end`, `owner`, `backup`, `session`, `caps`, `alert thresholds`, `stop authority`, `reconciliation method`, `Meta live regression` and `OW-12 acceptance links` as **PENDING** until verified. Obtain separate explicit written GO for a small Wave 1, not from this document.
+
+### Pre-activation hard gates (all mandatory)
+
+- [ ] SOF-41 **OW-12 live acceptance complete** with real TEST evidence, including Meta live regression and ambiguous-outcome handling.
+- [ ] SOF-44 **Agent/Viewer and wrong-tenant HTTP denial verified** (deferred, NOT waived), plus pause persistence across reconnect and in-flight semantics understood.
+- [ ] Exact pilot code HEAD, CI, clean migration replay, TEST grants/RLS and approved-operator API all verified on the same deployment.
+- [ ] **Actual** Wave 1 connection caps/pacing/circuit configured and checked against approved 3/hour and 10/day (or stricter) for the authorized connection; current 60/500 is not acceptable.
+- [ ] Operator confirms `OPENWA_PILOT_MODE=enforce` **before any pilot dispatch**, with negative missing-cohort/recipient/workload evidence; admission never inferred from the pilot flag alone. Other OpenWA traffic remains separately governed.
+- [ ] Monitoring/incident ownership and rollback tested, dedicated noncritical session and consent approved, signed webhooks healthy, no unsafe resend path.
+- [ ] SOF-42 preparation evidence reviewed and marked at its actual completion level; formal pilot **GO** recorded in SOF-43 identifying cohort, constraints and time window.
+
+Until all gates pass, **NO-GO**: no active allowlist, no `enforce` flip for a pilot, no external or bulk send, no claim of production readiness.
