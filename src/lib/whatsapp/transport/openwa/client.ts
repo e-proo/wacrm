@@ -22,6 +22,13 @@ export interface OpenWAReconciliationResult { found: boolean; providerMessageId?
 function isPrivateIpv4(hostname: string): boolean { const parts = hostname.split('.').map(Number); if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false; const [a,b] = parts; return a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) }
 function isUnsafeHostname(hostname: string): boolean { const host = hostname.toLowerCase().replace(/\.$/, ''); return host === 'localhost' || host === '::1' || host === '0.0.0.0' || host.endsWith('.local') || host.endsWith('.internal') || isPrivateIpv4(host) }
 export function validateOpenWABaseUrl(baseUrl: string, allowedHosts: readonly string[] = []): URL { let url: URL; try { url = new URL(baseUrl) } catch { throw new WhatsAppTransportError('invalid_request', 'OpenWA base URL is invalid') }; if (url.protocol !== 'https:') throw new WhatsAppTransportError('invalid_request', 'OpenWA base URL must use HTTPS'); if (url.username || url.password || url.search || url.hash) throw new WhatsAppTransportError('invalid_request', 'OpenWA base URL must not contain credentials, query, or fragment'); const allow = new Set(allowedHosts.map((host) => host.toLowerCase())); if (isUnsafeHostname(url.hostname) && !allow.has(url.hostname.toLowerCase())) throw new WhatsAppTransportError('invalid_request', 'OpenWA base URL targets a restricted host'); url.pathname = url.pathname.replace(/\/+$/, '') || '/'; return url }
+export function validateOpenWAWebhookUrl(value: string): URL {
+  const url = validateOpenWABaseUrl(value)
+  if (url.pathname !== '/api/whatsapp/openwa/webhook') {
+    throw new WhatsAppTransportError('invalid_request', 'OPENWA_WEBHOOK_URL must point to /api/whatsapp/openwa/webhook on the public WACRM HTTPS origin')
+  }
+  return url
+}
 export function redactOpenWAValue(value: unknown): unknown { if (Array.isArray(value)) return value.map(redactOpenWAValue); if (!value || typeof value !== 'object') return value; return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key,item]) => [key, /token|secret|authorization|api[-_]?key|cookie|qr|signed.?url/i.test(key) ? REDACTED : redactOpenWAValue(item)])) }
 function mapHttpError(status: number, safeCode?: string): WhatsAppTransportError { if (status === 400 || status === 404 || status === 422) return new WhatsAppTransportError('invalid_request', `OpenWA request rejected (${status}${safeCode ? `; code=${safeCode}` : ''})`); if (status === 401 || status === 403) return new WhatsAppTransportError('authentication_or_configuration', `OpenWA authentication failed (${status})`); if (status === 409) return new WhatsAppTransportError('connection_restricted', 'OpenWA connection state rejected the request'); if (status === 429) return new WhatsAppTransportError('rate_limited', 'OpenWA rate limit reached'); if (status >= 500) return new WhatsAppTransportError('retryable_provider_failure', `OpenWA provider failure (${status})`); return new WhatsAppTransportError('permanent_provider_failure', `OpenWA request failed (${status})`) }
 /** Only expose a whitelisted *shape* of upstream error code. Never forward
@@ -174,25 +181,32 @@ export class OpenWAClient {
   }
   async configureWebhook(sessionId: string, url: string, secret: string, correlationId?: string): Promise<void> {
     if (!secret || secret.length < 16) throw new WhatsAppTransportError('invalid_request', 'OpenWA webhook signing secret is too short')
-    // The webhook URL is deployment-controlled, not supplied by an agent or end user.
-    const endpoint = validateOpenWABaseUrl(url)
-    if (endpoint.pathname !== '/api/whatsapp/openwa/webhook') {
-      throw new WhatsAppTransportError('invalid_request', 'OpenWA webhook URL must target the WACRM OpenWA intake route')
-    }
+    validateOpenWAWebhookUrl(url)
     const prefix = `/api/sessions/${encodeURIComponent(sessionId)}/webhooks`
-    const existing = await this.request<Array<{ id: string; url: string }>>(prefix, { correlationId })
-    if (!Array.isArray(existing)) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA returned an invalid webhook list')
-    const matching = existing.find((item) => item.url === url)
-    const payload = {
-      url, secret, events: ['message.received', 'message.sent', 'message.ack', 'message.failed', 'message.receipt',
-        'session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'],
-    }
-    if (matching) {
-      await this.request(`${prefix}/${encodeURIComponent(matching.id)}`, {
-        method: 'PUT', correlationId, body: { ...payload, active: true },
-      })
-    } else {
-      await this.request(prefix, { method: 'POST', correlationId, body: payload })
+    let stage: 'list' | 'update' | 'register' = 'list'
+    try {
+      const existing = await this.request<Array<{ id: string; url: string }>>(prefix, { correlationId })
+      if (!Array.isArray(existing)) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA returned an invalid webhook list')
+      const matching = existing.find((item) => item.url === url)
+      const payload = {
+        url, secret, events: ['message.received', 'message.sent', 'message.ack', 'message.failed', 'message.receipt',
+          'session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'],
+      }
+      if (matching) {
+        stage = 'update'
+        await this.request(`${prefix}/${encodeURIComponent(matching.id)}`, {
+          method: 'PUT', correlationId, body: { ...payload, active: true },
+        })
+      } else {
+        stage = 'register'
+        await this.request(prefix, { method: 'POST', correlationId, body: payload })
+      }
+    } catch (error) {
+      // Only sanitized upstream errors are surfaced; never include bodies or secrets.
+      if (error instanceof WhatsAppTransportError) {
+        throw new WhatsAppTransportError(error.code, `OpenWA webhook ${stage} failed: ${error.message}`, error)
+      }
+      throw error
     }
   }
   async startSession(sessionId: string, correlationId?: string): Promise<OpenWASessionStatus> {

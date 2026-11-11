@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { OpenWAClient, redactOpenWAValue, validateOpenWABaseUrl } from './client'
+import { OpenWAClient, redactOpenWAValue, validateOpenWABaseUrl, validateOpenWAWebhookUrl } from './client'
 import { WhatsAppTransportError } from '../types'
 
 function response(status: number, body?: unknown): Response {
@@ -15,6 +15,22 @@ describe('OpenWA upstream REST contract', () => {
     expect(() => validateOpenWABaseUrl('https://192.168.1.10')).toThrow(WhatsAppTransportError)
     expect(validateOpenWABaseUrl('https://10.0.0.5:8443', ['10.0.0.5']).origin).toBe('https://10.0.0.5:8443')
     expect(validateOpenWABaseUrl('https://example.ngrok-free.app').origin).toBe('https://example.ngrok-free.app')
+  })
+
+  it('requires the exact HTTPS WACRM webhook URL', () => {
+    expect(validateOpenWAWebhookUrl('https://wacrm.example.com/api/whatsapp/openwa/webhook').pathname)
+      .toBe('/api/whatsapp/openwa/webhook')
+    expect(() => validateOpenWAWebhookUrl('http://wacrm.example.com/api/whatsapp/openwa/webhook')).toThrow()
+    expect(() => validateOpenWAWebhookUrl('https://wacrm.example.com/wrong')).toThrow()
+  })
+
+  it('identifies a failed gateway webhook list request without exposing secrets', async () => {
+    const client = new OpenWAClient({
+      baseUrl: 'https://gateway.example.com', apiKey: 'do-not-leak',
+      fetchImpl: vi.fn(async () => response(404, { code: 'UNKNOWN_ROUTE', details: 'secret-do-not-leak' })) as unknown as typeof fetch,
+    })
+    await expect(client.configureWebhook('s1', 'https://wacrm.example.com/api/whatsapp/openwa/webhook', 'secret-123456789012'))
+      .rejects.toMatchObject({ code: 'invalid_request', message: 'OpenWA webhook list failed: OpenWA request rejected (404; code=UNKNOWN_ROUTE)' })
   })
 
   it('uses actual /api/sessions send-text contract with auth, quotedMessageId and idempotency', async () => {

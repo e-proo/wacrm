@@ -163,7 +163,10 @@ export function OpenWAConnections() {
         cache: 'no-store',
       })
       const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
-      if (!response.ok) throw new Error(data.error || w('actionFailed'))
+      if (!response.ok) {
+        const stage = typeof data.stage === 'string' && /^[a-z_]{1,40}$/.test(data.stage) ? data.stage : null
+        throw new Error(`${data.error || w('actionFailed')}${stage ? ` (stage: ${stage})` : ''}`)
+      }
       if (actionName === 'logout') setQr(null)
       if (actionName === 'configure_webhook') toast.success(w('webhookConfigured'))
       await load()
@@ -233,13 +236,19 @@ export function OpenWAConnections() {
       <CardHeader><CardTitle className="text-base">{connection.display_name || 'WhatsApp Web'}</CardTitle><CardDescription>{w('status')} {(['creating', 'waiting_qr', 'authenticating', 'ready', 'connected', 'disconnected', 'reconnecting', 'restricted', 'failed', 'logged_out'] as const).includes(connection.status as 'ready') ? w(connection.status as 'creating' | 'waiting_qr' | 'authenticating' | 'ready' | 'connected' | 'disconnected' | 'reconnecting' | 'restricted' | 'failed' | 'logged_out') : connection.status}{connection.phone_identity ? ` · ${connection.phone_identity}` : ''}</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         {connection.provider_metadata?.onboarding_reconciliation_required && <Alert variant="destructive">
-          <AlertTitle>OpenWA session creation needs reconciliation</AlertTitle>
+          <AlertTitle>{w('reconciliationTitle')}</AlertTitle>
           <AlertDescription>
-            The gateway may already have created this session. Do not create another one blindly.
+            {w('reconciliationDesc')}
             {connection.provider_metadata.onboarding_stage ? ` Stage: ${connection.provider_metadata.onboarding_stage}.` : ''}
             {connection.provider_metadata.onboarding_failure_code ? ` Code: ${connection.provider_metadata.onboarding_failure_code}.` : ''}
           </AlertDescription>
         </Alert>}
+        {connection.phone_identity && connections.filter((item) => item.phone_identity === connection.phone_identity).length > 1 && <Alert>
+          <AlertDescription>
+            {w('duplicatePhoneNotice')}
+            <span className="block mt-1 break-all text-xs">{w('connectionReference')}: {connection.id} · Session: {connection.session_id || '—'}</span>
+          </AlertDescription>
+        </Alert>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => action(connection.id, 'refresh')}><RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}</Button>
           {['creating', 'waiting_qr', 'authenticating', 'disconnected'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => showQr(connection.id)}><QrCode className="mr-2 h-4 w-4" />{w('showQr')}</Button>}

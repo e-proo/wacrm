@@ -25,6 +25,14 @@ interface OpenWAConnectionRow {
   session_id: string | null
   status: OpenWAConnectionState
   phone_identity: string | null
+  provider_metadata: Record<string, unknown> | null
+}
+
+const ONBOARDING_KEYS = new Set(['onboarding_stage', 'onboarding_failure_code', 'onboarding_reconciliation_required'])
+
+/** Preserve unrelated metadata when a gateway-verified start resolves ambiguity. */
+export function resolvedOpenWAOnboardingMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(metadata).filter(([key]) => !ONBOARDING_KEYS.has(key)))
 }
 
 const STATE_ALIASES: Record<string, OpenWAConnectionState> = {
@@ -74,7 +82,7 @@ export function canApplyOpenWAStateTransition(current: OpenWAConnectionState, ne
 async function loadOpenWAConnection(db: SupabaseClient, accountId: string, connectionId: string): Promise<OpenWAConnectionRow> {
   const { data, error } = await db
     .from('whatsapp_connections')
-    .select('id, account_id, session_id, status, phone_identity')
+    .select('id, account_id, session_id, status, phone_identity, provider_metadata')
     .eq('id', connectionId)
     .eq('account_id', accountId)
     .eq('provider', 'openwa')
@@ -92,11 +100,24 @@ async function persistStatus(
   connection: OpenWAConnectionRow,
   providerStatus: OpenWASessionStatus,
 ): Promise<OpenWAConnectionState> {
+  // A gateway lookup is authoritative only for the stored, tenant-scoped session.
+  if (providerStatus.sessionId && providerStatus.sessionId !== connection.session_id) {
+    throw new WhatsAppTransportError('connection_restricted', 'OpenWA session identity mismatch; review the session mapping')
+  }
   const next = normalizeOpenWAConnectionState(providerStatus.status)
-  if (!canApplyOpenWAStateTransition(connection.status, next)) return connection.status
+  const confirmedOnline = next === 'connected' || next === 'ready'
+  const verifiedRecovery = connection.provider_metadata?.onboarding_reconciliation_required === true
+    && confirmedOnline && Boolean(connection.session_id)
+  // A failed session-start timeout can later be confirmed as ready; ordinary
+  // failed, restricted, or logged-out connections must never be resurrected.
+  if (!canApplyOpenWAStateTransition(connection.status, next)
+      && !(connection.status === 'failed' && verifiedRecovery)) return connection.status
 
   const now = new Date().toISOString()
   const patch: Record<string, unknown> = { status: next }
+  if (verifiedRecovery) {
+    patch.provider_metadata = resolvedOpenWAOnboardingMetadata(connection.provider_metadata ?? {})
+  }
   if (providerStatus.phoneIdentity) patch.phone_identity = providerStatus.phoneIdentity
   if (next === 'connected' || next === 'ready') {
     patch.connected_at = now
@@ -111,6 +132,7 @@ async function persistStatus(
     .eq('id', connection.id)
     .eq('account_id', connection.account_id)
     .eq('provider', 'openwa')
+    .eq('session_id', connection.session_id)
     .eq('status', connection.status)
 
   if (error) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to persist OpenWA connection state', error)

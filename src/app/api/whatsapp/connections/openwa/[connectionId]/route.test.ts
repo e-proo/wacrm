@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
 const h = vi.hoisted(() => ({
   auth: vi.fn(),
@@ -116,5 +117,90 @@ describe('OpenWA session removal from WACRM', () => {
     expect(response.status).toBe(200)
     expect(h.logout).toHaveBeenCalledTimes(1)
     expect(h.rpc).not.toHaveBeenCalled()
+  })
+})
+
+describe('OpenWA signed webhook configuration', () => {
+  const previousUrl = process.env.OPENWA_WEBHOOK_URL
+  let session: { session_id: string | null } | null
+  let configure: ReturnType<typeof vi.fn>
+  let lookupFilters: Array<[string, unknown]>
+  let dbFrom: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    process.env.OPENWA_WEBHOOK_URL = 'https://wacrm.example.com/api/whatsapp/openwa/webhook'
+    session = { session_id: 'gateway-session-1' }
+    configure = vi.fn().mockResolvedValue(undefined)
+    lookupFilters = []
+    const lookup = {
+      eq: (key: string, value: unknown) => { lookupFilters.push([key, value]); return lookup },
+      is: (key: string, value: unknown) => { lookupFilters.push([key, value]); return lookup },
+      maybeSingle: async () => ({ data: session, error: null }),
+    }
+    dbFrom = vi.fn(() => ({ select: () => lookup }))
+    h.auth.mockResolvedValue({
+      accountId: ACCOUNT, user: { id: ACTOR }, adminDb: { from: dbFrom },
+    })
+    h.credentials.mockResolvedValue({
+      credentials: { webhookSecret: 'existing-server-only-secret' },
+      client: { configureWebhook: configure },
+    })
+  })
+
+  afterEach(() => {
+    if (previousUrl === undefined) delete process.env.OPENWA_WEBHOOK_URL
+    else process.env.OPENWA_WEBHOOK_URL = previousUrl
+  })
+
+  it('rejects absent URL with HTTP 400 and no credential or gateway side effects', async () => {
+    delete process.env.OPENWA_WEBHOOK_URL
+    const response = await POST(request('configure_webhook'), context())
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'invalid_request', stage: 'webhook_url' })
+    expect(dbFrom).not.toHaveBeenCalled()
+    expect(h.credentials).not.toHaveBeenCalled()
+  })
+
+  it('rejects wrong WACRM URL path before secret persistence', async () => {
+    process.env.OPENWA_WEBHOOK_URL = 'https://wacrm.example.com/incorrect/webhook'
+    const response = await POST(request('configure_webhook'), context())
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'invalid_request', stage: 'webhook_url' })
+    expect(dbFrom).not.toHaveBeenCalled()
+  })
+
+  it('reports upstream webhook list rejection without a misleading WACRM route 404', async () => {
+    configure.mockRejectedValue(new WhatsAppTransportError('invalid_request', 'OpenWA webhook list failed: OpenWA request rejected (404)'))
+    const response = await POST(request('configure_webhook'), context())
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'invalid_request', stage: 'gateway_registration' })
+    expect(configure).toHaveBeenCalledWith('gateway-session-1', process.env.OPENWA_WEBHOOK_URL, 'existing-server-only-secret', CONNECTION)
+    expect(lookupFilters).toContainEqual(['account_id', ACCOUNT])
+    expect(lookupFilters).toContainEqual(['archived_at', null])
+  })
+
+  it('returns an actual 404 only for a missing tenant session', async () => {
+    session = null
+    const response = await POST(request('configure_webhook'), context())
+    expect(response.status).toBe(404)
+    expect((await response.json()).code).toBe('not_found')
+    expect(h.credentials).not.toHaveBeenCalled()
+  })
+
+  it('blocks webhook registration for an unresolved missing session ID', async () => {
+    session = { session_id: null }
+    const response = await POST(request('configure_webhook'), context())
+    expect(response.status).toBe(409)
+    expect((await response.json()).code).toBe('connection_restricted')
+    expect(h.credentials).not.toHaveBeenCalled()
+  })
+
+  it('enables the signed webhook using a previously persisted secret', async () => {
+    const response = await POST(request('configure_webhook'), context())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ enabled: true })
+    expect(configure).toHaveBeenCalledTimes(1)
+    expect(h.credentials).toHaveBeenCalledTimes(1)
   })
 })

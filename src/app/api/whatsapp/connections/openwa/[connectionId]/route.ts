@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { NextResponse } from 'next/server'
 
 import { encrypt } from '@/lib/whatsapp/encryption'
+import { validateOpenWAWebhookUrl } from '@/lib/whatsapp/transport/openwa/client'
 import { resolveOpenWAClient } from '@/lib/whatsapp/transport/openwa/credentials'
 
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
@@ -11,11 +12,15 @@ import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 const noStore = { 'Cache-Control': 'no-store, private, max-age=0' }
 type Context = { params: Promise<{ connectionId: string }> }
 
-function errorResponse(error: unknown) {
+function errorResponse(error: unknown, stage?: string) {
   const message = error instanceof WhatsAppTransportError ? error.message : 'OpenWA session request failed'
   const code = error instanceof WhatsAppTransportError ? error.code : 'retryable_provider_failure'
-  const status = code === 'authentication_or_configuration' ? 403 : code === 'invalid_request' ? 404 : code === 'connection_restricted' ? 409 : 502
-  return NextResponse.json({ error: message, code }, { status, headers: noStore })
+  // Upstream HTTP 404 or missing configuration must not appear as a missing WACRM route.
+  const status = code === 'authentication_or_configuration' ? 403
+    : code === 'invalid_request' ? 400
+    : code === 'connection_restricted' || code === 'ambiguous_outcome' ? 409
+    : code === 'rate_limited' ? 429 : 502
+  return NextResponse.json({ error: message, code, ...(stage ? { stage } : {}) }, { status, headers: noStore })
 }
 
 export async function GET(_request: Request, context: Context) {
@@ -29,19 +34,27 @@ export async function GET(_request: Request, context: Context) {
 }
 
 export async function POST(request: Request, context: Context) {
+  let stage: string | undefined
   try {
     const { connectionId } = await context.params
     const { accountId, adminDb, user } = await requireOpenWASessionAdmin()
     const body = await request.json() as Record<string, unknown>
     if (body.action === 'configure_webhook') {
+      stage = 'webhook_url'
       const webhookUrl = process.env.OPENWA_WEBHOOK_URL?.trim()
       if (!webhookUrl) {
         throw new WhatsAppTransportError('invalid_request', 'Configure OPENWA_WEBHOOK_URL with your public WACRM webhook URL first')
       }
+      validateOpenWAWebhookUrl(webhookUrl)
+      stage = 'session_lookup'
       const { data: connection, error: connectionError } = await adminDb.from('whatsapp_connections')
-        .select('session_id').eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa').maybeSingle()
-      if (connectionError || !connection?.session_id) throw new WhatsAppTransportError('invalid_request', 'OpenWA session was not found for this account', connectionError)
+        .select('session_id').eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+        .is('archived_at', null).maybeSingle()
+      if (connectionError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load the OpenWA session', connectionError)
+      if (!connection) return NextResponse.json({ error: 'OpenWA session was not found for this account', code: 'not_found' }, { status: 404, headers: noStore })
+      if (!connection.session_id) throw new WhatsAppTransportError('connection_restricted', 'OpenWA session ID requires reconciliation before configuring webhooks')
 
+      stage = 'credentials'
       const { credentials, client } = await resolveOpenWAClient(adminDb, accountId, connectionId)
       const secret = credentials.webhookSecret ?? randomBytes(32).toString('hex')
       if (!credentials.webhookSecret) {
@@ -52,6 +65,7 @@ export async function POST(request: Request, context: Context) {
           .eq('connection_id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
         if (secretError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to save OpenWA webhook signing secret', secretError)
       }
+      stage = 'gateway_registration'
       await client.configureWebhook(connection.session_id, webhookUrl, secret, connectionId)
       return NextResponse.json({ enabled: true }, { headers: noStore })
     }
@@ -101,7 +115,7 @@ export async function POST(request: Request, context: Context) {
       return NextResponse.json({ connectionId, manualPaused: paused }, { headers: noStore })
     }
     throw new WhatsAppTransportError('invalid_request', 'Unsupported OpenWA session action')
-  } catch (error) { return errorResponse(error) }
+  } catch (error) { return errorResponse(error, stage) }
 }
 
 export async function DELETE(_request: Request, context: Context) {

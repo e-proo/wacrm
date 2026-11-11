@@ -177,6 +177,22 @@ const labels = {
     "en": "Log out",
     "ar": "تسجيل الخروج"
   },
+  "reconciliationTitle": {
+    "en": "OpenWA session needs verification",
+    "ar": "تحتاج جلسة OpenWA إلى التحقق"
+  },
+  "reconciliationDesc": {
+    "en": "A previous session start was uncertain. If the gateway is ready, click Refresh to verify this session and clear the warning. Do not create another session.",
+    "ar": "كانت نتيجة بدء الجلسة السابقة غير مؤكدة. إذا كانت الجلسة جاهزة في OpenWA، اضغط تحديث للتحقق منها وإزالة التحذير. لا تنشئ جلسة جديدة."
+  },
+  "duplicatePhoneNotice": {
+    "en": "Multiple WACRM connections show this number. Check their session IDs and pending messages before removing a connection.",
+    "ar": "توجد عدة اتصالات في WACRM لهذا الرقم. تحقق من معرّفات الجلسات والرسائل المعلّقة قبل حذف أي اتصال."
+  },
+  "connectionReference": {
+    "en": "WACRM connection",
+    "ar": "معرّف اتصال WACRM"
+  },
   "removeFromWacrm": {
     "en": "Remove from WACRM",
     "ar": "حذف من WACRM"
