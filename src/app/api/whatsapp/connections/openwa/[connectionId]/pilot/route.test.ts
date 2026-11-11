@@ -3,7 +3,7 @@ import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
 const h = vi.hoisted(() => ({
   auth: vi.fn(),
-  envMode: { enabled: true },
+  envMode: { enabled: true, invalid: false },
   connection: { id: '2dacee52-3486-4b47-96a0-fa4399ac0fb2', status: 'ready',
     session_id: 'session-1', phone_identity: '123456789', archived_at: null as string | null },
   guard: { manual_paused: true, hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
@@ -18,7 +18,7 @@ vi.mock('@/lib/whatsapp/transport/openwa/session-auth', () => ({
   requireOpenWASessionAdmin: h.auth,
 }))
 vi.mock('@/lib/whatsapp/transport/guardrails', () => ({
-  openWAPilotEnforcementEnabled: () => h.envMode.enabled,
+  openWAPilotEnforcementEnabled: () => { if (h.envMode.invalid) throw new Error('invalid mode'); return h.envMode.enabled },
   canonicalOpenWAPilotRecipient: (value: string) => /^[1-9][0-9]{6,14}$/.test(value) ? value + '@c.us' : null,
   openWAPilotRecipientHash: () => 'a'.repeat(64),
 }))
@@ -91,6 +91,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     h.pending = 0
     h.duplicates = 1
     h.envMode.enabled = true
+    h.envMode.invalid = false
     process.env.NEXT_PUBLIC_SUPABASE_URL = TEST_URL
     h.auth.mockResolvedValue({ accountId: ACCOUNT, user: { id: USER },
       adminDb: { from: vi.fn(dbFrom) } })
@@ -182,6 +183,15 @@ describe('OW-13 DEV pilot protected UI API', () => {
       table: 'whatsapp_guardrail_events', type: 'insert',
       payload: expect.objectContaining({ decision: 'resumed', reason: 'ow13_dev_pilot_admin_activate' }),
     }))
+  })
+  it('keeps emergency STOP available even with an invalid runtime flag', async () => {
+    h.envMode.invalid = true
+    h.guard.manual_paused = false
+    h.active = 1
+    const response = await POST(request({ action: 'stop' }), context())
+    expect(response.status).toBe(200)
+    expect(h.guard.manual_paused).toBe(true)
+    expect(h.active).toBe(0)
   })
   it('stops independently of the runtime enforcement flag, revokes grants and audits', async () => {
     h.envMode.enabled = false
