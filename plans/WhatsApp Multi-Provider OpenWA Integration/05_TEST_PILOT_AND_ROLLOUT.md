@@ -74,3 +74,11 @@ Use allowlist/feature flag first, then staged cohort expansion. Maintain emergen
 
 ### Final Definition of Done
 Only mark the integration `production ready` when implementation, TEST verification, live acceptance, pilot evidence and release/security approval are all complete. Linear labels/status must reflect these distinct levels rather than collapsing them into a single "Done" claim.
+
+## OW-13 preparation addendum — 2026-11-11
+
+OW-13 may be **prepared in parallel** with OW-12 acceptance, but its actual bounded pilot cannot begin until OW-12 reaches `live acceptance complete`, the scoped allowlist/kill switch has verified controls and an explicitly authorized cohort/time window exists.
+
+See [08_OW13_BOUNDED_PILOT_PREPARATION.md](08_OW13_BOUNDED_PILOT_PREPARATION.md) for proposed waves, admission gates, monitoring, incident stop/rollback procedure and report template.
+
+Linear: [SOF-42 / preparation](https://linear.app/eproo/issue/SOF-42/ow-13-prep-prepare-bounded-openwa-pilot-controls-monitoring-and) In Progress; [SOF-43 / execution](https://linear.app/eproo/issue/SOF-43/ow-13-execute-bounded-openwa-pilot-after-ow-12-live-acceptance-not) Todo, blocked by SOF-41 and SOF-42. **No** live pilot or Production changes authorized.

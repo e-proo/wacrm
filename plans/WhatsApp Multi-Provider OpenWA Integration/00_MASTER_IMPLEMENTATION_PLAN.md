@@ -1,6 +1,6 @@
 # WACRM — WhatsApp Multi-Provider + OpenWA Integration
 
-Status: EXECUTION IN PROGRESS — OW-0..OW-11 implementation phases closed (including OW-4: implementation complete + TEST QR/session verified + CI verified); OW-12 remains partial live acceptance In Progress; OW-13/OW-14 not started. Closure checkpoint 2026-11-07.
+Status: EXECUTION IN PROGRESS — OW-0..OW-11 implementation phases closed; OW-12 remains partial live acceptance In Progress; OW-13 preparation is In Progress from 2026-11-11 (SOF-42) but pilot execution (SOF-43) is blocked and not started; OW-14 not started. Historical OW-4 closure checkpoint 2026-11-07.
 
 ## Objective
 Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Meta WhatsApp Cloud API as the official/default production transport. WACRM remains the source of truth for CRM/business logic/agents/automations/broadcasts/audit/idempotency.
@@ -29,7 +29,7 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 | OW-4 | COMPLETE — implementation + live TEST QR/session + CI verified | [merge CI #42410328689](https://github.com/e-proo/wacrm/actions/runs/42410328689), [merge Migrations #42410328723](https://github.com/e-proo/wacrm/actions/runs/42410328723); add-on TEST migration 152 verified; not OW-12 full live acceptance |
 | OW-5..OW-11 | IMPLEMENTATION ISSUES DONE | prior implementation + CI gates (SOF-34..SOF-40); not OW-12 live acceptance |
 | OW-12 | LIVE TEST PARTIALLY VERIFIED | session/QR/ready, Webhook 202, inbound text, AI reply and read receipt verified; remaining acceptance matrix open |
-| OW-13 | NOT STARTED | bounded pilot cannot begin before OW-12 complete |
+| OW-13 | PREPARATION IN PROGRESS; PILOT NOT STARTED | Preparation SOF-42; pilot SOF-43 blocked by OW-12 live acceptance and approval |
 | OW-14 | NOT STARTED | production decision requires pilot, security and ops evidence |
 
 ## OW-4 implementation evidence
@@ -89,3 +89,11 @@ Meta Cloud remains the official/default production provider. OpenWA is an option
 `TEST verified` means the phase's required TEST environment evidence passes.
 `live acceptance complete` means required real-provider scenarios have been executed and recorded.
 `production ready` requires later rollout gates, operational evidence, NOTE-001 review and explicit release approval.
+
+## OW-13 preparation checkpoint — 2026-11-11
+
+- Verified pre-preparation HEAD `b6babdfe7931258c976318fc1adb0bc94ae4dc1c`: [CI 43094036951](https://github.com/e-proo/wacrm/actions/runs/43094036951) completed/success; it is not live pilot acceptance.
+- New canonical bounded-pilot preparation and GO/NO-GO plan: [08_OW13_BOUNDED_PILOT_PREPARATION.md](08_OW13_BOUNDED_PILOT_PREPARATION.md).
+- [SOF-42](https://linear.app/eproo/issue/SOF-42/ow-13-prep-prepare-bounded-openwa-pilot-controls-monitoring-and) prepares controls; [SOF-43](https://linear.app/eproo/issue/SOF-43/ow-13-execute-bounded-openwa-pilot-after-ow-12-live-acceptance-not) remains blocked by [SOF-41](https://linear.app/eproo/issue/SOF-41/ow-12-execute-live-openwa-test-acceptance) and SOF-42. No real cohort, Production enablement or outbound sends were authorized.
+- Read-only TEST: five OpenWA ready connections, ten unresolved sending messages without provider-native IDs. They must not be resent or reclassified by inference.
+- Missing server-enforced pilot cohort admission in the examined outbound boundary and unproven admin-operated emergency stop are pre-activation work, not accepted rollout features. NOTE-001 remains open before Production/GA.

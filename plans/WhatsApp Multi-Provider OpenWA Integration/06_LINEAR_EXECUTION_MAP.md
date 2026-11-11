@@ -17,7 +17,7 @@ Purpose: plan, implement, verify and roll out the provider-neutral WhatsApp laye
 - OW-4 — Session Lifecycle & QR Onboarding (SOF-33): **Done** at implementation complete + live TEST create/QR/Ready verified + current merge-HEAD CI/Migrations/Meta regression green.
 - OW-5 through OW-11 (SOF-34..SOF-40): implementation phase issues Done with historical CI/TEST evidence; not a claim of full live acceptance.
 - OW-12 (SOF-41): current execution phase, In Progress with partial live TEST: Webhook 202, inbound, native @lid, agent outbound and read ack verified.
-- OW-13/OW-14: not started; no pilot/production rollout approval.
+- OW-13: preparation In Progress (SOF-42); pilot execution Todo/blocked (SOF-43) pending OW-12. OW-14 not started; no pilot/Production approval.
 
 OW-1 Linear issue:
 - `SOF-29 — OW-1 — Implement provider-neutral WhatsApp connection data model and tenant RLS`
@@ -84,3 +84,10 @@ Phase implementation closure never implies OW-12 full live acceptance or product
 - Canonical 2026-11-07 evidence: [OpenWA live TEST checkpoint](https://linear.app/eproo/document/openwa-live-test-checkpoint-2026-11-07-ow-4-ow-12-1e473cda8576).
 - OW-4 live TEST create/QR/Ready verified; the fresh CI/Meta regression gate is satisfied after [PR #3](https://github.com/e-proo/wacrm/pull/3) merged at `c87fd13cf68df1cc6757fd910a7761e9110ff411` on 2026-11-07. [CI #42410328689](https://github.com/e-proo/wacrm/actions/runs/42410328689) and [Migrations #42410328723](https://github.com/e-proo/wacrm/actions/runs/42410328723) both `completed/success` on exact merge HEAD, including OW-4 QR/tenant/credential smoke. TEST additive migration `152_openwa_service_role_credential_grants.sql` applied and role permissions verified. SOF-33 is eligible for Done at `implementation complete + TEST QR/session verified + CI verified`.
 - OW-12 has partial live acceptance and cannot close. `@lid` routing fix and TEST migrations `147`, `148`, `150`, `151` are recorded with read receipt success, outstanding old ambiguous send and untested scenarios.
+
+## OW-13 planning vs execution — 2026-11-11
+
+- New plan: [08_OW13_BOUNDED_PILOT_PREPARATION.md](08_OW13_BOUNDED_PILOT_PREPARATION.md).
+- [SOF-42](https://linear.app/eproo/issue/SOF-42/ow-13-prep-prepare-bounded-openwa-pilot-controls-monitoring-and) owns the preparation runbook, control gap inventory, staged cohort, observability and rollback evidence.
+- [SOF-43](https://linear.app/eproo/issue/SOF-43/ow-13-execute-bounded-openwa-pilot-after-ow-12-live-acceptance-not) owns future live bounded pilot execution; blocked by SOF-41 and SOF-42 until all gates and written approval pass.
+- OW-12/SOF-41 remains In Progress and must still verify real-provider ambiguous reconciliation, remaining live acceptance matrix and same-TEST Meta regression. No pilot or Production traffic was enabled.
