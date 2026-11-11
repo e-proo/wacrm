@@ -111,7 +111,8 @@ export async function POST(request: Request, context: Context) {
       if (connectionError || !connection) throw new WhatsAppTransportError('invalid_request', 'OpenWA connection was not found for this account', connectionError)
       const { error } = await adminDb.from('whatsapp_connection_guardrails').upsert({ connection_id: connectionId, account_id: accountId, manual_paused: paused, updated_at: new Date().toISOString() }, { onConflict: 'connection_id' })
       if (error) throw new WhatsAppTransportError('retryable_provider_failure', 'Could not update OpenWA emergency pause', error)
-      await adminDb.from('whatsapp_guardrail_events').insert({ account_id: accountId, connection_id: connectionId, workload: 'manual', decision: paused ? 'paused' : 'resumed', reason: 'admin_emergency_control' })
+      const { error: auditError } = await adminDb.from('whatsapp_guardrail_events').insert({ account_id: accountId, connection_id: connectionId, workload: 'manual', decision: paused ? 'paused' : 'resumed', reason: 'admin_emergency_control' })
+      if (auditError) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA pause changed but its audit record could not be saved; refresh the connection state', auditError)
       return NextResponse.json({ connectionId, manualPaused: paused }, { headers: noStore })
     }
     throw new WhatsAppTransportError('invalid_request', 'Unsupported OpenWA session action')

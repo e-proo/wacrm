@@ -28,7 +28,7 @@ function errorResponse(error: unknown, diagnostics?: { stage?: string; reconcili
 
 export async function GET() {
   try {
-    const { accountId, userDb } = await requireOpenWASessionAdmin()
+    const { accountId, userDb, adminDb } = await requireOpenWASessionAdmin()
     const { data, error } = await userDb
       .from('whatsapp_connections')
       .select('id, display_name, phone_identity, status, session_id, instance_id, engine, provider_metadata, connected_at, disconnected_at, restricted_at, created_at, updated_at')
@@ -37,7 +37,15 @@ export async function GET() {
       .is('archived_at', null)
       .order('created_at', { ascending: false })
     if (error) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA connections', error)
-    return NextResponse.json({ connections: data ?? [] }, { headers: noStore })
+    // Expose only the scoped pause state to authorized admins; no hashes.
+    const { data: guardrails, error: guardrailError } = await adminDb
+      .from('whatsapp_connection_guardrails')
+      .select('connection_id, manual_paused')
+      .eq('account_id', accountId)
+    if (guardrailError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA emergency stop state', guardrailError)
+    const pauseByConnection = new Map((guardrails ?? []).map((row) => [row.connection_id, row.manual_paused === true]))
+    const connections = (data ?? []).map((row) => ({ ...row, guardrail: { manual_paused: pauseByConnection.get(row.id) === true } }))
+    return NextResponse.json({ connections }, { headers: noStore })
   } catch (error) {
     return errorResponse(error)
   }
