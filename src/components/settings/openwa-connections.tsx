@@ -224,7 +224,7 @@ export function OpenWAConnections() {
         {pilotEnforced !== null && <Alert variant={pilotEnforced ? 'default' : 'destructive'}>
           <AlertTitle>{w(pilotEnforced ? 'pilotEnforceOn' : 'pilotEnforceOff')}</AlertTitle>
           <AlertDescription>{w(pilotEnforced ? 'pilotEnforceOnHint' : 'pilotEnforceOffHint')}</AlertDescription>
-        </Alert>
+        </Alert>}
         <div className="grid gap-3 md:grid-cols-2">
           <div><Label htmlFor="openwa-name">{w('name')}</Label><Input id="openwa-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div>
           <div><Label htmlFor="openwa-url">{w('baseUrl')}</Label><Input id="openwa-url" placeholder="https://openwa.example.com" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /></div>
