@@ -89,7 +89,7 @@ BEGIN
     RAISE EXCEPTION 'Malformed recipient hash escaped admission: %',v_result;
   END IF;
 
-  UPDATE public.whatsapp_openwa_pilot_allowlist SET expires_at=now()-interval '1 second'
+  UPDATE public.whatsapp_openwa_pilot_allowlist SET approved_at=now()-interval '2 days', expires_at=now()-interval '1 day'
   WHERE connection_id=v_conn AND account_id=v_account;
   SELECT public.check_openwa_pilot_admission(v_account,v_conn,repeat('a',64),'manual') INTO v_result;
   IF v_result->>'allowed' <> 'false' THEN
