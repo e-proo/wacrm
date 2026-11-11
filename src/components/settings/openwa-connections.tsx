@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { useAuth } from '@/hooks/use-auth'
 import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-api-response'
 import { useWhatsAppLabels } from './whatsapp-labels'
+import { OpenWAPilotControls } from './openwa-pilot-controls'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -282,6 +283,7 @@ export function OpenWAConnections() {
             <Trash2 className="mr-2 h-4 w-4" />{w('removeFromWacrm')}
           </Button>
         </div>
+        <OpenWAPilotControls connectionId={connection.id} />
         {qr?.connectionId === connection.id && <div className="rounded-md border p-4">
           <p className="mb-3 text-sm font-medium">{w('qrPayload')}</p>
           <Image src={qr.value} alt={w('qrPayload')} width={256} height={256} unoptimized className="rounded bg-white p-2" />
