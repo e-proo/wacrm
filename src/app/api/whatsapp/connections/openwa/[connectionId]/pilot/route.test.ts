@@ -5,7 +5,7 @@ const h = vi.hoisted(() => ({
   auth: vi.fn(),
   envMode: { enabled: true, invalid: false },
   connection: { id: '2dacee52-3486-4b47-96a0-fa4399ac0fb2', status: 'ready',
-    session_id: 'session-1', phone_identity: '123456789', archived_at: null as string | null },
+    session_id: 'session-1' as string | null, phone_identity: '123456789', archived_at: null as string | null },
   guard: { manual_paused: true, hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
     minimum_interval_ms: 15000, jitter_ms: 3000, warmup_hourly_cap: 3, warmup_daily_cap: 10 },
   active: 0,
@@ -83,6 +83,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     vi.clearAllMocks()
     h.calls.length = 0
     h.connection.status = 'ready'
+    h.connection.session_id = 'session-1'
     h.connection.archived_at = null
     Object.assign(h.guard, { manual_paused: true, hourly_cap: 3, daily_cap: 10,
       first_touch_daily_cap: 1, minimum_interval_ms: 15000, jitter_ms: 3000,
@@ -183,6 +184,16 @@ describe('OW-13 DEV pilot protected UI API', () => {
       table: 'whatsapp_guardrail_events', type: 'insert',
       payload: expect.objectContaining({ decision: 'resumed', reason: 'ow13_dev_pilot_admin_activate' }),
     }))
+  })
+  it('allows STOP after the upstream session ID is lost, without unpausing', async () => {
+    h.connection.session_id = null
+    h.guard.manual_paused = false
+    h.active = 1
+    const response = await POST(request({ action: 'stop' }), context())
+    expect(response.status).toBe(200)
+    expect(h.guard.manual_paused).toBe(true)
+    expect(h.active).toBe(0)
+    expect((await POST(request({ action: 'activate' }), context())).status).toBe(409)
   })
   it('keeps emergency STOP available even with an invalid runtime flag', async () => {
     h.envMode.invalid = true
