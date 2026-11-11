@@ -14,8 +14,11 @@ on:
       - 'supabase/**'
       - '.github/workflows/migrations.yml'
 
+# OW-13 recovery: isolate new migration runs from the old
+# migrations-${{ github.ref }} queue, whose queued runs never got jobs.
+# This is a clean local database replay only; no live DB is touched.
 concurrency:
-  group: migrations-${{ github.ref }}
+  group: migrations-ow13-verify-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
