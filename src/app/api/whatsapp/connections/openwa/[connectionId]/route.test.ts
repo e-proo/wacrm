@@ -252,6 +252,21 @@ describe('OW-13 tenant-scoped admin pause/resume stop control', () => {
     expect(h.logout).not.toHaveBeenCalled()
   })
 
+  it('blocks generic resume of the pinned TEST DEV pilot; use validated pilot controls', async () => {
+    const previous = process.env.NEXT_PUBLIC_SUPABASE_URL
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://pqirsnfupofhulmewakq.supabase.co'
+    try {
+      const response = await POST(request('resume'), context('2dacee52-3486-4b47-96a0-fa4399ac0fb2'))
+      expect(response.status).toBe(409)
+      expect(await response.json()).toMatchObject({ code: 'pilot_control_required' })
+      expect(guardrailUpsert).not.toHaveBeenCalled()
+      expect(auditInsert).not.toHaveBeenCalled()
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL
+      else process.env.NEXT_PUBLIC_SUPABASE_URL = previous
+    }
+  })
+
   it('rejects a connection absent from the authorized tenant without side effects', async () => {
     existing = null
     const response = await POST(request('pause'), context())
