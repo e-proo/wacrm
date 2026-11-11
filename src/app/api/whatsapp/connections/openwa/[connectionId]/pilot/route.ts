@@ -56,7 +56,7 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     .eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
     .maybeSingle()
   checkDb(ce, 'connection')
-  if (!connection || connection.archived_at || !connection.session_id) {
+  if (!connection || connection.archived_at) {
     throw new WhatsAppTransportError('connection_restricted', 'Pilot connection missing or unavailable')
   }
   const { data: guard, error: ge } = await db.from('whatsapp_connection_guardrails')
@@ -181,7 +181,7 @@ export async function POST(request: Request, context: Context) {
       if (!s.enforced || !s.guard.manual_paused) return deny('Enable the server-side gate and pause before granting a recipient', 409)
       if (body.consent_confirmed !== true) return deny('Recipient consent is required', 400)
       if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) return deny('Duplicate connection identity must be reviewed', 409)
-      if (!['ready','connected'].includes(s.connection.status) || s.pending !== 0 || s.grants !== 0) {
+      if (!s.connection.session_id || !['ready','connected'].includes(s.connection.status) || s.pending !== 0 || s.grants !== 0) {
         return deny('Pilot session is not ready, has unsettled sends or already has a grant', 409)
       }
       requireLimits(s)
@@ -202,7 +202,7 @@ export async function POST(request: Request, context: Context) {
 
     if (action === 'activate') {
       if (!s.enforced || !s.guard.manual_paused || s.grants !== 1 || s.manualGrants !== 1 || s.pending !== 0 ||
-          !['ready','connected'].includes(s.connection.status)) {
+          !s.connection.session_id || !['ready','connected'].includes(s.connection.status)) {
         return deny('Pilot activation requires enforce mode, one approval, paused/ready connection and zero unsettled sends', 409)
       }
       if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) return deny('Duplicate sessions need explicit review', 409)
