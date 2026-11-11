@@ -69,6 +69,11 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     .select('id', { count: 'exact', head: true }).eq('account_id', accountId)
     .eq('connection_id', connectionId).eq('active', true).gt('expires_at', new Date().toISOString())
   checkDb(ae, 'grants')
+  const { count: manualGrants, error: manualError } = await db.from('whatsapp_openwa_pilot_allowlist')
+    .select('id', { count: 'exact', head: true }).eq('account_id', accountId)
+    .eq('connection_id', connectionId).eq('active', true).eq('workload', 'manual')
+    .gt('expires_at', new Date().toISOString())
+  checkDb(manualError, 'manual-grants')
   const { count: pending, error: me } = await db.from('messages')
     .select('id', { count: 'exact', head: true }).eq('provider', 'openwa')
     .eq('connection_id', connectionId).eq('status', 'sending').is('provider_message_id', null)
@@ -83,7 +88,7 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     duplicates = count ?? 0
   }
   const enforced = openWAPilotEnforcementEnabled()
-  return { connection, guard, grants: grants ?? 0, pending: pending ?? 0, duplicates, enforced,
+  return { connection, guard, grants: grants ?? 0, manualGrants: manualGrants ?? 0, pending: pending ?? 0, duplicates, enforced,
     active: enforced && !guard.manual_paused && (grants ?? 0) > 0 }
 }
 
@@ -171,7 +176,7 @@ export async function POST(request: Request, context: Context) {
 
     if (action === 'grant') {
       if (!s.enforced || !s.guard.manual_paused) return deny('Enable the server-side gate and pause before granting a recipient', 409)
-      if (!body.consent_confirmed) return deny('Recipient consent is required', 400)
+      if (body.consent_confirmed !== true) return deny('Recipient consent is required', 400)
       if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) return deny('Duplicate connection identity must be reviewed', 409)
       if (!['ready','connected'].includes(s.connection.status) || s.pending !== 0 || s.grants !== 0) {
         return deny('Pilot session is not ready, has unsettled sends or already has a grant', 409)
@@ -193,7 +198,7 @@ export async function POST(request: Request, context: Context) {
     }
 
     if (action === 'activate') {
-      if (!s.enforced || !s.guard.manual_paused || s.grants !== 1 || s.pending !== 0 ||
+      if (!s.enforced || !s.guard.manual_paused || s.grants !== 1 || s.manualGrants !== 1 || s.pending !== 0 ||
           !['ready','connected'].includes(s.connection.status)) {
         return deny('Pilot activation requires enforce mode, one approval, paused/ready connection and zero unsettled sends', 409)
       }
