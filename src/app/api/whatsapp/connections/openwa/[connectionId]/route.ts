@@ -109,9 +109,14 @@ export async function POST(request: Request, context: Context) {
       // The pinned TEST pilot may only be activated through its validated
       // admin pilot endpoint. The general resume action would bypass admission
       // readiness checks and could unpause while enforce mode is off.
+      let isTestPilotProject = false
+      try {
+        isTestPilotProject = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname
+          === 'pqirsnfupofhulmewakq.supabase.co'
+      } catch { /* the pinned DEV rule is inapplicable to a missing URL */ }
       if (body.action === 'resume'
         && connectionId === '2dacee52-3486-4b47-96a0-fa4399ac0fb2'
-        && process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co') {
+        && isTestPilotProject) {
         return NextResponse.json({
           error: 'Use the TEST pilot controls to activate this connection safely',
           code: 'pilot_control_required',
