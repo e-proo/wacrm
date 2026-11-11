@@ -278,6 +278,126 @@ const labels = {
     "en": "The pilot recipient allowlist is NOT being enforced. Do not resume the dedicated TEST pilot connection until the server is restarted in enforce mode and the recipient is approved.",
     "ar": "قائمة سماح المستلمين الخاصة بالتجربة غير مفروضة. لا تستأنف اتصال TEST المخصص قبل تشغيل الخادم بوضع enforce واعتماد المستلم التجريبي."
   },
+  "devPilotTitle": {
+    "en": "DEV pilot — TEST connection controls",
+    "ar": "Pilot تجريبي — إدارة اتصال TEST"
+  },
+  "devPilotLoading": {
+    "en": "Loading pilot configuration…",
+    "ar": "جارٍ تحميل إعدادات التجربة…"
+  },
+  "devPilotRuntimeNote": {
+    "en": "TEST only. The Next.js server must run in enforce mode; the browser cannot change server environment variables.",
+    "ar": "يعمل هذا التحكم على TEST فقط. وضع enforce على خادم Next.js مطلوب، ولا يمكن تغييره من واجهة المتصفح."
+  },
+  "devPilotState": {
+    "en": "Pilot",
+    "ar": "حالة التجربة"
+  },
+  "devPilotActive": {
+    "en": "Active",
+    "ar": "مفعّلة"
+  },
+  "devPilotInactive": {
+    "en": "Inactive",
+    "ar": "غير مفعّلة"
+  },
+  "devPilotPaused": {
+    "en": "Paused",
+    "ar": "إيقاف الإرسال"
+  },
+  "devPilotYes": {
+    "en": "Yes",
+    "ar": "نعم"
+  },
+  "devPilotNo": {
+    "en": "No",
+    "ar": "لا"
+  },
+  "devPilotGrants": {
+    "en": "Active grants",
+    "ar": "موافقات سارية"
+  },
+  "devPilotPending": {
+    "en": "Unsettled sends",
+    "ar": "رسائل معلّقة"
+  },
+  "devPilotDuplicateWarning": {
+    "en": "Warning: multiple ready connections share the same identity. Check the exact OpenWA session before activation.",
+    "ar": "تنبيه: توجد عدة اتصالات جاهزة للهوية نفسها. تحقق من جلسة OpenWA الصحيحة قبل التفعيل."
+  },
+  "devPilotHourly": {
+    "en": "Hourly send cap",
+    "ar": "حد الرسائل/ساعة"
+  },
+  "devPilotDaily": {
+    "en": "Daily send cap",
+    "ar": "حد الرسائل/24 ساعة"
+  },
+  "devPilotFirstTouch": {
+    "en": "New recipients per 24h",
+    "ar": "حد المستلمين الجدد/24 ساعة"
+  },
+  "devPilotInterval": {
+    "en": "Minimum interval (ms)",
+    "ar": "الحد الأدنى بين الإرسالات (مللي ثانية)"
+  },
+  "devPilotJitter": {
+    "en": "Jitter (ms)",
+    "ar": "التأخير العشوائي (مللي ثانية)"
+  },
+  "devPilotSaveLimits": {
+    "en": "Save pilot limits",
+    "ar": "حفظ حدود التجربة"
+  },
+  "devPilotRecipient": {
+    "en": "Consenting test recipient",
+    "ar": "المستلم التجريبي"
+  },
+  "devPilotRecipientHint": {
+    "en": "Used only to derive a scoped SHA-256 hash; the plaintext is not persisted. Grant is manual-only and expires in 4 hours.",
+    "ar": "يُستخدم الرقم أو معرّف @lid لإنشاء بصمة مشفرة النطاق؛ لا يُحفظ الرقم بصيغته الأصلية. الموافقة مدتها 4 ساعات ولمحادثة يدوية واحدة فقط."
+  },
+  "devPilotConsent": {
+    "en": "I confirm this recipient consented to the test message",
+    "ar": "أؤكد موافقة المستلم على الرسالة التجريبية"
+  },
+  "devPilotDuplicateAck": {
+    "en": "I reviewed duplicate identities and verified the intended session",
+    "ar": "راجعت اتصالات الهوية المتكررة وتحققت من الجلسة الصحيحة"
+  },
+  "devPilotGrant": {
+    "en": "Approve recipient (4 hours)",
+    "ar": "اعتماد مستلم (4 ساعات)"
+  },
+  "devPilotActivate": {
+    "en": "Start pilot on this connection",
+    "ar": "بدء التجربة لهذا الاتصال"
+  },
+  "devPilotStop": {
+    "en": "Stop pilot and revoke grants",
+    "ar": "إيقاف التجربة وسحب الموافقة"
+  },
+  "devPilotStopHint": {
+    "en": "Stop blocks new sends and revokes approvals, but already in-flight provider requests may complete. Never blindly resend ambiguous messages.",
+    "ar": "زر الإيقاف يمنع الإرسال الجديد ويسحب الموافقات، لكن إرسالًا سبق وصوله للمزود قد يكتمل. لا تعِد إرسال رسالة مجهولة النتيجة."
+  },
+  "devPilotStopped": {
+    "en": "Pilot stopped; grants revoked.",
+    "ar": "توقف Pilot وسُحبت الموافقات."
+  },
+  "devPilotStarted": {
+    "en": "Pilot activated on the selected connection.",
+    "ar": "تم بدء Pilot على الاتصال المحدد."
+  },
+  "devPilotGranted": {
+    "en": "Test recipient approved; sending remains paused.",
+    "ar": "تم اعتماد مستلم اختباري دون بدء الإرسال."
+  },
+  "devPilotLimitsSaved": {
+    "en": "Pilot limits saved.",
+    "ar": "حُفظت حدود الإرسال التجريبي."
+  },
   "pauseSending": {
     "en": "Pause sending",
     "ar": "إيقاف الإرسال"
