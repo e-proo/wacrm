@@ -106,6 +106,17 @@ export async function POST(request: Request, context: Context) {
 
     if (body.action === 'reconnect') return NextResponse.json(await reconnectOpenWAConnection(adminDb, accountId, connectionId), { headers: noStore })
     if (body.action === 'pause' || body.action === 'resume') {
+      // The pinned TEST pilot may only be activated through its validated
+      // admin pilot endpoint. The general resume action would bypass admission
+      // readiness checks and could unpause while enforce mode is off.
+      if (body.action === 'resume'
+        && connectionId === '2dacee52-3486-4b47-96a0-fa4399ac0fb2'
+        && process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co') {
+        return NextResponse.json({
+          error: 'Use the TEST pilot controls to activate this connection safely',
+          code: 'pilot_control_required',
+        }, { status: 409, headers: noStore })
+      }
       const paused = body.action === 'pause'
       const { data: connection, error: connectionError } = await adminDb.from('whatsapp_connections').select('id').eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa').maybeSingle()
       if (connectionError || !connection) throw new WhatsAppTransportError('invalid_request', 'OpenWA connection was not found for this account', connectionError)
