@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { encrypt } from '@/lib/whatsapp/encryption'
 import { validateOpenWABaseUrl } from '@/lib/whatsapp/transport/openwa/client'
+import { openWAPilotEnforcementEnabled } from '@/lib/whatsapp/transport/guardrails'
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
 import { resolveOpenWAClient } from '@/lib/whatsapp/transport/openwa/credentials'
 import { normalizeOpenWAConnectionState } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
@@ -45,7 +46,7 @@ export async function GET() {
     if (guardrailError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA emergency stop state', guardrailError)
     const pauseByConnection = new Map<string, boolean>((guardrails ?? []).map((row) => [row.connection_id, row.manual_paused === true] as const))
     const connections = (data ?? []).map((row) => ({ ...row, guardrail: { manual_paused: pauseByConnection.get(row.id) === true } }))
-    return NextResponse.json({ connections }, { headers: noStore })
+    return NextResponse.json({ connections, pilot: { enforced: openWAPilotEnforcementEnabled() } }, { headers: noStore })
   } catch (error) {
     return errorResponse(error)
   }
