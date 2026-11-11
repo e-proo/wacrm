@@ -190,3 +190,59 @@ Source implementation commits after the initial runbook: [a24032b3](https://gith
 - [ ] SOF-42 preparation evidence reviewed and marked at its actual completion level; formal pilot **GO** recorded in SOF-43 identifying cohort, constraints and time window.
 
 Until all gates pass, **NO-GO**: no active allowlist, no `enforce` flip for a pilot, no external or bulk send, no claim of production readiness.
+
+
+## 14. TEST-only operator-authorized development live trial — 2026-11-12 (NOT formal SOF-43 execution)
+
+**Operator decision:** The project owner explicitly requested initiating real **development-mode TEST pilot sends before OW-12 and the live Agent/Viewer role-negative are complete**, with findings recorded for later remediation and **no Production deployment**. This is a **separate, narrowly controlled development smoke trial**, not approval to close SOF-41/SOF-44, mark SOF-43 `pilot accepted`, or roll out to customers. The previous formal GO/NO-GO gates in §4 and §13 remain binding for the formal bounded pilot and OW-14.
+
+### 14.1 What was actually implemented and changed
+
+- Git branch `refactor/service-platform-v2`; latest CI must be checked for the new code HEAD before trusting runtime changes.
+- **TEST-only DB change:** provisionally staged existing `openwa/ready` connection `2dacee52-3486-4b47-96a0-fa4399ac0fb2` in account `8ed95309-96cd-4347-b725-bd8c5039ed4f`. Explicit tenant+provider+ready+not-archived+no-ambiguous-outbound criteria were checked on the write. No new connection or session was created.
+- Set its `whatsapp_connection_guardrails` to **manual_paused=true** (fail-closed staging), `hourly_cap=3`, `daily_cap=10`, `first_touch_daily_cap=1`, `minimum_interval_ms=15000`, `jitter_ms=3000`, `warmup_hourly_cap=3`, `warmup_daily_cap=10`, `failure_min_attempts=2` with 15-minute window and 50% failure threshold; seven-day warmup window. Wrote one `paused/ow13_dev_trial_staged_no_send` audit event. Postflight confirmed exact limits, paused state, 0 active admissions, 0 ambiguous sends for this connection, 1 staging audit.
+- Other connections and their limits were left unchanged. **10 legacy ambiguous OpenWA sends remain elsewhere** and MUST NOT be resent.
+- **Operator utility** `scripts/openwa-dev-pilot.mjs` pins this TEST project/account/connection. It verifies `.env.local` points to the exact TEST host, checks caps, paused state, no unresolved outbound, actual owner/admin approver and explicit recipient consent. It accepts a single canonical recipient interactively (not shell history), writes only a scoped SHA-256 hash for workload `manual`, expires the grant after **4 hours**, and **does not unpause or send WhatsApp**. `status` is read-only and `stop --confirm-stop` pauses the connection, deactivates grants and audits.
+- Admin-only WACRM connection-list API and localized settings show **actual runtime** pilot admission enforcement (`enforced` true/false). This is informational and never exposes recipient hashes or credentials.
+- **No actual WhatsApp message sent by this change or by the engineering assistant.** The user's local WACRM process/`.env.local` cannot be modified or restarted through the available read-only browser connection, and a consenting destination is not yet known. Therefore **DEV live trial execution is staged, not yet provider-verified**.
+
+### 14.2 Observed hazards and reconciliations required
+
+1. **Duplicate provider identity:** WACRM TEST shows multiple `ready` connections for the same WhatsApp phone identity, while OpenWA's locally observed sessions show only two connected and one disconnected. The selected connection is present as connected in the OpenWA UI, has zero ambiguous outbound and zero sends in the recent 24-hour read; this does NOT prove that duplicated identity/session state is harmless. Resolve/review the duplicate connections before using `--ack-duplicate-sessions`. Do not create a replacement session blindly.
+2. **Global opt-in mode:** `OPENWA_PILOT_MODE=enforce` currently checks pilot admission for **all OpenWA outbound on that WACRM server**, not just the selected connection. With no approval rows, sends from other OpenWA sessions will fail closed; it does NOT automatically block inbound nor replace the per-connection Pause control. Do not flip to `off` as an emergency stop: `off` disables this extra admission gate. The explicit Pause plus cohort revoke is the correct rollback.
+3. **Recipient consent:** a controlled owner/consenting test destination, canonical `@c.us` or `@lid` identity, and a real approved-by TEST owner/admin identity have not been supplied. Never derive consent from previous messages and never publish the actual recipient in GitHub/Linear.
+4. **Deferred security:** real `Agent`/`Viewer` HTTP-403 and wrong-tenant negative tests, reconnect/pause persistence, alert delivery, complete OW-12 live acceptance, uncertain native provider outcomes and Meta live regression remain open. They are recorded as `not tested`, not `pass`.
+5. **Environment:** browser observation shows `http://localhost:3000` WACRM and `http://localhost:2886` OpenWA, but browser access here is read-only and cannot update local secrets or send messages. The new settings signal must read **ON** after the operator restarts the local server.
+6. **NOTE-001** Supabase security debt remains a Production/GA obstacle, independent of this isolated TEST exercise.
+
+### 14.3 Precise operator procedure — development trial only
+
+On the operator's local WACRM checkout:
+
+```powershell
+git checkout refactor/service-platform-v2
+git pull origin refactor/service-platform-v2
+# Check .env.local uses NEXT_PUBLIC_SUPABASE_URL=https://pqirsnfupofhulmewakq.supabase.co
+# Set OPENWA_PILOT_MODE=enforce in .env.local (do NOT commit it).
+# Restart npm run dev to load the new value. Verify the new admin Settings alert says enforcement ON.
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs status
+```
+
+Only after reviewing the duplicate-session warning, verifying the dedicated TEST connection and obtaining the controlled recipient's consent, run from a **local interactive terminal**:
+
+```powershell
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs grant --approver=YOUR_TEST_ADMIN_USER_UUID --consent-confirmed --ack-duplicate-sessions
+```
+
+The command prompts for **one** approved recipient, does not print/store the plaintext identity and writes a 4-hour `manual` allowlist grant. The `--ack-duplicate-sessions` flag is **not permission to ignore** an unresolved identity/session conflict: first ensure the selected OpenWA session is really connected and that WACRM is routing to that exact connection. The tool deliberately leaves the selected session **paused**.
+
+Then, and only then: in WACRM admin settings verify pilot enforcement **ON**, resume **only the selected connection**, and use WACRM Inbox to send **a single small text** to the approved operator-controlled recipient. Observe `whatsapp_openwa_pilot_admission_events`, `whatsapp_guardrail_events`, the exact `messages` identity and status, and the OpenWA recipient's actual delivery; no automation/AI/broadcast, no unknown-recipient send, no test resend of old ambiguous messages. On unexpected outcome, STOP and preserve evidence.
+
+```powershell
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs stop --confirm-stop
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs status
+```
+
+**Exit/stop evidence required:** at least one `allowed=true` manual admission on the approved connection, exact native provider message identity and non-ambiguous observed outcome, <=3 reserved sends/hour, <=10/day, manual paused and zero active grant after STOP, and no duplicate physical send. Do not report a provider success until both actual recipient/provider evidence and WACRM audit agree.
+
+**Status (this checkpoint):** isolated TEST candidate is **STAGED + PAUSED**, server runtime enforcement **NOT YET OBSERVED ON**, allowlist **EMPTY**, actual WhatsApp trial send **NOT STARTED**. SOF-43 remains blocked; a separate development-trial tracking task should record operator input and proof without lifting the formal rollout gates.
