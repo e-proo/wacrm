@@ -246,3 +246,56 @@ node --env-file=.env.local scripts/openwa-dev-pilot.mjs status
 **Exit/stop evidence required:** at least one `allowed=true` manual admission on the approved connection, exact native provider message identity and non-ambiguous observed outcome, <=3 reserved sends/hour, <=10/day, manual paused and zero active grant after STOP, and no duplicate physical send. Do not report a provider success until both actual recipient/provider evidence and WACRM audit agree.
 
 **Status (this checkpoint):** isolated TEST candidate is **STAGED + PAUSED**, server runtime enforcement **NOT YET OBSERVED ON**, allowlist **EMPTY**, actual WhatsApp trial send **NOT STARTED**. SOF-43 remains blocked; a separate development-trial tracking task should record operator input and proof without lifting the formal rollout gates.
+
+
+## 15. Unified DEV pilot controls via WACRM UI and terminal — 2026-11-12
+
+This section supersedes the §14 assumption that the first pilot approval and start are available **only via CLI**. A dedicated admin-only UI and CLI now manage the **same tenant-scoped TEST guardrail and allowlist rows**. No new database schema, Production mutation or WhatsApp provider send is needed to install these controls.
+
+### Existing status output: how to read it
+
+`ready` means WACRM connection state, not proof that the upstream gateway currently routes to that session. `paused=true` blocks sending; caps of 3/hour, 10/day and first-touch 1/day are TEST guardrails. `active_admissions=0` means no recipient can pass the enforced pilot admission check. `same_identity_ready_connections=5` is a real duplicate-identity warning and must be reviewed before activation. `local_env_pilot_mode=enforce` means **only** that the CLI's process read `.env.local`. `runtime_mode_confirmed=false` is intentionally non-authoritative because a CLI cannot inspect another running Next.js process environment. The server-backed WACRM admin settings banner and the new protected pilot GET endpoint are the runtime truth.
+
+### Admin-only UI
+
+After syncing the branch and restarting the local Next.js server, open **Settings → WhatsApp → WhatsApp Web (OpenWA)**. For the pinned TEST connection `2dacee52-3486-4b47-96a0-fa4399ac0fb2` only, the new **DEV Pilot** panel exposes:
+- Server-verified `enforced` and active/paused state, current active approvals, unresolved outbound count and duplicate-identity count.
+- Editable **caps**, allowed only while paused: `hourly_cap 1..3`, `daily_cap 1..10`, `first_touch_daily_cap 0..1`, `minimum_interval_ms 15000..600000`, `jitter_ms 0..600000`. Warmup caps remain at or below chosen hourly/daily caps.
+- A consenting test recipient field that is **not stored as plaintext**, explicit consent checkbox and, if duplicate identity exists, an explicit session review acknowledgement; approval is hashed server-side, `workload=manual` only and expires in at most four hours.
+- **Start** requires actual server `OPENWA_PILOT_MODE=enforce`, paused ready connection, **exactly one unexpired manual grant**, no other active workload grant, no unsettled sends and safe caps. It unpauses the connection and records an audit event; it **does not dispatch a message**.
+- **Stop** pauses the connection and revokes all active pilot grants for that connection, with auditable state. Already in-flight provider sends may still complete.
+
+The generic OpenWA `resume` action is specifically blocked for this pinned TEST connection, to prevent bypass of admission and limit verification; use the DEV Pilot panel or verified CLI for activating it. Generic `pause` remains an extra emergency-stop mechanism but does not automatically revoke grants; prefer Pilot **Stop**.
+
+Only an authenticated WACRM owner/admin of the exact TEST tenant can call `GET/POST /api/whatsapp/connections/openwa/[connectionId]/pilot`. This route hard-pins both the TEST Supabase project and the TEST account/connection; it rejects any other project, account or connection. The browser receives counts/booleans/caps only, not recipient hashes or service credentials. A real Agent/Viewer HTTP-negative acceptance test is still **DEFERRED / NOT WAIVED**.
+
+### Terminal — same database controls
+
+```powershell
+git checkout refactor/service-platform-v2
+git pull origin refactor/service-platform-v2
+# Ensure .env.local points to https://pqirsnfupofhulmewakq.supabase.co.
+# Set OPENWA_PILOT_MODE=enforce then restart npm run dev.
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs status
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs limits --hourly=3 --daily=10 --first-touch=1 --interval-ms=15000 --jitter-ms=3000
+# Verify WACRM's server-side banner ON, review duplicate sessions, and obtain recipient consent.
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs grant --approver=YOUR_TEST_ADMIN_USER_UUID --consent-confirmed --ack-duplicate-sessions
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs activate --confirm-activate --runtime-verified --ack-duplicate-sessions
+# If anything is unclear, stop and revoke:
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs stop --confirm-stop
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs status
+```
+
+`grant` prompts for recipient interactively. **Never put recipient identities or any keys in terminal command arguments or logs.** `activate --runtime-verified` is an explicit **operator assertion** after observing the admin UI banner; the CLI still cannot prove the actual Next.js process environment. Use UI activation when possible because it checks enforce mode on the running server.
+
+**Global runtime caveat:** `OPENWA_PILOT_MODE=enforce` remains a **server environment safety gate**, and while enabled it checks admission on *all* OpenWA outbound sends from that WACRM instance. It is not a per-connection toggle and must never be changed to `off` as an emergency stop. The new UI/CLI controls activation on **one dedicated connection** by combining guardrail pause and scoped recipient grants; other OpenWA connections with no approved grants are denied while enforce mode is on. The Meta default/provider path remains unchanged.
+
+### Required verification before actual TEST message
+
+1. Verify current code HEAD CI (Lint, Typecheck, Test, Build, Meta regression); no status is assumed from a prior HEAD. Confirm server settings show **ON** after Next.js restart.
+2. Confirm exact gateway session is connected and duplicate identities investigated. Consent and receiving destination must be under operator control.
+3. Change caps only with the connection paused. Approve exactly one consenting manual recipient; verify approval count 1 while paused.
+4. Activate from UI or CLI, send **one** short text only via the existing WACRM Inbox and verify native ID, actual receipt and WACRM status; do not retry ambiguous outcomes.
+5. Stop/revoke, confirm zero active grants and paused guardrail state in both UI and CLI; record corresponding events and the send outcome.
+
+**Outstanding evidence:** dedicated UI route security/unit tests are implementation/CI evidence, not a substitute for actual TEST HTTP role-negative tests; cross-tenant negatives, reconnect persistence, webhook/Meta live regression and OW-12 remain pending. Formal SOF-43 still blocked. Separate DEV trial tracking: [SOF-45](https://linear.app/eproo/issue/SOF-45).
