@@ -151,8 +151,11 @@ describe('OW-13 server-enforced pilot admission (no real provider calls)', () =>
         return { data: null, error: null }
       })
       const pending = t.guarded.send(request)
+      // Attach rejection handling BEFORE advancing fake timers; otherwise
+      // Vitest records an unhandled rejection even when the assertion passes.
+      const rejection = expect(pending).rejects.toMatchObject({ code: 'connection_restricted' })
       await vi.advanceTimersByTimeAsync(75)
-      await expect(pending).rejects.toMatchObject({ code: 'connection_restricted' })
+      await rejection
       expect(admissionChecks).toBe(2)
       expect(t.send).not.toHaveBeenCalled()
     } finally {
