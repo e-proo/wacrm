@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Image from 'next/image'
-import { Loader2, LogOut, QrCode, RefreshCw, RotateCcw, Trash2, Webhook } from 'lucide-react'
+import { Loader2, LogOut, Pause, Play, QrCode, RefreshCw, RotateCcw, Trash2, Webhook } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useAuth } from '@/hooks/use-auth'
@@ -22,6 +22,7 @@ interface OpenWAConnection {
   status: string
   session_id: string | null
   engine: string | null
+  guardrail?: { manual_paused: boolean }
   provider_metadata?: {
     onboarding_stage?: string
     onboarding_failure_code?: string
@@ -153,7 +154,7 @@ export function OpenWAConnections() {
     } finally { setBusy(null) }
   }
 
-  async function action(connectionId: string, actionName: 'refresh' | 'reconnect' | 'logout' | 'configure_webhook') {
+  async function action(connectionId: string, actionName: 'refresh' | 'reconnect' | 'logout' | 'configure_webhook' | 'pause' | 'resume') {
     setBusy(`${actionName}:${connectionId}`)
     try {
       const response = await fetch(`/api/whatsapp/connections/openwa/${connectionId}`, {
@@ -169,6 +170,8 @@ export function OpenWAConnections() {
       }
       if (actionName === 'logout') setQr(null)
       if (actionName === 'configure_webhook') toast.success(w('webhookConfigured'))
+      if (actionName === 'pause') toast.success(w('sendingPaused'))
+      if (actionName === 'resume') toast.success(w('sendingResumed'))
       await load()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : w('actionFailed'))
@@ -249,12 +252,23 @@ export function OpenWAConnections() {
             <span className="block mt-1 break-all text-xs">{w('connectionReference')}: {connection.id} · Session: {connection.session_id || '—'}</span>
           </AlertDescription>
         </Alert>}
+        {connection.guardrail?.manual_paused && <Alert variant="destructive">
+          <AlertTitle>{w('sendingPaused')}</AlertTitle>
+          <AlertDescription>{w('pauseSendingHint')}</AlertDescription>
+        </Alert>}
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => action(connection.id, 'refresh')}><RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}</Button>
           {['creating', 'waiting_qr', 'authenticating', 'disconnected'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => showQr(connection.id)}><QrCode className="mr-2 h-4 w-4" />{w('showQr')}</Button>}
           {['disconnected', 'failed'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'reconnect')}><RotateCcw className="mr-2 h-4 w-4" />{w('reconnect')}</Button>}
           {connection.session_id && connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'configure_webhook')} disabled={busy === `configure_webhook:${connection.id}`}><Webhook className="mr-2 h-4 w-4" />{w('configureWebhook')}</Button>}
           {connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'logout')}><LogOut className="mr-2 h-4 w-4" />{w('logout')}</Button>}
+          {connection.guardrail?.manual_paused
+            ? <Button variant="outline" size="sm" onClick={() => action(connection.id, 'resume')} disabled={busy !== null}>
+                <Play className="mr-2 h-4 w-4" />{w('resumeSending')}
+              </Button>
+            : <Button variant="destructive" size="sm" onClick={() => action(connection.id, 'pause')}>
+                <Pause className="mr-2 h-4 w-4" />{w('pauseSending')}
+              </Button>}
           <Button variant="outline" size="sm" onClick={() => setPendingRemoval(connection)}
             disabled={busy !== null} className="text-destructive hover:text-destructive">
             <Trash2 className="mr-2 h-4 w-4" />{w('removeFromWacrm')}

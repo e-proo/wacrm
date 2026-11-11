@@ -262,6 +262,26 @@ const labels = {
     "en": "OpenWA webhook configured successfully",
     "ar": "تم إعداد Webhook الخاص بـOpenWA بنجاح"
   },
+  "pauseSending": {
+    "en": "Pause sending",
+    "ar": "إيقاف الإرسال"
+  },
+  "resumeSending": {
+    "en": "Resume sending",
+    "ar": "استئناف الإرسال"
+  },
+  "sendingPaused": {
+    "en": "OpenWA sending is paused",
+    "ar": "تم إيقاف الإرسال عبر OpenWA"
+  },
+  "sendingResumed": {
+    "en": "OpenWA sending resumed",
+    "ar": "تم استئناف الإرسال عبر OpenWA"
+  },
+  "pauseSendingHint": {
+    "en": "New sends are blocked. In-flight provider requests may still complete; investigate ambiguous sends before resuming. Resuming does not bypass pilot allowlist.",
+    "ar": "تُمنع عمليات الإرسال الجديدة. قد تكتمل طلبات أُرسلت للمزود بالفعل؛ تحقق من الرسائل مجهولة النتيجة قبل الاستئناف. الاستئناف لا يتجاوز قائمة السماح للتجربة."
+  },
   "actionFailed": {
     "en": "Session action failed",
     "ar": "تعذّر تنفيذ إجراء الجلسة"
