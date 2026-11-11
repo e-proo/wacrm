@@ -272,7 +272,7 @@ export function OpenWAConnections() {
           {connection.session_id && connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'configure_webhook')} disabled={busy === `configure_webhook:${connection.id}`}><Webhook className="mr-2 h-4 w-4" />{w('configureWebhook')}</Button>}
           {connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'logout')}><LogOut className="mr-2 h-4 w-4" />{w('logout')}</Button>}
           {connection.guardrail?.manual_paused
-            ? <Button variant="outline" size="sm" onClick={() => action(connection.id, 'resume')} disabled={busy !== null}>
+            ? connection.id !== '2dacee52-3486-4b47-96a0-fa4399ac0fb2' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'resume')} disabled={busy !== null}>
                 <Play className="mr-2 h-4 w-4" />{w('resumeSending')}
               </Button>
             : <Button variant="destructive" size="sm" onClick={() => action(connection.id, 'pause')}>
