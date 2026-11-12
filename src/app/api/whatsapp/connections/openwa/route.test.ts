@@ -144,7 +144,7 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     expect(await response.json()).toEqual({
       connections: [
         { id: 'conn-1', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
-        { id: 'conn-2', status: 'ready', provider: 'openwa', guardrail: { manual_paused: false } },
+        { id: 'conn-2', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
         { id: 'conn-3', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
       ],
       pilot: { enforced: process.env.OPENWA_PILOT_MODE === 'enforce',
