@@ -299,3 +299,55 @@ node --env-file=.env.local scripts/openwa-dev-pilot.mjs status
 5. Stop/revoke, confirm zero active grants and paused guardrail state in both UI and CLI; record corresponding events and the send outcome.
 
 **Outstanding evidence:** dedicated UI route security/unit tests are implementation/CI evidence, not a substitute for actual TEST HTTP role-negative tests; cross-tenant negatives, reconnect persistence, webhook/Meta live regression and OW-12 remain pending. Formal SOF-43 still blocked. Separate DEV trial tracking: [SOF-45](https://linear.app/eproo/issue/SOF-45).
+
+
+## 16. Dynamic TEST session pilot selection and Cloudflare gateway rotation — 2026-11-12
+
+**Motivation:** OpenWA's tunnel URL often rotates during local development; WACRM previously hard-coded the DEV Pilot panel, API and CLI to connection `2dacee52-3486-4b47-96a0-fa4399ac0fb2`. This prevented accepting newly created sessions. The operator requested reusable TEST Pilot controls on **all OpenWA sessions in their account**, not another fixed UUID.
+
+**Observed read-only TEST evidence:** new WACRM OpenWA connection `02527740-9806-45ae-b9b1-1354c25f1d3f` belongs to test account `8ed95309-96cd-4347-b725-bd8c5039ed4f`, with DB status `ready` and a non-null `session_id`, no unsettled `sending` rows, and **no guardrail configuration**. DB `ready` is not authoritative proof of current upstream reachability: verify from the OpenWA dashboard and WACRM Refresh before sending.
+
+### Implemented behavior (code verification separate from operator acceptance)
+
+- **WACRM admin-only API `/api/whatsapp/connections/openwa/{connectionId}/pilot`** accepts any **valid UUID scoped to the authenticated admin's tenant and OpenWA provider on the pinned TEST Supabase project**. Non-TEST environments and unauthorized tenants fail closed. No cross-tenant broad service-role lookup. No migration and no hard-coded connection ID in this server route.
+- **`GET` for an unconfigured session is read-only** and returns `configured=false`, with safe suggested caps. This must not be mistaken for a persisted guardrail. New `prepare` action requires explicit confirmation, an existing `ready/connected` session, no unresolved outbound messages or active admission; writes a **paused** guardrail with `3/hour, 10/day, 1 new recipient/day, 15000ms minimum interval, 3000ms jitter`, warmup/circuit defaults, and an audit entry. It **never** auto-grants a recipient or sends a message.
+- **Per-connection UI panel** is displayed on every OpenWA card **in TEST only** with a `Prepare Pilot` action for unconfigured sessions; existing `limits/grant/activate/stop` operate on the selected card. Approval remains an account+connection+recipient+workload-scoped SHA-256 hash expiring after max 4 hours. No approval from one connection is inherited by any other session or by a tunnel change.
+- **Generic OpenWA `resume` is blocked on TEST for every connection** to prevent a shortcut around the DEV Pilot approval and cap checks. Admin Pilot Start validates server `enforce`, exactly one unexpired `manual` grant, status `ready/connected`, session identity, zero unknown outcomes, caps, and explicit duplicate-identity review. Stop pauses and revokes approvals even after provider session loss or malformed pilot env.
+- **CLI** uses `list` to discover current TEST OpenWA connections in the established TEST account and `--connection=UUID` to target any connection for `status/prepare/limits/grant/activate/stop`. It pins project and established TEST account, not a particular session; it does not take contact phone or API secrets in command-line flags. It is a developer tool using a local TEST service-role key (never expose the key).
+- **Rotating Cloudflare tunnel URL:** the admin can use the existing top-level OpenWA URL/API key inputs, and then click **Update this connection's gateway URL** on the existing card. The action is TEST-only, validates HTTPS and allowed hosts, calls read-only `GET /api/sessions/{stored_session_id}` against the new URL with the new key, and updates **only that connection's** tenant-scoped encrypted gateway credentials **if the exact upstream session ID matches**. It **does not POST /sessions**, start/reconnect, replace signed webhook secrets, transfer messages, or create duplicate WhatsApp sessions. If no matching session is found, the update is rejected and existing credentials remain intact. Reconfigure signed inbound webhook URL separately if the WACRM public origin also changed.
+- **No automatic switching of old session identities**: WACRM `connection_id` and upstream OpenWA `session_id` are stable identities, while the tunnel URL is just a transport endpoint. Reusing the same OpenWA instance after a tunnel change should use the URL-update operation, **not another New Session**.
+- No changes to Production, Meta adapter, existing migrations, OpenWA local checkout or actual provider sessions. No auto-resend for ambiguous sends.
+
+### Operator procedure, one selected session (PowerShell)
+
+```powershell
+git checkout refactor/service-platform-v2
+git pull origin refactor/service-platform-v2
+# Ensure .env.local points to https://pqirsnfupofhulmewakq.supabase.co
+# Set OPENWA_PILOT_MODE=enforce and restart local npm run dev once.
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs list
+$connection = "02527740-9806-45ae-b9b1-1354c25f1d3f"
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs status --connection=$connection
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs prepare --connection=$connection --confirm-prepare
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs limits --connection=$connection --hourly=3 --daily=10 --first-touch=1 --interval-ms=15000 --jitter-ms=3000
+# Confirm the new upstream session is really connected; investigate any
+# duplicate-phone mapping; obtain consent and verify WACRM displays Enforced ON.
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs grant --connection=$connection --approver=YOUR_TEST_ADMIN_USER_UUID --consent-confirmed --ack-duplicate-sessions
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs activate --connection=$connection --confirm-activate --runtime-verified --ack-duplicate-sessions
+# Exactly one consensual manual test message from the WACRM Inbox ONLY.
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs stop --connection=$connection --confirm-stop
+node --env-file=.env.local scripts/openwa-dev-pilot.mjs status --connection=$connection
+```
+
+The `grant` command prompts for one consenting recipient in the terminal; **never paste that phone/JID into source control or Linear**. The `--ack-duplicate-sessions` flag is not evidence of actual gateway identity verification. The CLI `--runtime-verified` argument remains an explicit human confirmation of the server UI; the CLI cannot read another process's environment.
+
+### Testing and gates
+
+- [ ] CI checks **on the exact final HEAD** (Lint, Typecheck, Vitest, Meta regression, Build) all completed/success.
+- [ ] Admin UI shows `configured=false` for a fresh connection, then `prepare` produces an actual paused guardrail without any grant.
+- [ ] Wrong account, absent provider connection, invalid UUID, Production URL and unauthenticated role cannot change pilot controls.
+- [ ] URL rotation with wrong session ID does not change encrypted credentials; exact upstream session ID updates URL/key only.
+- [ ] No older connection loses its grant, state or guardrail setting when preparing a different connection; no unapproved recipient can send while `enforce` is ON.
+- [ ] Actual gateway status, one manually approved send/ACK, duplicate checks, STOP/revoke/persistence verified on TEST.
+
+**This change lifts the *hard-coded pilot connection* blocker only; it does NOT close** [SOF-46](https://linear.app/eproo/issue/SOF-46) upstream `Socket` startup investigation, [SOF-44](https://linear.app/eproo/issue/SOF-44) live Agent/Viewer negative tests, [SOF-41](https://linear.app/eproo/issue/SOF-41) OW-12 live acceptance or formal [SOF-43](https://linear.app/eproo/issue/SOF-43) GO/NO-GO.
