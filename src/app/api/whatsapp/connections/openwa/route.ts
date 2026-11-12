@@ -46,7 +46,10 @@ export async function GET() {
     if (guardrailError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA emergency stop state', guardrailError)
     const pauseByConnection = new Map<string, boolean>((guardrails ?? []).map((row) => [row.connection_id, row.manual_paused === true] as const))
     const connections = (data ?? []).map((row) => ({ ...row, guardrail: { manual_paused: pauseByConnection.get(row.id) === true } }))
-    return NextResponse.json({ connections, pilot: { enforced: openWAPilotEnforcementEnabled() } }, { headers: noStore })
+    let devMode = false
+    try { devMode = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname === 'pqirsnfupofhulmewakq.supabase.co' }
+    catch { /* TEST-only pilot controls remain hidden */ }
+    return NextResponse.json({ connections, pilot: { enforced: openWAPilotEnforcementEnabled(), devMode } }, { headers: noStore })
   } catch (error) {
     return errorResponse(error)
   }
