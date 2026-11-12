@@ -82,3 +82,10 @@ OW-13 may be **prepared in parallel** with OW-12 acceptance, but its actual boun
 See [08_OW13_BOUNDED_PILOT_PREPARATION.md](08_OW13_BOUNDED_PILOT_PREPARATION.md) for proposed waves, admission gates, monitoring, incident stop/rollback procedure and report template.
 
 Linear: [SOF-42 / preparation](https://linear.app/eproo/issue/SOF-42/ow-13-prep-prepare-bounded-openwa-pilot-controls-monitoring-and) In Progress; [SOF-43 / execution](https://linear.app/eproo/issue/SOF-43/ow-13-execute-bounded-openwa-pilot-after-ow-12-live-acceptance-not) Todo, blocked by SOF-41 and SOF-42. **No** live pilot or Production changes authorized.
+
+
+## OW-14 preparation addendum — 2026-11-12 (planning only; NO-GO)
+
+At the owner's direction the remaining OW-12 and formal OW-13 live tests are **deferred, not waived**. Production readiness can be planned in parallel but not certified or executed. The detailed P0–P5, W01–W10 implementation and governance plan is [10_OW14_PRODUCTION_READINESS_AND_ROLLOUT_PLAN.md](10_OW14_PRODUCTION_READINESS_AND_ROLLOUT_PLAN.md). Its evidence/governance packet is [11_OW14_RELEASE_DECISION_TEMPLATE.md](11_OW14_RELEASE_DECISION_TEMPLATE.md).
+
+The current GitHub implementation CI/migration replay and TEST-only migration state support preparation, **not a formal GO**. Required before any Production activation: SOF-41 `live acceptance complete`, SOF-43 `bounded pilot accepted`, all scoped role/security and provider/webhook/Meta regressions, operations/backup/capacity/monitoring, approved unofficial-provider warning and current NOTE-001 security review with independent release sign-off. No Production environment, migration, secret or gateway changes are authorized by this document.
