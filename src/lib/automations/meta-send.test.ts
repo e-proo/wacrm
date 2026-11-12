@@ -75,7 +75,7 @@ describe('agent/automation message reservation reconciliation safety', () => {
       table: 'messages', payload: { status: 'failed' },
       filters: {
         id: 'reserved-bot-1', conversation_id: 'conv-1', provider: 'openwa',
-        status: 'sending', provider_message_id: null,
+        status: 'sending', provider_message_id: null, message_id: null,
       },
     }])
   })
