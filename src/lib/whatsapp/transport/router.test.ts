@@ -42,6 +42,15 @@ describe('provider-neutral outbound router', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects an archived same-account OpenWA session before opening provider credentials', async () => {
+    await expect(resolveWhatsAppTransport(dbForConnection({
+      id: 'ow-old', account_id: 'acct-1', provider: 'openwa',
+      archived_at: '2026-11-12T00:00:00.000Z',
+    }), 'acct-1', 'ow-old')).rejects.toMatchObject({ code: 'connection_restricted' })
+    expect(supabaseAdmin).not.toHaveBeenCalled()
+    expect(resolveOpenWATransport).not.toHaveBeenCalled()
+  })
+
   it('rejects cross-account connection BEFORE opening privileged credentials', async () => {
     await expect(resolveWhatsAppTransport(dbForConnection({ id: 'ow-1', account_id: 'acct-other', provider: 'openwa' }), 'acct-1', 'ow-1')).rejects.toMatchObject({ code: 'authentication_or_configuration' })
     expect(supabaseAdmin).not.toHaveBeenCalled()
