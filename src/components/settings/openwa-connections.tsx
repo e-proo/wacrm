@@ -39,7 +39,7 @@ interface OpenWAApiPayload extends Record<string, unknown> {
   stage?: string
   reconciliation_required?: boolean
   connections?: OpenWAConnection[]
-  pilot?: { enforced: boolean }
+  pilot?: { enforced: boolean; devMode: boolean }
   connection?: { id: string }
   qr?: string
   expires_at?: string
@@ -51,6 +51,7 @@ export function OpenWAConnections() {
   const w = useWhatsAppLabels()
   const [connections, setConnections] = useState<OpenWAConnection[]>([])
   const [pilotEnforced, setPilotEnforced] = useState<boolean | null>(null)
+  const [pilotDevMode, setPilotDevMode] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -76,11 +77,13 @@ export function OpenWAConnections() {
       if (!response.ok) throw new Error(data.error || w('loadOpenwa'))
       setConnections(data.connections ?? [])
       setPilotEnforced(typeof data.pilot?.enforced === 'boolean' ? data.pilot.enforced : null)
+      setPilotDevMode(data.pilot?.devMode === true)
       setLoadError(null)
     } catch (error) {
       const reason = error instanceof Error ? error.message : w('loadOpenwa')
       setLoadError(reason)
       setPilotEnforced(null)
+      setPilotDevMode(false)
       toast.error(reason)
     } finally {
       setLoading(false)
@@ -272,7 +275,7 @@ export function OpenWAConnections() {
           {connection.session_id && connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'configure_webhook')} disabled={busy === `configure_webhook:${connection.id}`}><Webhook className="mr-2 h-4 w-4" />{w('configureWebhook')}</Button>}
           {connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'logout')}><LogOut className="mr-2 h-4 w-4" />{w('logout')}</Button>}
           {connection.guardrail?.manual_paused
-            ? connection.id !== '2dacee52-3486-4b47-96a0-fa4399ac0fb2' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'resume')} disabled={busy !== null}>
+            ? !pilotDevMode && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'resume')} disabled={busy !== null}>
                 <Play className="mr-2 h-4 w-4" />{w('resumeSending')}
               </Button>
             : <Button variant="destructive" size="sm" onClick={() => action(connection.id, 'pause')}>
@@ -283,7 +286,7 @@ export function OpenWAConnections() {
             <Trash2 className="mr-2 h-4 w-4" />{w('removeFromWacrm')}
           </Button>
         </div>
-        <OpenWAPilotControls connectionId={connection.id} />
+        {pilotDevMode && <OpenWAPilotControls connectionId={connection.id} />}
         {qr?.connectionId === connection.id && <div className="rounded-md border p-4">
           <p className="mb-3 text-sm font-medium">{w('qrPayload')}</p>
           <Image src={qr.value} alt={w('qrPayload')} width={256} height={256} unoptimized className="rounded bg-white p-2" />
