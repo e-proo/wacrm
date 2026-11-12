@@ -335,8 +335,8 @@ const labels = {
     "ar": "جارٍ تحميل إعدادات التجربة…"
   },
   "devPilotRuntimeNote": {
-    "en": "TEST only. The Next.js server must run in enforce mode; the browser cannot change server environment variables.",
-    "ar": "يعمل هذا التحكم على TEST فقط. وضع enforce على خادم Next.js مطلوب، ولا يمكن تغييره من واجهة المتصفح."
+    "en": "On this TEST project, recipient allowlist enforcement is automatic. Use the session-specific Start/Stop controls below. Approval is required before the first send; unapproved OpenWA sends from other TEST sessions are blocked.",
+    "ar": "حماية قائمة سماح المستلمين مفعّلة تلقائيًا على مشروع TEST. استخدم أزرار بدء وإيقاف الجلسة أدناه. لا يُسمح بإرسال رسالة قبل اعتماد المستلم، وتُمنع الرسائل غير المعتمدة من جلسات TEST الأخرى."
   },
   "devPilotState": {
     "en": "Pilot",
