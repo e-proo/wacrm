@@ -129,7 +129,7 @@ describe('OW-13 admin-only emergency stop visibility', () => {
       select: () => connQuery,
       eq: (field: string, value: unknown) => { connectionFilters.push([field, value]); return connQuery },
       is: () => connQuery,
-      order: async () => ({ data: [{ id: 'conn-1', status: 'ready', provider: 'openwa' }, { id: 'conn-2', status: 'ready', provider: 'openwa' }], error: null }),
+      order: async () => ({ data: [{ id: 'conn-1', status: 'ready', provider: 'openwa' }, { id: 'conn-2', status: 'ready', provider: 'openwa' }, { id: 'conn-3', status: 'ready', provider: 'openwa' }], error: null }),
     }
     const guardrailQuery: Record<string, unknown> = {
       select: () => guardrailQuery,
@@ -145,6 +145,7 @@ describe('OW-13 admin-only emergency stop visibility', () => {
       connections: [
         { id: 'conn-1', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
         { id: 'conn-2', status: 'ready', provider: 'openwa', guardrail: { manual_paused: false } },
+        { id: 'conn-3', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
       ],
       pilot: { enforced: process.env.OPENWA_PILOT_MODE === 'enforce',
         devMode: process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co' },
