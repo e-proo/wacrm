@@ -10,6 +10,7 @@ import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-
 import { useWhatsAppLabels } from './whatsapp-labels'
 import { OpenWAPilotControls } from './openwa-pilot-controls'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -23,7 +24,7 @@ interface OpenWAConnection {
   status: string
   session_id: string | null
   engine: string | null
-  guardrail?: { manual_paused: boolean }
+  guardrail?: { manual_paused: boolean; pilot_enabled: boolean }
   provider_metadata?: {
     onboarding_stage?: string
     onboarding_failure_code?: string
@@ -250,7 +251,7 @@ export function OpenWAConnections() {
       <CardContent className="space-y-4">
         <Alert><AlertTitle>{w('onboarding')}</AlertTitle><AlertDescription>{w('onboardingDesc')}</AlertDescription></Alert>
         {pilotEnforced !== null && <Alert variant={pilotEnforced ? 'default' : 'destructive'}>
-          <AlertTitle>{w(pilotEnforced ? 'pilotEnforceOn' : 'pilotEnforceOff')}</AlertTitle>
+          <AlertTitle>{w(pilotDevMode ? 'devPilotPerSessionTitle' : pilotEnforced ? 'pilotEnforceOn' : 'pilotEnforceOff')}</AlertTitle>
           <AlertDescription>{w(pilotDevMode ? 'devPilotAutoEnforceHint' : pilotEnforced ? 'pilotEnforceOnHint' : 'pilotEnforceOffHint')}</AlertDescription>
         </Alert>}
         <div className="grid gap-3 md:grid-cols-2">
@@ -310,7 +311,14 @@ export function OpenWAConnections() {
     </div>}
 
     {connections.map((connection) => <Card key={connection.id}>
-      <CardHeader><CardTitle className="text-base">{connection.display_name || 'WhatsApp Web'}</CardTitle><CardDescription>{w('status')} {(['creating', 'waiting_qr', 'authenticating', 'ready', 'connected', 'disconnected', 'reconnecting', 'restricted', 'failed', 'logged_out'] as const).includes(connection.status as 'ready') ? w(connection.status as 'creating' | 'waiting_qr' | 'authenticating' | 'ready' | 'connected' | 'disconnected' | 'reconnecting' | 'restricted' | 'failed' | 'logged_out') : connection.status}{connection.phone_identity ? ` · ${connection.phone_identity}` : ''}</CardDescription></CardHeader>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base">{connection.display_name || 'WhatsApp Web'}</CardTitle>
+          {pilotDevMode && <Badge variant={connection.guardrail?.pilot_enabled === false ? 'secondary' : 'outline'}>
+            {w(connection.guardrail?.pilot_enabled === false ? 'devPilotNormalMode' : 'devPilotProtected')}
+          </Badge>}
+        </div>
+        <CardDescription>{w('status')} {(['creating', 'waiting_qr', 'authenticating', 'ready', 'connected', 'disconnected', 'reconnecting', 'restricted', 'failed', 'logged_out'] as const).includes(connection.status as 'ready') ? w(connection.status as 'creating' | 'waiting_qr' | 'authenticating' | 'ready' | 'connected' | 'disconnected' | 'reconnecting' | 'restricted' | 'failed' | 'logged_out') : connection.status}{connection.phone_identity ? ` · ${connection.phone_identity}` : ''}</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         {connection.provider_metadata?.onboarding_reconciliation_required && <Alert variant="destructive">
           <AlertTitle>{w('reconciliationTitle')}</AlertTitle>

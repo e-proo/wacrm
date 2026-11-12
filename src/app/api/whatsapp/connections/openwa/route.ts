@@ -41,13 +41,18 @@ export async function GET() {
     // Expose only the scoped pause state to authorized admins; no hashes.
     const { data: guardrails, error: guardrailError } = await adminDb
       .from('whatsapp_connection_guardrails')
-      .select('connection_id, manual_paused')
+      .select('connection_id, manual_paused, pilot_enabled')
       .eq('account_id', accountId)
     if (guardrailError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA emergency stop state', guardrailError)
-    const pauseByConnection = new Map<string, boolean>((guardrails ?? []).map((row) => [row.connection_id, row.manual_paused === true] as const))
+    const guardrailByConnection = new Map((guardrails ?? []).map((row) => [row.connection_id, row] as const))
     // A new OpenWA session without a guardrail row is fail-closed: the UI
     // must not claim sending is enabled before explicit TEST pilot setup.
-    const connections = (data ?? []).map((row) => ({ ...row, guardrail: { manual_paused: pauseByConnection.get(row.id) !== false } }))
+    const connections = (data ?? []).map((row) => ({
+      ...row, guardrail: {
+        manual_paused: guardrailByConnection.get(row.id)?.manual_paused !== false,
+        pilot_enabled: guardrailByConnection.get(row.id)?.pilot_enabled !== false,
+      },
+    }))
     const devMode = isOpenWATestProject()
     return NextResponse.json({ connections, pilot: {
       enforced: openWAPilotEnforcementEnabled(),

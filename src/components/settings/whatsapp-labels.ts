@@ -278,6 +278,10 @@ const labels = {
     "en": "The pilot recipient allowlist is NOT being enforced. Do not resume the dedicated TEST pilot connection until the server is restarted in enforce mode and the recipient is approved.",
     "ar": "قائمة سماح المستلمين الخاصة بالتجربة غير مفروضة. لا تستأنف اتصال TEST المخصص قبل تشغيل الخادم بوضع enforce واعتماد المستلم التجريبي."
   },
+  "devPilotPerSessionTitle": {
+    "en": "TEST Pilot — per-session protection",
+    "ar": "حماية Pilot في TEST — لكل جلسة بشكل مستقل"
+  },
   "devPilotModeTitle": {
     "en": "Pilot mode for this OpenWA session",
     "ar": "وضع Pilot لجلسة OpenWA هذه"
