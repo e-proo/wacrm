@@ -3,6 +3,7 @@ import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
 const h = vi.hoisted(() => ({
   auth: vi.fn(),
+  refresh: vi.fn(),
   envMode: { enabled: true, invalid: false },
   connection: { id: '2dacee52-3486-4b47-96a0-fa4399ac0fb2', status: 'ready',
     session_id: 'session-1' as string | null, phone_identity: '123456789', archived_at: null as string | null },
@@ -17,6 +18,9 @@ const h = vi.hoisted(() => ({
 
 vi.mock('@/lib/whatsapp/transport/openwa/session-auth', () => ({
   requireOpenWASessionAdmin: h.auth,
+}))
+vi.mock('@/lib/whatsapp/transport/openwa/session-lifecycle', () => ({
+  refreshOpenWAConnectionStatus: h.refresh,
 }))
 vi.mock('@/lib/whatsapp/transport/guardrails', () => ({
   isOpenWATestProject: () => process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co',
@@ -104,6 +108,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     h.duplicates = 1
     h.envMode.enabled = true
     h.envMode.invalid = false
+    h.refresh.mockResolvedValue({ status: 'ready', phoneIdentity: '123456789' })
     process.env.NEXT_PUBLIC_SUPABASE_URL = TEST_URL
     h.auth.mockResolvedValue({ accountId: ACCOUNT, user: { id: USER },
       adminDb: { from: vi.fn(dbFrom) } })
@@ -227,12 +232,30 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect((await POST(request({ action: 'activate' }), context())).status).toBe(409)
     expect(h.calls).toEqual([])
   })
+  it('refuses start if OpenWA gateway no longer reports ready', async () => {
+    h.active = 1
+    h.refresh.mockResolvedValue({ status: 'disconnected' })
+    const response = await POST(request({ action: 'activate' }), context())
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ code: 'pilot_gateway_not_ready' })
+    expect(h.guard.manual_paused).toBe(true)
+    expect(h.calls).toEqual([])
+  })
+  it('keeps the session paused when live gateway verification fails', async () => {
+    h.active = 1
+    h.refresh.mockRejectedValue(new Error('gateway timed out'))
+    const response = await POST(request({ action: 'activate' }), context())
+    expect(response.status).toBe(502)
+    expect(h.guard.manual_paused).toBe(true)
+    expect(h.calls).toEqual([])
+  })
   it('activates a fully qualified paused connection and audits the operation', async () => {
     h.active = 1
     const response = await POST(request({ action: 'activate' }), context())
     expect(response.status).toBe(200)
     expect((await response.json()).active).toBe(true)
     expect(h.guard.manual_paused).toBe(false)
+    expect(h.refresh).toHaveBeenCalledWith(expect.anything(), ACCOUNT, CONNECTION)
     expect(h.calls).toContainEqual(expect.objectContaining({
       table: 'whatsapp_guardrail_events', type: 'insert',
       payload: expect.objectContaining({ decision: 'resumed', reason: 'ow13_dev_pilot_admin_activate' }),
