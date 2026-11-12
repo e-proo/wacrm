@@ -7,8 +7,7 @@ import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 type Context = { params: Promise<{ connectionId: string }> }
 const noStore = { 'Cache-Control': 'private, no-store, max-age=0' }
 const TEST_PROJECT = 'pqirsnfupofhulmewakq'
-const PILOT_CONNECTION = '2dacee52-3486-4b47-96a0-fa4399ac0fb2'
-const PILOT_ACCOUNT = '8ed95309-96cd-4347-b725-bd8c5039ed4f'
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MAX_HOURLY = 3
 const MAX_DAILY = 10
 const MAX_FIRST_TOUCH = 1
@@ -34,12 +33,12 @@ function fail(error: unknown) {
   return deny('OpenWA pilot control could not be completed; inspect server diagnostics', 502, 'pilot_control_error')
 }
 
-function assertPinnedTest(connectionId: string, accountId: string) {
+function assertTestConnectionId(connectionId: string) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   let project: string | undefined
   try { project = new URL(url ?? '').hostname } catch { /* reject below */ }
-  if (project !== `${TEST_PROJECT}.supabase.co` || connectionId !== PILOT_CONNECTION || accountId !== PILOT_ACCOUNT) {
-    throw new WhatsAppTransportError('connection_restricted', 'This DEV pilot is restricted to its pinned TEST connection')
+  if (project !== `${TEST_PROJECT}.supabase.co` || !UUID.test(connectionId)) {
+    throw new WhatsAppTransportError('connection_restricted', 'DEV pilot controls are available only on TEST')
   }
 }
 
@@ -63,7 +62,14 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     .select('manual_paused,hourly_cap,daily_cap,first_touch_daily_cap,minimum_interval_ms,jitter_ms,warmup_hourly_cap,warmup_daily_cap')
     .eq('connection_id', connectionId).eq('account_id', accountId).maybeSingle()
   checkDb(ge, 'guardrail')
-  if (!guard) throw new WhatsAppTransportError('connection_restricted', 'Pilot limits have not been configured')
+  // Newly created sessions have no guardrails until an admin prepares them.
+  // A missing row must not silently inherit permissive schema defaults.
+  const configured = Boolean(guard)
+  const safeGuard = guard ?? {
+    manual_paused: true, hourly_cap: MAX_HOURLY, daily_cap: MAX_DAILY,
+    first_touch_daily_cap: MAX_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
+    jitter_ms: 3000, warmup_hourly_cap: MAX_HOURLY, warmup_daily_cap: MAX_DAILY,
+  }
 
   const { count: grants, error: ae } = await db.from('whatsapp_openwa_pilot_allowlist')
     .select('id', { count: 'exact', head: true }).eq('account_id', accountId)
@@ -91,12 +97,14 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
   // pilot flag was misconfigured. Unknown values deny activation/sends.
   let enforced = false
   try { enforced = openWAPilotEnforcementEnabled() } catch { enforced = false }
-  return { connection, guard, grants: grants ?? 0, manualGrants: manualGrants ?? 0, pending: pending ?? 0, duplicates, enforced,
-    active: enforced && !guard.manual_paused && (grants ?? 0) > 0 }
+  return { connection, guard: safeGuard, configured, grants: grants ?? 0, manualGrants: manualGrants ?? 0,
+    pending: pending ?? 0, duplicates, enforced,
+    active: configured && enforced && !safeGuard.manual_paused && (grants ?? 0) > 0 }
 }
 
 function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
-  return { connectionId: PILOT_CONNECTION, status: s.connection.status, enforced: s.enforced,
+  return { connectionId: s.connection.id, configured: s.configured,
+    status: s.connection.status, enforced: s.enforced,
     active: s.active, paused: s.guard.manual_paused, guardrails: {
       hourly_cap: s.guard.hourly_cap, daily_cap: s.guard.daily_cap,
       first_touch_daily_cap: s.guard.first_touch_daily_cap,
@@ -126,7 +134,7 @@ export async function GET(_request: Request, context: Context) {
   try {
     const { connectionId } = await context.params
     const { accountId, adminDb } = await requireOpenWASessionAdmin()
-    assertPinnedTest(connectionId, accountId)
+    assertTestConnectionId(connectionId)
     return NextResponse.json(await snapshot(adminDb, accountId, connectionId).then(safeStatus), { headers: noStore })
   } catch (error) { return fail(error) }
 }
@@ -135,20 +143,44 @@ export async function POST(request: Request, context: Context) {
   try {
     const { connectionId } = await context.params
     const { accountId, adminDb, user } = await requireOpenWASessionAdmin()
-    assertPinnedTest(connectionId, accountId)
+    assertTestConnectionId(connectionId)
     const body = await request.json() as Record<string, unknown>
     const action = body.action
-    if (!['limits', 'grant', 'activate', 'stop'].includes(String(action))) return deny('Unknown pilot action', 400)
+    if (!['prepare', 'limits', 'grant', 'activate', 'stop'].includes(String(action))) return deny('Unknown pilot action', 400)
     const s = await snapshot(adminDb, accountId, connectionId)
 
+    if (action === 'prepare') {
+      if (body.confirm_prepare !== true) return deny('Confirm connection-specific pilot preparation', 400)
+      if (!s.connection.session_id || !['ready', 'connected'].includes(s.connection.status) || s.pending !== 0 || s.grants !== 0) {
+        return deny('Pilot preparation requires an existing ready session without unsettled sends or active grants', 409)
+      }
+      const { error } = await adminDb.from('whatsapp_connection_guardrails')
+        .upsert({ connection_id: connectionId, account_id: accountId,
+          manual_paused: true, hourly_cap: MAX_HOURLY, daily_cap: MAX_DAILY,
+          first_touch_daily_cap: MAX_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
+          jitter_ms: 3000, warmup_until: new Date(Date.now() + 7 * 86400000).toISOString(),
+          warmup_hourly_cap: MAX_HOURLY, warmup_daily_cap: MAX_DAILY,
+          failure_window_minutes: 15, failure_min_attempts: 2,
+          failure_rate_threshold: 0.5, updated_at: new Date().toISOString() },
+        { onConflict: 'connection_id' })
+      checkDb(error, 'prepare')
+      const { error: auditError } = await adminDb.from('whatsapp_guardrail_events')
+        .insert({ account_id: accountId, connection_id: connectionId, workload: 'manual',
+          decision: 'paused', reason: 'ow13_dev_pilot_admin_prepare' })
+      checkDb(auditError, 'prepare-audit')
+      return NextResponse.json(safeStatus(await snapshot(adminDb, accountId, connectionId)), { headers: noStore })
+    }
+
     if (action === 'stop') {
-      // Pause first; revoke admissions second. Failed audit is explicit, not a fake success.
-      const { data: updated, error: pe } = await adminDb.from('whatsapp_connection_guardrails')
-        .update({ manual_paused: true, updated_at: new Date().toISOString() })
-        .eq('account_id', accountId).eq('connection_id', connectionId)
-        .select('connection_id').maybeSingle()
+      // STOP also works before an admin prepares this new session.
+      const { error: pe } = await adminDb.from('whatsapp_connection_guardrails')
+        .upsert({ connection_id: connectionId, account_id: accountId,
+          manual_paused: true,
+          ...(!s.configured ? { hourly_cap: MAX_HOURLY, daily_cap: MAX_DAILY,
+            first_touch_daily_cap: MAX_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
+            jitter_ms: 3000, warmup_hourly_cap: MAX_HOURLY, warmup_daily_cap: MAX_DAILY } : {}),
+          updated_at: new Date().toISOString() }, { onConflict: 'connection_id' })
       checkDb(pe, 'stop-pause')
-      if (!updated) throw new WhatsAppTransportError('connection_restricted', 'Missing guardrail')
       const { error: re } = await adminDb.from('whatsapp_openwa_pilot_allowlist')
         .update({ active: false }).eq('account_id', accountId).eq('connection_id', connectionId).eq('active', true)
       checkDb(re, 'stop-revoke')
@@ -160,7 +192,7 @@ export async function POST(request: Request, context: Context) {
     }
 
     if (action === 'limits') {
-      if (!s.guard.manual_paused) return deny('Pause the pilot before changing limits', 409)
+      if (!s.configured || !s.guard.manual_paused) return deny('Pause the pilot before changing limits', 409)
       const hourly = int(body.hourly_cap, 1, MAX_HOURLY, 'hourly')
       const daily = int(body.daily_cap, 1, MAX_DAILY, 'daily')
       const firstTouch = int(body.first_touch_daily_cap, 0, MAX_FIRST_TOUCH, 'first touch')
@@ -178,7 +210,7 @@ export async function POST(request: Request, context: Context) {
     }
 
     if (action === 'grant') {
-      if (!s.enforced || !s.guard.manual_paused) return deny('Enable the server-side gate and pause before granting a recipient', 409)
+      if (!s.configured || !s.enforced || !s.guard.manual_paused) return deny('Enable the server-side gate and pause before granting a recipient', 409)
       if (body.consent_confirmed !== true) return deny('Recipient consent is required', 400)
       if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) return deny('Duplicate connection identity must be reviewed', 409)
       if (!s.connection.session_id || !['ready','connected'].includes(s.connection.status) || s.pending !== 0 || s.grants !== 0) {
@@ -201,7 +233,7 @@ export async function POST(request: Request, context: Context) {
     }
 
     if (action === 'activate') {
-      if (!s.enforced || !s.guard.manual_paused || s.grants !== 1 || s.manualGrants !== 1 || s.pending !== 0 ||
+      if (!s.configured || !s.enforced || !s.guard.manual_paused || s.grants !== 1 || s.manualGrants !== 1 || s.pending !== 0 ||
           !s.connection.session_id || !['ready','connected'].includes(s.connection.status)) {
         return deny('Pilot activation requires enforce mode, one approval, paused/ready connection and zero unsettled sends', 409)
       }
