@@ -1,7 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AlertCircle, CheckCircle2, ChevronDown, Play, RefreshCw, ShieldCheck, Square, SlidersHorizontal } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -20,6 +22,7 @@ interface PilotState extends Record<string, unknown> {
   active_admissions: number
   unsettled_outbound: number
   same_identity_ready_connections: number
+  error?: string
   guardrails: {
     hourly_cap: number
     daily_cap: number
@@ -27,24 +30,50 @@ interface PilotState extends Record<string, unknown> {
     minimum_interval_ms: number
     jitter_ms: number
   }
-  error?: string
 }
+
+type RelatedConnection = { id: string; status: string; sessionId: string | null }
+type PilotAction = 'prepare' | 'limits' | 'grant' | 'activate' | 'stop'
+type PilotStep = 'protected' | 'pending' | 'needsStop' | 'verify' | 'prepare' | 'approve' | 'start' | 'active' | 'multiple'
 
 const defaultLimits = { hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
   minimum_interval_ms: 15000, jitter_ms: 3000 }
 
-export function OpenWAPilotControls({ connectionId }: { connectionId: string }) {
+/**
+ * Phone entry is friendlier than the provider JID: +country code and common
+ * separators are accepted in the browser, then sent as canonical digits.
+ * Verified @lid chat identities are never guessed or converted to phone JIDs.
+ */
+function normalizeTestRecipient(value: string): string | null {
+  const raw = value.trim()
+  if (/^[0-9]{5,20}@(c\.us|lid)$/.test(raw)) return raw
+  if (!/^\+?[0-9 ()-]+$/.test(raw)) return null
+  const digits = raw.replace(/[+ ()-]/g, '')
+  return /^[1-9][0-9]{6,14}$/.test(digits) ? digits : null
+}
+
+export function OpenWAPilotControls({
+  connectionId,
+  relatedConnections = [],
+}: {
+  connectionId: string
+  relatedConnections?: RelatedConnection[]
+}) {
   const w = useWhatsAppLabels()
   const [state, setState] = useState<PilotState | null>(null)
   const [limits, setLimits] = useState(defaultLimits)
   const [recipient, setRecipient] = useState('')
   const [consent, setConsent] = useState(false)
   const [duplicateAck, setDuplicateAck] = useState(false)
+  const [verified, setVerified] = useState(false)
+  const [verifiedStatus, setVerifiedStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [verifying, setVerifying] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const endpoint = `/api/whatsapp/connections/openwa/${connectionId}/pilot`
+  const normalizedRecipient = useMemo(() => normalizeTestRecipient(recipient), [recipient])
 
   const load = useCallback(async () => {
     try {
@@ -52,20 +81,47 @@ export function OpenWAPilotControls({ connectionId }: { connectionId: string }) 
       const data = await parseOpenWAApiResponse<PilotState>(res)
       if (!res.ok) throw new Error(data.error || 'Pilot status unavailable')
       setState(data)
-      setLimits({ hourly_cap: data.guardrails.hourly_cap, daily_cap: data.guardrails.daily_cap,
+      setLimits({
+        hourly_cap: data.guardrails.hourly_cap,
+        daily_cap: data.guardrails.daily_cap,
         first_touch_daily_cap: data.guardrails.first_touch_daily_cap,
-        minimum_interval_ms: data.guardrails.minimum_interval_ms, jitter_ms: data.guardrails.jitter_ms })
+        minimum_interval_ms: data.guardrails.minimum_interval_ms,
+        jitter_ms: data.guardrails.jitter_ms,
+      })
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Pilot status unavailable')
       setState(null)
+      setVerified(false)
     } finally { setLoading(false) }
   }, [endpoint])
 
   useEffect(() => { void load() }, [load])
 
-  async function submit(action: 'prepare' | 'limits' | 'grant' | 'activate' | 'stop') {
-    if (busy) return
+  // This is an actual read against the provider, not a copy of stale WACRM DB status.
+  async function verifyGateway() {
+    if (busy || verifying) return
+    setVerifying(true)
+    setError(null)
+    setNotice(null)
+    setVerified(false)
+    setVerifiedStatus(null)
+    try {
+      const res = await fetch(`/api/whatsapp/connections/openwa/${connectionId}`, { cache: 'no-store' })
+      const data = await parseOpenWAApiResponse<{ error?: string; status?: string }>(res)
+      if (!res.ok) throw new Error(data.error || w('devPilotVerifyFailed'))
+      setVerifiedStatus(data.status ?? null)
+      if (!['ready', 'connected'].includes(data.status ?? '')) throw new Error(w('devPilotVerifyNotReady'))
+      setVerified(true)
+      setNotice(w('devPilotVerifySuccess'))
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : w('devPilotVerifyFailed'))
+    } finally { setVerifying(false) }
+  }
+
+  async function submit(action: PilotAction) {
+    if (busy || verifying) return
     setBusy(true)
     setError(null)
     setNotice(null)
@@ -73,103 +129,224 @@ export function OpenWAPilotControls({ connectionId }: { connectionId: string }) 
       const body: Record<string, unknown> = { action }
       if (action === 'prepare') body.confirm_prepare = true
       if (action === 'limits') Object.assign(body, limits)
-      if (action === 'grant') Object.assign(body, { recipient: recipient.trim(), consent_confirmed: consent,
-        ack_duplicate_sessions: duplicateAck, hours: 4 })
+      if (action === 'grant') Object.assign(body, {
+        recipient: normalizedRecipient, consent_confirmed: consent,
+        ack_duplicate_sessions: duplicateAck, hours: 4,
+      })
       if (action === 'activate') body.ack_duplicate_sessions = duplicateAck
       const res = await fetch(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body), cache: 'no-store',
       })
       const data = await parseOpenWAApiResponse<PilotState>(res)
-      if (!res.ok) throw new Error(data.error || 'Pilot action rejected')
+      if (!res.ok) throw new Error(data.error || w('devPilotActionRejected'))
       setState(data)
       if (action === 'grant') { setRecipient(''); setConsent(false) }
+      if (action === 'stop') { setVerified(false); setDuplicateAck(false); setVerifiedStatus(null) }
       setNotice(w(action === 'prepare' ? 'devPilotPrepared' : action === 'stop' ? 'devPilotStopped'
         : action === 'activate' ? 'devPilotStarted'
         : action === 'grant' ? 'devPilotGranted' : 'devPilotLimitsSaved'))
       await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Pilot operation rejected')
+      setError(e instanceof Error ? e.message : w('devPilotActionRejected'))
     } finally { setBusy(false) }
   }
 
-  return <Card className="mt-4 border-dashed">
-    <CardHeader><CardTitle className="text-base">{w('devPilotTitle')}</CardTitle></CardHeader>
+  const step: PilotStep | null = !state ? null
+    : !state.enforced ? 'protected'
+    : state.unsettled_outbound > 0 ? 'pending'
+    : !state.paused && !state.active ? 'needsStop'
+    : state.active ? 'active'
+    : !verified ? 'verify'
+    : !state.configured ? 'prepare'
+    : state.active_admissions === 0 ? 'approve'
+    : state.active_admissions === 1 ? 'start'
+    : 'multiple'
+  const running = busy || verifying
+  const needsDuplicateReview = (state?.same_identity_ready_connections ?? 0) > 1
+  const canApprove = Boolean(state?.configured && state.enforced && state.paused && normalizedRecipient
+    && consent && verified && state.unsettled_outbound === 0 && (!needsDuplicateReview || duplicateAck))
+  const canStart = Boolean(state?.configured && state.enforced && state.paused && verified
+    && state.active_admissions === 1 && state.unsettled_outbound === 0
+    && (!needsDuplicateReview || duplicateAck))
+
+  return <Card className="border-border/70">
+    <CardHeader className="space-y-2 pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <CardTitle className="text-base">{w('devPilotEasyTitle')}</CardTitle>
+        <div className="flex flex-wrap items-center gap-2">
+          {state?.enforced && <Badge variant="outline"><ShieldCheck className="size-3" />{w('devPilotProtected')}</Badge>}
+          {state && <Badge variant={state.active ? 'default' : 'secondary'}>
+            {state.active ? w('devPilotActive') : w('devPilotPaused')}
+          </Badge>}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">{w('devPilotEasyHint')}</p>
+    </CardHeader>
+
     <CardContent className="space-y-4">
       {loading && <p className="text-sm text-muted-foreground">{w('devPilotLoading')}</p>}
-      {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
-      {notice && <Alert><AlertDescription>{notice}</AlertDescription></Alert>}
+      {error && <Alert variant="destructive"><AlertCircle className="size-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+      {notice && <Alert><CheckCircle2 className="size-4" /><AlertDescription>{notice}</AlertDescription></Alert>}
+
       {state && <>
-        <Alert variant={state.enforced ? 'default' : 'destructive'}>
-          <AlertTitle>{w(state.enforced ? 'pilotEnforceOn' : 'pilotEnforceOff')}</AlertTitle>
-          <AlertDescription>{w('devPilotRuntimeNote')}</AlertDescription>
-        </Alert>
-        <p className="text-sm">{w('devPilotState')}: <strong>{state.active ? w('devPilotActive') : w('devPilotInactive')}</strong>
-          {' · '}{w('devPilotPaused')}: {state.paused ? w('devPilotYes') : w('devPilotNo')}
-          {' · '}{w('devPilotGrants')}: {state.active_admissions}
-          {' · '}{w('devPilotPending')}: {state.unsettled_outbound}</p>
-        {state.same_identity_ready_connections > 1 && <Alert variant="destructive">
-          <AlertDescription>{w('devPilotDuplicateWarning')} ({state.same_identity_ready_connections})</AlertDescription>
-        </Alert>}
-        {!state.configured && <Alert>
-          <AlertTitle>{w('devPilotNeedsSetup')}</AlertTitle>
-          <AlertDescription>{w('devPilotSetupHint')}</AlertDescription>
-        </Alert>}
-        {!state.configured && <Button type="button" variant="outline"
-          disabled={busy || !['ready', 'connected'].includes(state.status) || state.unsettled_outbound !== 0}
-          onClick={() => void submit('prepare')}>{w('devPilotPrepare')}</Button>}
-        {state.configured && <>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
           {([
-            ['hourly_cap','devPilotHourly',1,3],
-            ['daily_cap','devPilotDaily',1,10],
-            ['first_touch_daily_cap','devPilotFirstTouch',0,1],
-            ['minimum_interval_ms','devPilotInterval',15000,600000],
-            ['jitter_ms','devPilotJitter',0,600000],
-          ] as const).map(([key,label,min,max]) => <div key={key} className="space-y-1">
-            <Label htmlFor={`pilot-${connectionId}-${key}`}>{w(label)}</Label>
-            <Input id={`pilot-${connectionId}-${key}`} type="number" min={min} max={max}
-              value={limits[key]} disabled={busy || !state.paused}
-              onChange={(e) => setLimits((prev) => ({ ...prev, [key]: Number(e.target.value) }))}/>
-          </div>)}
+            [w('devPilotVerifiedGateway'), verified ? w('devPilotYes') : w('devPilotNo')],
+            [w('devPilotGrants'), String(state.active_admissions)],
+            [w('devPilotPending'), String(state.unsettled_outbound)],
+            [w('devPilotHourly'), String(state.guardrails.hourly_cap)],
+          ] as const).map(([label, value]) =>
+            <div key={label} className="rounded-lg border bg-muted/30 p-3">
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className="mt-1 font-semibold tabular-nums">{value}</p>
+            </div>,
+          )}
         </div>
-        <Button type="button" variant="outline" disabled={busy || !state.paused} onClick={() => void submit('limits')}>
-          {w('devPilotSaveLimits')}
-        </Button>
-        <div className="space-y-2">
-          <Label htmlFor={`pilot-recipient-${connectionId}`}>{w('devPilotRecipient')}</Label>
-          <Input id={`pilot-recipient-${connectionId}`} type="text" autoComplete="off"
-            placeholder="12345678901 or 123456789@lid" value={recipient}
-            disabled={busy || !state.paused}
-            onChange={(e) => setRecipient(e.target.value)}/>
-          <p className="text-xs text-muted-foreground">{w('devPilotRecipientHint')}</p>
-          <div className="flex items-center gap-2">
-            <Checkbox id={`pilot-consent-${connectionId}`} checked={consent} disabled={busy || !state.paused}
-              onCheckedChange={(checked) => setConsent(checked === true)}/>
-            <Label htmlFor={`pilot-consent-${connectionId}`}>{w('devPilotConsent')}</Label>
+
+        <div className="grid grid-cols-4 gap-1.5 text-center text-xs">
+          {([
+            [w('devPilotStepVerify'), verified || step === 'active'],
+            [w('devPilotStepPrepare'), state.configured],
+            [w('devPilotStepApprove'), state.active_admissions === 1 || step === 'active'],
+            [w('devPilotStepStart'), step === 'active'],
+          ] as const).map(([label, complete], index) =>
+            <div key={label} className={`rounded-md px-1 py-2 ${complete ? 'bg-primary/10 text-foreground' : 'bg-muted/50 text-muted-foreground'}`}>
+              {complete ? <CheckCircle2 className="mx-auto mb-1 size-4" /> : <span className="mx-auto mb-1 block font-semibold">{index + 1}</span>}
+              {label}
+            </div>,
+          )}
+        </div>
+
+        {needsDuplicateReview && !state.active && <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+          <p className="font-medium">{w('devPilotDuplicateCount')} ({state.same_identity_ready_connections})</p>
+          <p className="mt-1 text-xs text-muted-foreground">{w('devPilotDuplicateExplain')}</p>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-sm font-medium underline underline-offset-4">{w('devPilotInspectSessions')}</summary>
+            <ul className="mt-2 space-y-2 text-xs">
+              {relatedConnections.map((connection) => <li key={connection.id} className="rounded-md border bg-background p-2">
+                <div className="font-medium">{connection.id === connectionId ? w('devPilotChosenSession') : w('devPilotOtherSession')} · {connection.status}</div>
+                <div className="break-all text-muted-foreground">WACRM: {connection.id}</div>
+                <div className="break-all text-muted-foreground">OpenWA: {connection.sessionId || '—'}</div>
+              </li>)}
+            </ul>
+            <p className="mt-2 text-xs text-muted-foreground">{w('devPilotDuplicateCompare')}</p>
+          </details>
+          <div className="mt-3 flex items-start gap-2">
+            <Checkbox id={`pilot-duplicate-${connectionId}`} checked={duplicateAck}
+              disabled={running} onCheckedChange={(v) => setDuplicateAck(v === true)} />
+            <Label htmlFor={`pilot-duplicate-${connectionId}`} className="text-sm leading-relaxed">{w('devPilotDuplicateAck')}</Label>
           </div>
-          {state.same_identity_ready_connections > 1 && <div className="flex items-center gap-2">
-            <Checkbox id={`pilot-duplicates-${connectionId}`} checked={duplicateAck} disabled={busy}
-              onCheckedChange={(checked) => setDuplicateAck(checked === true)}/>
-            <Label htmlFor={`pilot-duplicates-${connectionId}`}>{w('devPilotDuplicateAck')}</Label>
+        </div>}
+
+        {step === 'protected' && <Alert variant="destructive"><AlertDescription>{w('devPilotEnforceRequired')}</AlertDescription></Alert>}
+        {step === 'pending' && <Alert variant="destructive"><AlertDescription>{w('devPilotUnsettledBlocked')}</AlertDescription></Alert>}
+        {step === 'needsStop' && <Alert variant="destructive">
+          <AlertDescription>{w('devPilotNoGrantUnpaused')}</AlertDescription>
+        </Alert>}
+        {step === 'multiple' && <Alert variant="destructive"><AlertDescription>{w('devPilotTooManyGrants')}</AlertDescription></Alert>}
+
+        {step === 'verify' && <section className="space-y-2 rounded-lg border p-4">
+          <p className="font-semibold">{w('devPilotVerifyTitle')}</p>
+          <p className="text-sm text-muted-foreground">{w('devPilotVerifyDescription')}</p>
+          {verifiedStatus && <p className="text-sm">{w('status')} {verifiedStatus}</p>}
+          <Button disabled={running} onClick={() => void verifyGateway()}>
+            <RefreshCw className={`me-2 size-4 ${verifying ? 'animate-spin' : ''}`} />
+            {w('devPilotVerifyButton')}
+          </Button>
+        </section>}
+
+        {step === 'prepare' && <section className="space-y-2 rounded-lg border p-4">
+          <p className="font-semibold">{w('devPilotNeedsSetup')}</p>
+          <p className="text-sm text-muted-foreground">{w('devPilotSetupHint')}</p>
+          <Button disabled={running} onClick={() => void submit('prepare')}>{w('devPilotPrepare')}</Button>
+        </section>}
+
+        {step === 'approve' && <section className="space-y-3 rounded-lg border p-4">
+          <div>
+            <p className="font-semibold">{w('devPilotApproveTitle')}</p>
+            <p className="text-sm text-muted-foreground">{w('devPilotApproveDescription')}</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`pilot-recipient-${connectionId}`}>{w('devPilotRecipient')}</Label>
+            <Input id={`pilot-recipient-${connectionId}`} value={recipient} autoComplete="off"
+              dir="ltr" placeholder="+9677XXXXXXXX" disabled={running}
+              onChange={(e) => setRecipient(e.target.value)} />
+            <p className="text-xs text-muted-foreground">{w('devPilotRecipientFormat')}</p>
+            {recipient.trim() && !normalizedRecipient && <p className="text-xs text-destructive">{w('devPilotInvalidRecipient')}</p>}
+          </div>
+          <div className="flex items-start gap-2">
+            <Checkbox id={`pilot-consent-${connectionId}`} checked={consent} disabled={running}
+              onCheckedChange={(v) => setConsent(v === true)} />
+            <Label htmlFor={`pilot-consent-${connectionId}`} className="text-sm leading-relaxed">{w('devPilotConsent')}</Label>
+          </div>
+          {needsDuplicateReview && !duplicateAck &&
+            <p className="text-xs text-amber-600 dark:text-amber-400">{w('devPilotMustReviewDuplicates')}</p>}
+          <Button disabled={running || !canApprove} onClick={() => void submit('grant')}>
+            {w('devPilotGrant')}
+          </Button>
+        </section>}
+
+        {step === 'start' && <section className="space-y-3 rounded-lg border p-4">
+          <p className="font-semibold">{w('devPilotReadyToStart')}</p>
+          <p className="text-sm text-muted-foreground">{w('devPilotStartDescription')}</p>
+          {needsDuplicateReview && !duplicateAck &&
+            <p className="text-xs text-amber-600 dark:text-amber-400">{w('devPilotMustReviewDuplicates')}</p>}
+          <Button disabled={running || !canStart} onClick={() => void submit('activate')}>
+            <Play className="me-2 size-4" />{w('devPilotActivate')}
+          </Button>
+        </section>}
+
+        {step === 'active' && <section className="space-y-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4">
+          <p className="flex items-center gap-2 font-semibold"><CheckCircle2 className="size-5" />{w('devPilotNowActive')}</p>
+          <p className="text-sm text-muted-foreground">{w('devPilotSendOneMessage')}</p>
+          <Button variant="destructive" disabled={running} onClick={() => void submit('stop')}>
+            <Square className="me-2 size-4" />{w('devPilotStop')}
+          </Button>
+        </section>}
+
+        {step !== 'active' && (state.configured || state.active_admissions > 0 || !state.paused) &&
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" disabled={running} onClick={() => void submit('stop')}>
+              <Square className="me-2 size-4" />{w('devPilotStop')}
+            </Button>
+            {verified && <Button size="sm" variant="ghost" disabled={running}
+              onClick={() => void verifyGateway()}><RefreshCw className="me-2 size-4" />{w('devPilotReverify')}</Button>}
           </div>}
-          <Button type="button" variant="outline"
-            disabled={busy || !state.enforced || !state.paused || !consent || !recipient.trim() ||
-              (state.same_identity_ready_connections > 1 && !duplicateAck)}
-            onClick={() => void submit('grant')}>{w('devPilotGrant')}</Button>
+
+        {state.configured && <details className="rounded-lg border px-4 py-3">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium">
+            <span className="flex items-center gap-2"><SlidersHorizontal className="size-4" />{w('devPilotAdvanced')}</span>
+            <ChevronDown className="size-4 text-muted-foreground" />
+          </summary>
+          <p className="mt-2 text-xs text-muted-foreground">{w('devPilotLimitsHelp')}</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {([
+              ['hourly_cap', 'devPilotHourly', 1, 3],
+              ['daily_cap', 'devPilotDaily', 1, 10],
+              ['first_touch_daily_cap', 'devPilotFirstTouch', 0, 1],
+              ['minimum_interval_ms', 'devPilotInterval', 15000, 600000],
+              ['jitter_ms', 'devPilotJitter', 0, 600000],
+            ] as const).map(([key, label, min, max]) =>
+              <div key={key} className="space-y-1">
+                <Label htmlFor={`pilot-${connectionId}-${key}`}>{w(label)}</Label>
+                <Input id={`pilot-${connectionId}-${key}`} type="number" min={min} max={max}
+                  value={limits[key]} disabled={running || !state.paused}
+                  onChange={(e) => setLimits((prev) => ({ ...prev, [key]: Number(e.target.value) }))} />
+              </div>,
+            )}
+          </div>
+          <Button className="mt-3" size="sm" variant="outline" disabled={running || !state.paused}
+            onClick={() => void submit('limits')}>{w('devPilotSaveLimits')}</Button>
+        </details>}
+
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{w('devPilotStopHint')}</span>
+          <Button size="sm" variant="ghost" disabled={running}
+            onClick={() => { setLoading(true); void load() }}>
+            <RefreshCw className="me-2 size-3" />{w('refresh')}
+          </Button>
         </div>
-        </>}
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" disabled={busy || !state.configured || !state.enforced || !state.paused ||
-            state.active_admissions !== 1 || state.unsettled_outbound !== 0 ||
-            (state.same_identity_ready_connections > 1 && !duplicateAck)}
-            onClick={() => void submit('activate')}>{w('devPilotActivate')}</Button>
-          <Button type="button" variant="destructive" disabled={busy}
-            onClick={() => void submit('stop')}>{w('devPilotStop')}</Button>
-          <Button type="button" variant="outline" disabled={busy}
-            onClick={() => { setLoading(true); void load() }}>{w('refresh')}</Button>
-        </div>
-        <p className="text-xs text-muted-foreground">{w('devPilotStopHint')}</p>
       </>}
     </CardContent>
   </Card>
