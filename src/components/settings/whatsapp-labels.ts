@@ -298,6 +298,154 @@ const labels = {
     "en": "The TEST server enforces the pilot recipient allowlist automatically. Start or stop each connection here; no OPENWA_PILOT_MODE edit is needed. Other unapproved OpenWA sends on TEST may be blocked.",
     "ar": "حماية قائمة السماح مفعّلة تلقائيًا على خادم TEST. تستطيع التحكم في بدء وإيقاف كل جلسة من هذه اللوحة؛ لا حاجة لتغيير OPENWA_PILOT_MODE في ملفات البيئة. قد تُمنع عمليات OpenWA الأخرى غير المعتمدة في TEST."
   },
+  "devPilotEasyTitle": {
+    "en": "OpenWA test sending",
+    "ar": "تجربة إرسال OpenWA"
+  },
+  "devPilotEasyHint": {
+    "en": "Follow the steps to test one session safely. Existing limits are preserved and can be adjusted under Advanced settings.",
+    "ar": "اتبع الخطوات بالتسلسل لاختبار جلسة واحدة بأمان. تُحفظ الحدود السابقة ويمكن تغييرها من الإعدادات المتقدمة."
+  },
+  "devPilotProtected": {
+    "en": "Allowlist protected",
+    "ar": "الحماية مفعلة"
+  },
+  "devPilotVerifiedGateway": {
+    "en": "Gateway verified",
+    "ar": "تحقق الاتصال"
+  },
+  "devPilotStepVerify": {
+    "en": "Verify",
+    "ar": "تحقق"
+  },
+  "devPilotStepPrepare": {
+    "en": "Prepare",
+    "ar": "جهّز"
+  },
+  "devPilotStepApprove": {
+    "en": "Approve",
+    "ar": "اعتمد"
+  },
+  "devPilotStepStart": {
+    "en": "Start",
+    "ar": "ابدأ"
+  },
+  "devPilotDuplicateCount": {
+    "en": "Connections sharing this number",
+    "ar": "اتصالات للرقم نفسه"
+  },
+  "devPilotDuplicateExplain": {
+    "en": "This is not a failure. Multiple sessions are registered for this phone. Compare the OpenWA session ID before approving a recipient.",
+    "ar": "هذه ليست رسالة فشل. توجد أكثر من جلسة مسجلة لنفس الرقم. تحقق من معرّف الجلسة المستخدمة في OpenWA قبل اعتماد المستلم."
+  },
+  "devPilotInspectSessions": {
+    "en": "Show sessions and compare IDs",
+    "ar": "عرض الجلسات ومقارنة المعرّفات"
+  },
+  "devPilotChosenSession": {
+    "en": "Selected session",
+    "ar": "الجلسة المختارة"
+  },
+  "devPilotOtherSession": {
+    "en": "Other session",
+    "ar": "جلسة أخرى"
+  },
+  "devPilotDuplicateCompare": {
+    "en": "Match the selected OpenWA session ID with the OpenWA dashboard. Do not delete or recreate sessions merely because the Cloudflare URL changed.",
+    "ar": "طابق معرّف جلسة OpenWA المختارة مع لوحة OpenWA. لا تحذف الجلسات أو تعاود إنشاء جلسة بسبب تغيير رابط Cloudflare."
+  },
+  "devPilotVerifyTitle": {
+    "en": "Step 1: Verify the session",
+    "ar": "الخطوة الأولى: تحقق من الجلسة"
+  },
+  "devPilotVerifyDescription": {
+    "en": "Check the actual OpenWA gateway session rather than only the stored WACRM status. If the Cloudflare URL changed, update the existing connection above and retry.",
+    "ar": "اضغط للتحقق من جلسة OpenWA الحقيقية، وليس من حالة WACRM المخزنة فقط. إذا تغيّر رابط Cloudflare، حدّث الرابط أعلاه على نفس الاتصال ثم أعد التحقق."
+  },
+  "devPilotVerifyButton": {
+    "en": "Verify OpenWA session",
+    "ar": "التحقق من جلسة OpenWA"
+  },
+  "devPilotVerifySuccess": {
+    "en": "The OpenWA gateway confirms this session is ready. Continue to the next step.",
+    "ar": "تم التحقق من اتصال الجلسة عبر OpenWA. يمكنك متابعة الخطوة التالية."
+  },
+  "devPilotVerifyFailed": {
+    "en": "Unable to verify the OpenWA session. Check the gateway URL and API key or update the URL, then retry.",
+    "ar": "تعذّر الوصول إلى جلسة OpenWA. اختبر رابط البوابة ومفتاح API أو حدّث الرابط ثم أعد المحاولة."
+  },
+  "devPilotVerifyNotReady": {
+    "en": "OpenWA responded but the session is not ready to send. Check its WhatsApp login and session state, then retry.",
+    "ar": "استجاب OpenWA لكن الجلسة ليست جاهزة للإرسال. تحقق من تسجيل دخول واتساب وحالة الجلسة ثم أعد المحاولة."
+  },
+  "devPilotApproveTitle": {
+    "en": "Next: Approve one test recipient",
+    "ar": "الخطوة التالية: اعتمد رقمًا واحدًا للاختبار"
+  },
+  "devPilotApproveDescription": {
+    "en": "Enter an international number belonging to a consenting test recipient. Approval does not send anything; the connection remains paused until Start.",
+    "ar": "أدخل رقم المستلم الذي وافق على التجربة بصيغة دولية. لا يبدأ الإرسال عند الاعتماد؛ يبقى الاتصال موقوفًا حتى تضغط «بدء التجربة»."
+  },
+  "devPilotRecipientFormat": {
+    "en": "Example: +9677XXXXXXXX or 9677XXXXXXXX. Spaces or an exact @lid chat ID are accepted; the plaintext recipient is not stored in the allowlist.",
+    "ar": "مثال: +9677XXXXXXXX أو 9677XXXXXXXX. يمكن إدخال المسافات أو معرّف واتساب @lid الصحيح؛ لا يُحفظ الرقم نفسه في قائمة السماح."
+  },
+  "devPilotInvalidRecipient": {
+    "en": "Enter a valid international number (7–15 digits including country code) or an exact @lid identity.",
+    "ar": "تحقق من الرقم الدولي: من 7 إلى 15 رقمًا يبدأ برمز الدولة، أو معرّف @lid صالح."
+  },
+  "devPilotMustReviewDuplicates": {
+    "en": "Before continuing, review the duplicate sessions above, compare their IDs and confirm that review.",
+    "ar": "قبل المتابعة، اعرض الجلسات المتكررة أعلاه، وطابق المعرّفات، ثم أكد مراجعتها."
+  },
+  "devPilotReadyToStart": {
+    "en": "Recipient approved — ready to start",
+    "ar": "المستلم معتمد — أنت جاهز لبدء التجربة"
+  },
+  "devPilotStartDescription": {
+    "en": "There is exactly one active grant. Start only unpauses this session; it does not automatically send a message.",
+    "ar": "هناك موافقة نشطة واحدة. الضغط على «بدء التجربة» يرفع الإيقاف عن هذه الجلسة فقط ولا يرسل رسالة تلقائيًا."
+  },
+  "devPilotNowActive": {
+    "en": "Pilot active for this session",
+    "ar": "Pilot مفعّل لهذه الجلسة"
+  },
+  "devPilotSendOneMessage": {
+    "en": "Open WACRM Inbox and send exactly one text to the approved recipient, then return here and Stop. Never blindly retry an uncertain send.",
+    "ar": "انتقل إلى صندوق الوارد في WACRM وأرسل رسالة نصية واحدة فقط للمستلم المعتمد، ثم عد هنا واضغط إيقاف التجربة. لا تعاود إرسال رسالة بنتيجة غير مؤكدة."
+  },
+  "devPilotEnforceRequired": {
+    "en": "The server admission gate is not enforced. Do not start sending until the TEST environment is corrected.",
+    "ar": "حماية قائمة السماح غير مفعلة على هذا الخادم. لا تبدأ الإرسال قبل إصلاح إعداد TEST."
+  },
+  "devPilotUnsettledBlocked": {
+    "en": "An unsettled send may already have reached OpenWA. Reconcile it before any new send; do not blindly retry.",
+    "ar": "توجد رسالة معلّقة قد يكون OpenWA أرسلها بالفعل. راجع حالتها قبل أي إرسال جديد، ولا تضغط إعادة الإرسال."
+  },
+  "devPilotNoGrantUnpaused": {
+    "en": "Sending is unpaused without an active test grant. Stop first, then verify and approve a recipient.",
+    "ar": "حالة الإرسال مفتوحة دون موافقة اختبار فعالة. اضغط «إيقاف التجربة» أولًا ثم أعد التحقق والاعتماد."
+  },
+  "devPilotTooManyGrants": {
+    "en": "Multiple grants are active. Stop and revoke them, then approve just one recipient.",
+    "ar": "توجد عدة موافقات فعالة. أوقف التجربة واسحب الموافقات، ثم اعتمد مستلمًا واحدًا فقط."
+  },
+  "devPilotReverify": {
+    "en": "Recheck session",
+    "ar": "إعادة التحقق من الجلسة"
+  },
+  "devPilotAdvanced": {
+    "en": "Advanced sending limits",
+    "ar": "إعدادات الإرسال المتقدمة"
+  },
+  "devPilotLimitsHelp": {
+    "en": "You do not need to change these for a first test. Defaults: 3/hour, 10/day, 1 new recipient and 15-second spacing. Changes are allowed only while paused.",
+    "ar": "لا تحتاج إلى تعديلها للتجربة الأولى. الحد الافتراضي 3 رسائل/ساعة، 10 رسائل/يوم، مستلم جديد واحد، وفاصل 15 ثانية. التعديل متاح فقط أثناء إيقاف الإرسال."
+  },
+  "devPilotActionRejected": {
+    "en": "Action could not be completed. Refresh the session and check the requirements above.",
+    "ar": "تعذّر تنفيذ الإجراء. حدّث حالة الجلسة وراجع المتطلبات الموضحة أعلاه."
+  },
   "devPilotNeedsSetup": {
     "en": "Pilot is not configured on this connection",
     "ar": "لم تُجهز إعدادات Pilot لهذا الاتصال"
