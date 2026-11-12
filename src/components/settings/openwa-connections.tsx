@@ -243,7 +243,7 @@ export function OpenWAConnections() {
         <Alert><AlertTitle>{w('onboarding')}</AlertTitle><AlertDescription>{w('onboardingDesc')}</AlertDescription></Alert>
         {pilotEnforced !== null && <Alert variant={pilotEnforced ? 'default' : 'destructive'}>
           <AlertTitle>{w(pilotEnforced ? 'pilotEnforceOn' : 'pilotEnforceOff')}</AlertTitle>
-          <AlertDescription>{w(pilotEnforced ? 'pilotEnforceOnHint' : 'pilotEnforceOffHint')}</AlertDescription>
+          <AlertDescription>{w(pilotDevMode ? 'devPilotAutoEnforceHint' : pilotEnforced ? 'pilotEnforceOnHint' : 'pilotEnforceOffHint')}</AlertDescription>
         </Alert>}
         <div className="grid gap-3 md:grid-cols-2">
           <div><Label htmlFor="openwa-name">{w('name')}</Label><Input id="openwa-name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div>
