@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { canonicalOpenWAPilotRecipient, isOpenWATestProject, openWAPilotEnforcementEnabled, openWAPilotRecipientHash } from '@/lib/whatsapp/transport/guardrails'
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
+import { resolveOpenWAPilotRecipientForGrant } from '@/lib/whatsapp/transport/openwa/pilot-recipient'
 import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
@@ -214,9 +215,15 @@ export async function POST(request: Request, context: Context) {
         return deny('Pilot session is not ready, has unsettled sends or already has a grant', 409)
       }
       requireLimits(s)
-      const canonical = typeof body.recipient === 'string' ? canonicalOpenWAPilotRecipient(body.recipient.trim()) : null
-      if (!canonical) return deny('Invalid OpenWA recipient identity', 400)
-      const hash = openWAPilotRecipientHash(accountId, connectionId, canonical)
+      const rawRecipient = typeof body.recipient === 'string' ? body.recipient.trim() : ''
+      if (!canonicalOpenWAPilotRecipient(rawRecipient)) return deny('Invalid OpenWA recipient identity', 400)
+      // The inbound chat may have a verified @lid identity even when the
+      // admin types its contact's phone number. Resolve the exact same
+      // session-scoped chat that the send core will use, not a guessed @c.us.
+      const resolvedRecipient = await resolveOpenWAPilotRecipientForGrant(
+        adminDb, accountId, connectionId, rawRecipient,
+      )
+      const hash = openWAPilotRecipientHash(accountId, connectionId, resolvedRecipient.recipient)
       if (!hash) return deny('Invalid recipient', 400)
       const hours = int(body.hours ?? 4, 1, 4, 'expiry')
       const now = new Date()
@@ -226,7 +233,10 @@ export async function POST(request: Request, context: Context) {
           approved_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3600000).toISOString() },
         { onConflict: 'account_id,connection_id,recipient_hash,workload' })
       checkDb(error, 'grant')
-      return NextResponse.json(safeStatus(await snapshot(adminDb, accountId, connectionId)), { headers: noStore })
+      return NextResponse.json({
+        ...safeStatus(await snapshot(adminDb, accountId, connectionId)),
+        recipient_identity_source: resolvedRecipient.source,
+      }, { headers: noStore })
     }
 
     if (action === 'activate') {
