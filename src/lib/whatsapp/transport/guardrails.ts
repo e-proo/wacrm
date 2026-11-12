@@ -28,14 +28,36 @@ export function openWAPilotRecipientHash(accountId: string, connectionId: string
 }
 
 /**
- * Inert by default. Only an explicit, server-side pilot activation value
- * enforces the allowlist for ALL OpenWA workload types. Unknown configuration
- * values fail closed instead of silently turning protection off.
+ * Development TEST environment is explicitly pinned to the authorized Supabase
+ * project. URL parsing is strict, never a substring/contains test (e.g. a
+ * malicious *.supabase.co.example.com host must not match).
+ *
+ * Only TEST gets always-on allowlist enforcement, so operators can manage the
+ * actual single-session Start/Stop/recipient approvals through WACRM Settings
+ * without editing .env.local. Production and other environments preserve their
+ * existing OPENWA_PILOT_MODE behavior.
  */
-export function openWAPilotEnforcementEnabled(mode = process.env.OPENWA_PILOT_MODE): boolean {
-  if (mode === undefined || mode === '' || mode === 'off') return false
-  if (mode === 'enforce') return true
-  throw new WhatsAppTransportError('authentication_or_configuration', 'Invalid OpenWA pilot enforcement configuration')
+export function isOpenWATestProject(url = process.env.NEXT_PUBLIC_SUPABASE_URL): boolean {
+  try {
+    const parsed = new URL(url ?? '')
+    return parsed.protocol === 'https:' &&
+      parsed.hostname === 'pqirsnfupofhulmewakq.supabase.co' &&
+      (parsed.port === '' || parsed.port === '443')
+  } catch {
+    return false
+  }
+}
+
+export function openWAPilotEnforcementEnabled(
+  mode = process.env.OPENWA_PILOT_MODE,
+  projectUrl = process.env.NEXT_PUBLIC_SUPABASE_URL,
+): boolean {
+  if (mode !== undefined && mode !== '' && mode !== 'off' && mode !== 'enforce') {
+    throw new WhatsAppTransportError('authentication_or_configuration', 'Invalid OpenWA pilot enforcement configuration')
+  }
+  // TEST is always protected, even if .env.local still says off.
+  // NEVER permit a UI action to turn off the admission check.
+  return mode === 'enforce' || isOpenWATestProject(projectUrl)
 }
 
 export class GuardedOpenWATransport implements WhatsAppTransport {
