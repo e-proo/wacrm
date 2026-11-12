@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { canonicalOpenWAPilotRecipient, isOpenWATestProject, openWAPilotEnforcementEnabled, openWAPilotRecipientHash } from '@/lib/whatsapp/transport/guardrails'
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
+import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
 type Context = { params: Promise<{ connectionId: string }> }
@@ -235,6 +236,21 @@ export async function POST(request: Request, context: Context) {
       }
       if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) return deny('Duplicate sessions need explicit review', 409)
       requireLimits(s)
+      // WACRM DB readiness can be stale after a Cloudflare URL rotation.
+      // Make a read-only provider-native status check immediately before
+      // lifting the emergency pause. Never create/retry a gateway session.
+      const live = await refreshOpenWAConnectionStatus(adminDb, accountId, connectionId)
+      if (!['ready', 'connected'].includes(live.status)) {
+        return deny('The existing OpenWA gateway session is not ready; verify or update the tunnel URL first', 409, 'pilot_gateway_not_ready')
+      }
+      // Re-check pause/grant after the network call, since another admin may
+      // have revoked the approval or stopped the pilot while it was pending.
+      const latest = await snapshot(adminDb, accountId, connectionId)
+      if (!latest.configured || !latest.enforced || !latest.guard.manual_paused ||
+        latest.grants !== 1 || latest.manualGrants !== 1 || latest.pending !== 0) {
+        return deny('Pilot state changed during verification; refresh and review', 409, 'pilot_state_changed')
+      }
+      requireLimits(latest)
       const { data: updated, error } = await adminDb.from('whatsapp_connection_guardrails')
         .update({ manual_paused: false, updated_at: new Date().toISOString() })
         .eq('account_id', accountId).eq('connection_id', connectionId).eq('manual_paused', true)
