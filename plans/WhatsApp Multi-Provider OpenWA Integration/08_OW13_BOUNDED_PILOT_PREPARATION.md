@@ -381,3 +381,32 @@ The change becomes effective after the local operator pulls the updated branch a
 - **Evidence to collect before claiming live acceptance**: exact HEAD/CI completed success; successful local WACRM admin UI and TEST HTTP actions `prepare/limits/grant/activate/stop`; verification that arbitrary/non-consenting recipients and Agent/Viewer cannot mutate or send; provider session readiness, one real recipient delivery and status reconciliation; STOP under a live send and after restart. Upstream `Socket` recovery, OW-12 and formal SOF-43 pilot GO remain separate.
 
 **Checkpoint:** WACRM UI and server code are implementation changes; CI verification and actual local app/provider TEST acceptance must be reported separately. No live WhatsApp message is sent by this change.
+
+
+## 18. Guided TEST Pilot interface and real gateway-readiness check — 2026-11-12
+
+**Operator evidence:** A screenshot of the TEST Pilot panel showed `enforced=true`, `manual_paused=true`, `active_admissions=0`, `unsettled_outbound=0`, and `same_identity_ready_connections=4`. The user reported that the full five-number guardrail form, big duplicate warning and disabled/low-visibility actions made it difficult to conduct a test. These are **preconditions**, not a successful live send. Supabase TEST independently confirms that the selected new ready connection `02527740-9806-45ae-b9b1-1354c25f1d3f` now has a persisted **paused** 3/hour + 10/day guardrail and **zero active grants**. No operator should presume gateway-native readiness from WACRM's DB status alone.
+
+### Delivered UX change
+
+- Replaced the dense unconditional Pilot form with a **step-by-step single-session wizard** in the centralized `Settings → WhatsApp → WhatsApp Web (OpenWA)` control center:
+  1. **Verify session** — an explicit button calls the existing owner/admin, tenant-scoped `GET /api/whatsapp/connections/openwa/{connectionId}` endpoint, which queries the actual gateway session with the currently saved credentials and persists the observed status. A stale WACRM `ready` DB value does NOT satisfy this step; a failed or unreachable OpenWA gateway shows an actionable warning (update tunnel URL or check OpenWA login).
+  2. **Prepare** — only if no paused guardrail row exists, display the existing safe 3/hour, 10/day configuration action. Do not create sessions or approve recipients.
+  3. **Approve** — display only a single recipient field, consent confirmation, and **Approve for 4 hours** button. The field accepts common `+countrycode` and spaced phone input by canonicalizing to digits **before** calling the existing server-side JID validation and scoped SHA-256 recipient hash. An existing `@lid` is left unchanged; invalid/ambiguous input is rejected. It does not automatically send.
+  4. **Start** — display only after one active approval exists; performs the existing scoped activation action and does not dispatch a message. A new server-side guard verifies **real provider-native ready/connected status immediately before unpausing** and resnapshots allowlist/pause state after this read, so a rotated tunnel, disconnected session or mid-check Stop/revocation leaves sending paused.
+  5. **Stop** — visible where relevant, pauses the selected connection and revokes its approvals; remains available even if gateway read/reconnect fails.
+- Replaced the large red duplicate identity warning with a concise review panel listing the selected and other ready WACRM connections' **WACRM IDs and corresponding OpenWA session IDs**, allowing the admin to compare them with the OpenWA dashboard before explicitly attesting review. **Four ready records with the same phone identity remain a real safety concern; no automatic dedup/delete or bypass.**
+- Top of panel shows short badges/counters for enforce mode, paused/active, gateway verification, grant count, unsettled sends and hourly limit. All five numeric guardrail inputs moved under **Advanced sending limits** (collapsed by default); existing values remain unchanged. Status/action feedback is localized to Arabic and English.
+- No plaintext recipients, API keys, session credentials, or raw provider exception traces are persisted by the new UI. Role/tenant scope and Meta compatibility remain unchanged.
+- The direct protected pilot API can still perform the established low-level checks independently of the frontend; new activation-specific verification prevents a stale ready session from bypassing the provider-readiness check even with a direct authenticated admin API request.
+
+### Acceptance and regression gates
+
+- [ ] CI on final HEAD: Lint, Typecheck, OW-4/Meta regression, Vitest including the new phone-normalization and gateway-readiness-negative tests, Build **all completed success**. Prior successful runs for earlier commits do not suffice.
+- [ ] Local admin on TEST confirms the wizard shows **Verify session** first, not the five numeric inputs; provider gateway is reachable and reports ready.
+- [ ] The duplicate identity review shows the selected session's exact OpenWA session ID; the reviewer confirms matching the OpenWA dashboard (rather than simply dismissing the warning).
+- [ ] A consenting recipient can be approved from the new phone field; UI shows one active grant and then allows **Start**. One manual text is delivered exactly once from WACRM Inbox; statuses/provider IDs and logs agree.
+- [ ] Disconnect/rotate gateway after verification and before Start: server must deny activation and keep guardrail paused. Stop/revoke shows zero active grants.
+- [ ] Agent/Viewer live HTTP-negative and wrong-tenant tests remain mandatory before formal Pilot GO, along with OW-12/SOF-41, OpenWA Socket SOF-46 and NOTE-001 security reviews.
+
+**Status:** UI implementation and tests committed. This section is not evidence of a live TEST message, signed-webhook acceptance or Production readiness. No Production mutation or automatic provider send was performed.
