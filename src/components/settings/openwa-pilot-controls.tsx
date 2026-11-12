@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-api-response'
+import { normalizeTestRecipient } from '@/lib/whatsapp/transport/openwa/pilot-recipient-input'
 import { useWhatsAppLabels } from './whatsapp-labels'
 
 interface PilotState extends Record<string, unknown> {
@@ -38,19 +39,6 @@ type PilotStep = 'protected' | 'pending' | 'needsStop' | 'verify' | 'prepare' | 
 
 const defaultLimits = { hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
   minimum_interval_ms: 15000, jitter_ms: 3000 }
-
-/**
- * Phone entry is friendlier than the provider JID: +country code and common
- * separators are accepted in the browser, then sent as canonical digits.
- * Verified @lid chat identities are never guessed or converted to phone JIDs.
- */
-function normalizeTestRecipient(value: string): string | null {
-  const raw = value.trim()
-  if (/^[0-9]{5,20}@(c\.us|lid)$/.test(raw)) return raw
-  if (!/^\+?[0-9 ()-]+$/.test(raw)) return null
-  const digits = raw.replace(/[+ ()-]/g, '')
-  return /^[1-9][0-9]{6,14}$/.test(digits) ? digits : null
-}
 
 export function OpenWAPilotControls({
   connectionId,
