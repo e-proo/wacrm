@@ -121,7 +121,7 @@ describe('OpenWA session create outcome safety', () => {
 })
 
 describe('OW-13 admin-only emergency stop visibility', () => {
-  it('returns only account-scoped paused state and no server-only guardrail details', async () => {
+  it('returns only account-scoped paused and Pilot states without private guardrail details', async () => {
     vi.clearAllMocks()
     const connectionFilters: Array<[string, unknown]> = []
     const guardrailFilters: Array<[string, unknown]> = []
@@ -134,7 +134,7 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     const guardrailQuery: Record<string, unknown> = {
       select: () => guardrailQuery,
       eq: (field: string, value: unknown) => { guardrailFilters.push([field, value]); return guardrailQuery },
-      then: (resolve: (result: unknown) => unknown) => resolve({ data: [{ connection_id: 'conn-1', manual_paused: true }], error: null }),
+      then: (resolve: (result: unknown) => unknown) => resolve({ data: [{ connection_id: 'conn-1', manual_paused: true, pilot_enabled: false }], error: null }),
     }
     const userFrom = vi.fn(() => connQuery)
     const adminFrom = vi.fn(() => guardrailQuery)
@@ -143,9 +143,9 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       connections: [
-        { id: 'conn-1', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
-        { id: 'conn-2', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
-        { id: 'conn-3', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
+        { id: 'conn-1', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true, pilot_enabled: false } },
+        { id: 'conn-2', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true, pilot_enabled: true } },
+        { id: 'conn-3', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true, pilot_enabled: true } },
       ],
       pilot: { enforced: process.env.OPENWA_PILOT_MODE === 'enforce' ||
           process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co',
