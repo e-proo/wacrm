@@ -9,7 +9,7 @@ const h = vi.hoisted(() => ({
   envMode: { enabled: true, invalid: false },
   connection: { id: '2dacee52-3486-4b47-96a0-fa4399ac0fb2', status: 'ready',
     session_id: 'session-1' as string | null, phone_identity: '123456789', archived_at: null as string | null },
-  guard: { manual_paused: true, hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
+  guard: { pilot_enabled: true, manual_paused: true, hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
     minimum_interval_ms: 15000, jitter_ms: 3000, warmup_hourly_cap: 3, warmup_daily_cap: 10 },
   active: 0,
   guardConfigured: true,
@@ -104,7 +104,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     h.connection.status = 'ready'
     h.connection.session_id = 'session-1'
     h.connection.archived_at = null
-    Object.assign(h.guard, { manual_paused: true, hourly_cap: 3, daily_cap: 10,
+    Object.assign(h.guard, { pilot_enabled: true, manual_paused: true, hourly_cap: 3, daily_cap: 10,
       first_touch_daily_cap: 1, minimum_interval_ms: 15000, jitter_ms: 3000,
       warmup_hourly_cap: 3, warmup_daily_cap: 10 })
     h.active = 0
@@ -117,7 +117,14 @@ describe('OW-13 DEV pilot protected UI API', () => {
     h.resolveRecipient.mockResolvedValue({ recipient: '12345678901@c.us', source: 'phone_without_inbound' })
     process.env.NEXT_PUBLIC_SUPABASE_URL = TEST_URL
     h.auth.mockResolvedValue({ accountId: ACCOUNT, user: { id: USER },
-      adminDb: { from: vi.fn(dbFrom) } })
+      adminDb: { from: vi.fn(dbFrom), rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
+        if (name !== 'set_openwa_test_pilot_mode') return { data: null, error: { code: 'unknown' } }
+        h.calls.push({ table: 'set_openwa_test_pilot_mode', type: 'rpc', payload: args })
+        h.guard.pilot_enabled = args.p_pilot_enabled === true
+        h.guard.manual_paused = h.guard.pilot_enabled
+        h.active = 0
+        return { data: { updated: true }, error: null }
+      }) } })
   })
   afterEach(() => {
     if (PREV_URL === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -295,6 +302,45 @@ describe('OW-13 DEV pilot protected UI API', () => {
       payload: expect.objectContaining({ decision: 'resumed', reason: 'ow13_dev_pilot_admin_activate' }),
     }))
   })
+
+  it('can disable Pilot for exactly this TEST session after explicit admin confirmation', async () => {
+    expect((await POST(request({ action: 'disable' }), context())).status).toBe(400)
+    const response = await POST(request({ action: 'disable', confirm_normal_sending: true }), context())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ pilot_enabled: false, paused: false, active: false })
+    expect(h.calls).toContainEqual(expect.objectContaining({
+      table: 'set_openwa_test_pilot_mode', type: 'rpc',
+      payload: expect.objectContaining({ p_account_id: ACCOUNT, p_connection_id: CONNECTION,
+        p_actor: USER, p_pilot_enabled: false, p_confirm_normal_sending: true }),
+    }))
+    expect(h.refresh).toHaveBeenCalledWith(expect.anything(), ACCOUNT, CONNECTION)
+    expect((await POST(request({ action: 'grant', recipient: '12345678901', consent_confirmed: true }), context())).status).toBe(409)
+  })
+
+  it('refuses normal send transition with unsettled messages, duplicate sessions or stale gateway', async () => {
+    h.pending = 1
+    expect((await POST(request({ action: 'disable', confirm_normal_sending: true }), context())).status).toBe(409)
+    h.pending = 0
+    h.duplicates = 2
+    expect((await POST(request({ action: 'disable', confirm_normal_sending: true }), context())).status).toBe(409)
+    h.duplicates = 1
+    h.refresh.mockResolvedValue({ status: 'disconnected' })
+    expect((await POST(request({ action: 'disable', confirm_normal_sending: true }), context())).status).toBe(409)
+    expect(h.calls).toEqual([])
+  })
+
+  it('re-enables Pilot with a paused session and no active grants', async () => {
+    h.guard.pilot_enabled = false
+    h.guard.manual_paused = false
+    const response = await POST(request({ action: 'enable' }), context())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ pilot_enabled: true, paused: true, active: false })
+    expect(h.calls).toContainEqual(expect.objectContaining({
+      table: 'set_openwa_test_pilot_mode', type: 'rpc',
+      payload: expect.objectContaining({ p_pilot_enabled: true }),
+    }))
+  })
+
   it('allows STOP after the upstream session ID is lost, without unpausing', async () => {
     h.connection.session_id = null
     h.guard.manual_paused = false

@@ -75,10 +75,25 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
   readonly provider = 'openwa' as const
   constructor(private readonly db: SupabaseClient, private readonly inner: WhatsAppTransport) {}
 
+  /**
+   * TEST admins can disable Pilot for exactly one account-scoped connection.
+   * Missing guardrail rows are protected; DB errors fail closed.
+   * Non-TEST deployment flags are unchanged.
+   */
+  private async pilotEnforcedFor(request: WhatsAppTransportSendRequest): Promise<boolean> {
+    const deploymentEnforced = openWAPilotEnforcementEnabled()
+    if (!isOpenWATestProject()) return deploymentEnforced
+    const { data, error } = await this.db.from('whatsapp_connection_guardrails')
+      .select('pilot_enabled').eq('account_id', request.accountId)
+      .eq('connection_id', request.connectionId).maybeSingle()
+    if (error) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA pilot mode could not be verified', error)
+    return data?.pilot_enabled !== false
+  }
+
   async send(request: WhatsAppTransportSendRequest): Promise<WhatsAppTransportSendResult> {
     const workload = request.workload ?? 'manual'
     const hash = recipientHash(request.accountId, request.connectionId, request.recipient)
-    const pilotEnforced = openWAPilotEnforcementEnabled()
+    const pilotEnforced = await this.pilotEnforcedFor(request)
 
     // Do not consume guardrail capacity or call the gateway for an unauthorized
     // cohort. The RPC joins both tenant and connection with the allowlist.
@@ -99,8 +114,13 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
     // A pause or allowlist revocation during pacing must be observed before
     // provider dispatch. A POST already in flight cannot be retroactively
     // cancelled; ambiguous outcomes still require reconciliation.
-    if (pilotEnforced || waitMs > 0) {
+    if (pilotEnforced || waitMs > 0 || isOpenWATestProject()) {
       await this.assertNotPaused(request)
+      // If TEST mode was changed during pacing/reservation, do not dispatch
+      // under the old admission assumption.
+      if (isOpenWATestProject() && (await this.pilotEnforcedFor(request)) !== pilotEnforced) {
+        throw new OpenWAPreDispatchDenied('OpenWA Pilot mode changed before dispatch; retry after refresh')
+      }
       if (pilotEnforced && waitMs > 0) await this.assertPilotAdmission(request, workload)
     }
 

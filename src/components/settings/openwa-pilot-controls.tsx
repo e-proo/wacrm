@@ -17,6 +17,7 @@ interface PilotState extends Record<string, unknown> {
   connectionId: string
   status: string
   enforced: boolean
+  pilot_enabled: boolean
   configured: boolean
   active: boolean
   paused: boolean
@@ -34,8 +35,8 @@ interface PilotState extends Record<string, unknown> {
 }
 
 type RelatedConnection = { id: string; status: string; sessionId: string | null }
-type PilotAction = 'prepare' | 'limits' | 'grant' | 'activate' | 'stop'
-type PilotStep = 'protected' | 'pending' | 'needsStop' | 'verify' | 'prepare' | 'approve' | 'start' | 'active' | 'multiple'
+type PilotAction = 'prepare' | 'limits' | 'grant' | 'activate' | 'stop' | 'disable' | 'enable'
+type PilotStep = 'protected' | 'pending' | 'needsStop' | 'verify' | 'prepare' | 'approve' | 'start' | 'active' | 'multiple' | 'normal'
 
 const defaultLimits = { hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
   minimum_interval_ms: 15000, jitter_ms: 3000 }
@@ -43,9 +44,11 @@ const defaultLimits = { hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
 export function OpenWAPilotControls({
   connectionId,
   relatedConnections = [],
+  onPilotChange,
 }: {
   connectionId: string
   relatedConnections?: RelatedConnection[]
+  onPilotChange?: () => void
 }) {
   const w = useWhatsAppLabels()
   const [state, setState] = useState<PilotState | null>(null)
@@ -121,7 +124,8 @@ export function OpenWAPilotControls({
         recipient: normalizedRecipient, consent_confirmed: consent,
         ack_duplicate_sessions: duplicateAck, hours: 4,
       })
-      if (action === 'activate') body.ack_duplicate_sessions = duplicateAck
+      if (action === 'activate' || action === 'disable') body.ack_duplicate_sessions = duplicateAck
+      if (action === 'disable') body.confirm_normal_sending = true
       const res = await fetch(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body), cache: 'no-store',
@@ -130,8 +134,11 @@ export function OpenWAPilotControls({
       if (!res.ok) throw new Error(data.error || w('devPilotActionRejected'))
       setState(data)
       if (action === 'grant') { setRecipient(''); setConsent(false) }
-      if (action === 'stop') { setVerified(false); setDuplicateAck(false); setVerifiedStatus(null) }
-      setNotice(w(action === 'prepare' ? 'devPilotPrepared' : action === 'stop' ? 'devPilotStopped'
+      if (['stop', 'disable', 'enable'].includes(action)) { setVerified(false); setDuplicateAck(false); setVerifiedStatus(null) }
+      if (action === 'stop' || action === 'disable' || action === 'enable') onPilotChange?.()
+      setNotice(w(action === 'prepare' ? 'devPilotPrepared'
+        : action === 'disable' ? 'devPilotDisabled' : action === 'enable' ? 'devPilotEnabled'
+        : action === 'stop' ? 'devPilotStopped'
         : action === 'activate' ? 'devPilotStarted'
         : action === 'grant' && data.recipient_identity_source === 'verified_inbound_chat'
           ? 'devPilotGrantedNativeChat'
@@ -143,6 +150,7 @@ export function OpenWAPilotControls({
   }
 
   const step: PilotStep | null = !state ? null
+    : !state.pilot_enabled ? 'normal'
     : !state.enforced ? 'protected'
     : state.unsettled_outbound > 0 ? 'pending'
     : !state.paused && !state.active ? 'needsStop'
@@ -165,9 +173,9 @@ export function OpenWAPilotControls({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <CardTitle className="text-base">{w('devPilotEasyTitle')}</CardTitle>
         <div className="flex flex-wrap items-center gap-2">
-          {state?.enforced && <Badge variant="outline"><ShieldCheck className="size-3" />{w('devPilotProtected')}</Badge>}
+          {state?.enforced && state.pilot_enabled && <Badge variant="outline"><ShieldCheck className="size-3" />{w('devPilotProtected')}</Badge>}
           {state && <Badge variant={state.active ? 'default' : 'secondary'}>
-            {state.active ? w('devPilotActive') : w('devPilotPaused')}
+            {!state.pilot_enabled ? w('devPilotNormalMode') : state.active ? w('devPilotActive') : w('devPilotPaused')}
           </Badge>}
         </div>
       </div>
@@ -178,6 +186,27 @@ export function OpenWAPilotControls({
       {loading && <p className="text-sm text-muted-foreground">{w('devPilotLoading')}</p>}
       {error && <Alert variant="destructive"><AlertCircle className="size-4" /><AlertDescription>{error}</AlertDescription></Alert>}
       {notice && <Alert><CheckCircle2 className="size-4" /><AlertDescription>{notice}</AlertDescription></Alert>}
+
+      {state && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">{w('devPilotModeTitle')}</p>
+          <p className="text-xs text-muted-foreground">{w(state.pilot_enabled ? 'devPilotModeEnabledHint' : 'devPilotModeDisabledHint')}</p>
+        </div>
+        {state.pilot_enabled
+          ? <Button variant="outline" disabled={running || (needsDuplicateReview && !duplicateAck)}
+              onClick={() => { if (window.confirm(w('devPilotDisableConfirm'))) void submit('disable') }}>
+              {w('devPilotDisableButton')}
+            </Button>
+          : <div className="flex flex-wrap gap-2">
+              {state.paused && <Button disabled={running || (needsDuplicateReview && !duplicateAck)}
+                onClick={() => { if (window.confirm(w('devPilotDisableConfirm'))) void submit('disable') }}>
+                {w('devPilotResumeNormal')}
+              </Button>}
+              <Button variant="outline" disabled={running} onClick={() => void submit('enable')}>
+                {w('devPilotEnableButton')}
+              </Button>
+            </div>}
+      </div>}
 
       {state && <>
         <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
@@ -194,7 +223,7 @@ export function OpenWAPilotControls({
           )}
         </div>
 
-        <div className="grid grid-cols-4 gap-1.5 text-center text-xs">
+        {state.pilot_enabled && <div className="grid grid-cols-4 gap-1.5 text-center text-xs">
           {([
             [w('devPilotStepVerify'), verified || step === 'active'],
             [w('devPilotStepPrepare'), state.configured],
@@ -206,9 +235,9 @@ export function OpenWAPilotControls({
               {label}
             </div>,
           )}
-        </div>
+        </div>}
 
-        {needsDuplicateReview && !state.active && <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+        {needsDuplicateReview && <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
           <p className="font-medium">{w('devPilotDuplicateCount')} ({state.same_identity_ready_connections})</p>
           <p className="mt-1 text-xs text-muted-foreground">{w('devPilotDuplicateExplain')}</p>
           <details className="mt-2">
@@ -229,6 +258,7 @@ export function OpenWAPilotControls({
           </div>
         </div>}
 
+        {step === 'normal' && <Alert><AlertDescription>{w('devPilotNormalModeHint')}</AlertDescription></Alert>}
         {step === 'protected' && <Alert variant="destructive"><AlertDescription>{w('devPilotEnforceRequired')}</AlertDescription></Alert>}
         {step === 'pending' && <Alert variant="destructive"><AlertDescription>{w('devPilotUnsettledBlocked')}</AlertDescription></Alert>}
         {step === 'needsStop' && <Alert variant="destructive">
@@ -304,7 +334,7 @@ export function OpenWAPilotControls({
               onClick={() => void verifyGateway()}><RefreshCw className="me-2 size-4" />{w('devPilotReverify')}</Button>}
           </div>}
 
-        {state.configured && <details className="rounded-lg border px-4 py-3">
+        {state.pilot_enabled && state.configured && <details className="rounded-lg border px-4 py-3">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium">
             <span className="flex items-center gap-2"><SlidersHorizontal className="size-4" />{w('devPilotAdvanced')}</span>
             <ChevronDown className="size-4 text-muted-foreground" />

@@ -15,7 +15,7 @@ function setup(reservation: Record<string, unknown>, sendImpl?: () => Promise<Wh
   return { rpc, inner, guarded: new GuardedOpenWATransport(db, inner) }
 }
 
-function pilotSetup(options: { admitted?: boolean; paused?: boolean; circuitUntil?: string | null; rpcError?: boolean; fenceError?: boolean; waitMs?: number } = {}) {
+function pilotSetup(options: { admitted?: boolean; paused?: boolean; pilotEnabled?: boolean; circuitUntil?: string | null; rpcError?: boolean; fenceError?: boolean; waitMs?: number } = {}) {
   const rpc = vi.fn(async (name: string) => {
     if (name === 'check_openwa_pilot_admission') return { data: { allowed: options.admitted ?? false }, error: options.rpcError ? { code: 'PGRST202' } : null }
     if (name === 'reserve_openwa_guardrail_send') return { data: { allowed: true, wait_ms: options.waitMs ?? 0 }, error: null }
@@ -27,7 +27,7 @@ function pilotSetup(options: { admitted?: boolean; paused?: boolean; circuitUnti
     select: () => query,
     eq: (key: string, value: unknown) => { filters.push([key, value]); return query },
     maybeSingle: async () => ({ data: options.paused === undefined && options.fenceError
-      ? null : { manual_paused: options.paused ?? false, circuit_open_until: options.circuitUntil ?? null },
+      ? null : { manual_paused: options.paused ?? false, pilot_enabled: options.pilotEnabled ?? true, circuit_open_until: options.circuitUntil ?? null },
       error: options.fenceError ? { code: 'PGRST202' } : null }),
   }
   const from = vi.fn(() => query)
@@ -180,6 +180,32 @@ describe('OW-13 server-enforced pilot admission (no real provider calls)', () =>
     } finally {
       vi.useRealTimers()
     }
+  })
+
+
+  it('disabled TEST Pilot bypasses only the allowlist, not guardrails or pauses', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://pqirsnfupofhulmewakq.supabase.co')
+    vi.stubEnv('OPENWA_PILOT_MODE', 'off')
+    const normal = pilotSetup({ pilotEnabled: false, admitted: false, paused: false })
+    await expect(normal.guarded.send(request)).resolves.toMatchObject({ providerMessageId: 'provider-mock-1' })
+    expect(normal.rpc.mock.calls.map(([name]) => name)).toEqual([
+      'reserve_openwa_guardrail_send', 'record_openwa_guardrail_outcome',
+    ])
+    expect(normal.filters).toContainEqual(['account_id', request.accountId])
+    expect(normal.filters).toContainEqual(['connection_id', request.connectionId])
+    const paused = pilotSetup({ pilotEnabled: false, admitted: false, paused: true })
+    await expect(paused.guarded.send(request)).rejects.toMatchObject({ code: 'connection_restricted' })
+    expect(paused.send).not.toHaveBeenCalled()
+  })
+
+  it('enforces Pilot by default for TEST and fails closed if its mode cannot be read', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://pqirsnfupofhulmewakq.supabase.co')
+    const missingGrant = pilotSetup({ admitted: false })
+    await expect(missingGrant.guarded.send(request)).rejects.toMatchObject({ code: 'connection_restricted' })
+    expect(missingGrant.send).not.toHaveBeenCalled()
+    const unavailable = pilotSetup({ fenceError: true })
+    await expect(unavailable.guarded.send(request)).rejects.toMatchObject({ code: 'retryable_provider_failure' })
+    expect(unavailable.send).not.toHaveBeenCalled()
   })
 
   it('leaves Meta unaffected by guarding only the OpenWA-specific transport', async () => {

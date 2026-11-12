@@ -305,7 +305,8 @@ export function OpenWAConnections() {
         </CardContent>
       </Card>
       {selectedPilotId && <OpenWAPilotControls key={selectedPilotId}
-        connectionId={selectedPilotId} relatedConnections={relatedPilotConnections} />}
+        connectionId={selectedPilotId} relatedConnections={relatedPilotConnections}
+        onPilotChange={() => { void load() }} />}
     </div>}
 
     {connections.map((connection) => <Card key={connection.id}>

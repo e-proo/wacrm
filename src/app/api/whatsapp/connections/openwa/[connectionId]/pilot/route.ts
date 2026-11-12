@@ -57,14 +57,14 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     throw new WhatsAppTransportError('connection_restricted', 'Pilot connection missing or unavailable')
   }
   const { data: guard, error: ge } = await db.from('whatsapp_connection_guardrails')
-    .select('manual_paused,hourly_cap,daily_cap,first_touch_daily_cap,minimum_interval_ms,jitter_ms,warmup_hourly_cap,warmup_daily_cap')
+    .select('manual_paused,pilot_enabled,hourly_cap,daily_cap,first_touch_daily_cap,minimum_interval_ms,jitter_ms,warmup_hourly_cap,warmup_daily_cap')
     .eq('connection_id', connectionId).eq('account_id', accountId).maybeSingle()
   checkDb(ge, 'guardrail')
   // Newly created sessions have no guardrails until an admin prepares them.
   // A missing row must not silently inherit permissive schema defaults.
   const configured = Boolean(guard)
   const safeGuard = guard ?? {
-    manual_paused: true, hourly_cap: MAX_HOURLY, daily_cap: MAX_DAILY,
+    manual_paused: true, pilot_enabled: true, hourly_cap: MAX_HOURLY, daily_cap: MAX_DAILY,
     first_touch_daily_cap: MAX_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
     jitter_ms: 3000, warmup_hourly_cap: MAX_HOURLY, warmup_daily_cap: MAX_DAILY,
   }
@@ -97,12 +97,12 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
   try { enforced = openWAPilotEnforcementEnabled() } catch { enforced = false }
   return { connection, guard: safeGuard, configured, grants: grants ?? 0, manualGrants: manualGrants ?? 0,
     pending: pending ?? 0, duplicates, enforced,
-    active: configured && enforced && !safeGuard.manual_paused && (grants ?? 0) > 0 }
+    active: configured && safeGuard.pilot_enabled && enforced && !safeGuard.manual_paused && (grants ?? 0) > 0 }
 }
 
 function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
   return { connectionId: s.connection.id, configured: s.configured,
-    status: s.connection.status, enforced: s.enforced,
+    status: s.connection.status, enforced: s.enforced, pilot_enabled: s.guard.pilot_enabled,
     active: s.active, paused: s.guard.manual_paused, guardrails: {
       hourly_cap: s.guard.hourly_cap, daily_cap: s.guard.daily_cap,
       first_touch_daily_cap: s.guard.first_touch_daily_cap,
@@ -144,10 +144,41 @@ export async function POST(request: Request, context: Context) {
     assertTestConnectionId(connectionId)
     const body = await request.json() as Record<string, unknown>
     const action = body.action
-    if (!['prepare', 'limits', 'grant', 'activate', 'stop'].includes(String(action))) return deny('Unknown pilot action', 400)
+    if (!['prepare', 'limits', 'grant', 'activate', 'stop', 'disable', 'enable'].includes(String(action))) return deny('Unknown pilot action', 400)
     const s = await snapshot(adminDb, accountId, connectionId)
 
+    if (action === 'disable' || action === 'enable') {
+      const enable = action === 'enable'
+      if (!enable) {
+        if (body.confirm_normal_sending !== true) return deny('Confirm ordinary sending for this connection', 400)
+        if (s.pending !== 0 || !s.connection.session_id || !['ready', 'connected'].includes(s.connection.status)) {
+          return deny('Reconcile unsettled sends and restore a ready session before disabling Pilot', 409)
+        }
+        if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) {
+          return deny('Review duplicate sessions before enabling ordinary sending', 409)
+        }
+        // Read the provider status, never create or reconnect another session.
+        const live = await refreshOpenWAConnectionStatus(adminDb, accountId, connectionId)
+        if (!['ready', 'connected'].includes(live.status)) {
+          return deny('The OpenWA gateway is not ready for ordinary sending', 409, 'pilot_gateway_not_ready')
+        }
+      }
+      // Transactional, tenant-scoped mode + pause + cap + revoke + audit.
+      const { data: outcome, error } = await adminDb.rpc('set_openwa_test_pilot_mode', {
+        p_account_id: accountId, p_connection_id: connectionId, p_actor: user.id,
+        p_pilot_enabled: enable,
+        p_confirm_normal_sending: !enable && body.confirm_normal_sending === true,
+        p_ack_duplicate_sessions: body.ack_duplicate_sessions === true,
+      })
+      checkDb(error, 'mode-toggle')
+      if ((outcome as { updated?: boolean } | null)?.updated !== true) {
+        return deny('Pilot mode changed or safety checks blocked this action; refresh the connection', 409, 'pilot_state_changed')
+      }
+      return NextResponse.json(safeStatus(await snapshot(adminDb, accountId, connectionId)), { headers: noStore })
+    }
+
     if (action === 'prepare') {
+      if (!s.guard.pilot_enabled) return deny('Enable Pilot before preparing this connection', 409)
       if (body.confirm_prepare !== true) return deny('Confirm connection-specific pilot preparation', 400)
       if (!s.connection.session_id || !['ready', 'connected'].includes(s.connection.status) || s.pending !== 0 || s.grants !== 0) {
         return deny('Pilot preparation requires an existing ready session without unsettled sends or active grants', 409)
@@ -190,7 +221,7 @@ export async function POST(request: Request, context: Context) {
     }
 
     if (action === 'limits') {
-      if (!s.configured || !s.guard.manual_paused) return deny('Pause the pilot before changing limits', 409)
+      if (!s.guard.pilot_enabled || !s.configured || !s.guard.manual_paused) return deny('Pause the pilot before changing limits', 409)
       const hourly = int(body.hourly_cap, 1, MAX_HOURLY, 'hourly')
       const daily = int(body.daily_cap, 1, MAX_DAILY, 'daily')
       const firstTouch = int(body.first_touch_daily_cap, 0, MAX_FIRST_TOUCH, 'first touch')
@@ -208,7 +239,7 @@ export async function POST(request: Request, context: Context) {
     }
 
     if (action === 'grant') {
-      if (!s.configured || !s.enforced || !s.guard.manual_paused) return deny('Enable the server-side gate and pause before granting a recipient', 409)
+      if (!s.configured || !s.guard.pilot_enabled || !s.enforced || !s.guard.manual_paused) return deny('Enable the server-side gate and pause before granting a recipient', 409)
       if (body.consent_confirmed !== true) return deny('Recipient consent is required', 400)
       if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) return deny('Duplicate connection identity must be reviewed', 409)
       if (!s.connection.session_id || !['ready','connected'].includes(s.connection.status) || s.pending !== 0 || s.grants !== 0) {
@@ -240,7 +271,7 @@ export async function POST(request: Request, context: Context) {
     }
 
     if (action === 'activate') {
-      if (!s.configured || !s.enforced || !s.guard.manual_paused || s.grants !== 1 || s.manualGrants !== 1 || s.pending !== 0 ||
+      if (!s.configured || !s.guard.pilot_enabled || !s.enforced || !s.guard.manual_paused || s.grants !== 1 || s.manualGrants !== 1 || s.pending !== 0 ||
           !s.connection.session_id || !['ready','connected'].includes(s.connection.status)) {
         return deny('Pilot activation requires enforce mode, one approval, paused/ready connection and zero unsettled sends', 409)
       }
@@ -256,7 +287,7 @@ export async function POST(request: Request, context: Context) {
       // Re-check pause/grant after the network call, since another admin may
       // have revoked the approval or stopped the pilot while it was pending.
       const latest = await snapshot(adminDb, accountId, connectionId)
-      if (!latest.configured || !latest.enforced || !latest.guard.manual_paused ||
+      if (!latest.configured || !latest.guard.pilot_enabled || !latest.enforced || !latest.guard.manual_paused ||
         latest.grants !== 1 || latest.manualGrants !== 1 || latest.pending !== 0) {
         return deny('Pilot state changed during verification; refresh and review', 409, 'pilot_state_changed')
       }

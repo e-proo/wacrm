@@ -278,6 +278,50 @@ const labels = {
     "en": "The pilot recipient allowlist is NOT being enforced. Do not resume the dedicated TEST pilot connection until the server is restarted in enforce mode and the recipient is approved.",
     "ar": "قائمة سماح المستلمين الخاصة بالتجربة غير مفروضة. لا تستأنف اتصال TEST المخصص قبل تشغيل الخادم بوضع enforce واعتماد المستلم التجريبي."
   },
+  "devPilotModeTitle": {
+    "en": "Pilot mode for this OpenWA session",
+    "ar": "وضع Pilot لجلسة OpenWA هذه"
+  },
+  "devPilotModeEnabledHint": {
+    "en": "Pilot requires a recipient approval. Emergency Stop is separate from disabling Pilot.",
+    "ar": "يتطلب Pilot موافقة على المستلم. الإيقاف الطارئ مستقل عن تعطيل Pilot."
+  },
+  "devPilotModeDisabledHint": {
+    "en": "Pilot allowlist is off for this TEST session only; ordinary anti-abuse limits remain enforced.",
+    "ar": "قائمة سماح Pilot معطلة لهذه الجلسة في TEST فقط؛ وتظل حدود الحماية العامة سارية."
+  },
+  "devPilotDisableButton": {
+    "en": "Disable Pilot and allow normal sending",
+    "ar": "تعطيل Pilot والسماح بالإرسال العادي"
+  },
+  "devPilotEnableButton": {
+    "en": "Enable Pilot (pause sending)",
+    "ar": "تفعيل Pilot (إيقاف الإرسال حتى الاعتماد)"
+  },
+  "devPilotDisableConfirm": {
+    "en": "Disable Pilot for this ready session and allow ordinary sending? Confirm this is the correct WhatsApp account. Anti-abuse limits still apply.",
+    "ar": "هل تريد تعطيل Pilot لهذه الجلسة الجاهزة والسماح بالإرسال العادي؟ تأكد من أنها جلسة واتساب الصحيحة. ستبقى حدود الحماية العامة سارية."
+  },
+  "devPilotNormalMode": {
+    "en": "Normal sending",
+    "ar": "إرسال عادي"
+  },
+  "devPilotNormalModeHint": {
+    "en": "Pilot is disabled here. Emergency Stop still pauses sends; gateway, conversation identity, and webhook errors remain independent.",
+    "ar": "Pilot معطل هنا. يظل الإيقاف الطارئ يوقف الإرسال، ولا يعالج هذا الخيار أخطاء البوابة أو هوية المحادثة أو الويب هوك."
+  },
+  "devPilotResumeNormal": {
+    "en": "Resume normal sending",
+    "ar": "استئناف الإرسال العادي"
+  },
+  "devPilotDisabled": {
+    "en": "Pilot disabled for this TEST session. Normal sending resumed with general safety guardrails.",
+    "ar": "تم تعطيل Pilot لهذه الجلسة في TEST واستئناف الإرسال العادي مع استمرار الحماية العامة."
+  },
+  "devPilotEnabled": {
+    "en": "Pilot enabled, sends paused and old approvals revoked. Approve a recipient and activate Pilot again.",
+    "ar": "تم تفعيل Pilot وإيقاف الإرسال وإلغاء الموافقات القديمة. اعتمد المستلم وابدأ Pilot مجددًا."
+  },
   "devPilotHubTitle": {
     "en": "TEST Pilot control center",
     "ar": "لوحة إدارة Pilot التجريبي"
@@ -295,8 +339,8 @@ const labels = {
     "ar": "إدارة Pilot"
   },
   "devPilotAutoEnforceHint": {
-    "en": "The TEST server enforces the pilot recipient allowlist automatically. Start or stop each connection here; no OPENWA_PILOT_MODE edit is needed. Other unapproved OpenWA sends on TEST may be blocked.",
-    "ar": "حماية قائمة السماح مفعّلة تلقائيًا على خادم TEST. تستطيع التحكم في بدء وإيقاف كل جلسة من هذه اللوحة؛ لا حاجة لتغيير OPENWA_PILOT_MODE في ملفات البيئة. قد تُمنع عمليات OpenWA الأخرى غير المعتمدة في TEST."
+    "en": "TEST defaults to enforced Pilot for each session. Disable Pilot explicitly on a selected session to resume normal sending; Stop is only an emergency pause.",
+    "ar": "يعمل Pilot تلقائيًا لكل جلسة في TEST. استخدم زر تعطيل Pilot للجلسة المختارة للعودة إلى الإرسال العادي؛ أما زر الإيقاف فهو إيقاف طارئ للإرسال فقط."
   },
   "devPilotEasyTitle": {
     "en": "OpenWA test sending",
