@@ -446,3 +446,36 @@ During an operator-run **development TEST-only** Pilot, WACRM's local Next.js lo
 6. For inbound webhook `503`, capture its safe `[openwa-webhook]` category/event from Next.js logs and the resulting receipt status (especially `in_flight` vs `processing_retry`). Do not acknowledge a failed event as successful or fabricate a new event ID. For read-ack `409`, check the selected/current session identity first.
 
 **Acceptance level:** source implementation and CI must be verified at the exact resulting HEAD; live TEST send/receipt and webhook acceptance remain open, as do SOF-44 Agent/Viewer negatives, SOF-41 OW-12, SOF-43 formal Pilot and NOTE-001 Production security. No Production mutation or actual provider send performed during diagnosis.
+
+
+## 20. TEST-only agent pre-dispatch reconciliation and prevention of phantom `sending` rows — 2026-11-12
+
+This section **updates the pending-message status described in §19**. The exact legacy bot row was subsequently reconciled after stronger cross-source evidence was obtained; do not treat §19's original historical `sending` observation as the current TEST state.
+
+### Evidence reviewed *before* touching TEST
+
+- The single stale bot message `30242a67-e6e4-4d2a-bb18-e174bfdd286c` was `provider=openwa`, `sender_type=bot`, `status=sending`, with **both `provider_message_id` and `message_id` NULL**, and an `ai_agent_run_id` tied to run `1fe92151-5926-40ba-92c1-431c072515ee`.
+- The agent run ended `status=failed`, `error_code=SEND_FAILED`, and has no `outbound_message_id`. The run path `src/lib/automations/meta-send.ts` invokes `resolveConversationTransport` and sends with workload `agent` when an `aiAgentRunId` is present. Under the TEST server's automatically enforced cohort, the `GuardedOpenWATransport` checks the exact workload grant **before calling OpenWA**.
+- A read-only DB check confirmed **NO `agent` pilot grant for this connection at that message's timestamp**. The only recorded grant was `manual`. A separate agent's manually attempted message on the same connection failed immediately before this bot record, matching the operator's observed pilot-cohort `409`. The connection was already **paused**, with zero current approvals, before reconciliation.
+- This combination establishes a narrowly identifiable WACRM **pre-provider policy denial** for the *one* AI-run reservation; it is not a generic rule for all `sending` rows. Other ambiguous sends, provider timeouts or uncertain acceptance outcomes are **not** eligible for bulk cleanup.
+
+### Bounded Supabase TEST change
+
+A single transaction on `pqirsnfupofhulmewakq` repeated the above evidence as SQL predicates (exact account/connection/message/run IDs, failed run code, provider and both message IDs NULL, manual paused, no `agent` admission at send time, and a nearby rejected manual message). It then updated **only** this bot row from `sending` to `failed` and inserted an auditable `whatsapp_guardrail_events` event: `workload=agent`, `decision=blocked`, reason `ow13_test_agent_policy_predispatch_reconciled`. The transaction was contingent on exactly one matching row and would have rolled back on a mismatch.
+
+**Independent read-only postflight:** the row is now `failed` with both native IDs still NULL; the selected Pilot connection is **paused**, has **0 active grants**, **0 remaining uncertain `sending` rows**, and exactly one reconciliation audit event. No WhatsApp provider call, inbox replay, resend, session deletion, or Production write occurred.
+
+### Permanent runtime fix for future agent attempts
+
+- `src/lib/whatsapp/transport/guardrails.ts` introduces `OpenWAPreDispatchDenied extends WhatsAppTransportError`, emitted **only** by known pre-`inner.send` pilot admission/guardrail/pause/circuit denials. A provider-originated or timeout error with the generic `connection_restricted` code is **not** this specialized error.
+- `src/lib/automations/meta-send.ts` catches this exact branded pre-dispatch denial when it already reserved a bot `sending` record, then conditionally changes **only that row** to `failed` where the conversation, provider, status and **both** provider-message IDs still match the unattempted state. It logs a bounded DB code if the local status update fails. Original policy rejection is rethrown so the AI run remains failed. Any provider exception, `ambiguous_outcome`, or post-provider DB persistence failure **remains `sending` for reconciliation**.
+- Regression tests cover branded local denial becoming `failed`, a genuine ambiguous provider outcome leaving the reservation untouched, and a generic upstream `connection_restricted` **not** being misclassified as pre-dispatch.
+
+### Operator's safe next TEST attempt
+
+1. Update and restart local WACRM to the fixed HEAD. Confirm the TEST OpenWA session `02527740-9806-45ae-b9b1-1354c25f1d3f` still maps to the actual OpenWA gateway and has `pending=0, paused=true, grants=0`.
+2. In **Settings → WhatsApp → TEST Pilot** select that connection, Verify gateway and review duplicate identities, then **approve the consenting recipient anew** using the ordinary international phone input. The upgraded server resolves and hashes the *verified native `@lid` identity for this same session*, matching what Inbox will use; the UI reports a native-chat approval without exposing its JID.
+3. Start only this TEST connection. Send **one short manual text in the existing consenting conversation**, and verify one physical delivery + provider ID and WACRM status, then Stop/revoke.
+4. **Different unapproved recipient** must still return `409`. The other conversation's archived original session must be explicitly changed to a current same-phone verified session, not silently reused. Read-ack `409` and webhook `503` require their own provider-specific evidence before closure.
+
+**Acceptance remains open:** no real provider send has been made by ChatGPT and successful local live send/ACK has not been reported after this patch. SOF-47 tracks TEST reconciliation and inbound retry acceptance, SOF-45 remains DEV Pilot In Progress, SOF-44 live Agent/Viewer negative, OW-12/SOF-41 and SOF-43 formal Pilot still blocked, NOTE-001 must be reviewed before Production GA.
