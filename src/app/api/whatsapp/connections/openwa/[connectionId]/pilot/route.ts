@@ -7,7 +7,7 @@ import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 type Context = { params: Promise<{ connectionId: string }> }
 const noStore = { 'Cache-Control': 'private, no-store, max-age=0' }
 const TEST_PROJECT = 'pqirsnfupofhulmewakq'
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MAX_HOURLY = 3
 const MAX_DAILY = 10
 const MAX_FIRST_TOUCH = 1
