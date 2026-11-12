@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server'
 
-import { canonicalOpenWAPilotRecipient, openWAPilotEnforcementEnabled, openWAPilotRecipientHash } from '@/lib/whatsapp/transport/guardrails'
+import { canonicalOpenWAPilotRecipient, isOpenWATestProject, openWAPilotEnforcementEnabled, openWAPilotRecipientHash } from '@/lib/whatsapp/transport/guardrails'
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
 type Context = { params: Promise<{ connectionId: string }> }
 const noStore = { 'Cache-Control': 'private, no-store, max-age=0' }
-const TEST_PROJECT = 'pqirsnfupofhulmewakq'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MAX_HOURLY = 3
 const MAX_DAILY = 10
@@ -34,10 +33,7 @@ function fail(error: unknown) {
 }
 
 function assertTestConnectionId(connectionId: string) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  let project: string | undefined
-  try { project = new URL(url ?? '').hostname } catch { /* reject below */ }
-  if (project !== `${TEST_PROJECT}.supabase.co` || !UUID.test(connectionId)) {
+  if (!isOpenWATestProject() || !UUID.test(connectionId)) {
     throw new WhatsAppTransportError('connection_restricted', 'DEV pilot controls are available only on TEST')
   }
 }
