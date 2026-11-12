@@ -117,18 +117,19 @@ async function main() {
     first_touch_daily_cap: guard?.first_touch_daily_cap ?? null,
     minimum_interval_ms: guard?.minimum_interval_ms ?? null,
     jitter_ms: guard?.jitter_ms ?? null,
-    active: process.env.OPENWA_PILOT_MODE === 'enforce' && guard?.manual_paused === false && (active.count ?? 0) > 0,
+    active: guard?.manual_paused === false && (active.count ?? 0) > 0,
     unsettled_outbound: unsettled.count ?? null,
     active_admissions: active.count ?? null,
     active_manual_approvals: manualActive.count ?? null,
     same_identity_ready_connections: duplicates.count ?? null,
     local_env_pilot_mode: process.env.OPENWA_PILOT_MODE ?? 'off',
+    effective_pilot_mode: 'enforce (automatic on pinned TEST project)',
     runtime_mode_confirmed: false, // This CLI does not read live Next.js process memory.
   }
 
   if (action === 'status') {
     console.log(JSON.stringify(state, null, 2))
-    console.log('Runtime mode is NOT provable from this script. Restart WACRM after changing .env.local.')
+    console.log('WACRM now automatically enforces TEST pilot admission. Restart the local WACRM server after updating its code; this CLI cannot inspect an already-running process.')
     return
   }
 
@@ -182,7 +183,7 @@ async function main() {
   if (action === 'activate') {
     expect(has('--confirm-activate'), 'Explicit --confirm-activate required')
     expect(has('--runtime-verified'), 'Verify the actual WACRM Settings pilot badge says ON, then add --runtime-verified')
-    expect(process.env.OPENWA_PILOT_MODE === 'enforce', 'Local configuration must set OPENWA_PILOT_MODE=enforce')
+    expect(!process.env.OPENWA_PILOT_MODE || ['off', 'enforce'].includes(process.env.OPENWA_PILOT_MODE), 'Invalid local pilot mode')
     expect(conn.session_id && (conn.status === 'ready' || conn.status === 'connected'), 'Pilot connection not ready')
     expect(guard?.manual_paused === true, 'Connection must be paused before starting the pilot')
     expect((unsettled.count ?? 0) === 0, 'Ambiguous messages must be reviewed first')
@@ -231,8 +232,8 @@ async function main() {
   }
 
   // GRANT does not unpause the connection or dispatch a provider request.
-  expect(process.env.OPENWA_PILOT_MODE === 'enforce',
-    'Set OPENWA_PILOT_MODE=enforce in local WACRM .env.local and restart the dev server first')
+  expect(!process.env.OPENWA_PILOT_MODE || ['off', 'enforce'].includes(process.env.OPENWA_PILOT_MODE),
+    'Invalid local pilot mode. The TEST project now enforces pilot admission automatically.')
   expect(has('--consent-confirmed'), 'Recipient consent must be explicitly confirmed')
   expect(has('--ack-duplicate-sessions') || (duplicates.count ?? 0) <= 1,
     'Multiple WACRM connections share the WhatsApp identity; reconcile them or explicitly acknowledge via --ack-duplicate-sessions')
@@ -275,7 +276,7 @@ async function main() {
     }, { onConflict: 'account_id,connection_id,recipient_hash,workload' }), 'Pilot allowlist grant')
 
   console.log('One TEST-only, manual-send recipient approval stored as an opaque scoped hash.')
-  console.log('The session remains PAUSED. Confirm WACRM has restarted in enforce mode, then resume ONLY this connection using the admin UI.')
+  console.log('The session remains PAUSED. TEST pilot admission is automatically enforced after WACRM restarts with the updated code; use the admin UI to activate only this connection.')
   console.log('Send at most one controlled first-touch message, inspect replies/ACKs, and use the stop command immediately for any unexpected result.')
   console.log(`Approval expires at ${expires.toISOString()}; no recipient, JID or hash was printed.`)
 }
