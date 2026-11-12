@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { NextResponse } from 'next/server'
 
 import { encrypt } from '@/lib/whatsapp/encryption'
-import { validateOpenWAWebhookUrl } from '@/lib/whatsapp/transport/openwa/client'
+import { OpenWAClient, validateOpenWABaseUrl, validateOpenWAWebhookUrl } from '@/lib/whatsapp/transport/openwa/client'
 import { resolveOpenWAClient } from '@/lib/whatsapp/transport/openwa/credentials'
 
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
@@ -39,6 +39,38 @@ export async function POST(request: Request, context: Context) {
     const { connectionId } = await context.params
     const { accountId, adminDb, user } = await requireOpenWASessionAdmin()
     const body = await request.json() as Record<string, unknown>
+    if (body.action === 'update_gateway') {
+      // Tunnel URLs rotate. Verify this is the SAME upstream session before
+      // updating the encrypted credential record. No POST /sessions or /start.
+      const { data: connection, error: lookupError } = await adminDb.from('whatsapp_connections')
+        .select('session_id').eq('id', connectionId).eq('account_id', accountId)
+        .eq('provider', 'openwa').is('archived_at', null).maybeSingle()
+      if (lookupError || !connection?.session_id) {
+        throw new WhatsAppTransportError('connection_restricted', 'Existing OpenWA session identity is required to update its gateway', lookupError)
+      }
+      const baseUrl = typeof body.base_url === 'string' ? body.base_url.trim() : ''
+      const apiKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
+      if (!baseUrl || !apiKey) throw new WhatsAppTransportError('invalid_request', 'Enter the new OpenWA URL and API key')
+      const allowedHosts = (process.env.OPENWA_ALLOWED_HOSTS ?? '').split(',').map((item) => item.trim()).filter(Boolean)
+      const verifiedUrl = validateOpenWABaseUrl(baseUrl, allowedHosts)
+      const client = new OpenWAClient({ baseUrl: verifiedUrl.toString(), apiKey, allowedHosts, timeoutMs: 8000 })
+      // Read-only provider verification: an arbitrary, stale or different
+      // OpenWA gateway MUST NOT overwrite the connection's credentials.
+      const existingSession = await client.getSessionStatus(connection.session_id, connectionId)
+      if (existingSession.sessionId !== connection.session_id) {
+        throw new WhatsAppTransportError('connection_restricted', 'The new gateway did not confirm this exact OpenWA session')
+      }
+      const { data: updated, error: writeError } = await adminDb.from('whatsapp_connection_credentials')
+        .update({ base_url: verifiedUrl.origin + (verifiedUrl.pathname === '/' ? '' : verifiedUrl.pathname),
+          api_key_encrypted: encrypt(apiKey), updated_at: new Date().toISOString() })
+        .eq('connection_id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+        .select('connection_id').maybeSingle()
+      if (writeError || !updated) {
+        throw new WhatsAppTransportError('retryable_provider_failure', 'Could not update existing OpenWA gateway credentials', writeError)
+      }
+      return NextResponse.json({ updated: true, sessionId: connection.session_id }, { headers: noStore })
+    }
+
     if (body.action === 'configure_webhook') {
       stage = 'webhook_url'
       const webhookUrl = process.env.OPENWA_WEBHOOK_URL?.trim()
