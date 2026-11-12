@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   guard: { manual_paused: true, hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
     minimum_interval_ms: 15000, jitter_ms: 3000, warmup_hourly_cap: 3, warmup_daily_cap: 10 },
   active: 0,
+  guardConfigured: true,
   pending: 0,
   duplicates: 1,
   calls: [] as { table: string; type: string; payload: unknown }[],
@@ -41,16 +42,19 @@ function request(body: unknown) {
 
 function dbFrom(table: string) {
   let operation = 'select'
+  const filters: Record<string, unknown> = {}
   const q = {
     select: (_fields?: string, _options?: unknown) => q,
-    eq: (_key: string, _value: unknown) => q,
+    eq: (key: string, value: unknown) => { filters[key] = value; return q },
     is: (_key: string, _value: unknown) => q,
     gt: (_key: string, _value: unknown) => q,
     in: (_key: string, _value: unknown) => q,
     maybeSingle: async () => {
       if (operation === 'update') return { data: { connection_id: CONNECTION }, error: null }
-      if (table === 'whatsapp_connections') return { data: h.connection, error: null }
-      if (table === 'whatsapp_connection_guardrails') return { data: h.guard, error: null }
+      if (table === 'whatsapp_connections') return { data:
+        filters.id === h.connection.id && filters.account_id === ACCOUNT && filters.provider === 'openwa'
+          ? h.connection : null, error: null }
+      if (table === 'whatsapp_connection_guardrails') return { data: h.guardConfigured ? h.guard : null, error: null }
       return { data: null, error: null }
     },
     update: (payload: Record<string, unknown>) => {
@@ -62,7 +66,11 @@ function dbFrom(table: string) {
     },
     upsert: async (payload: Record<string, unknown>) => {
       h.calls.push({ table, type: 'upsert', payload })
-      h.active = 1
+      if (table === 'whatsapp_openwa_pilot_allowlist') h.active = 1
+      if (table === 'whatsapp_connection_guardrails') {
+        h.guardConfigured = true
+        Object.assign(h.guard, payload)
+      }
       return { error: null }
     },
     insert: async (payload: Record<string, unknown>) => {
@@ -82,6 +90,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     h.calls.length = 0
+    h.connection.id = CONNECTION
     h.connection.status = 'ready'
     h.connection.session_id = 'session-1'
     h.connection.archived_at = null
@@ -89,6 +98,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
       first_touch_daily_cap: 1, minimum_interval_ms: 15000, jitter_ms: 3000,
       warmup_hourly_cap: 3, warmup_daily_cap: 10 })
     h.active = 0
+    h.guardConfigured = true
     h.pending = 0
     h.duplicates = 1
     h.envMode.enabled = true
@@ -108,7 +118,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(response.status).toBe(403)
     expect(h.calls).toEqual([])
   })
-  it('refuses any Production URL, wrong account or other connection', async () => {
+  it('refuses a Production URL, wrong tenant, or missing connection', async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://production-project.supabase.co'
     expect((await POST(request({ action: 'stop' }), context())).status).toBe(409)
     process.env.NEXT_PUBLIC_SUPABASE_URL = TEST_URL
@@ -121,11 +131,53 @@ describe('OW-13 DEV pilot protected UI API', () => {
     const response = await GET(new Request('http://localhost'), context())
     const payload = await response.json()
     expect(response.status).toBe(200)
-    expect(payload).toMatchObject({ paused: true, enforced: true, active_admissions: 0,
+    expect(payload).toMatchObject({ configured: true, paused: true, enforced: true, active_admissions: 0,
       unsettled_outbound: 0, guardrails: { hourly_cap: 3, daily_cap: 10 } })
     expect(JSON.stringify(payload)).not.toContain('recipient_hash')
     expect(JSON.stringify(payload)).not.toContain('api_key')
   })
+  it('shows unconfigured fresh sessions without writing permissive limits', async () => {
+    h.connection.id = '02527740-9806-45ae-b9b1-1354c25f1d3f'
+    h.guardConfigured = false
+    const response = await GET(new Request('http://localhost'), context(h.connection.id))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      connectionId: h.connection.id, configured: false, paused: true, active: false,
+      guardrails: { hourly_cap: 3, daily_cap: 10 },
+    })
+    expect(h.calls).toEqual([])
+    h.connection.id = CONNECTION
+  })
+
+  it('prepares the newly selected TEST session with strict paused caps and no grant', async () => {
+    h.connection.id = '02527740-9806-45ae-b9b1-1354c25f1d3f'
+    h.guardConfigured = false
+    const response = await POST(request({ action: 'prepare', confirm_prepare: true }),
+      context(h.connection.id))
+    expect(response.status).toBe(200)
+    expect((await response.json()).configured).toBe(true)
+    expect(h.guard.manual_paused).toBe(true)
+    expect(h.calls).toContainEqual(expect.objectContaining({
+      table: 'whatsapp_connection_guardrails', type: 'upsert',
+      payload: expect.objectContaining({
+        account_id: ACCOUNT, connection_id: h.connection.id,
+        manual_paused: true, hourly_cap: 3, daily_cap: 10,
+        first_touch_daily_cap: 1, minimum_interval_ms: 15000,
+      }),
+    }))
+    expect(h.calls.filter((c) => c.table === 'whatsapp_openwa_pilot_allowlist')).toHaveLength(0)
+    h.connection.id = CONNECTION
+  })
+
+  it('cannot prepare an unknown session, one with unsettled messages, or without confirmation', async () => {
+    expect((await POST(request({ action: 'prepare', confirm_prepare: true }),
+      context('22222222-2222-4222-8222-222222222222'))).status).toBe(409)
+    expect((await POST(request({ action: 'prepare' }), context())).status).toBe(400)
+    h.pending = 1
+    expect((await POST(request({ action: 'prepare', confirm_prepare: true }), context())).status).toBe(409)
+    expect(h.calls).toEqual([])
+  })
+
   it('rejects invalid higher pilot caps without changes', async () => {
     const response = await POST(request({
       action: 'limits', hourly_cap: 60, daily_cap: 500,
