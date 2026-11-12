@@ -5,15 +5,18 @@ import { GuardedOpenWATransport } from './guardrails'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { WhatsAppTransportError, type WhatsAppProvider, type WhatsAppTransport } from './types'
 
-interface ConnectionRow { id: string; account_id: string; provider: WhatsAppProvider }
+interface ConnectionRow { id: string; account_id: string; provider: WhatsAppProvider; archived_at?: string | null }
 export interface ResolvedWhatsAppTransport { connectionId: string; transport: WhatsAppTransport }
 
 export async function resolveWhatsAppTransport(db: SupabaseClient, accountId: string, connectionId?: string | null): Promise<ResolvedWhatsAppTransport> {
   if (!connectionId) return resolveMetaTransport(db, accountId)
-  const { data, error } = await db.from('whatsapp_connections').select('id, account_id, provider').eq('id', connectionId).eq('account_id', accountId).maybeSingle()
+  const { data, error } = await db.from('whatsapp_connections').select('id, account_id, provider, archived_at').eq('id', connectionId).eq('account_id', accountId).maybeSingle()
   if (error || !data) throw new WhatsAppTransportError('authentication_or_configuration', 'WhatsApp connection is not configured for this account', error)
   const connection = data as ConnectionRow
   if (connection.provider === 'openwa') {
+    if (connection.archived_at) {
+      throw new WhatsAppTransportError('connection_restricted', 'This conversation uses an archived OpenWA session. Select a ready same-phone session explicitly before sending.')
+    }
     // Caller-scoped DB above authorizes access to this connection. Only
     // after that check may server-only credential reads and guardrail RPCs
     // use service_role (migrations 149/152); never widen client grants.
