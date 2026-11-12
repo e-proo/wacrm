@@ -40,6 +40,11 @@ export async function POST(request: Request, context: Context) {
     const { accountId, adminDb, user } = await requireOpenWASessionAdmin()
     const body = await request.json() as Record<string, unknown>
     if (body.action === 'update_gateway') {
+      // This management flow is authorized for isolated TEST development only.
+      let testEnvironment = false
+      try { testEnvironment = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname === 'pqirsnfupofhulmewakq.supabase.co' }
+      catch { /* fail closed */ }
+      if (!testEnvironment) throw new WhatsAppTransportError('connection_restricted', 'Gateway rotation is only available on TEST')
       // Tunnel URLs rotate. Verify this is the SAME upstream session before
       // updating the encrypted credential record. No POST /sessions or /start.
       const { data: connection, error: lookupError } = await adminDb.from('whatsapp_connections')
