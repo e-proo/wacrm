@@ -133,7 +133,9 @@ export function OpenWAPilotControls({
       if (action === 'stop') { setVerified(false); setDuplicateAck(false); setVerifiedStatus(null) }
       setNotice(w(action === 'prepare' ? 'devPilotPrepared' : action === 'stop' ? 'devPilotStopped'
         : action === 'activate' ? 'devPilotStarted'
-        : action === 'grant' ? 'devPilotGranted' : 'devPilotLimitsSaved'))
+        : action === 'grant' && data.recipient_identity_source === 'verified_inbound_chat'
+          ? 'devPilotGrantedNativeChat'
+          : action === 'grant' ? 'devPilotGranted' : 'devPilotLimitsSaved'))
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : w('devPilotActionRejected'))
