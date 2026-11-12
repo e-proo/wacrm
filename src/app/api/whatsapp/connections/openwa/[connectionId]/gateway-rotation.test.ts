@@ -26,9 +26,10 @@ vi.mock('@/lib/whatsapp/transport/openwa/client', async (original) => {
   const actual = await original<typeof import('@/lib/whatsapp/transport/openwa/client')>()
   return {
     ...actual,
-    OpenWAClient: vi.fn().mockImplementation(() => ({
-      getSessionStatus: h.status,
-    })),
+    // Use a constructible class: the runtime calls `new OpenWAClient()`.
+    OpenWAClient: class {
+      getSessionStatus = h.status
+    },
   }
 })
 
