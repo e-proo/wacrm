@@ -225,6 +225,14 @@ export function OpenWAConnections() {
     }
   }
 
+  const selectedPilotConnection = connections.find((c) => c.id === selectedPilotId)
+  const relatedPilotConnections = selectedPilotConnection?.phone_identity
+    ? connections.filter((c) => c.phone_identity === selectedPilotConnection.phone_identity &&
+      ['ready', 'connected'].includes(c.status)).map((c) => ({
+      id: c.id, status: c.status, sessionId: c.session_id,
+    }))
+    : []
+
   if (!canEditSettings) return null
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
   if (loadError) {
@@ -296,7 +304,8 @@ export function OpenWAConnections() {
           </div>
         </CardContent>
       </Card>
-      {selectedPilotId && <OpenWAPilotControls key={selectedPilotId} connectionId={selectedPilotId} />}
+      {selectedPilotId && <OpenWAPilotControls key={selectedPilotId}
+        connectionId={selectedPilotId} relatedConnections={relatedPilotConnections} />}
     </div>}
 
     {connections.map((connection) => <Card key={connection.id}>
