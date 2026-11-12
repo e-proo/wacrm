@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 /**
- * OW-13 DEV-only, single-connection pilot operator utility.
+ * OW-13 DEV-only, account-scoped pilot operator utility for any TEST connection.
  *
  * Usage (Node 22+, from WACRM repository root, PowerShell):
- *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs status
- *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs grant --approver=USER_UUID --consent-confirmed --ack-duplicate-sessions
- *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs limits --hourly=3 --daily=10 --first-touch=1 --interval-ms=15000 --jitter-ms=3000
- *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs activate --confirm-activate --runtime-verified --ack-duplicate-sessions
- *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs stop --confirm-stop
+ *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs list
+ *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs status --connection=UUID
+ *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs prepare --connection=UUID --confirm-prepare
+ *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs limits --connection=UUID --hourly=3 --daily=10 --first-touch=1 --interval-ms=15000 --jitter-ms=3000
+ *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs grant --connection=UUID --approver=USER_UUID --consent-confirmed --ack-duplicate-sessions
+ *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs activate --connection=UUID --confirm-activate --runtime-verified --ack-duplicate-sessions
+ *   node --env-file=.env.local scripts/openwa-dev-pilot.mjs stop --connection=UUID --confirm-stop
  *
  * No outbound WhatsApp send is issued by this utility. The recipient is read
  * interactively and stored only as a scoped SHA-256 hash. This script never
@@ -19,12 +21,12 @@ import { createClient } from '@supabase/supabase-js'
 
 const TEST_REF = 'pqirsnfupofhulmewakq'
 const ACCOUNT_ID = '8ed95309-96cd-4347-b725-bd8c5039ed4f'
-const CONNECTION_ID = '2dacee52-3486-4b47-96a0-fa4399ac0fb2'
 const MAX_ACTIVE_HOURS = 4
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const [action = 'status', ...flags] = process.argv.slice(2)
 const has = (name) => flags.includes(name)
 const option = (prefix) => flags.find((s) => s.startsWith(prefix))?.slice(prefix.length)
+const CONNECTION_ID = option('--connection=')
 
 function expect(value, message) {
   if (!value) throw new Error(message)
@@ -43,7 +45,7 @@ function canonicalRecipient(value) {
 }
 
 async function main() {
-  expect(['status', 'grant', 'limits', 'activate', 'stop'].includes(action), 'Expected status, grant, limits, activate or stop')
+  expect(['list', 'status', 'prepare', 'grant', 'limits', 'activate', 'stop'].includes(action), 'Expected list, status, prepare, grant, limits, activate or stop')
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   expect(url && key, 'Missing TEST Supabase URL or server-only service role key')
@@ -56,11 +58,23 @@ async function main() {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 
+  if (action === 'list') {
+    const sessions = dataOrError(await db.from('whatsapp_connections')
+      .select('id,status,session_id,display_name')
+      .eq('account_id', ACCOUNT_ID).eq('provider', 'openwa')
+      .is('archived_at', null).order('created_at', { ascending: false }).limit(50), 'Session listing')
+    console.log(JSON.stringify({ environment: 'TEST ONLY', sessions: (sessions ?? []).map((row) => ({
+      id: row.id, status: row.status, has_session: Boolean(row.session_id), name: row.display_name,
+    })) }, null, 2))
+    return
+  }
+
+  expect(CONNECTION_ID && UUID.test(CONNECTION_ID), 'Provide --connection=UUID; run list to see the TEST OpenWA sessions')
   const conn = dataOrError(await db.from('whatsapp_connections')
     .select('id,account_id,status,session_id,phone_identity,archived_at')
     .eq('id', CONNECTION_ID).eq('account_id', ACCOUNT_ID).eq('provider', 'openwa')
     .maybeSingle(), 'Connection lookup')
-  expect(conn && !conn.archived_at && conn.session_id, 'Pilot connection is absent, archived or lacks a session')
+  expect(conn && !conn.archived_at, 'Pilot connection is absent or archived in this TEST account')
 
   const guard = dataOrError(await db.from('whatsapp_connection_guardrails')
     .select('manual_paused,hourly_cap,daily_cap,first_touch_daily_cap,minimum_interval_ms,jitter_ms,warmup_hourly_cap,warmup_daily_cap')
@@ -95,6 +109,7 @@ async function main() {
   const state = {
     environment: 'TEST ONLY',
     connection: CONNECTION_ID,
+    configured: Boolean(guard),
     status: conn.status,
     paused: guard?.manual_paused ?? null,
     hourly_cap: guard?.hourly_cap ?? null,
@@ -114,6 +129,28 @@ async function main() {
   if (action === 'status') {
     console.log(JSON.stringify(state, null, 2))
     console.log('Runtime mode is NOT provable from this script. Restart WACRM after changing .env.local.')
+    return
+  }
+
+  if (action === 'prepare') {
+    expect(has('--confirm-prepare'), 'Explicit --confirm-prepare required')
+    expect(conn.session_id && ['ready', 'connected'].includes(conn.status), 'Prepare only an existing ready TEST session')
+    expect((unsettled.count ?? 0) === 0 && (active.count ?? 0) === 0,
+      'Reconcile pending sends or revoke active grants before preparing this connection')
+    dataOrError(await db.from('whatsapp_connection_guardrails').upsert({
+      connection_id: CONNECTION_ID, account_id: ACCOUNT_ID, manual_paused: true,
+      hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
+      minimum_interval_ms: 15000, jitter_ms: 3000,
+      warmup_until: new Date(Date.now() + 7 * 86400000).toISOString(),
+      warmup_hourly_cap: 3, warmup_daily_cap: 10,
+      failure_window_minutes: 15, failure_min_attempts: 2, failure_rate_threshold: 0.5,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'connection_id' }), 'Pilot preparation')
+    dataOrError(await db.from('whatsapp_guardrail_events').insert({
+      account_id: ACCOUNT_ID, connection_id: CONNECTION_ID, workload: 'manual',
+      decision: 'paused', reason: 'ow13_dev_pilot_cli_prepare',
+    }), 'Pilot preparation audit')
+    console.log('TEST pilot configured and PAUSED for this connection only; no recipient approved or message sent.')
     return
   }
 
@@ -146,7 +183,7 @@ async function main() {
     expect(has('--confirm-activate'), 'Explicit --confirm-activate required')
     expect(has('--runtime-verified'), 'Verify the actual WACRM Settings pilot badge says ON, then add --runtime-verified')
     expect(process.env.OPENWA_PILOT_MODE === 'enforce', 'Local configuration must set OPENWA_PILOT_MODE=enforce')
-    expect(conn.status === 'ready' || conn.status === 'connected', 'Pilot connection not ready')
+    expect(conn.session_id && (conn.status === 'ready' || conn.status === 'connected'), 'Pilot connection not ready')
     expect(guard?.manual_paused === true, 'Connection must be paused before starting the pilot')
     expect((unsettled.count ?? 0) === 0, 'Ambiguous messages must be reviewed first')
     expect((active.count ?? 0) === 1 && (manualActive.count ?? 0) === 1, 'Exactly one unexpired manual-only grant is required')
@@ -175,9 +212,13 @@ async function main() {
 
   if (action === 'stop') {
     expect(has('--confirm-stop'), 'Explicit --confirm-stop required')
-    dataOrError(await db.from('whatsapp_connection_guardrails')
-      .update({ manual_paused: true, updated_at: new Date().toISOString() })
-      .eq('account_id', ACCOUNT_ID).eq('connection_id', CONNECTION_ID), 'Emergency pause')
+    dataOrError(await db.from('whatsapp_connection_guardrails').upsert({
+      connection_id: CONNECTION_ID, account_id: ACCOUNT_ID,
+      manual_paused: true, updated_at: new Date().toISOString(),
+      ...(!guard ? { hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
+        minimum_interval_ms: 15000, jitter_ms: 3000,
+        warmup_hourly_cap: 3, warmup_daily_cap: 10 } : {}),
+    }, { onConflict: 'connection_id' }), 'Emergency pause')
     dataOrError(await db.from('whatsapp_openwa_pilot_allowlist')
       .update({ active: false }).eq('account_id', ACCOUNT_ID)
       .eq('connection_id', CONNECTION_ID).eq('active', true), 'Pilot cohort revocation')
@@ -185,7 +226,7 @@ async function main() {
       .insert({ account_id: ACCOUNT_ID, connection_id: CONNECTION_ID,
         workload: 'manual', decision: 'paused', reason: 'ow13_dev_pilot_operator_stop' }),
     'Stop audit')
-    console.log('TEST pilot paused and admission revoked for the pinned connection. In-flight sends may still complete.')
+    console.log('TEST pilot paused and approvals revoked for the chosen connection. In-flight sends may still complete.')
     return
   }
 
@@ -195,7 +236,7 @@ async function main() {
   expect(has('--consent-confirmed'), 'Recipient consent must be explicitly confirmed')
   expect(has('--ack-duplicate-sessions') || (duplicates.count ?? 0) <= 1,
     'Multiple WACRM connections share the WhatsApp identity; reconcile them or explicitly acknowledge via --ack-duplicate-sessions')
-  expect(conn.status === 'ready' || conn.status === 'connected', 'Pilot session not ready')
+  expect(conn.session_id && (conn.status === 'ready' || conn.status === 'connected'), 'Pilot session not ready')
   expect(guard?.manual_paused === true, 'Connection must remain paused until the allowlist grant is ready')
   expect((guard.hourly_cap ?? Infinity) <= 3 && (guard.daily_cap ?? Infinity) <= 10
     && (guard.first_touch_daily_cap ?? Infinity) <= 1
