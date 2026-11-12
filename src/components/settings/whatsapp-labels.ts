@@ -278,6 +278,26 @@ const labels = {
     "en": "The pilot recipient allowlist is NOT being enforced. Do not resume the dedicated TEST pilot connection until the server is restarted in enforce mode and the recipient is approved.",
     "ar": "قائمة سماح المستلمين الخاصة بالتجربة غير مفروضة. لا تستأنف اتصال TEST المخصص قبل تشغيل الخادم بوضع enforce واعتماد المستلم التجريبي."
   },
+  "devPilotHubTitle": {
+    "en": "TEST Pilot control center",
+    "ar": "لوحة إدارة Pilot التجريبي"
+  },
+  "devPilotHubHint": {
+    "en": "Choose an OpenWA connection to prepare, set limits, approve a recipient, start or stop sending. Each connection is independent; no PowerShell commands are needed.",
+    "ar": "اختر اتصال OpenWA من القائمة للتحكم في التجهيز وحدود الإرسال والمستلم المعتمد والتفعيل والإيقاف. كل اتصال مستقل، ولا يلزم تشغيل أوامر PowerShell."
+  },
+  "devPilotChooseConnection": {
+    "en": "Select the TEST session",
+    "ar": "الجلسة التي تريد اختبارها"
+  },
+  "devPilotManageThisConnection": {
+    "en": "Manage Pilot",
+    "ar": "إدارة Pilot"
+  },
+  "devPilotAutoEnforceHint": {
+    "en": "The TEST server enforces the pilot recipient allowlist automatically. Start or stop each connection here; no OPENWA_PILOT_MODE edit is needed. Other unapproved OpenWA sends on TEST may be blocked.",
+    "ar": "حماية قائمة السماح مفعّلة تلقائيًا على خادم TEST. تستطيع التحكم في بدء وإيقاف كل جلسة من هذه اللوحة؛ لا حاجة لتغيير OPENWA_PILOT_MODE في ملفات البيئة. قد تُمنع عمليات OpenWA الأخرى غير المعتمدة في TEST."
+  },
   "devPilotNeedsSetup": {
     "en": "Pilot is not configured on this connection",
     "ar": "لم تُجهز إعدادات Pilot لهذا الاتصال"
