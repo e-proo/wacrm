@@ -4,6 +4,8 @@ import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 const h = vi.hoisted(() => ({
   auth: vi.fn(),
   refresh: vi.fn(),
+  resolveRecipient: vi.fn(),
+  recipientHash: vi.fn(() => 'a'.repeat(64)),
   envMode: { enabled: true, invalid: false },
   connection: { id: '2dacee52-3486-4b47-96a0-fa4399ac0fb2', status: 'ready',
     session_id: 'session-1' as string | null, phone_identity: '123456789', archived_at: null as string | null },
@@ -22,11 +24,14 @@ vi.mock('@/lib/whatsapp/transport/openwa/session-auth', () => ({
 vi.mock('@/lib/whatsapp/transport/openwa/session-lifecycle', () => ({
   refreshOpenWAConnectionStatus: h.refresh,
 }))
+vi.mock('@/lib/whatsapp/transport/openwa/pilot-recipient', () => ({
+  resolveOpenWAPilotRecipientForGrant: h.resolveRecipient,
+}))
 vi.mock('@/lib/whatsapp/transport/guardrails', () => ({
   isOpenWATestProject: () => process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co',
   openWAPilotEnforcementEnabled: () => { if (h.envMode.invalid) throw new Error('invalid mode'); return h.envMode.enabled },
   canonicalOpenWAPilotRecipient: (value: string) => /^[1-9][0-9]{6,14}$/.test(value) ? value + '@c.us' : null,
-  openWAPilotRecipientHash: () => 'a'.repeat(64),
+  openWAPilotRecipientHash: h.recipientHash,
 }))
 import { GET, POST } from './route'
 
@@ -109,6 +114,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     h.envMode.enabled = true
     h.envMode.invalid = false
     h.refresh.mockResolvedValue({ status: 'ready', phoneIdentity: '123456789' })
+    h.resolveRecipient.mockResolvedValue({ recipient: '12345678901@c.us', source: 'phone_without_inbound' })
     process.env.NEXT_PUBLIC_SUPABASE_URL = TEST_URL
     h.auth.mockResolvedValue({ accountId: ACCOUNT, user: { id: USER },
       adminDb: { from: vi.fn(dbFrom) } })
@@ -225,6 +231,34 @@ describe('OW-13 DEV pilot protected UI API', () => {
         workload: 'manual', approved_by: USER }),
     }))
     expect(JSON.stringify(h.calls)).not.toContain('12345678901')
+  })
+  it('grants the native inbound LID, not the guessed phone JID, on the exact TEST session', async () => {
+    const nativeLid = '123456789012345@lid'
+    h.resolveRecipient.mockResolvedValue({
+      recipient: nativeLid, source: 'verified_inbound_chat',
+    })
+    const response = await POST(request({
+      action: 'grant', recipient: '12345678901',
+      consent_confirmed: true, ack_duplicate_sessions: true, hours: 4,
+    }), context())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      recipient_identity_source: 'verified_inbound_chat',
+    })
+    expect(h.resolveRecipient).toHaveBeenCalledWith(expect.anything(), ACCOUNT, CONNECTION, '12345678901')
+    expect(h.recipientHash).toHaveBeenCalledWith(ACCOUNT, CONNECTION, nativeLid)
+    expect(JSON.stringify(h.calls)).not.toContain(nativeLid)
+    expect(JSON.stringify(h.calls)).not.toContain('12345678901')
+  })
+  it('does not persist an approval when native chat identity cannot be resolved safely', async () => {
+    h.resolveRecipient.mockRejectedValue(new WhatsAppTransportError(
+      'connection_restricted', 'Multiple native identities for this contact',
+    ))
+    const response = await POST(request({
+      action: 'grant', recipient: '12345678901', consent_confirmed: true,
+    }), context())
+    expect(response.status).toBe(409)
+    expect(h.calls).toEqual([])
   })
   it('does not activate with no grant or unresolved sends', async () => {
     expect((await POST(request({ action: 'activate' }), context())).status).toBe(409)
