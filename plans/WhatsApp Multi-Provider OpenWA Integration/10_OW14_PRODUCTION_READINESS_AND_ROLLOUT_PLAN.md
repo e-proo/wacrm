@@ -134,3 +134,22 @@ Only after formal GO and separate Production change authorization. Proposed (not
 Proposed roles: Engineering (W01/W05/W08), SRE/Platform (W02/W04/W06/W10), Security/DB (W03), Product/Legal/Support (W07), QA/Pilot owner (G1/G2), independent Release Owner (W09/W10). Specific humans, deputies and estimated dates are TBD; do not invent approvals. Store only redacted evidence, never secrets or sensitive recipient identities. Every later Production change needs a separate approved change ticket, backup/checkpoint, window, stop owner and rollback evidence.
 
 References: 00_MASTER_IMPLEMENTATION_PLAN.md, 05_TEST_PILOT_AND_ROLLOUT.md, 08_OW13_BOUNDED_PILOT_PREPARATION.md and 11_OW14_RELEASE_DECISION_TEMPLATE.md.
+
+## 8. Linear workstream tracker (existing OW-14 milestone)
+
+Planning coordination: [SOF-58](https://linear.app/eproo/issue/SOF-58). Implementation work packages (not yet executed):
+
+| Workstream | Linear | Execution state |
+| --- | --- | --- |
+| W01 Baseline / topology gap audit | [SOF-48](https://linear.app/eproo/issue/SOF-48) | Todo; recommended first work |
+| W02 Isolated gateway deployment | [SOF-49](https://linear.app/eproo/issue/SOF-49) | Todo |
+| W03 Security, NOTE-001, rotation | [SOF-50](https://linear.app/eproo/issue/SOF-50) | Todo |
+| W04 Observability and on-call | [SOF-51](https://linear.app/eproo/issue/SOF-51) | Todo |
+| W05 Delivery/ACK/reconciliation | [SOF-52](https://linear.app/eproo/issue/SOF-52) | Todo; live acceptance deferred |
+| W06 Capacity, backup/restore | [SOF-53](https://linear.app/eproo/issue/SOF-53) | Todo |
+| W07 Opt-in and policy warning | [SOF-54](https://linear.app/eproo/issue/SOF-54) | Todo |
+| W08 Release/CI/migrations | [SOF-55](https://linear.app/eproo/issue/SOF-55) | Todo |
+| W09 Independent release GO/NO-GO | [SOF-56](https://linear.app/eproo/issue/SOF-56) | Todo; blocked by SOF-41, SOF-43, SOF-44 and W01–W08 |
+| W10 Controlled Production waves | [SOF-57](https://linear.app/eproo/issue/SOF-57) | Todo; blocked by W09 and prior live phase gates |
+
+No separate Linear project or duplicate OW-14 milestone was created. W01–W08 can progress on documentation/design independently; runtime work is separately authorized, and Production decisions remain blocked until all required proofs exist.
