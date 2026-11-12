@@ -1,6 +1,6 @@
 # WACRM — WhatsApp Multi-Provider + OpenWA Integration
 
-Status: EXECUTION IN PROGRESS — OW-0..OW-11 implementation phases closed; OW-12 remains partial live acceptance In Progress; OW-13 preparation is In Progress from 2026-11-11 (SOF-42) but pilot execution (SOF-43) is blocked and not started; OW-14 not started. Historical OW-4 closure checkpoint 2026-11-07.
+Status: EXECUTION IN PROGRESS — OW-0..OW-11 implementation phases closed; OW-12 live acceptance remains In Progress; OW-13 preparation In Progress, formal pilot SOF-43 blocked; OW-14 production-readiness PLANNING PREPARED (2026-11-12), production decision and rollout NOT STARTED / NO-GO. Historical OW-4 closure checkpoint 2026-11-07.
 
 ## Objective
 Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Meta WhatsApp Cloud API as the official/default production transport. WACRM remains the source of truth for CRM/business logic/agents/automations/broadcasts/audit/idempotency.
@@ -30,7 +30,7 @@ Add OpenWA as an optional self-hosted WhatsApp Web transport while preserving Me
 | OW-5..OW-11 | IMPLEMENTATION ISSUES DONE | prior implementation + CI gates (SOF-34..SOF-40); not OW-12 live acceptance |
 | OW-12 | LIVE TEST PARTIALLY VERIFIED | session/QR/ready, Webhook 202, inbound text, AI reply and read receipt verified; remaining acceptance matrix open |
 | OW-13 | PREPARATION IN PROGRESS; PILOT NOT STARTED | Preparation SOF-42; pilot SOF-43 blocked by OW-12 live acceptance and approval |
-| OW-14 | NOT STARTED | production decision requires pilot, security and ops evidence |
+| OW-14 | PREPARATION PLANNED / NO-GO | planning documents drafted; implementation, security sign-off, OW-12/13 acceptance, production decision and staged rollout pending |
 
 ## OW-4 implementation evidence
 - OpenWA REST client exposes create/status/QR/reconnect/logout session primitives while retaining the OW-3 timeout, SSRF, redaction and error boundary.
@@ -97,3 +97,12 @@ Meta Cloud remains the official/default production provider. OpenWA is an option
 - [SOF-42](https://linear.app/eproo/issue/SOF-42/ow-13-prep-prepare-bounded-openwa-pilot-controls-monitoring-and) prepares controls; [SOF-43](https://linear.app/eproo/issue/SOF-43/ow-13-execute-bounded-openwa-pilot-after-ow-12-live-acceptance-not) remains blocked by [SOF-41](https://linear.app/eproo/issue/SOF-41/ow-12-execute-live-openwa-test-acceptance) and SOF-42. No real cohort, Production enablement or outbound sends were authorized.
 - Read-only TEST: five OpenWA ready connections, ten unresolved sending messages without provider-native IDs. They must not be resent or reclassified by inference.
 - Missing server-enforced pilot cohort admission in the examined outbound boundary and unproven admin-operated emergency stop are pre-activation work, not accepted rollout features. NOTE-001 remains open before Production/GA.
+
+
+## OW-14 professional production-readiness preparation — 2026-11-12
+
+- The owner elected to defer remaining live tests and requested OW-14 **planning now**, not activation. See [10_OW14_PRODUCTION_READINESS_AND_ROLLOUT_PLAN.md](10_OW14_PRODUCTION_READINESS_AND_ROLLOUT_PLAN.md) for P0–P5 staged governance and W01–W10 work packages, and [11_OW14_RELEASE_DECISION_TEMPLATE.md](11_OW14_RELEASE_DECISION_TEMPLATE.md) for the evidence/owner/security GO/NO-GO packet.
+- Verified planning baseline: `refactor/service-platform-v2` HEAD `3175c541d2a33851593a6ed45042e62ca7186a3c` before documentation changes, [CI](https://github.com/e-proo/wacrm/actions/runs/43298734037) success, [Migrations replay](https://github.com/e-proo/wacrm/actions/runs/43297752814) success, TEST migrations 155/156 applied. Refresh exact HEAD and workflows before implementation or release approval.
+- Latest TEST state: only one non-archived OpenWA connection remains; `pilot_enabled=false`, `manual_paused=false`, no pending `sending` messages. This is not evidence of a passed formal Pilot; old development cleanup does not prove native reconciliation.
+- Hard blockers unchanged: SOF-41 OW-12 live acceptance, SOF-43 OW-13 bounded pilot and its SOF-42/44 prerequisites, current provider/media/webhook/restart/security gates and NOTE-001 security review. Recent Supabase TEST advisor findings are itemized in the OW-14 plan; Production remains untouched.
+- The OW-14 planning artifacts and Linear work packages can be prepared in parallel; **no** customer-facing Production configuration, migration, new connection or rollout is authorized. Separate security/product/ops and release owner approval is required later.
