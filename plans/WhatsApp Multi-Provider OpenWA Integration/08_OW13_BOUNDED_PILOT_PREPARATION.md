@@ -351,3 +351,33 @@ The `grant` command prompts for one consenting recipient in the terminal; **neve
 - [ ] Actual gateway status, one manually approved send/ACK, duplicate checks, STOP/revoke/persistence verified on TEST.
 
 **This change lifts the *hard-coded pilot connection* blocker only; it does NOT close** [SOF-46](https://linear.app/eproo/issue/SOF-46) upstream `Socket` startup investigation, [SOF-44](https://linear.app/eproo/issue/SOF-44) live Agent/Viewer negative tests, [SOF-41](https://linear.app/eproo/issue/SOF-41) OW-12 live acceptance or formal [SOF-43](https://linear.app/eproo/issue/SOF-43) GO/NO-GO.
+
+
+## 17. TEST Pilot from WACRM UI — terminal-free operator workflow (2026-11-12)
+
+**Supersedes the environment-activation instructions in §§14–16 for the pinned development TEST project.** The operator asked to use the full DEV Pilot through WACRM Settings rather than Node/PowerShell commands. This change introduces no new schema and does not modify Production, Meta routing, existing sessions or recipient approvals.
+
+### Automatic recipient-admission protection on TEST
+
+`isOpenWATestProject()` requires the **exact HTTPS hostname** `pqirsnfupofhulmewakq.supabase.co`. On this project only, `openWAPilotEnforcementEnabled()` returns `true` even if `OPENWA_PILOT_MODE` is absent or set to `off`. Invalid pilot environment modes continue to throw and block sends. **Production/other Supabase projects preserve the previous behavior** (`off` by default or explicit `enforce`). There is deliberately **no button to disable the globally enforced TEST allowlist**: doing so could allow sends from other sessions with pre-existing, more permissive guardrails. Pilot **Start/Stop is connection-specific** and operates on the stored pause, explicit consenting manual recipient grant, and previously established strict per-connection caps.
+
+The change becomes effective after the local operator pulls the updated branch and **restarts WACRM**. No edit to `.env.local` is necessary. OpenWA gateway may be restarted independently. The separate optional terminal utility remains supported and now reports the automatic effective TEST gate.
+
+### Complete UI procedure
+
+1. Open WACRM `Settings → WhatsApp → WhatsApp Web (OpenWA)` as an authenticated **owner/admin**. The page's server-backed `pilot.enforced=true` signal confirms that WACRM's process is enforcing admission. The banner explicitly explains that unapproved OpenWA sends from other TEST sessions are blocked.
+2. In the new **TEST Pilot control center** immediately above the session cards, choose any existing OpenWA session from the dropdown (name, WACRM status, and UUID suffix). Its full WACRM connection ID and status are shown. You can also click **Manage Pilot** on any card to focus the same panel. The selected `OpenWAPilotControls` is keyed by connection ID, so stale recipient input/consent from another card cannot carry over.
+3. If the Cloudflare tunnel URL changed: enter its new URL and API key in the existing top-level inputs, then click **Update this connection's gateway URL** for the selected session. The protected TEST-only API reads `GET /api/sessions/{stored-session-id}` on the new endpoint and saves encrypted credentials **only if the ID matches exactly**; never creates another session. Wrong gateway/ID or unverified request is rejected. WACRM status refresh is available beside this control; investigate stale `ready` status and duplicate identities before Pilot activation.
+4. If the chosen connection has no guardrail row, the panel displays **Pilot not configured**. Click **Prepare Pilot**. The server writes only a paused 3/hour, 10/day, one first-touch/day, min 15s + jitter guardrail for the authenticated tenant's current TEST connection. No grant or WhatsApp send occurs.
+5. While paused, edit and save the five cap/pacing fields. Enter **one consenting test recipient**, check explicit consent and review duplicate session identities if warned. Click **Approve recipient (4 hours)**. The server hashes the canonical identity and uses the currently authenticated admin's user ID as `approved_by`, so **no `--approver` UUID or CLI command is necessary**. The plaintext recipient is not persisted.
+6. Confirm one active approval, `enforced=true`, and no ambiguous/outstanding send. Click **Start Pilot** on the same selected session. Only then use the ordinary WACRM Inbox to send one small controlled manual message. Observe native provider identity, delivery and WACRM status; never automatically resend ambiguous outcomes.
+7. Click **Stop Pilot and revoke approvals** on the chosen connection; verify the panel and WACRM status show paused, zero active grants. A provider request already in-flight may complete, so inspect audit and delivery logs. Repeat independently on any other existing session with new consent; approvals never transfer.
+
+### Security and acceptance
+
+- The TEST allowlist remains server-only, tenant-scoped and **cannot be switched OFF through the browser**. New status fields report booleans/counts only, no recipient hashes, API keys or server credentials. `requireOpenWASessionAdmin` still enforces WACRM owner/admin; Agent/Viewer live HTTP-negative acceptance remains a separate required SOF-44 test.
+- The dropdown and per-connection controls are visible only when the existing protected OpenWA list API reports the **TEST project**; Production is not given this development control center. Meta is unchanged.
+- Existing old sessions and unresolved OpenWA sends are not modified. No Supabase schema migration is required; migrations 147/155 already exist on TEST. Running under the pinned TEST project automatically enforces the allowlist on *all* OpenWA workload types, not just the selected session.
+- **Evidence to collect before claiming live acceptance**: exact HEAD/CI completed success; successful local WACRM admin UI and TEST HTTP actions `prepare/limits/grant/activate/stop`; verification that arbitrary/non-consenting recipients and Agent/Viewer cannot mutate or send; provider session readiness, one real recipient delivery and status reconciliation; STOP under a live send and after restart. Upstream `Socket` recovery, OW-12 and formal SOF-43 pilot GO remain separate.
+
+**Checkpoint:** WACRM UI and server code are implementation changes; CI verification and actual local app/provider TEST acceptance must be reported separately. No live WhatsApp message is sent by this change.
