@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import { Loader2, LogOut, Pause, Play, QrCode, RefreshCw, RotateCcw, Trash2, Webhook } from 'lucide-react'
 import { toast } from 'sonner'
@@ -39,7 +39,7 @@ interface OpenWAApiPayload extends Record<string, unknown> {
   stage?: string
   reconciliation_required?: boolean
   connections?: OpenWAConnection[]
-  pilot?: { enforced: boolean; devMode: boolean }
+  pilot?: { enforced: boolean; devMode: boolean; automaticallyEnforced?: boolean }
   connection?: { id: string }
   qr?: string
   expires_at?: string
@@ -52,6 +52,8 @@ export function OpenWAConnections() {
   const [connections, setConnections] = useState<OpenWAConnection[]>([])
   const [pilotEnforced, setPilotEnforced] = useState<boolean | null>(null)
   const [pilotDevMode, setPilotDevMode] = useState(false)
+  const [selectedPilotId, setSelectedPilotId] = useState('')
+  const pilotSectionRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -75,7 +77,10 @@ export function OpenWAConnections() {
       const response = await fetch('/api/whatsapp/connections/openwa', { cache: 'no-store' })
       const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
       if (!response.ok) throw new Error(data.error || w('loadOpenwa'))
-      setConnections(data.connections ?? [])
+      const available = data.connections ?? []
+      setConnections(available)
+      setSelectedPilotId((current) => available.some((c) => c.id === current) ? current
+        : (available.find((c) => ['ready', 'connected'].includes(c.status))?.id ?? available[0]?.id ?? ''))
       setPilotEnforced(typeof data.pilot?.enforced === 'boolean' ? data.pilot.enforced : null)
       setPilotDevMode(data.pilot?.devMode === true)
       setLoadError(null)
@@ -91,6 +96,11 @@ export function OpenWAConnections() {
   }, [canEditSettings])
 
   useEffect(() => { void load() }, [load])
+
+  function focusPilot(connectionId: string) {
+    setSelectedPilotId(connectionId)
+    pilotSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   async function checkGateway() {
     if (!baseUrl.trim() || !apiKey.trim()) return toast.error(w('required'))
@@ -253,6 +263,42 @@ export function OpenWAConnections() {
       </CardContent>
     </Card>
 
+    {pilotDevMode && connections.length > 0 && <div ref={pilotSectionRef} className="space-y-3 scroll-mt-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{w('devPilotHubTitle')}</CardTitle>
+          <CardDescription>{w('devPilotHubHint')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Label htmlFor="openwa-pilot-selector">{w('devPilotChooseConnection')}</Label>
+          <select id="openwa-pilot-selector" className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={selectedPilotId} onChange={(e) => setSelectedPilotId(e.target.value)}>
+            {connections.map((c) => <option key={c.id} value={c.id}>
+              {c.display_name || 'WhatsApp Web'} · {c.status} · {c.id.slice(0, 8)}
+            </option>)}
+          </select>
+          {selectedPilotId && <p className="break-all text-xs text-muted-foreground">
+            {w('connectionReference')}: {selectedPilotId}
+            {' · '}{w('devPilotState')}: {connections.find((c) => c.id === selectedPilotId)?.status ?? 'unknown'}
+          </p>}
+          <p className="text-sm text-muted-foreground">{w('devPilotGatewayUpdateHint')}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" disabled={busy !== null || !selectedPilotId}
+              onClick={() => { if (selectedPilotId) void action(selectedPilotId, 'refresh') }}>
+              <RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}
+            </Button>
+            <Button variant="outline" size="sm"
+              disabled={busy !== null || !selectedPilotId || !baseUrl.trim() || !apiKey.trim() ||
+                !connections.find((c) => c.id === selectedPilotId)?.session_id}
+              onClick={() => { if (selectedPilotId) void action(selectedPilotId, 'update_gateway') }}>
+              {w('devPilotGatewayUpdate')}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      {selectedPilotId && <OpenWAPilotControls key={selectedPilotId} connectionId={selectedPilotId} />}
+    </div>}
+
     {connections.map((connection) => <Card key={connection.id}>
       <CardHeader><CardTitle className="text-base">{connection.display_name || 'WhatsApp Web'}</CardTitle><CardDescription>{w('status')} {(['creating', 'waiting_qr', 'authenticating', 'ready', 'connected', 'disconnected', 'reconnecting', 'restricted', 'failed', 'logged_out'] as const).includes(connection.status as 'ready') ? w(connection.status as 'creating' | 'waiting_qr' | 'authenticating' | 'ready' | 'connected' | 'disconnected' | 'reconnecting' | 'restricted' | 'failed' | 'logged_out') : connection.status}{connection.phone_identity ? ` · ${connection.phone_identity}` : ''}</CardDescription></CardHeader>
       <CardContent className="space-y-3">
@@ -276,6 +322,9 @@ export function OpenWAConnections() {
         </Alert>}
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => action(connection.id, 'refresh')}><RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}</Button>
+          {pilotDevMode && <Button variant="outline" size="sm" onClick={() => focusPilot(connection.id)}>
+            {w('devPilotManageThisConnection')}
+          </Button>}
           {pilotDevMode && connection.session_id && <Button variant="outline" size="sm"
             disabled={busy !== null || !baseUrl.trim() || !apiKey.trim()}
             onClick={() => action(connection.id, 'update_gateway')}>{w('devPilotGatewayUpdate')}</Button>}
@@ -295,7 +344,6 @@ export function OpenWAConnections() {
             <Trash2 className="mr-2 h-4 w-4" />{w('removeFromWacrm')}
           </Button>
         </div>
-        {pilotDevMode && <OpenWAPilotControls connectionId={connection.id} />}
         {qr?.connectionId === connection.id && <div className="rounded-md border p-4">
           <p className="mb-3 text-sm font-medium">{w('qrPayload')}</p>
           <Image src={qr.value} alt={w('qrPayload')} width={256} height={256} unoptimized className="rounded bg-white p-2" />
