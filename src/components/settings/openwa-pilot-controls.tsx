@@ -14,6 +14,7 @@ interface PilotState extends Record<string, unknown> {
   connectionId: string
   status: string
   enforced: boolean
+  configured: boolean
   active: boolean
   paused: boolean
   active_admissions: number
@@ -29,7 +30,6 @@ interface PilotState extends Record<string, unknown> {
   error?: string
 }
 
-const PILOT_ID = '2dacee52-3486-4b47-96a0-fa4399ac0fb2'
 const defaultLimits = { hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
   minimum_interval_ms: 15000, jitter_ms: 3000 }
 
@@ -64,13 +64,14 @@ export function OpenWAPilotControls({ connectionId }: { connectionId: string }) 
 
   useEffect(() => { void load() }, [load])
 
-  async function submit(action: 'limits' | 'grant' | 'activate' | 'stop') {
+  async function submit(action: 'prepare' | 'limits' | 'grant' | 'activate' | 'stop') {
     if (busy) return
     setBusy(true)
     setError(null)
     setNotice(null)
     try {
       const body: Record<string, unknown> = { action }
+      if (action === 'prepare') body.confirm_prepare = true
       if (action === 'limits') Object.assign(body, limits)
       if (action === 'grant') Object.assign(body, { recipient: recipient.trim(), consent_confirmed: consent,
         ack_duplicate_sessions: duplicateAck, hours: 4 })
@@ -83,7 +84,7 @@ export function OpenWAPilotControls({ connectionId }: { connectionId: string }) 
       if (!res.ok) throw new Error(data.error || 'Pilot action rejected')
       setState(data)
       if (action === 'grant') { setRecipient(''); setConsent(false) }
-      setNotice(w(action === 'stop' ? 'devPilotStopped'
+      setNotice(w(action === 'prepare' ? 'devPilotPrepared' : action === 'stop' ? 'devPilotStopped'
         : action === 'activate' ? 'devPilotStarted'
         : action === 'grant' ? 'devPilotGranted' : 'devPilotLimitsSaved'))
       await load()
@@ -92,7 +93,6 @@ export function OpenWAPilotControls({ connectionId }: { connectionId: string }) 
     } finally { setBusy(false) }
   }
 
-  if (connectionId !== PILOT_ID) return null
   return <Card className="mt-4 border-dashed">
     <CardHeader><CardTitle className="text-base">{w('devPilotTitle')}</CardTitle></CardHeader>
     <CardContent className="space-y-4">
@@ -111,6 +111,14 @@ export function OpenWAPilotControls({ connectionId }: { connectionId: string }) 
         {state.same_identity_ready_connections > 1 && <Alert variant="destructive">
           <AlertDescription>{w('devPilotDuplicateWarning')} ({state.same_identity_ready_connections})</AlertDescription>
         </Alert>}
+        {!state.configured && <Alert>
+          <AlertTitle>{w('devPilotNeedsSetup')}</AlertTitle>
+          <AlertDescription>{w('devPilotSetupHint')}</AlertDescription>
+        </Alert>}
+        {!state.configured && <Button type="button" variant="outline"
+          disabled={busy || !['ready', 'connected'].includes(state.status) || state.unsettled_outbound !== 0}
+          onClick={() => void submit('prepare')}>{w('devPilotPrepare')}</Button>}
+        {state.configured && <>
         <div className="grid gap-3 sm:grid-cols-2">
           {([
             ['hourly_cap','devPilotHourly',1,3],
@@ -119,8 +127,8 @@ export function OpenWAPilotControls({ connectionId }: { connectionId: string }) 
             ['minimum_interval_ms','devPilotInterval',15000,600000],
             ['jitter_ms','devPilotJitter',0,600000],
           ] as const).map(([key,label,min,max]) => <div key={key} className="space-y-1">
-            <Label htmlFor={`pilot-${key}`}>{w(label)}</Label>
-            <Input id={`pilot-${key}`} type="number" min={min} max={max}
+            <Label htmlFor={`pilot-${connectionId}-${key}`}>{w(label)}</Label>
+            <Input id={`pilot-${connectionId}-${key}`} type="number" min={min} max={max}
               value={limits[key]} disabled={busy || !state.paused}
               onChange={(e) => setLimits((prev) => ({ ...prev, [key]: Number(e.target.value) }))}/>
           </div>)}
@@ -129,29 +137,30 @@ export function OpenWAPilotControls({ connectionId }: { connectionId: string }) 
           {w('devPilotSaveLimits')}
         </Button>
         <div className="space-y-2">
-          <Label htmlFor="pilot-recipient">{w('devPilotRecipient')}</Label>
-          <Input id="pilot-recipient" type="text" autoComplete="off"
+          <Label htmlFor={`pilot-recipient-${connectionId}`}>{w('devPilotRecipient')}</Label>
+          <Input id={`pilot-recipient-${connectionId}`} type="text" autoComplete="off"
             placeholder="12345678901 or 123456789@lid" value={recipient}
             disabled={busy || !state.paused}
             onChange={(e) => setRecipient(e.target.value)}/>
           <p className="text-xs text-muted-foreground">{w('devPilotRecipientHint')}</p>
           <div className="flex items-center gap-2">
-            <Checkbox id="pilot-consent" checked={consent} disabled={busy || !state.paused}
+            <Checkbox id={`pilot-consent-${connectionId}`} checked={consent} disabled={busy || !state.paused}
               onCheckedChange={(checked) => setConsent(checked === true)}/>
-            <Label htmlFor="pilot-consent">{w('devPilotConsent')}</Label>
+            <Label htmlFor={`pilot-consent-${connectionId}`}>{w('devPilotConsent')}</Label>
           </div>
           {state.same_identity_ready_connections > 1 && <div className="flex items-center gap-2">
-            <Checkbox id="pilot-duplicates" checked={duplicateAck} disabled={busy}
+            <Checkbox id={`pilot-duplicates-${connectionId}`} checked={duplicateAck} disabled={busy}
               onCheckedChange={(checked) => setDuplicateAck(checked === true)}/>
-            <Label htmlFor="pilot-duplicates">{w('devPilotDuplicateAck')}</Label>
+            <Label htmlFor={`pilot-duplicates-${connectionId}`}>{w('devPilotDuplicateAck')}</Label>
           </div>}
           <Button type="button" variant="outline"
             disabled={busy || !state.enforced || !state.paused || !consent || !recipient.trim() ||
               (state.same_identity_ready_connections > 1 && !duplicateAck)}
             onClick={() => void submit('grant')}>{w('devPilotGrant')}</Button>
         </div>
+        </>}
         <div className="flex flex-wrap gap-2">
-          <Button type="button" disabled={busy || !state.enforced || !state.paused ||
+          <Button type="button" disabled={busy || !state.configured || !state.enforced || !state.paused ||
             state.active_admissions !== 1 || state.unsettled_outbound !== 0 ||
             (state.same_identity_ready_connections > 1 && !duplicateAck)}
             onClick={() => void submit('activate')}>{w('devPilotActivate')}</Button>
