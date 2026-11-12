@@ -29,7 +29,8 @@ try {
     try {
       const { error: updateError } = await db.from('messages').update({ status: 'failed' })
         .eq('id', reservedMessageId).eq('conversation_id', input.conversationId)
-        .eq('provider', 'openwa').eq('status', 'sending').is('provider_message_id', null)
+        .eq('provider', 'openwa').eq('status', 'sending')
+        .is('provider_message_id', null).is('message_id', null)
       if (updateError) console.warn('[automation-openwa] pre-dispatch finalization failed', {
         dbCode: typeof updateError.code === 'string' ? updateError.code : 'unknown',
       })
