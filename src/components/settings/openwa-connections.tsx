@@ -162,13 +162,18 @@ export function OpenWAConnections() {
     } finally { setBusy(null) }
   }
 
-  async function action(connectionId: string, actionName: 'refresh' | 'reconnect' | 'logout' | 'configure_webhook' | 'pause' | 'resume') {
+  async function action(connectionId: string, actionName: 'refresh' | 'reconnect' | 'logout' | 'configure_webhook' | 'pause' | 'resume' | 'update_gateway') {
+    if (actionName === 'update_gateway' && (!baseUrl.trim() || !apiKey.trim())) {
+      toast.error(w('required'))
+      return
+    }
     setBusy(`${actionName}:${connectionId}`)
     try {
       const response = await fetch(`/api/whatsapp/connections/openwa/${connectionId}`, {
         method: actionName === 'logout' ? 'DELETE' : actionName === 'refresh' ? 'GET' : 'POST',
         headers: actionName !== 'refresh' && actionName !== 'logout' ? { 'Content-Type': 'application/json' } : undefined,
-        body: actionName !== 'refresh' && actionName !== 'logout' ? JSON.stringify({ action: actionName }) : undefined,
+        body: actionName !== 'refresh' && actionName !== 'logout' ? JSON.stringify({ action: actionName,
+          ...(actionName === 'update_gateway' ? { base_url: baseUrl.trim(), api_key: apiKey.trim() } : {}) }) : undefined,
         cache: 'no-store',
       })
       const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
@@ -178,6 +183,7 @@ export function OpenWAConnections() {
       }
       if (actionName === 'logout') setQr(null)
       if (actionName === 'configure_webhook') toast.success(w('webhookConfigured'))
+      if (actionName === 'update_gateway') { setApiKey(''); toast.success(w('devPilotGatewayUpdated')) }
       if (actionName === 'pause') toast.success(w('sendingPaused'))
       if (actionName === 'resume') toast.success(w('sendingResumed'))
       await load()
@@ -270,6 +276,9 @@ export function OpenWAConnections() {
         </Alert>}
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => action(connection.id, 'refresh')}><RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}</Button>
+          {pilotDevMode && connection.session_id && <Button variant="outline" size="sm"
+            disabled={busy !== null || !baseUrl.trim() || !apiKey.trim()}
+            onClick={() => action(connection.id, 'update_gateway')}>{w('devPilotGatewayUpdate')}</Button>}
           {['creating', 'waiting_qr', 'authenticating', 'disconnected'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => showQr(connection.id)}><QrCode className="mr-2 h-4 w-4" />{w('showQr')}</Button>}
           {['disconnected', 'failed'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'reconnect')}><RotateCcw className="mr-2 h-4 w-4" />{w('reconnect')}</Button>}
           {connection.session_id && connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'configure_webhook')} disabled={busy === `configure_webhook:${connection.id}`}><Webhook className="mr-2 h-4 w-4" />{w('configureWebhook')}</Button>}
