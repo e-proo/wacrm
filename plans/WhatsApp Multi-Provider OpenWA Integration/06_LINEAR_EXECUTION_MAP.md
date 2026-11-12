@@ -100,3 +100,9 @@ Phase implementation closure never implies OW-12 full live acceptance or product
 - Create PREP/engineering workstream tasks under existing OW-14 milestone. Keep release decision and production wave tasks **Todo/blocked** by SOF-41 OW-12, SOF-43 OW-13 formal pilot, NOTE-001 item-level security disposition, verified current SHA/CI/Migrations and explicit approvals. No implicit authorization or state promotion from planning.
 - Source baseline before planning commits: HEAD `3175c541d2a33851593a6ed45042e62ca7186a3c`, CI `43298734037` success and migrations `43297752814` success. Refresh for new HEAD; older historical inventory and pending-send snapshots are not current.
 - Owner explicitly **deferred** remaining live TEST gates; deferral does not equal `TEST verified`, `live acceptance complete` or `production ready`. Do not mark OW-14 milestone Done until actual staged rollout and independent signoff evidence passes.
+
+## OW-14 exact workstream issue map — 2026-11-12
+
+Planning [SOF-58](https://linear.app/eproo/issue/SOF-58); baseline [SOF-48](https://linear.app/eproo/issue/SOF-48); gateway [SOF-49](https://linear.app/eproo/issue/SOF-49); security/NOTE-001 [SOF-50](https://linear.app/eproo/issue/SOF-50); telemetry/on-call [SOF-51](https://linear.app/eproo/issue/SOF-51); webhook/outbound reliability [SOF-52](https://linear.app/eproo/issue/SOF-52); capacity/backup [SOF-53](https://linear.app/eproo/issue/SOF-53); opt-in/UX [SOF-54](https://linear.app/eproo/issue/SOF-54); release CI/migrations [SOF-55](https://linear.app/eproo/issue/SOF-55); **release decision blocked** [SOF-56](https://linear.app/eproo/issue/SOF-56); **production wave blocked** [SOF-57](https://linear.app/eproo/issue/SOF-57). All belong to the existing milestone OW-14, not a new project.
+
+Next possible non-production task: **SOF-48 read-only baseline/topology audit**. Formal GO remains NO-GO while SOF-41/SOF-43 and security/ops gates remain open.
