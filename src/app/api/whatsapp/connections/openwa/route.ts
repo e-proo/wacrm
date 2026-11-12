@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { encrypt } from '@/lib/whatsapp/encryption'
 import { validateOpenWABaseUrl } from '@/lib/whatsapp/transport/openwa/client'
-import { openWAPilotEnforcementEnabled } from '@/lib/whatsapp/transport/guardrails'
+import { isOpenWATestProject, openWAPilotEnforcementEnabled } from '@/lib/whatsapp/transport/guardrails'
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
 import { resolveOpenWAClient } from '@/lib/whatsapp/transport/openwa/credentials'
 import { normalizeOpenWAConnectionState } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
@@ -48,10 +48,12 @@ export async function GET() {
     // A new OpenWA session without a guardrail row is fail-closed: the UI
     // must not claim sending is enabled before explicit TEST pilot setup.
     const connections = (data ?? []).map((row) => ({ ...row, guardrail: { manual_paused: pauseByConnection.get(row.id) !== false } }))
-    let devMode = false
-    try { devMode = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname === 'pqirsnfupofhulmewakq.supabase.co' }
-    catch { /* TEST-only pilot controls remain hidden */ }
-    return NextResponse.json({ connections, pilot: { enforced: openWAPilotEnforcementEnabled(), devMode } }, { headers: noStore })
+    const devMode = isOpenWATestProject()
+    return NextResponse.json({ connections, pilot: {
+      enforced: openWAPilotEnforcementEnabled(),
+      devMode,
+      automaticallyEnforced: devMode,
+    } }, { headers: noStore })
   } catch (error) {
     return errorResponse(error)
   }
