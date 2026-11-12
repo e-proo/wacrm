@@ -410,3 +410,39 @@ The change becomes effective after the local operator pulls the updated branch a
 - [ ] Agent/Viewer live HTTP-negative and wrong-tenant tests remain mandatory before formal Pilot GO, along with OW-12/SOF-41, OpenWA Socket SOF-46 and NOTE-001 security reviews.
 
 **Status:** UI implementation and tests committed. This section is not evidence of a live TEST message, signed-webhook acceptance or Production readiness. No Production mutation or automatic provider send was performed.
+
+
+## 19. TEST actual send denials: phone-approved @c.us versus verified @lid, archived session, webhook retry — 2026-11-12
+
+### Observed operator failure (no unapproved resend)
+
+During an operator-run **development TEST-only** Pilot, WACRM's local Next.js logs showed:
+- `POST /api/whatsapp/send 409`, `OpenWA pilot cohort does not authorize this send` for the **consenting test recipient**.
+- Another `POST /api/whatsapp/send 400`, `OpenWA connection is not configured for this account` for a **different conversation**.
+- `POST /api/whatsapp/openwa/read 409` (after a separate `200`).
+- `POST /api/whatsapp/openwa/webhook 503`. This indicates a deferred/in-flight webhook or processing retry, **not proof of inbound delivery loss**. Full safe server `[openwa-webhook]` code/category is needed before root-cause closure.
+
+**Supabase TEST read-only investigation** verified:
+- The selected legitimate connection `02527740-9806-45ae-b9b1-1354c25f1d3f` was `ready`, `manual_paused=false`, 3/hour, 10/day, with **one unexpired `manual` recipient grant** (created after owner/admin consent) and no provider credentials exposed.
+- The test-recipient conversation `aa7dd947-2d88-41ab-a715-b5b65beb4606` had its most recent incoming WhatsApp chat identity as a verified **`@lid`** on that exact connection. The grant hash instead corresponded to that contact's typed **phone `@c.us`** identity. `resolveOpenWAConversationRecipient` intentionally replies using the native `@lid`; the exact-match allowlist correctly rejected that different hash. **Never loosen the allowlist or convert LID digits to a phone JID.** No actual WhatsApp send is proved by the manually rejected 409; the transport denies it before the gateway.
+- Two recent user agent messages in that conversation were marked `failed` with no native provider IDs. Separately, message `30242a67-e6e4-4d2a-bb18-e174bfdd286c` was an automated **bot** outbound on the same connection still at `sending`, with no native ID. This is **AMBIGUOUS / UNSETTLED**; do not assume a failed send or blindly retry/mark it failed. A TEST Pilot restart is blocked until reconciliation evidence resolves it.
+- The other conversation `441411b3-8536-445d-b471-31fc3a46d658` last inbound belonged to `6d4a284b-e47f-47e3-88b4-c27751267045`, a **same-account but archived** OpenWA connection with revoked credentials. Default outbound resolution led to a 400, and read-ack to a 409. An unapproved **other recipient** is also intentionally outside the Pilot cohort; never globally authorize it as a test workaround. The Inbox must require human selection of an available, verified **same-phone** transport, rather than automatically migrating conversations or reviving archived credentials.
+- At least one recent signed inbound OpenWA event receipt on the current TEST connection reached `processed_at` with no error. This does **not** establish that the operator's exact `503` event was subsequently processed; inspect the local safe webhook warning and retry evidence.
+
+### Implemented fix
+
+- New `src/lib/whatsapp/transport/openwa/pilot-recipient.ts` chooses the **same provider-native chat ID used by Inbox sending** for a typed consenting phone when the unique account-scoped contact has a validated inbound chat on the **same selected connection**. For a contact's latest verified `@lid` chat, the grant hashes the `@lid` identity, not guessed `@c.us`. For an outbound-only contact without inbound on that connection, phone `@c.us` remains possible under explicit admin consent. Mixed, missing or conflicting chat IDs / duplicate contacts fail closed. All contact/conversation lookups retain tenant scope, and messages are bound by conversation IDs + connection ID + provider. No plain recipient hash input is exposed to agents.
+- The existing `POST /api/whatsapp/connections/openwa/{connectionId}/pilot` action `grant` calls the resolver **after** checking admin session, consent, pause, caps, zero pending and duplicate-session acknowledgement, and stores only a SHA-256 account/connection/scoped native-chat hash with `workload='manual'`, 4-hour TTL. UI displays a safe "approved for verified native chat" note, not the LID value.
+- `resolveWhatsAppTransport` refuses archived OpenWA connections with `connection_restricted` / HTTP 409 *before* a service-role credential lookup. The Inbox surfaces an actionable warning and requires explicit session selection when an older conversation's current connection is no longer among active same-phone options; read-ack is deferred until that choice. No automatic session change, credential revival or unsafe outbound retry.
+- Unit tests for native LID consent, canonical phone fallback, ambiguity, missing native identity, tenant/session filters, revoked/archived connection and denied provider dispatch; existing OW-4/Meta regression unaffected.
+
+### Required operator TEST acceptance (not yet completed)
+
+1. Pull the current branch and restart local WACRM. **Pause/Stop the existing Pilot** to revoke its old `@c.us` grant. Do not send further messages while the bot `sending` record is unresolved.
+2. Review the ambiguous bot message **directly in the selected OpenWA session** and in WACRM event/receipt timeline; resolve by evidence (received/provider id/verified absent). Do not mark failure without proof and **never blind resend**. No automatic database changes were performed by the assistant.
+3. After reconciliation, select `02527740…`, verify the gateway, approve the consenting test phone anew from the Pilot UI; it will resolve its verified incoming `@lid` chat and store a new scoped grant. Confirm the UI's native-chat approval message, one active manual approval, then **Start**.
+4. Send exactly **one** text in that existing conversation from WACRM Inbox and verify provider ID, recipient delivery and WACRM status; Stop/revoke immediately after. The unrelated number must still be denied by the allowlist.
+5. For the archived session conversation, open its Inbox connection selector and explicitly choose a current session with the **same provider-verified WhatsApp phone**, then re-check its recipient admission separately; do not use an old/archived connection or transfer grant from a different contact.
+6. For inbound webhook `503`, capture its safe `[openwa-webhook]` category/event from Next.js logs and the resulting receipt status (especially `in_flight` vs `processing_retry`). Do not acknowledge a failed event as successful or fabricate a new event ID. For read-ack `409`, check the selected/current session identity first.
+
+**Acceptance level:** source implementation and CI must be verified at the exact resulting HEAD; live TEST send/receipt and webhook acceptance remain open, as do SOF-44 Agent/Viewer negatives, SOF-41 OW-12, SOF-43 formal Pilot and NOTE-001 Production security. No Production mutation or actual provider send performed during diagnosis.
