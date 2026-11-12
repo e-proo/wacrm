@@ -19,6 +19,7 @@ vi.mock('@/lib/whatsapp/transport/openwa/session-auth', () => ({
   requireOpenWASessionAdmin: h.auth,
 }))
 vi.mock('@/lib/whatsapp/transport/guardrails', () => ({
+  isOpenWATestProject: () => process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co',
   openWAPilotEnforcementEnabled: () => { if (h.envMode.invalid) throw new Error('invalid mode'); return h.envMode.enabled },
   canonicalOpenWAPilotRecipient: (value: string) => /^[1-9][0-9]{6,14}$/.test(value) ? value + '@c.us' : null,
   openWAPilotRecipientHash: () => 'a'.repeat(64),
