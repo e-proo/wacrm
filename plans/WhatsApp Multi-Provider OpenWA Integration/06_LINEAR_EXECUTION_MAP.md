@@ -17,7 +17,7 @@ Purpose: plan, implement, verify and roll out the provider-neutral WhatsApp laye
 - OW-4 — Session Lifecycle & QR Onboarding (SOF-33): **Done** at implementation complete + live TEST create/QR/Ready verified + current merge-HEAD CI/Migrations/Meta regression green.
 - OW-5 through OW-11 (SOF-34..SOF-40): implementation phase issues Done with historical CI/TEST evidence; not a claim of full live acceptance.
 - OW-12 (SOF-41): current execution phase, In Progress with partial live TEST: Webhook 202, inbound, native @lid, agent outbound and read ack verified.
-- OW-13: preparation In Progress (SOF-42); pilot execution Todo/blocked (SOF-43) pending OW-12. OW-14 not started; no pilot/Production approval.
+- OW-13: preparation In Progress (SOF-42/SOF-44); formal pilot Todo/blocked (SOF-43) pending OW-12. OW-14 **planning prepared** under existing OW-14 milestone; release approval and production rollout NOT STARTED / NO-GO.
 
 OW-1 Linear issue:
 - `SOF-29 — OW-1 — Implement provider-neutral WhatsApp connection data model and tenant RLS`
@@ -91,3 +91,12 @@ Phase implementation closure never implies OW-12 full live acceptance or product
 - [SOF-42](https://linear.app/eproo/issue/SOF-42/ow-13-prep-prepare-bounded-openwa-pilot-controls-monitoring-and) owns the preparation runbook, control gap inventory, staged cohort, observability and rollback evidence.
 - [SOF-43](https://linear.app/eproo/issue/SOF-43/ow-13-execute-bounded-openwa-pilot-after-ow-12-live-acceptance-not) owns future live bounded pilot execution; blocked by SOF-41 and SOF-42 until all gates and written approval pass.
 - OW-12/SOF-41 remains In Progress and must still verify real-provider ambiguous reconciliation, remaining live acceptance matrix and same-TEST Meta regression. No pilot or Production traffic was enabled.
+
+
+## OW-14 preparation / Linear execution contract — 2026-11-12
+
+- Existing project `P-SOF-2`, existing milestone `OW-14 — Production Rollout Decision` (no duplicate project/milestone). Planning may overlap with OW-12 and OW-13, but formal production release approval is downstream of complete OW-12 and OW-13 acceptance.
+- Canonical plan: [10_OW14_PRODUCTION_READINESS_AND_ROLLOUT_PLAN.md](10_OW14_PRODUCTION_READINESS_AND_ROLLOUT_PLAN.md), stages P0–P5 and W01–W10. Decision template: [11_OW14_RELEASE_DECISION_TEMPLATE.md](11_OW14_RELEASE_DECISION_TEMPLATE.md). Each workstream issue requires scope, source files/evidence, verification, owner, rollback and a precise acceptance level.
+- Create PREP/engineering workstream tasks under existing OW-14 milestone. Keep release decision and production wave tasks **Todo/blocked** by SOF-41 OW-12, SOF-43 OW-13 formal pilot, NOTE-001 item-level security disposition, verified current SHA/CI/Migrations and explicit approvals. No implicit authorization or state promotion from planning.
+- Source baseline before planning commits: HEAD `3175c541d2a33851593a6ed45042e62ca7186a3c`, CI `43298734037` success and migrations `43297752814` success. Refresh for new HEAD; older historical inventory and pending-send snapshots are not current.
+- Owner explicitly **deferred** remaining live TEST gates; deferral does not equal `TEST verified`, `live acceptance complete` or `production ready`. Do not mark OW-14 milestone Done until actual staged rollout and independent signoff evidence passes.
