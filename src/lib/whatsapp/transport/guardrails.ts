@@ -2,6 +2,17 @@ import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { WhatsAppTransportError, type WhatsAppTransport, type WhatsAppTransportSendRequest, type WhatsAppTransportSendResult } from './types'
 
+/**
+ * A WACRM policy denial before any OpenWA provider dispatch. Unlike a
+ * generic upstream error, this safely establishes the provider was not called
+ * for this invocation. Automation may finalize its reserved local 'sending'
+ * identity as failed without risking an ambiguous provider outcome.
+ */
+export class OpenWAPreDispatchDenied extends WhatsAppTransportError {
+  readonly providerDispatchAttempted = false
+  constructor(message: string) { super('connection_restricted', message) }
+}
+
 interface Reservation { allowed?: boolean; reason?: string; wait_ms?: number }
 interface Admission { allowed?: boolean; reason?: string }
 interface GuardrailFence { manual_paused: boolean; circuit_open_until: string | null }
@@ -81,7 +92,7 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
     })
     if (error) throw new WhatsAppTransportError('retryable_provider_failure', 'Could not reserve OpenWA guardrail capacity', error)
     const reservation = (data ?? {}) as Reservation
-    if (!reservation.allowed) throw new WhatsAppTransportError('connection_restricted', `OpenWA send blocked by WACRM guardrail: ${reservation.reason ?? 'policy'}`)
+    if (!reservation.allowed) throw new OpenWAPreDispatchDenied(`OpenWA send blocked by WACRM guardrail: ${reservation.reason ?? 'policy'}`)
     const waitMs = Math.max(0, Math.min(Number(reservation.wait_ms ?? 0), 600_000))
     if (waitMs > 0) await sleep(waitMs)
 
@@ -105,7 +116,7 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
 
   private async assertPilotAdmission(request: WhatsAppTransportSendRequest, workload: string): Promise<void> {
     const hash = openWAPilotRecipientHash(request.accountId, request.connectionId, request.recipient)
-    if (!hash) throw new WhatsAppTransportError('connection_restricted', 'OpenWA pilot recipient identity is not permitted')
+    if (!hash) throw new OpenWAPreDispatchDenied('OpenWA pilot recipient identity is not permitted')
     const { data, error } = await this.db.rpc('check_openwa_pilot_admission', {
       p_account_id: request.accountId,
       p_connection_id: request.connectionId,
@@ -113,7 +124,7 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
       p_workload: workload,
     })
     if (error) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA pilot admission could not be verified', error)
-    if (!(data as Admission | null)?.allowed) throw new WhatsAppTransportError('connection_restricted', 'OpenWA pilot cohort does not authorize this send')
+    if (!(data as Admission | null)?.allowed) throw new OpenWAPreDispatchDenied('OpenWA pilot cohort does not authorize this send')
   }
 
   private async assertNotPaused(request: WhatsAppTransportSendRequest): Promise<void> {
@@ -124,11 +135,11 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
       .maybeSingle()
     if (error || !data) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA emergency stop state could not be verified', error)
     const fence = data as GuardrailFence
-    if (fence.manual_paused !== false) throw new WhatsAppTransportError('connection_restricted', 'OpenWA connection is paused')
+    if (fence.manual_paused !== false) throw new OpenWAPreDispatchDenied('OpenWA connection is paused')
     if (fence.circuit_open_until !== null) {
       const until = Date.parse(fence.circuit_open_until)
       if (!Number.isFinite(until) || until > Date.now()) {
-        throw new WhatsAppTransportError('connection_restricted', 'OpenWA circuit breaker is open')
+        throw new OpenWAPreDispatchDenied('OpenWA circuit breaker is open')
       }
     }
   }
