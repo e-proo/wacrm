@@ -114,9 +114,7 @@ export async function POST(request: Request, context: Context) {
         isTestPilotProject = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname
           === 'pqirsnfupofhulmewakq.supabase.co'
       } catch { /* the pinned DEV rule is inapplicable to a missing URL */ }
-      if (body.action === 'resume'
-        && connectionId === '2dacee52-3486-4b47-96a0-fa4399ac0fb2'
-        && isTestPilotProject) {
+      if (body.action === 'resume' && isTestPilotProject) {
         return NextResponse.json({
           error: 'Use the TEST pilot controls to activate this connection safely',
           code: 'pilot_control_required',
