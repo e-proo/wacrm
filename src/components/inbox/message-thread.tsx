@@ -283,6 +283,10 @@ export function MessageThread({
   const activeOpenWAChoices = openWAConnectionChoices && openWAConnectionChoices.conversationId === conversationId ? openWAConnectionChoices.data : null;
   const [manualConnection, setManualConnection] = useState<{ conversationId: string; connectionId: string } | null>(null);
   const selectedConnectionId = manualConnection && manualConnection.conversationId === conversationId ? manualConnection.connectionId : undefined;
+  // Archived session identity must not silently fall back to another sender.
+  const requiresOpenWAConnectionChoice = Boolean(activeOpenWAChoices?.current_connection_id &&
+    !activeOpenWAChoices.options.some((option) => option.id === activeOpenWAChoices.current_connection_id) &&
+    !selectedConnectionId);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -498,7 +502,7 @@ export function MessageThread({
   // not merely clear WACRM's unread_count. The server verifies agent role,
   // tenant, connection and the signed inbound 1:1 JID before any write.
   useEffect(() => {
-    if (!conversationId || !user?.id || !lastVisibleInboundId) return;
+    if (!conversationId || !user?.id || !lastVisibleInboundId || requiresOpenWAConnectionChoice) return;
     void fetch("/api/whatsapp/openwa/read", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -521,7 +525,7 @@ export function MessageThread({
     }).catch(() => {
       console.warn("[openwa-read] WhatsApp read acknowledgement request failed");
     });
-  }, [conversationId, user?.id, lastVisibleInboundId, selectedConnectionId]);
+  }, [conversationId, user?.id, lastVisibleInboundId, selectedConnectionId, requiresOpenWAConnectionChoice]);
 
   // Opening a thread is also viewing its assignment/request notifications.
   // The conversation unread_count and the notifications.read_at badge are
@@ -549,6 +553,10 @@ export function MessageThread({
   const handleSend = useCallback(
     async (text: string, replyToId?: string) => {
       if (!conversation) return;
+      if (requiresOpenWAConnectionChoice) {
+        toast.error(w("conversationConnectionMustSelect"));
+        return;
+      }
 
       const tempId = `temp-${Date.now()}`;
 
@@ -587,6 +595,12 @@ export function MessageThread({
           if (unknownOutcome) {
             console.warn("OpenWA text send outcome uncertain; reconcile before retrying");
             toast.warning("Message delivery is uncertain. Check WhatsApp before sending again.");
+          } else if (payload?.code === "connection_restricted" &&
+            typeof reason === "string" && reason.includes("pilot cohort")) {
+            toast.error(w("conversationPilotApprovalRequired"));
+          } else if (payload?.code === "whatsapp_not_configured" &&
+            typeof reason === "string" && reason.includes("OpenWA connection")) {
+            toast.error(w("conversationConnectionMustSelect"));
           } else {
             console.error("Failed to send message:", reason);
             toast.error(`Failed to send: ${reason}`);
@@ -607,7 +621,7 @@ export function MessageThread({
         onUpdateMessage(tempId, { status: "sending" });
       }
     },
-    [conversation, onNewMessage, onUpdateMessage, selectedConnectionId]
+    [conversation, onNewMessage, onUpdateMessage, selectedConnectionId, requiresOpenWAConnectionChoice, w]
   );
 
   const handleSendMedia = useCallback(
@@ -1086,6 +1100,13 @@ export function MessageThread({
                 className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
               />
             </button>
+          )}
+
+          {requiresOpenWAConnectionChoice && (
+            <span className="max-w-52 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300"
+              title={w("conversationConnectionMustSelect")}>
+              {w("conversationConnectionMustSelect")}
+            </span>
           )}
 
           {/* A deliberate, human-selected override for the same WhatsApp
