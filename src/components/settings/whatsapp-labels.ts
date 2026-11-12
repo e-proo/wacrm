@@ -278,6 +278,34 @@ const labels = {
     "en": "The pilot recipient allowlist is NOT being enforced. Do not resume the dedicated TEST pilot connection until the server is restarted in enforce mode and the recipient is approved.",
     "ar": "قائمة سماح المستلمين الخاصة بالتجربة غير مفروضة. لا تستأنف اتصال TEST المخصص قبل تشغيل الخادم بوضع enforce واعتماد المستلم التجريبي."
   },
+  "devPilotNeedsSetup": {
+    "en": "Pilot is not configured on this connection",
+    "ar": "لم تُجهز إعدادات Pilot لهذا الاتصال"
+  },
+  "devPilotSetupHint": {
+    "en": "Prepare only this existing TEST session with safe caps, paused sending, and no recipient approval. It does not create a new OpenWA session or send a message.",
+    "ar": "جهّز جلسة TEST الموجودة بحدود آمنة وإيقاف إرسال دون اعتماد أي مستلم. لا يُنشئ جلسة جديدة ولا يرسل رسالة."
+  },
+  "devPilotPrepare": {
+    "en": "Prepare pilot on this connection",
+    "ar": "تجهيز Pilot لهذا الاتصال"
+  },
+  "devPilotPrepared": {
+    "en": "Pilot controls prepared and sending paused on this connection.",
+    "ar": "تم تجهيز حدود Pilot وإيقاف الإرسال لهذا الاتصال."
+  },
+  "devPilotGatewayUpdate": {
+    "en": "Update this connection's gateway URL",
+    "ar": "تحديث رابط البوابة لهذا الاتصال"
+  },
+  "devPilotGatewayUpdateHint": {
+    "en": "Enter the current gateway URL and API key above, then update this existing connection; it will verify the same upstream session without creating another.",
+    "ar": "أدخل رابط البوابة الجديد ومفتاح API أعلاه، ثم حدّث الاتصال الحالي. سيتحقق من الجلسة الموجودة دون إنشاء جلسة أخرى."
+  },
+  "devPilotGatewayUpdated": {
+    "en": "Gateway URL updated on the existing connection.",
+    "ar": "تم تحديث رابط البوابة على الاتصال الموجود."
+  },
   "devPilotTitle": {
     "en": "DEV pilot — TEST connection controls",
     "ar": "Pilot تجريبي — إدارة اتصال TEST"
