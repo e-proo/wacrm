@@ -45,7 +45,9 @@ export async function GET() {
       .eq('account_id', accountId)
     if (guardrailError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA emergency stop state', guardrailError)
     const pauseByConnection = new Map<string, boolean>((guardrails ?? []).map((row) => [row.connection_id, row.manual_paused === true] as const))
-    const connections = (data ?? []).map((row) => ({ ...row, guardrail: { manual_paused: pauseByConnection.get(row.id) === true } }))
+    // A new OpenWA session without a guardrail row is fail-closed: the UI
+    // must not claim sending is enabled before explicit TEST pilot setup.
+    const connections = (data ?? []).map((row) => ({ ...row, guardrail: { manual_paused: pauseByConnection.get(row.id) !== false } }))
     let devMode = false
     try { devMode = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname === 'pqirsnfupofhulmewakq.supabase.co' }
     catch { /* TEST-only pilot controls remain hidden */ }
