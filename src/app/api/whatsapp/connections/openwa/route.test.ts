@@ -146,7 +146,8 @@ describe('OW-13 admin-only emergency stop visibility', () => {
         { id: 'conn-1', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true } },
         { id: 'conn-2', status: 'ready', provider: 'openwa', guardrail: { manual_paused: false } },
       ],
-      pilot: { enforced: process.env.OPENWA_PILOT_MODE === 'enforce' },
+      pilot: { enforced: process.env.OPENWA_PILOT_MODE === 'enforce',
+        devMode: process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co' },
     })
     expect(connectionFilters).toContainEqual(['account_id', 'acct-1'])
     expect(connectionFilters).toContainEqual(['provider', 'openwa'])
