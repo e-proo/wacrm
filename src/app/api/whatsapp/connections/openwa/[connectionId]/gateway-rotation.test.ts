@@ -122,13 +122,13 @@ describe('OpenWA TEST tunnel URL rotation for an existing session', () => {
   it('refuses to save credentials if the new endpoint does not confirm the exact session', async () => {
     h.status.mockResolvedValue({ sessionId: 'wrong-session', status: 'ready' })
     const response = await POST(request(), context())
-    expect(response.status).toBe(409)
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(409)
     expect(h.updates).toHaveLength(0)
   })
   it('updates only scoped encrypted credentials on verified existing session without creating one', async () => {
     const response = await POST(request(), context())
     const data = await response.json()
-    expect(response.status).toBe(200)
+    expect(response.status, JSON.stringify(data)).toBe(200)
     expect(data).toMatchObject({ updated: true, sessionId: 'gateway-session-1' })
     expect(h.status).toHaveBeenCalledWith('gateway-session-1', CONNECTION)
     expect(h.updates).toEqual([expect.objectContaining({
