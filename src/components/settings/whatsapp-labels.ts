@@ -586,6 +586,18 @@ const labels = {
     "en": "Pilot activated on the selected connection.",
     "ar": "تم بدء Pilot على الاتصال المحدد."
   },
+  "devPilotGrantedNativeChat": {
+    "en": "Recipient approved for the verified native OpenWA chat on this session (including @lid if used). No message was sent; start the Pilot only after pending messages are reconciled.",
+    "ar": "تم اعتماد المستلم بهوية محادثة OpenWA الأصلية على هذه الجلسة (بما فيها @lid عند استخدامها). لم تُرسل أي رسالة؛ لا تبدأ التجربة قبل تسوية الرسائل المعلّقة."
+  },
+  "conversationPilotApprovalRequired": {
+    "en": "This OpenWA chat is not authorized in TEST Pilot. In Settings → WhatsApp → TEST Pilot, stop/revoke any old grant, approve the consenting recipient again for this exact session and native chat, then start. Do not send to other numbers.",
+    "ar": "هذه المحادثة غير معتمدة في Pilot. من الإعدادات ← واتساب ← TEST Pilot أوقف الموافقة القديمة واسحبها، ثم اعتمد المستلم الموافق مجددًا على هذه الجلسة وهويتها الأصلية وابدأ التجربة. لا ترسل لأرقام أخرى."
+  },
+  "conversationConnectionMustSelect": {
+    "en": "The conversation's original OpenWA session is unavailable. Select a current, same-account/same-phone connection from the session menu before sending. No automatic session switch.",
+    "ar": "جلسة OpenWA الأصلية لهذه المحادثة غير متاحة. اختر جلسة حالية للرقم نفسه من قائمة الاتصالات أعلى المحادثة قبل الإرسال. لن تُغيَّر الجلسة تلقائيًا."
+  },
   "devPilotGranted": {
     "en": "Test recipient approved; sending remains paused.",
     "ar": "تم اعتماد مستلم اختباري دون بدء الإرسال."
