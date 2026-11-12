@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GuardedOpenWATransport, canonicalOpenWAPilotRecipient, openWAPilotEnforcementEnabled, openWAPilotRecipientHash } from './guardrails'
+import { GuardedOpenWATransport, canonicalOpenWAPilotRecipient, isOpenWATestProject, openWAPilotEnforcementEnabled, openWAPilotRecipientHash } from './guardrails'
 import { WhatsAppTransportError, type WhatsAppTransport, type WhatsAppTransportSendResult } from './types'
 
 const request = { accountId: 'acc-1', connectionId: 'conn-1', recipient: '967700000001', content: { kind: 'text' as const, text: 'hi' }, idempotencyKey: 'idem-1' }
@@ -76,6 +76,25 @@ describe('OW-13 server-enforced pilot admission (no real provider calls)', () =>
     const t = pilotSetup({ admitted: true })
     await expect(t.guarded.send(request)).rejects.toMatchObject({ code: 'authentication_or_configuration' })
     expect(t.rpc).not.toHaveBeenCalled()
+    expect(t.send).not.toHaveBeenCalled()
+  })
+
+  it('automatically protects exactly the TEST Supabase project without an env edit', async () => {
+    const testUrl = 'https://pqirsnfupofhulmewakq.supabase.co'
+    const otherUrl = 'https://other-project.supabase.co'
+    expect(isOpenWATestProject(testUrl)).toBe(true)
+    expect(isOpenWATestProject(testUrl + '.evil.example')).toBe(false)
+    expect(isOpenWATestProject('http://pqirsnfupofhulmewakq.supabase.co')).toBe(false)
+    expect(openWAPilotEnforcementEnabled('off', testUrl)).toBe(true)
+    expect(openWAPilotEnforcementEnabled(undefined, testUrl)).toBe(true)
+    expect(openWAPilotEnforcementEnabled('off', otherUrl)).toBe(false)
+    expect(openWAPilotEnforcementEnabled('enforce', otherUrl)).toBe(true)
+
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', testUrl)
+    vi.stubEnv('OPENWA_PILOT_MODE', 'off')
+    const t = pilotSetup({ admitted: false })
+    await expect(t.guarded.send(request)).rejects.toMatchObject({ code: 'connection_restricted' })
+    expect(t.rpc.mock.calls.map(([name]) => name)).toEqual(['check_openwa_pilot_admission'])
     expect(t.send).not.toHaveBeenCalled()
   })
 
