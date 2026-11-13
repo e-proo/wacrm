@@ -514,6 +514,26 @@ const labels = {
     "en": "Edit session settings",
     "ar": "تعديل إعدادات الجلسة"
   },
+  "sessionWebhookUrl": {
+    "en": "WACRM webhook URL (OpenWA → WACRM)",
+    "ar": "رابط استقبال Webhook في WACRM (من OpenWA إلى WACRM)"
+  },
+  "sessionWebhookHint": {
+    "en": "Different from the OpenWA gateway URL. Use the public WACRM HTTPS address ending with /api/whatsapp/openwa/webhook. Saving updates the existing webhook on OpenWA and verifies the result.",
+    "ar": "هذا رابط مختلف عن بوابة OpenWA. أدخل عنوان WACRM العام عبر HTTPS والمنتهي بـ /api/whatsapp/openwa/webhook. عند الحفظ يُحدّث التسجيل الموجود داخل OpenWA ثم يتحقق منه."
+  },
+  "sessionWebhookTestOnly": {
+    "en": "Webhook URL editing is available only in TEST. Enter a valid WACRM HTTPS callback.",
+    "ar": "تعديل رابط Webhook متاح في بيئة TEST فقط. أدخل رابط استقبال WACRM صحيحًا عبر HTTPS."
+  },
+  "sessionWebhookSyncFailed": {
+    "en": "OpenWA did not confirm the webhook update. Other settings may already be saved; refresh and check the session before retrying.",
+    "ar": "لم تؤكد OpenWA تحديث Webhook. قد تكون إعدادات أخرى حُفظت بالفعل؛ تحقق من الجلسة قبل إعادة المحاولة."
+  },
+  "sessionWebhookNotSynced": {
+    "en": "Gateway settings saved, but the OpenWA webhook was not changed. Enter the WACRM callback URL and save again to sync it.",
+    "ar": "حُفظت إعدادات البوابة، لكن رابط Webhook في OpenWA لم يتغير. أدخل رابط استقبال WACRM واحفظ مجددًا لمزامنته."
+  },
   "sessionSettingsSave": {
     "en": "Save session settings",
     "ar": "حفظ إعدادات الجلسة"
@@ -547,8 +567,8 @@ const labels = {
     "ar": "تحديث رابط البوابة ومفتاح API متاح حاليًا في TEST فقط. يمكنك تعديل اسم الجلسة هنا."
   },
   "sessionSettingsIdentityHint": {
-    "en": "Changing a gateway verifies this exact upstream session; it will not create or resend a session. Pilot controls are separate.",
-    "ar": "عند تغيير البوابة سيتم التحقق من هوية الجلسة نفسها دون إنشاء جلسة أو إعادة إرسال. إعدادات Pilot منفصلة."
+    "en": "Gateway changes verify the exact upstream session. A webhook URL change synchronizes its existing OpenWA registration. No session creation or message resend. Pilot controls are separate.",
+    "ar": "تغيير البوابة يتحقق من الجلسة نفسها، وتغيير رابط Webhook يزامن التسجيل الموجود في OpenWA، دون إنشاء جلسة أو إعادة إرسال. إعدادات Pilot منفصلة."
   },
   "devPilotGatewayUpdate": {
     "en": "Update this connection's gateway URL",
