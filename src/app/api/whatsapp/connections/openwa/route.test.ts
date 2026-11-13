@@ -149,7 +149,8 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     h.requireAdmin.mockResolvedValue({ accountId: 'acct-1', userDb: { from: userFrom }, adminDb: { from: adminFrom } })
     const response = await GET()
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({
+    const payload = await response.json()
+    expect(payload).toEqual({
       connections: [
         { id: 'conn-1', status: 'ready', provider: 'openwa', gateway_base_url: 'https://gateway.example.com', guardrail: { manual_paused: true, pilot_enabled: false } },
         { id: 'conn-2', status: 'ready', provider: 'openwa', gateway_base_url: null, guardrail: { manual_paused: true, pilot_enabled: true } },
@@ -168,7 +169,7 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     expect(adminFrom).toHaveBeenCalledWith('whatsapp_connection_credentials')
     expect(gatewayFilters).toContainEqual(['account_id', 'acct-1'])
     expect(gatewayFilters).toContainEqual(['provider', 'openwa'])
-    expect(JSON.stringify(await response.clone().json())).not.toContain('api_key')
+    expect(JSON.stringify(payload)).not.toContain('api_key')
     expect(response.headers.get('cache-control')).toContain('no-store')
   })
 
