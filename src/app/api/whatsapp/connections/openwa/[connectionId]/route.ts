@@ -96,11 +96,16 @@ export async function POST(request: Request, context: Context) {
 
     if (body.action === 'configure_webhook') {
       stage = 'webhook_url'
-      const webhookUrl = process.env.OPENWA_WEBHOOK_URL?.trim()
-      if (!webhookUrl) {
-        throw new WhatsAppTransportError('invalid_request', 'Configure OPENWA_WEBHOOK_URL with your public WACRM webhook URL first')
+      const supplied = body.webhook_url !== undefined
+      if (supplied && !isOpenWATestProject()) {
+        throw new WhatsAppTransportError('connection_restricted', 'Custom webhook URLs are editable on TEST only')
       }
-      validateOpenWAWebhookUrl(webhookUrl)
+      const requested = typeof body.webhook_url === 'string' ? body.webhook_url.trim() : ''
+      if (supplied) {
+        if (!requested) throw new WhatsAppTransportError('invalid_request', 'Enter a public HTTPS WACRM webhook URL')
+        // The callback receives customer data; it must be a valid WACRM route.
+        validateOpenWAWebhookUrl(requested)
+      }
       stage = 'session_lookup'
       const { data: connection, error: connectionError } = await adminDb.from('whatsapp_connections')
         .select('session_id').eq('id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
@@ -111,18 +116,33 @@ export async function POST(request: Request, context: Context) {
 
       stage = 'credentials'
       const { credentials, client } = await resolveOpenWAClient(adminDb, accountId, connectionId)
+      const webhookUrl = requested || credentials.webhookUrl || process.env.OPENWA_WEBHOOK_URL?.trim() || ''
+      if (!webhookUrl) throw new WhatsAppTransportError('invalid_request', 'Configure a public WACRM webhook URL first')
+      validateOpenWAWebhookUrl(webhookUrl)
       const secret = credentials.webhookSecret ?? randomBytes(32).toString('hex')
       if (!credentials.webhookSecret) {
-        // Persist the signing key before enabling delivery: there must never
-        // be a window in which OpenWA sends events WACRM cannot verify.
+        // Persist HMAC signing key before enabling provider delivery.
         const { error: secretError } = await adminDb.from('whatsapp_connection_credentials')
           .update({ webhook_secret_encrypted: encrypt(secret) })
           .eq('connection_id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
         if (secretError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to save OpenWA webhook signing secret', secretError)
       }
       stage = 'gateway_registration'
+      // This updates a unique existing WACRM callback IN PLACE and verifies
+      // OpenWA's list after the PUT/POST; it never silently creates duplicates.
       await client.configureWebhook(connection.session_id, webhookUrl, secret, connectionId)
-      return NextResponse.json({ enabled: true }, { headers: noStore })
+      if (supplied) {
+        stage = 'save_verified_url'
+        const { data: saved, error: saveError } = await adminDb.from('whatsapp_connection_credentials')
+          .update({ webhook_url: webhookUrl })
+          .eq('connection_id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+          .select('connection_id').maybeSingle()
+        if (saveError || !saved) {
+          throw new WhatsAppTransportError('retryable_provider_failure',
+            'OpenWA confirmed the webhook, but WACRM could not save its URL; refresh before retrying', saveError)
+        }
+      }
+      return NextResponse.json({ enabled: true, synced: true, webhook_url: webhookUrl }, { headers: noStore })
     }
     if (body.action === 'remove_from_wacrm') {
       // Admin-only, local removal. Do NOT issue /logout or remote DELETE:
