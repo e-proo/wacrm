@@ -5,6 +5,9 @@ DO $$
 DECLARE
   v_user uuid := '00000000-0000-4000-8000-000000001859';
   v_account uuid;
+  v_other_user uuid := '00000000-0000-4000-8000-000000001860';
+  v_other_account uuid;
+  v_other_connection uuid := gen_random_uuid();
   v_ai_connection uuid := gen_random_uuid();
   v_agent uuid := gen_random_uuid();
   v_revision uuid := gen_random_uuid();
@@ -31,6 +34,16 @@ BEGIN
     '{"full_name":"Agent Transport Binding Smoke"}'::jsonb);
   SELECT account_id INTO STRICT v_account FROM public.profiles
     WHERE user_id=v_user;
+  INSERT INTO auth.users(id,email,raw_user_meta_data)
+  VALUES (v_other_user,'agent-transport-foreign-tenant@example.test',
+    '{"full_name":"Foreign Tenant Fixture"}'::jsonb);
+  SELECT account_id INTO STRICT v_other_account FROM public.profiles
+    WHERE user_id=v_other_user;
+  INSERT INTO public.whatsapp_connections(
+    id,account_id,provider,status,session_id
+  ) VALUES (
+    v_other_connection,v_other_account,'openwa','ready','sof59-foreign-session'
+  );
 
   INSERT INTO public.whatsapp_connections(
     id,account_id,provider,status,session_id
@@ -126,6 +139,34 @@ BEGIN
   );
   IF v_result->>'reason'<>'connection_session_window_closed' THEN
     RAISE EXCEPTION 'SOF59 accepted text on a different session: %',v_result;
+  END IF;
+
+  -- A session in another tenant is not a valid route, even when ready.
+  UPDATE public.ai_agent_tasks
+    SET target_policy=jsonb_build_object(
+      'whatsappConnectionId',v_other_connection::text
+    ) WHERE id=v_task;
+  v_result:=public.reserve_bound_agent_task_outbound_message(
+    v_run,'coverage.sourcing_message',1,'text',
+    'Safe bounded test text',null,null,'[]'::jsonb,0,60,1440,true
+  );
+  IF v_result->>'reason'<>'connection_not_found' THEN
+    RAISE EXCEPTION 'SOF59 accepted foreign tenant connection: %',v_result;
+  END IF;
+
+  -- Archived sessions are never reused, even if their status still says ready.
+  UPDATE public.whatsapp_connections SET archived_at=now()
+    WHERE id=v_wa_other;
+  UPDATE public.ai_agent_tasks
+    SET target_policy=jsonb_build_object(
+      'whatsappConnectionId',v_wa_other::text
+    ) WHERE id=v_task;
+  v_result:=public.reserve_bound_agent_task_outbound_message(
+    v_run,'coverage.sourcing_message',1,'text',
+    'Safe bounded test text',null,null,'[]'::jsonb,0,60,1440,true
+  );
+  IF v_result->>'reason'<>'connection_archived' THEN
+    RAISE EXCEPTION 'SOF59 accepted archived ready session: %',v_result;
   END IF;
 
   -- Missing explicit session must never silently fall back to Meta.

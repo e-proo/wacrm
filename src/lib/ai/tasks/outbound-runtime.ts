@@ -170,7 +170,7 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
   const params =
     candidate.kind === 'template' ? [...candidate.params] : []
 
-  const { data, error } = await db.rpc('reserve_agent_task_outbound_message', {
+  const { data, error } = await db.rpc('reserve_bound_agent_task_outbound_message', {
     p_run_id: runRow.id,
     p_policy_key: policy.key,
     p_policy_version: policy.version,
