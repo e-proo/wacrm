@@ -133,6 +133,58 @@ const labels = {
     "en": "Send via OpenWA",
     "ar": "الإرسال عبر OpenWA"
   },
+  "conversationConnectionLabel": {
+    "en": "OpenWA sender:",
+    "ar": "جلسة OpenWA للإرسال:"
+  },
+  "conversationConnectionChoose": {
+    "en": "Select a ready session",
+    "ar": "اختر جلسة جاهزة"
+  },
+  "conversationConnectionNoReady": {
+    "en": "No ready sessions available",
+    "ar": "لا توجد جلسات جاهزة حاليًا"
+  },
+  "conversationConnectionUnavailable": {
+    "en": "Not available for sending",
+    "ar": "غير متاحة للإرسال"
+  },
+  "conversationConnectionNoReadyHint": {
+    "en": "No verified same-number session is ready. Check a listed session's status or open WhatsApp settings; sending remains blocked until you explicitly select a ready session.",
+    "ar": "لا توجد جلسة جاهزة مؤكدة لنفس الرقم. تحقق من حالة الجلسات الظاهرة أو افتح إعدادات واتساب؛ يظل الإرسال ممنوعًا حتى تختار جلسة جاهزة بنفسك."
+  },
+  "conversationConnectionIdentityMissing": {
+    "en": "The original WhatsApp identity cannot be verified; session switching is disabled. Ask an administrator to reconcile the connection.",
+    "ar": "تعذر التحقق من هوية الجلسة الأصلية؛ لا يمكن تبديلها قبل مراجعة المسؤول للاتصال."
+  },
+  "conversationConnectionRefreshStatus": {
+    "en": "Verify session status",
+    "ar": "تحقق من حالة الجلسة"
+  },
+  "conversationConnectionNowReady": {
+    "en": "OpenWA confirms this session is ready. Select it from the sender list to send.",
+    "ar": "أكدت OpenWA جاهزية الجلسة. اخترها من قائمة الإرسال قبل إرسال الرسائل."
+  },
+  "conversationConnectionStillUnavailable": {
+    "en": "OpenWA has not confirmed the session is ready. Sending remains blocked.",
+    "ar": "لم تؤكد OpenWA جاهزية الجلسة بعد. لا يزال الإرسال ممنوعًا."
+  },
+  "conversationConnectionRefreshFailed": {
+    "en": "Could not verify this OpenWA session. Check the gateway in WhatsApp settings.",
+    "ar": "تعذر التحقق من جلسة OpenWA. راجع البوابة في إعدادات واتساب."
+  },
+  "conversationConnectionReload": {
+    "en": "Reload session list",
+    "ar": "تحديث قائمة الجلسات"
+  },
+  "conversationConnectionManage": {
+    "en": "Manage sessions in WhatsApp settings",
+    "ar": "إدارة الجلسات في إعدادات واتساب"
+  },
+  "conversationConnectionsLoadFailed": {
+    "en": "Session options could not be loaded; the sender will not be changed automatically.",
+    "ar": "تعذر تحميل جلسات الإرسال؛ لن يتم تبديل الجلسة تلقائيًا."
+  },
   "conversationConnectionAutomatic": {
     "en": "Conversation connection",
     "ar": "اتصال المحادثة"

@@ -21,6 +21,7 @@ import {
   MessageSquare,
   ChevronDown,
   UserPlus,
+  Link2,
   Check,
   Clock,
   ArrowLeft,
@@ -55,11 +56,21 @@ import { AiThreadBanner } from "./ai-thread-banner";
 import { buildReplyPreview } from "./reply-quote";
 import { renderTemplateBody } from "@/lib/whatsapp/template-body";
 import { toast } from "sonner";
+import Link from "next/link";
 import { useWhatsAppLabels } from "@/components/settings/whatsapp-labels";
 
+interface OpenWAConnectionChoice {
+  id: string;
+  display_name: string;
+  status: string;
+  gateway_host: string;
+}
 interface ConversationSendConnections {
   current_connection_id: string | null;
-  options: { id: string; display_name: string; status: string; gateway_host: string }[];
+  options: OpenWAConnectionChoice[];
+  unavailable_options: OpenWAConnectionChoice[];
+  identity_unavailable?: boolean;
+  can_refresh?: boolean;
 }
 
 interface ReplyDraft {
@@ -280,10 +291,15 @@ export function MessageThread({
 
   const conversationId = conversation?.id;
   const [openWAConnectionChoices, setOpenWAConnectionChoices] = useState<{ conversationId: string; data: ConversationSendConnections } | null>(null);
+  const [connectionChoicesError, setConnectionChoicesError] = useState<string | null>(null);
+  const [choiceRefreshToken, setChoiceRefreshToken] = useState(0);
+  const [checkingConnectionId, setCheckingConnectionId] = useState<string | null>(null);
   const activeOpenWAChoices = openWAConnectionChoices && openWAConnectionChoices.conversationId === conversationId ? openWAConnectionChoices.data : null;
   const [manualConnection, setManualConnection] = useState<{ conversationId: string; connectionId: string } | null>(null);
-  const selectedConnectionId = manualConnection && manualConnection.conversationId === conversationId ? manualConnection.connectionId : undefined;
-  // Archived session identity must not silently fall back to another sender.
+  const selectedConnectionId = manualConnection && manualConnection.conversationId === conversationId &&
+    activeOpenWAChoices?.options.some((option) => option.id === manualConnection.connectionId)
+    ? manualConnection.connectionId : undefined;
+  // Never allow an archived or stale selected sender to fall back silently.
   const requiresOpenWAConnectionChoice = Boolean(activeOpenWAChoices?.current_connection_id &&
     !activeOpenWAChoices.options.some((option) => option.id === activeOpenWAChoices.current_connection_id) &&
     !selectedConnectionId);
@@ -297,13 +313,44 @@ export function MessageThread({
       if (!response.ok) throw new Error("connection options unavailable");
       return await response.json() as ConversationSendConnections;
     }).then((data) => {
-      if (!cancelled) setOpenWAConnectionChoices({ conversationId, data });
+      if (!cancelled) {
+        setOpenWAConnectionChoices({ conversationId, data });
+        setConnectionChoicesError(null);
+      }
     }).catch(() => {
-      // Never guess or silently switch an unavailable connection.
-      if (!cancelled) setOpenWAConnectionChoices(null);
+      // Keep a visible recovery path; do not guess an OpenWA session.
+      if (!cancelled) {
+        setOpenWAConnectionChoices(null);
+        setConnectionChoicesError(conversationId);
+      }
     });
     return () => { cancelled = true; };
-  }, [conversationId, resyncToken]);
+  }, [conversationId, resyncToken, choiceRefreshToken]);
+
+  async function checkOpenWAConnection(connectionId: string) {
+    if (!conversationId || checkingConnectionId) return;
+    setCheckingConnectionId(connectionId);
+    try {
+      const response = await fetch("/api/whatsapp/conversations/send-connections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: conversationId, connection_id: connectionId }),
+        cache: "no-store",
+      });
+      const result = await response.json() as { status?: string; error?: string };
+      if (!response.ok) throw new Error(result.error || w("conversationConnectionRefreshFailed"));
+      if (result.status === "ready" || result.status === "connected") {
+        toast.success(w("conversationConnectionNowReady"));
+      } else {
+        toast.warning(w("conversationConnectionStillUnavailable"));
+      }
+    } catch {
+      toast.error(w("conversationConnectionRefreshFailed"));
+    } finally {
+      setCheckingConnectionId(null);
+      setChoiceRefreshToken((value) => value + 1);
+    }
+  }
 
 
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
@@ -1102,49 +1149,6 @@ export function MessageThread({
             </button>
           )}
 
-          {requiresOpenWAConnectionChoice && (
-            <span className="max-w-52 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300"
-              title={w("conversationConnectionMustSelect")}>
-              {w("conversationConnectionMustSelect")}
-            </span>
-          )}
-
-          {/* A deliberate, human-selected override for the same WhatsApp
-              phone. Old messages retain their own connection IDs and reads
-              never reuse a chat JID from a different session. */}
-          {activeOpenWAChoices && activeOpenWAChoices.options.length > 0 && (activeOpenWAChoices.options.length > 1 || !activeOpenWAChoices.options.some((item) => item.id === activeOpenWAChoices.current_connection_id)) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className="inline-flex max-w-44 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
-                title={w("conversationConnectionCaution")}
-              >
-                <span className="truncate">
-                  {selectedConnectionId
-                    ? activeOpenWAChoices.options.find((item) => item.id === selectedConnectionId)?.gateway_host
-                      ?? w("conversationConnectionAlternative")
-                    : w("conversationConnectionAutomatic")}
-                </span>
-                <ChevronDown className="h-3 w-3 shrink-0" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="max-w-80 border-border bg-popover">
-                <DropdownMenuItem onClick={() => setManualConnection(null)}>
-                  {w("conversationConnectionAutomatic")}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                {activeOpenWAChoices.options.map((item) => (
-                  <DropdownMenuItem
-                    key={item.id}
-                    onClick={() => setManualConnection({ conversationId: conversationId!, connectionId: item.id })}
-                    className="flex flex-col items-start gap-0.5"
-                  >
-                    <span className="truncate text-xs font-medium">{item.gateway_host || item.display_name}</span>
-                    <span className="text-[10px] text-muted-foreground">{item.display_name} · {item.status}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-
           {/* Status dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(
@@ -1236,6 +1240,95 @@ export function MessageThread({
           </DropdownMenu>
         </div>
       </div>
+
+      {/* Per-conversation OpenWA sender picker lives on its own row: no
+          narrow-header clipping. Non-ready same-phone sessions remain visible
+          for diagnostics but are NEVER selectable for sending. */}
+      {activeOpenWAChoices?.current_connection_id && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card/95 px-3 py-2 text-xs sm:px-4">
+          <span className="text-muted-foreground">{w("conversationConnectionLabel")}</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label={w("conversationConnectionChoose")}
+              className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-foreground hover:bg-muted"
+            >
+              <span className="max-w-56 truncate">
+                {selectedConnectionId
+                  ? (activeOpenWAChoices.options.find((option) => option.id === selectedConnectionId)?.display_name
+                    ?? w("conversationConnectionAlternative"))
+                  : activeOpenWAChoices.options.some((option) => option.id === activeOpenWAChoices.current_connection_id)
+                    ? w("conversationConnectionAutomatic")
+                    : w("conversationConnectionChoose")}
+              </span>
+              <ChevronDown className="h-4 w-4 shrink-0" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[min(22rem,90vw)] border-border bg-popover">
+              {!requiresOpenWAConnectionChoice && (
+                <DropdownMenuItem onClick={() => setManualConnection(null)}>
+                  {w("conversationConnectionAutomatic")}
+                </DropdownMenuItem>
+              )}
+              {activeOpenWAChoices.options.map((option) => (
+                <DropdownMenuItem
+                  key={option.id}
+                  onClick={() => setManualConnection({ conversationId: conversationId!, connectionId: option.id })}
+                  className="flex flex-col items-start gap-0.5"
+                >
+                  <span className="w-full truncate text-xs font-medium">{option.display_name} · {option.gateway_host}</span>
+                  <span className="text-[10px] text-muted-foreground">{option.status}</span>
+                </DropdownMenuItem>
+              ))}
+              {activeOpenWAChoices.options.length === 0 && (
+                <DropdownMenuItem disabled>{w("conversationConnectionNoReady")}</DropdownMenuItem>
+              )}
+              {activeOpenWAChoices.unavailable_options.length > 0 && <DropdownMenuSeparator />}
+              {activeOpenWAChoices.unavailable_options.map((option) => (
+                <DropdownMenuItem key={option.id} disabled className="flex flex-col items-start gap-0.5">
+                  <span className="w-full truncate text-xs">{option.display_name} · {option.gateway_host}</span>
+                  <span className="text-[10px]">{option.status} · {w("conversationConnectionUnavailable")}</span>
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setChoiceRefreshToken((value) => value + 1)}>
+                <RefreshCw className="mr-2 h-3.5 w-3.5" />{w("conversationConnectionReload")}
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/settings?tab=whatsapp">
+                  <Link2 className="mr-2 h-3.5 w-3.5" />{w("conversationConnectionManage")}
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {activeOpenWAChoices.can_refresh && activeOpenWAChoices.unavailable_options.map((option) => (
+            <button type="button" key={option.id}
+              disabled={checkingConnectionId !== null}
+              onClick={() => void checkOpenWAConnection(option.id)}
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1.5 text-muted-foreground hover:text-foreground disabled:opacity-50"
+              title={w("conversationConnectionRefreshStatus")}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", checkingConnectionId === option.id && "animate-spin")} />
+              {w("conversationConnectionRefreshStatus")} · {option.display_name}
+            </button>
+          ))}
+          {requiresOpenWAConnectionChoice && (
+            <span role="status" className="w-full text-amber-600 dark:text-amber-300">
+              {activeOpenWAChoices.identity_unavailable
+                ? w("conversationConnectionIdentityMissing")
+                : activeOpenWAChoices.options.length === 0
+                  ? w("conversationConnectionNoReadyHint")
+                  : w("conversationConnectionMustSelect")}
+            </span>
+          )}
+        </div>
+      )}
+      {connectionChoicesError === conversationId && (
+        <div role="alert" className="flex items-center gap-2 border-b border-border bg-card px-3 py-2 text-xs text-amber-600">
+          {w("conversationConnectionsLoadFailed")}
+          <button type="button" className="underline" onClick={() => setChoiceRefreshToken((value) => value + 1)}>
+            {w("conversationConnectionReload")}
+          </button>
+        </div>
+      )}
 
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">

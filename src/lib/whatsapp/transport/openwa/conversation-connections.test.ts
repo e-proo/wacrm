@@ -4,7 +4,12 @@ import {
   listConversationOpenWASendConnections,
 } from './conversation-connections'
 
-function fixture(input: { current?: { provider: string; connection_id: string } | null; phone?: string | null } = {}) {
+function fixture(input: {
+  current?: { provider: string; connection_id: string } | null;
+  phone?: string | null;
+  archivedOriginal?: boolean;
+  newConnectionStatus?: string;
+} = {}) {
   const predicates: { table: string; column: string; value: unknown }[] = []
   const current = input.current === undefined ? { provider: 'openwa', connection_id: 'old-connection' } : input.current
   const phone = input.phone === undefined ? '967700000000' : input.phone
@@ -32,14 +37,18 @@ function fixture(input: { current?: { provider: string; connection_id: string } 
           Promise.resolve({
             data: table === 'whatsapp_connections'
               ? [
-                  { id: 'old-connection', display_name: 'Old', status: 'ready', session_id: 'old-session', phone_identity: phone },
-                  { id: 'new-connection', display_name: 'New', status: 'ready', session_id: 'new-session', phone_identity: phone },
+                  ...(!input.archivedOriginal ? [
+                    { id: 'old-connection', display_name: 'Old', status: 'ready', session_id: 'old-session', phone_identity: phone },
+                  ] : []),
+                  { id: 'new-connection', display_name: 'New', status: input.newConnectionStatus ?? 'ready', session_id: 'new-session', phone_identity: phone },
+                  { id: 'disconnected-connection', display_name: 'Recovery', status: 'disconnected', session_id: 'recovery-session', phone_identity: phone },
                   { id: 'wrong-phone', display_name: 'Wrong', status: 'ready', session_id: 'bad-session', phone_identity: 'not-the-same-phone' },
                 ]
               : table === 'whatsapp_connection_credentials'
                 ? [
                     { connection_id: 'old-connection', base_url: 'https://old.trycloudflare.com' },
                     { connection_id: 'new-connection', base_url: 'https://current.trycloudflare.com' },
+                    { connection_id: 'disconnected-connection', base_url: 'https://recover.trycloudflare.com' },
                     { connection_id: 'wrong-phone', base_url: 'https://unrelated.trycloudflare.com' },
                   ]
                 : [],
@@ -61,6 +70,9 @@ describe('OpenWA conversation connection selection', () => {
       { id: 'old-connection', display_name: 'Old', status: 'ready', gateway_host: 'old.trycloudflare.com' },
       { id: 'new-connection', display_name: 'New', status: 'ready', gateway_host: 'current.trycloudflare.com' },
     ])
+    expect(result.unavailable_options).toEqual([
+      { id: 'disconnected-connection', display_name: 'Recovery', status: 'disconnected', gateway_host: 'recover.trycloudflare.com' },
+    ])
     const accountScoped = predicates.filter((row) =>
       row.table === 'conversations' || row.table === 'whatsapp_connections' || row.table === 'whatsapp_connection_credentials')
     expect(accountScoped.every((row) => row.column === 'account_id' || row.column === 'id' || row.column === 'provider' || row.column === 'phone_identity')).toBe(true)
@@ -77,10 +89,26 @@ describe('OpenWA conversation connection selection', () => {
     await expect(authorizeConversationOpenWASendConnection(db as never, 'acct-1', 'conversation-1', 'foreign-tenant')).rejects.toMatchObject({ code: 'connection_restricted' })
   })
 
+  it('lists disconnected same-phone sessions when an archived source has no ready replacements, without authorizing sends', async () => {
+    const { db } = fixture({ archivedOriginal: true, newConnectionStatus: 'disconnected' })
+    const choices = await listConversationOpenWASendConnections(db as never, 'acct-1', 'conversation-1')
+    expect(choices.current_connection_id).toBe('old-connection')
+    expect(choices.options).toEqual([])
+    expect(choices.unavailable_options.map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: 'new-connection', status: 'disconnected' },
+      { id: 'disconnected-connection', status: 'disconnected' },
+    ])
+    await expect(authorizeConversationOpenWASendConnection(db as never, 'acct-1', 'conversation-1', 'new-connection'))
+      .rejects.toMatchObject({ code: 'connection_restricted' })
+  })
+
   it('never allows a WhatsApp connection switch from a Meta conversation or unknown phone identity', async () => {
     const meta = fixture({ current: { provider: 'meta_cloud', connection_id: 'meta-id' } })
     await expect(authorizeConversationOpenWASendConnection(meta.db as never, 'acct-1', 'conversation-1', 'new-connection')).rejects.toMatchObject({ code: 'connection_restricted' })
     const noPhone = fixture({ phone: null })
+    const unavailable = await listConversationOpenWASendConnections(noPhone.db as never, 'acct-1', 'conversation-1')
+    expect(unavailable.identity_unavailable).toBe(true)
+    expect(unavailable.unavailable_options).toEqual([])
     await expect(authorizeConversationOpenWASendConnection(noPhone.db as never, 'acct-1', 'conversation-1', 'new-connection')).rejects.toMatchObject({ code: 'connection_restricted' })
   })
 })

@@ -11,6 +11,11 @@ export interface OpenWASendConnectionOption {
 export interface ConversationOpenWAConnections {
   current_connection_id: string | null
   options: OpenWASendConnectionOption[]
+  /** Account- and phone-verified sessions that cannot send yet.
+   * Read-only visibility lets the admin refresh a stale disconnected state
+   * without treating the session as an eligible sender. */
+  unavailable_options: OpenWASendConnectionOption[]
+  identity_unavailable?: boolean
 }
 
 /** Only offer active sessions belonging to the same account and the same
@@ -33,25 +38,24 @@ export async function listConversationOpenWASendConnections(
     .eq('sender_type', 'customer').order('created_at', { ascending: false })
     .limit(1).maybeSingle()
   if (inboundError) throw new WhatsAppTransportError('retryable_provider_failure', 'Could not resolve conversation connection')
-  if (!inbound?.connection_id || inbound.provider !== 'openwa') return { current_connection_id: null, options: [] }
+  if (!inbound?.connection_id || inbound.provider !== 'openwa') return { current_connection_id: null, options: [], unavailable_options: [] }
 
   const { data: current, error: currentError } = await db.from('whatsapp_connections')
     .select('id, phone_identity').eq('id', inbound.connection_id).eq('account_id', accountId)
     .eq('provider', 'openwa').maybeSingle()
   if (currentError || !current?.phone_identity) {
-    return { current_connection_id: inbound.connection_id, options: [] }
+    return { current_connection_id: inbound.connection_id, options: [], unavailable_options: [], identity_unavailable: true }
   }
 
   const { data: candidates, error: candidateError } = await db.from('whatsapp_connections')
     .select('id, display_name, status, session_id, phone_identity')
     .eq('account_id', accountId).eq('provider', 'openwa')
     .eq('phone_identity', current.phone_identity)
-    .in('status', ['ready', 'connected'])
     .is('archived_at', null)
     .not('session_id', 'is', null)
     .order('updated_at', { ascending: false })
   if (candidateError) throw new WhatsAppTransportError('retryable_provider_failure', 'Could not load OpenWA connection options')
-  if (!candidates?.length) return { current_connection_id: inbound.connection_id, options: [] }
+  if (!candidates?.length) return { current_connection_id: inbound.connection_id, options: [], unavailable_options: [] }
 
   // Only the host is returned to the agent; never reveal keys, encrypted
   // credentials, webhook URLs, session IDs, or phone identities.
@@ -65,12 +69,19 @@ export async function listConversationOpenWASendConnections(
     try { host = new URL(row.base_url).hostname } catch { /* invalid server record */ }
     return [row.connection_id, host]
   }))
+  const matching = candidates.filter((candidate) => candidate.phone_identity === current.phone_identity)
+  const choices = matching.map((candidate) => ({
+    id: candidate.id,
+    display_name: candidate.display_name ?? 'WhatsApp Web',
+    status: hosts.has(candidate.id) ? candidate.status : 'credentials_missing',
+    gateway_host: hosts.get(candidate.id) ?? '',
+  }))
+  const ready = (choice: OpenWASendConnectionOption) =>
+    (choice.status === 'ready' || choice.status === 'connected') && Boolean(choice.gateway_host)
   return {
     current_connection_id: inbound.connection_id,
-    options: candidates.filter((candidate) => candidate.phone_identity === current.phone_identity && hosts.has(candidate.id)).map((candidate) => ({
-      id: candidate.id, display_name: candidate.display_name ?? 'WhatsApp Web',
-      status: candidate.status, gateway_host: hosts.get(candidate.id) ?? '',
-    })),
+    options: choices.filter(ready),
+    unavailable_options: choices.filter((choice) => !ready(choice)),
   }
 }
 
