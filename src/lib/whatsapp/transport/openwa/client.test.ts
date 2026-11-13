@@ -150,8 +150,11 @@ describe('OpenWA upstream REST contract', () => {
   })
 
   it('subscribes to the own-device message.sent echo', async () => {
+    let registered: Array<{ id: string; url: string }> = []
     const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
-      if (args[1]?.method === 'GET') return response(200, [])
+      if (args[1]?.method === 'GET') return response(200, registered)
+      const body = JSON.parse(String(args[1]?.body))
+      registered = [{ id: 'hook-1', url: body.url }]
       return response(201, { id: 'hook-1' })
     }) as unknown as typeof fetch
     const client = new OpenWAClient({ baseUrl: 'https://openwa.example.com', apiKey: 'key', fetchImpl })
