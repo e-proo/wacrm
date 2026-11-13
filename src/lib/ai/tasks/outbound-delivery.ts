@@ -28,6 +28,8 @@ interface OutboundTransport {
     contactId: string
     text: string
     engineIdempotencyKey: string
+    connectionId: string
+    expectedProvider: 'meta_cloud' | 'openwa'
     workload: 'agent'
   }): Promise<{ whatsapp_message_id: string; local_message_id: string }>
   sendTemplate(input: {
@@ -38,6 +40,8 @@ interface OutboundTransport {
     templateName: string
     language: string
     params: string[]
+    connectionId: string
+    expectedProvider: 'meta_cloud' | 'openwa'
     workload: 'agent'
   }): Promise<{ whatsapp_message_id: string }>
 }
@@ -50,7 +54,7 @@ const DEFAULT_TRANSPORT: OutboundTransport = {
 /**
  * Deliver one already-reserved Agent Task outbound message.
  *
- * Transport ownership is claimed in SQL immediately before the Meta call.
+ * Transport ownership is claimed in SQL immediately before the frozen-provider call.
  * Any exception after that claim is treated as ambiguous and is never
  * automatically retried: the reservation moves to requires_reconciliation.
  */
@@ -71,7 +75,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
   const { data: reservation, error: reservationError } = await db
     .from('ai_agent_task_outbound_messages')
     .select(
-      'id, account_id, task_id, task_target_id, run_id, status, message_kind, candidate_text, template_name, template_language, template_params, idempotency_key, local_message_id, whatsapp_message_id',
+      'id, account_id, task_id, task_target_id, run_id, status, message_kind, candidate_text, template_name, template_language, template_params, idempotency_key, local_message_id, whatsapp_message_id, provider, connection_id',
     )
     .eq('id', input.reservationId)
     .maybeSingle()
@@ -101,6 +105,8 @@ export async function deliverAgentTaskOutboundReservation(input: {
     idempotency_key: string
     local_message_id: string | null
     whatsapp_message_id: string | null
+    provider: 'meta_cloud' | 'openwa' | null
+    connection_id: string | null
   }
 
   if (row.status === 'sent') {
@@ -113,37 +119,35 @@ export async function deliverAgentTaskOutboundReservation(input: {
     }
   }
 
-  const [
-    { data: target, error: targetError },
-    { data: config, error: configError },
-  ] = await Promise.all([
-    db
-      .from('ai_agent_task_targets')
-      .select('contact_id, conversation_id')
-      .eq('account_id', row.account_id)
-      .eq('task_id', row.task_id)
-      .eq('id', row.task_target_id)
-      .maybeSingle(),
-    db
-      .from('whatsapp_config')
-      .select('user_id')
-      .eq('account_id', row.account_id)
-      .maybeSingle(),
-  ])
+  if (row.status === 'reserved' && (!row.connection_id || !row.provider)) {
+    return {
+      status: 'denied',
+      reason: 'connection_unbound',
+      reservationId: row.id,
+      localMessageId: row.local_message_id,
+      whatsappMessageId: row.whatsapp_message_id,
+    }
+  }
 
+  const { data: target, error: targetError } = await db
+    .from('ai_agent_task_targets')
+    .select('contact_id, conversation_id')
+    .eq('account_id', row.account_id)
+    .eq('task_id', row.task_id)
+    .eq('id', row.task_target_id)
+    .maybeSingle()
   if (targetError) throw targetError
-  if (configError) throw configError
-
-  const targetRow = target as {
-    contact_id: string | null
-    conversation_id: string | null
-  } | null
-
-  if (!targetRow?.contact_id || !targetRow.conversation_id) {
+  if (!target?.contact_id || !target.conversation_id) {
     throw new Error('AGENT_OUTBOUND_TARGET_CONTEXT_MISSING')
   }
-  if (!config?.user_id) {
-    throw new Error('WHATSAPP_CONFIG_OWNER_MISSING')
+  const { data: conversation, error: conversationError } = await db
+    .from('conversations')
+    .select('id, user_id, contact_id')
+    .eq('account_id', row.account_id)
+    .eq('id', target.conversation_id)
+    .maybeSingle()
+  if (conversationError || !conversation || conversation.contact_id !== target.contact_id) {
+    throw new Error('AGENT_OUTBOUND_CONVERSATION_CONTEXT_MISMATCH')
   }
 
   try {
@@ -177,7 +181,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
   }
 
   const { data: claimed, error: claimError } = await db.rpc(
-    'claim_agent_task_outbound_message',
+    'claim_bound_agent_task_outbound_message',
     {
       p_reservation_id: row.id,
       p_worker_id: input.workerId,
@@ -242,11 +246,13 @@ export async function deliverAgentTaskOutboundReservation(input: {
 
       const sent = await transport.sendText({
         accountId: row.account_id,
-        userId: config.user_id,
-        conversationId: targetRow.conversation_id,
-        contactId: targetRow.contact_id,
+        userId: conversation.user_id,
+        conversationId: target.conversation_id,
+        contactId: target.contact_id,
         text: row.candidate_text,
         engineIdempotencyKey: row.idempotency_key,
+        connectionId: row.connection_id!,
+        expectedProvider: row.provider!,
         workload: 'agent',
       })
       localMessageId = sent.local_message_id
@@ -259,12 +265,14 @@ export async function deliverAgentTaskOutboundReservation(input: {
 
       const sent = await transport.sendTemplate({
         accountId: row.account_id,
-        userId: config.user_id,
-        conversationId: targetRow.conversation_id,
-        contactId: targetRow.contact_id,
+        userId: conversation.user_id,
+        conversationId: target.conversation_id,
+        contactId: target.contact_id,
         templateName: row.template_name,
         language: row.template_language,
         params: normalizeTemplateParams(row.template_params),
+        connectionId: row.connection_id!,
+        expectedProvider: row.provider!,
         workload: 'agent',
       })
       whatsappMessageId = sent.whatsapp_message_id
@@ -273,7 +281,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
       const { data: localMessage, error: localMessageError } = await db
         .from('messages')
         .select('id')
-        .eq('conversation_id', targetRow.conversation_id)
+        .eq('conversation_id', target.conversation_id)
         .eq('message_id', whatsappMessageId)
         .maybeSingle()
       if (localMessageError) throw localMessageError

@@ -8,7 +8,7 @@ describe('Agent Task outbound delivery boundary', () => {
       'utf8',
     )
 
-    const claim = source.indexOf('claim_agent_task_outbound_message')
+    const claim = source.indexOf('claim_bound_agent_task_outbound_message')
     const sendText = source.indexOf('transport.sendText')
     const sendTemplate = source.indexOf('transport.sendTemplate')
 
@@ -50,6 +50,9 @@ describe('Agent Task outbound delivery boundary', () => {
     expect(delivery.match(/workload: 'agent',/g)).toHaveLength(2)
     expect(sendCore).toContain('input.workload ??')
     expect(sendCore).toContain('idempotencyKey:reservationValue??undefined')
+    expect(sendCore).toContain('resolveConversationTransport(db,input.accountId,input.conversationId,input.connectionId)')
+    expect(delivery).toContain("'claim_bound_agent_task_outbound_message'")
+    expect(delivery).toContain('expectedProvider: row.provider!')
+    expect(delivery).toContain('connectionId: row.connection_id!')
   })
-
 })
