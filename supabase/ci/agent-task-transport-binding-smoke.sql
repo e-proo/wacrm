@@ -16,6 +16,7 @@ DECLARE
   v_wa_other uuid := gen_random_uuid();
   v_task uuid := gen_random_uuid();
   v_task_meta uuid := gen_random_uuid();
+  v_pending_task uuid := gen_random_uuid();
   v_contact uuid := gen_random_uuid();
   v_contact_meta uuid := gen_random_uuid();
   v_conv uuid := gen_random_uuid();
@@ -108,6 +109,54 @@ BEGIN
     jsonb_build_object('whatsappConnectionId',v_meta::text),
     'whatsapp',1,2,'sof59-meta-task-identity','sof59-meta-task',v_user
   );
+
+  -- SOF-64: Task-level editing is possible only while pending, without
+  -- Targets/Runs/outbound sends, and without raising Builder caps.
+  INSERT INTO public.ai_agent_tasks(
+    id,account_id,task_type,task_type_version,agent_id,agent_revision_id,
+    trigger_type,status,objective,target_policy,channel,max_targets,
+    max_attempts_per_target,idempotency_key,correlation_id,created_by
+  ) VALUES (
+    v_pending_task,v_account,'coverage.sourcing',2,v_agent,v_revision,
+    'manual','queued','SOF64 pending task',
+    '{}'::jsonb,'whatsapp',1,1,
+    'sof64-pending-task-identity','sof64-pending-task',v_user
+  );
+  v_result:=public.update_pending_agent_task_connection(
+    v_account,v_pending_task,v_other_user,v_wa,1,1
+  );
+  IF v_result->>'reason'<>'admin_required' THEN
+    RAISE EXCEPTION 'SOF64 foreign tenant could edit Task: %',v_result;
+  END IF;
+  v_result:=public.update_pending_agent_task_connection(
+    v_account,v_pending_task,v_user,v_other_connection,1,1
+  );
+  IF v_result->>'reason'<>'connection_not_found' THEN
+    RAISE EXCEPTION 'SOF64 foreign session was accepted: %',v_result;
+  END IF;
+  v_result:=public.update_pending_agent_task_connection(
+    v_account,v_pending_task,v_user,v_wa,1,1
+  );
+  IF v_result->>'updated'<>'true' OR
+     NOT EXISTS (
+       SELECT 1 FROM public.ai_agent_tasks WHERE id=v_pending_task
+         AND target_policy->>'whatsappConnectionId'=v_wa::text
+     ) THEN
+    RAISE EXCEPTION 'SOF64 pending connection edit failed: %',v_result;
+  END IF;
+  v_result:=public.update_pending_agent_task_connection(
+    v_account,v_pending_task,v_user,v_wa,2,1
+  );
+  IF v_result->>'reason'<>'caps_cannot_increase' THEN
+    RAISE EXCEPTION 'SOF64 increased Task caps after creation: %',v_result;
+  END IF;
+  UPDATE public.ai_agent_tasks SET status='running' WHERE id=v_pending_task;
+  v_result:=public.update_pending_agent_task_connection(
+    v_account,v_pending_task,v_user,v_wa_other,1,1
+  );
+  IF v_result->>'reason'<>'task_not_editable' THEN
+    RAISE EXCEPTION 'SOF64 edited a started Task: %',v_result;
+  END IF;
 
   INSERT INTO public.ai_agent_task_targets(
     id,account_id,task_id,contact_id,counterparty_role,status,
@@ -358,6 +407,22 @@ BEGIN
     'EXECUTE'
   ) THEN
     RAISE EXCEPTION 'SOF60 provider-locked RPC grants are unsafe';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.update_pending_agent_task_connection(uuid,uuid,uuid,uuid,integer,integer)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.update_pending_agent_task_connection(uuid,uuid,uuid,uuid,integer,integer)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.update_pending_agent_task_connection(uuid,uuid,uuid,uuid,integer,integer)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'SOF64 edit RPC grants are too broad';
   END IF;
 
   RAISE NOTICE 'SOF59 bound transport smoke passed';

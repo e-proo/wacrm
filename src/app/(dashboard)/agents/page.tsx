@@ -10,6 +10,7 @@ import {
   Boxes,
   Users,
   ListChecks,
+  ListTodo,
   ShieldCheck,
   ClipboardCheck,
   Activity,
@@ -25,6 +26,7 @@ import { MultiAgentPanel } from '@/components/agents/multi-agent-panel';
 import { AgentRoutesPanel } from '@/components/agents/agent-routes-panel';
 import { TrustedAdminsPanel } from '@/components/agents/trusted-admins-panel';
 import { AgentRunsPanel } from '@/components/agents/agent-runs-panel';
+import { AgentTasksPanel } from '@/components/agents/agent-tasks-panel';
 import { ChangeRequestsPanel } from '@/components/agents/change-requests-panel';
 import { ObservabilityPanel } from '@/components/agents/observability-panel';
 import { IntentsPanel } from '@/components/agents/intents-panel';
@@ -40,6 +42,7 @@ type Tab =
   | 'routes'
   | 'trusted_admins'
   | 'runs'
+  | 'tasks'
   | 'change_requests'
   | 'observability'
   | 'intents';
@@ -117,6 +120,11 @@ export default function AgentsPage() {
               </TabsTrigger>
             )}
             {canSeeMultiAgent && (
+              <TabsTrigger value="tasks">
+                <ListTodo className="me-1.5 h-4 w-4" /> مهام الوكلاء
+              </TabsTrigger>
+            )}
+            {canSeeMultiAgent && (
               <TabsTrigger value="change_requests">
                 <ClipboardCheck className="me-1.5 h-4 w-4" /> {t('tabChangeRequests')}
               </TabsTrigger>
@@ -183,6 +191,12 @@ export default function AgentsPage() {
           <TabsContent value="setup" className="mt-4">
             <AiConfig onGoToProviders={() => setTab('providers')} />
           </TabsContent>
+
+          {canSeeMultiAgent && (
+            <TabsContent value="tasks" className="mt-4">
+              <AgentTasksPanel />
+            </TabsContent>
+          )}
 
           {canSeeMultiAgent && (
             <TabsContent value="change_requests" className="mt-4">
