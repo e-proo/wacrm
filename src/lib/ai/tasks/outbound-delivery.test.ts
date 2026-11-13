@@ -59,7 +59,7 @@ describe('Agent Task outbound delivery boundary', () => {
     expect(delivery).toContain("'claim_bound_agent_task_outbound_message'")
     expect(delivery).toContain('expectedProvider: row.provider!')
     expect(delivery).toContain('connectionId: row.connection_id!')
-    const preclaim = delivery.indexOf('await resolveWhatsAppTransport(')
+    const preclaim = delivery.indexOf('await preflightAgentTaskConnection(')
     const claim = delivery.indexOf("'claim_bound_agent_task_outbound_message'")
     expect(preclaim).toBeGreaterThanOrEqual(0)
     expect(claim).toBeGreaterThan(preclaim)

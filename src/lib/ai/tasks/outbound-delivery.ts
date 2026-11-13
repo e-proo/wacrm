@@ -1,5 +1,5 @@
 import { engineSendTemplate, engineSendText } from '@/lib/automations/meta-send'
-import { resolveWhatsAppTransport } from '@/lib/whatsapp/transport/router'
+import { preflightAgentTaskConnection } from './outbound-connection'
 import { supabaseAdmin } from '../admin-client'
 import {
   assertRuntimeCircuitClosed,
@@ -181,30 +181,18 @@ export async function deliverAgentTaskOutboundReservation(input: {
     throw error
   }
 
-  // Resolve credentials and exact session BEFORE claiming transport ownership.
-  // This never dispatches a message; missing credentials are a known
-  // pre-dispatch denial, not an ambiguous WhatsApp timeout.
-  if (row.status === 'reserved') {
-    try {
-      const selected = await resolveWhatsAppTransport(
-        db,
-        row.account_id,
-        row.connection_id,
-      )
-      if (
-        selected.connectionId !== row.connection_id ||
-        selected.transport.provider !== row.provider
-      ) {
-        throw new Error('AGENT_OUTBOUND_FROZEN_CONNECTION_MISMATCH')
-      }
-    } catch {
-      return {
-        status: 'denied',
-        reason: 'connection_preflight_failed',
-        reservationId: row.id,
-        localMessageId: row.local_message_id,
-        whatsappMessageId: row.whatsapp_message_id,
-      }
+  // Resolve the selected adapter/credentials before claiming ownership.
+  if (row.status === 'reserved' && !(await preflightAgentTaskConnection(db, {
+    accountId: row.account_id,
+    connectionId: row.connection_id!,
+    provider: row.provider!,
+  }))) {
+    return {
+      status: 'denied',
+      reason: 'connection_preflight_failed',
+      reservationId: row.id,
+      localMessageId: row.local_message_id,
+      whatsappMessageId: row.whatsapp_message_id,
     }
   }
 
