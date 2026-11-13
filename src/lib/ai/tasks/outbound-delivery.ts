@@ -28,6 +28,7 @@ interface OutboundTransport {
     contactId: string
     text: string
     engineIdempotencyKey: string
+    workload: 'agent'
   }): Promise<{ whatsapp_message_id: string; local_message_id: string }>
   sendTemplate(input: {
     accountId: string
@@ -37,6 +38,7 @@ interface OutboundTransport {
     templateName: string
     language: string
     params: string[]
+    workload: 'agent'
   }): Promise<{ whatsapp_message_id: string }>
 }
 
@@ -245,6 +247,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
         contactId: targetRow.contact_id,
         text: row.candidate_text,
         engineIdempotencyKey: row.idempotency_key,
+        workload: 'agent',
       })
       localMessageId = sent.local_message_id
       whatsappMessageId = sent.whatsapp_message_id
@@ -262,6 +265,7 @@ export async function deliverAgentTaskOutboundReservation(input: {
         templateName: row.template_name,
         language: row.template_language,
         params: normalizeTemplateParams(row.template_params),
+        workload: 'agent',
       })
       whatsappMessageId = sent.whatsapp_message_id
       transportSucceeded = true

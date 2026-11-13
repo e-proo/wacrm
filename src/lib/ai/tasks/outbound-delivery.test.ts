@@ -37,4 +37,19 @@ describe('Agent Task outbound delivery boundary', () => {
     expect(source).not.toContain('whatsapp.send')
     expect(source).not.toContain('modelExposed')
   })
+  it('routes Agent Task sends with an explicit agent workload (including text)', () => {
+    const delivery = readFileSync(
+      new URL('./outbound-delivery.ts', import.meta.url),
+      'utf8',
+    )
+    const sendCore = readFileSync(
+      new URL('../../automations/meta-send.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(delivery.match(/workload: 'agent',/g)).toHaveLength(2)
+    expect(sendCore).toContain('input.workload ??')
+    expect(sendCore).toContain('idempotencyKey:reservationValue??undefined')
+  })
+
 })
