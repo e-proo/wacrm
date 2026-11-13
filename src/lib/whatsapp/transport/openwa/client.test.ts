@@ -347,6 +347,48 @@ describe('OpenWA upstream REST contract', () => {
       .rejects.toMatchObject({ code: 'invalid_request' })
   })
 
+  it('updates one existing WACRM webhook even when the public callback URL has changed', async () => {
+    const old = 'https://old.example.com/api/whatsapp/openwa/webhook'
+    const next = 'https://new.example.com/api/whatsapp/openwa/webhook'
+    const calls: Array<{ method?: string; path: string }> = []
+    let stored = old
+    const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const path = (args[0] as URL).pathname
+      const method = args[1]?.method
+      calls.push({ path, method })
+      if (method === 'GET') return response(200, [
+        { id: 'owned-webhook', url: stored }, { id: 'other', url: 'https://another.example.com/hooks' },
+      ])
+      if (method === 'PUT') {
+        stored = JSON.parse(String(args[1]?.body)).url
+        return response(200, { id: 'owned-webhook' })
+      }
+      throw new Error('must not create a duplicate webhook')
+    }) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://gateway.example.com', apiKey: 'key', fetchImpl })
+    await client.configureWebhook('session-1', next, '1234567890123456')
+    expect(calls.map(({ method }) => method)).toEqual(['GET', 'PUT', 'GET'])
+    expect(calls[1].path).toBe('/api/sessions/session-1/webhooks/owned-webhook')
+  })
+  it('refuses to guess which WACRM webhook owns a session when duplicates exist', async () => {
+    const fetchImpl = vi.fn(async () => response(200, [
+      { id: 'one', url: 'https://old.example.com/api/whatsapp/openwa/webhook' },
+      { id: 'two', url: 'https://new.example.com/api/whatsapp/openwa/webhook' },
+    ])) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://gateway.example.com', apiKey: 'key', fetchImpl })
+    await expect(client.configureWebhook('session-1', 'https://new.example.com/api/whatsapp/openwa/webhook', '1234567890123456'))
+      .rejects.toMatchObject({ code: 'connection_restricted' })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+  it('never reports success if the gateway did not persist the new webhook URL', async () => {
+    const fetchImpl = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      if (args[1]?.method === 'GET') return response(200, [{ id: 'one', url: 'https://old.example.com/api/whatsapp/openwa/webhook' }])
+      return response(200, { id: 'one' })
+    }) as unknown as typeof fetch
+    const client = new OpenWAClient({ baseUrl: 'https://gateway.example.com', apiKey: 'key', fetchImpl })
+    await expect(client.configureWebhook('session-1', 'https://new.example.com/api/whatsapp/openwa/webhook', '1234567890123456'))
+      .rejects.toMatchObject({ code: 'connection_restricted' })
+  })
   it('recursively redacts secrets and QR material', () => {
     expect(redactOpenWAValue({ apiKey: 'a', qr: 'c', signedUrl: 'd', nested: { webhook_secret: 'b', value: 1 } })).toEqual({
       apiKey: '[REDACTED]', qr: '[REDACTED]', signedUrl: '[REDACTED]', nested: { webhook_secret: '[REDACTED]', value: 1 },

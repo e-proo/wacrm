@@ -183,32 +183,49 @@ export class OpenWAClient {
     if (!secret || secret.length < 16) throw new WhatsAppTransportError('invalid_request', 'OpenWA webhook signing secret is too short')
     validateOpenWAWebhookUrl(url)
     const prefix = `/api/sessions/${encodeURIComponent(sessionId)}/webhooks`
-    let stage: 'list' | 'update' | 'register' = 'list'
+    let stage: 'list' | 'update' | 'register' | 'verify' = 'list'
     try {
-      const existing = await this.request<Array<{ id: string; url: string }>>(prefix, { correlationId })
-      if (!Array.isArray(existing)) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA returned an invalid webhook list')
-      const matching = existing.find((item) => item.url === url)
+      const list = () => this.request<Array<{ id: string; url: string }>>(prefix, { correlationId })
+      const current = await list()
+      if (!Array.isArray(current)) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA returned an invalid webhook list')
+      const ownedByWACRM = (item: { id: string; url: string }) => {
+        if (typeof item.id !== 'string' || typeof item.url !== 'string') return false
+        try { validateOpenWAWebhookUrl(item.url); return true }
+        catch { return false }
+      }
+      const owned = current.filter(ownedByWACRM)
+      if (owned.length > 1) {
+        throw new WhatsAppTransportError('connection_restricted',
+          'Multiple WACRM webhook registrations exist. Resolve duplicates in the OpenWA dashboard first')
+      }
       const payload = {
         url, secret, events: ['message.received', 'message.sent', 'message.ack', 'message.failed', 'message.receipt',
           'session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'],
       }
-      if (matching) {
+      if (owned.length === 1) {
         stage = 'update'
-        await this.request(`${prefix}/${encodeURIComponent(matching.id)}`, {
+        await this.request(`${prefix}/${encodeURIComponent(owned[0].id)}`, {
           method: 'PUT', correlationId, body: { ...payload, active: true },
         })
       } else {
         stage = 'register'
         await this.request(prefix, { method: 'POST', correlationId, body: payload })
       }
+      stage = 'verify'
+      const after = await list()
+      const verified = Array.isArray(after) ? after.filter(ownedByWACRM) : []
+      if (verified.length !== 1 || verified[0].url !== url) {
+        throw new WhatsAppTransportError('connection_restricted',
+          'OpenWA did not confirm the requested webhook URL. Inspect the live webhook list')
+      }
     } catch (error) {
-      // Only sanitized upstream errors are surfaced; never include bodies or secrets.
       if (error instanceof WhatsAppTransportError) {
         throw new WhatsAppTransportError(error.code, `OpenWA webhook ${stage} failed: ${error.message}`, error)
       }
       throw error
     }
   }
+
   async startSession(sessionId: string, correlationId?: string): Promise<OpenWASessionStatus> {
     const response = await this.request<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(sessionId)}/start`, { method: 'POST', correlationId, timeoutMs: 45_000, ambiguousOnFailure: true })
     return sessionFromGateway(response)
