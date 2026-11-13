@@ -43,7 +43,7 @@ describe('resolveOpenWACredentials', () => {
 
     await expect(resolveOpenWACredentials(db, 'acc-1', 'conn-1')).resolves.toEqual({
       accountId: 'acc-1', connectionId: 'conn-1', baseUrl: 'https://openwa.example.com',
-      apiKey: 'plain:enc-api', webhookSecret: 'plain:enc-hook',
+      apiKey: 'plain:enc-api', webhookSecret: 'plain:enc-hook', webhookUrl: undefined,
     })
     expect(connectionQuery.eq).toHaveBeenCalledWith('id', 'conn-1')
     expect(connectionQuery.eq).toHaveBeenCalledWith('account_id', 'acc-1')

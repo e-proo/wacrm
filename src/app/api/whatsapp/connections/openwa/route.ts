@@ -46,16 +46,17 @@ export async function GET() {
     if (guardrailError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA emergency stop state', guardrailError)
     const { data: gateways, error: gatewayError } = await adminDb
       .from('whatsapp_connection_credentials')
-      .select('connection_id, base_url')
+      .select('connection_id, base_url, webhook_url')
       .eq('account_id', accountId)
       .eq('provider', 'openwa')
     if (gatewayError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA gateway settings', gatewayError)
-    const gatewayByConnection = new Map((gateways ?? []).map((row) => [row.connection_id, row.base_url] as const))
+    const gatewayByConnection = new Map((gateways ?? []).map((row) => [row.connection_id, row] as const))
     const guardrailByConnection = new Map((guardrails ?? []).map((row) => [row.connection_id, row] as const))
     // A new OpenWA session without a guardrail row is fail-closed: the UI
     // must not claim sending is enabled before explicit TEST pilot setup.
     const connections = (data ?? []).map((row) => ({
-      ...row, gateway_base_url: gatewayByConnection.get(row.id) ?? null, guardrail: {
+      ...row, gateway_base_url: gatewayByConnection.get(row.id)?.base_url ?? null,
+      webhook_url: gatewayByConnection.get(row.id)?.webhook_url ?? null, guardrail: {
         manual_paused: guardrailByConnection.get(row.id)?.manual_paused !== false,
         pilot_enabled: guardrailByConnection.get(row.id)?.pilot_enabled !== false,
       },

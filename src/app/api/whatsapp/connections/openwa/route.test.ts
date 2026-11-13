@@ -141,7 +141,7 @@ describe('OW-13 admin-only emergency stop visibility', () => {
       select: () => gatewayQuery,
       eq: (field: string, value: unknown) => { gatewayFilters.push([field, value]); return gatewayQuery },
       then: (resolve: (result: unknown) => unknown) => resolve({ data: [
-        { connection_id: 'conn-1', base_url: 'https://gateway.example.com' },
+        { connection_id: 'conn-1', base_url: 'https://gateway.example.com', webhook_url: 'https://crm.example.com/api/whatsapp/openwa/webhook' },
       ], error: null }),
     }
     const userFrom = vi.fn(() => connQuery)
@@ -152,9 +152,9 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     const payload = await response.json()
     expect(payload).toEqual({
       connections: [
-        { id: 'conn-1', status: 'ready', provider: 'openwa', gateway_base_url: 'https://gateway.example.com', guardrail: { manual_paused: true, pilot_enabled: false } },
-        { id: 'conn-2', status: 'ready', provider: 'openwa', gateway_base_url: null, guardrail: { manual_paused: true, pilot_enabled: true } },
-        { id: 'conn-3', status: 'ready', provider: 'openwa', gateway_base_url: null, guardrail: { manual_paused: true, pilot_enabled: true } },
+        { id: 'conn-1', status: 'ready', provider: 'openwa', gateway_base_url: 'https://gateway.example.com', webhook_url: 'https://crm.example.com/api/whatsapp/openwa/webhook', guardrail: { manual_paused: true, pilot_enabled: false } },
+        { id: 'conn-2', status: 'ready', provider: 'openwa', gateway_base_url: null, webhook_url: null, guardrail: { manual_paused: true, pilot_enabled: true } },
+        { id: 'conn-3', status: 'ready', provider: 'openwa', gateway_base_url: null, webhook_url: null, guardrail: { manual_paused: true, pilot_enabled: true } },
       ],
       gateway_settings: { rotation_allowed: process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co' },
       pilot: { enforced: process.env.OPENWA_PILOT_MODE === 'enforce' ||
