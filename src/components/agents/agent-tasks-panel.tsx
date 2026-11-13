@@ -20,6 +20,7 @@ interface Agent {
   slug: string
   status: string
   published: boolean
+  coverageVersions: number[]
 }
 interface CoverageRequest {
   id: string
@@ -110,10 +111,14 @@ export function AgentTasksPanel() {
   const currentReady = selectedConnection === 'latest' ||
     available.some((c) => c.id === selectedConnection)
   const selectedProvider = connections.find((c) => c.id === selectedConnection)?.provider
+  const selectedAgent = data?.agents.find((agent) => agent.id === agentId)
+  const agentCanUseCoverage = Boolean(selectedAgent?.coverageVersions.length)
+  const agentCanUseOpenWA = selectedAgent?.coverageVersions.includes(2) === true
 
   const canCreate = !busy && data?.outboundDeliveryEnabled === true &&
     Boolean(agentId) && Boolean(requestId) && Boolean(selectedConnection) &&
-    currentReady
+    currentReady && agentCanUseCoverage &&
+    (selectedProvider !== 'openwa' || agentCanUseOpenWA)
 
   async function createTask() {
     if (!canCreate) return
@@ -230,8 +235,8 @@ export function AgentTasksPanel() {
                 className="h-10 w-full rounded-md border bg-background px-3" disabled={loading || busy}>
                 <option value="">— اختر وكيلًا —</option>
                 {(data?.agents ?? []).map((agent) => (
-                  <option key={agent.id} value={agent.id} disabled={agent.status !== 'active' || !agent.published}>
-                    {agent.name} · {agent.status}{!agent.published ? ' · دون نسخة منشورة' : ''}
+                  <option key={agent.id} value={agent.id} disabled={agent.status !== 'active' || !agent.published || !agent.coverageVersions.length}>
+                    {agent.name} · {agent.status}{!agent.published ? ' · دون نسخة منشورة' : ''}{!agent.coverageVersions.length ? ' · لم تُنشَر مهمة Coverage' : ''}
                   </option>
                 ))}
               </select>
@@ -280,6 +285,11 @@ export function AgentTasksPanel() {
                 disabled={busy} />
             </label>
           </div>
+          {selectedProvider === 'openwa' && !agentCanUseOpenWA && selectedAgent ? (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              هذا الوكيل لا يملك Coverage sourcing V2 في نسخته المنشورة. انشر نسخة Builder تتضمن V2 أولًا.
+            </p>
+          ) : null}
           {selectedProvider === 'openwa' ? (
             <p className="text-xs text-muted-foreground">
               يتطلب إرسال OpenWA محادثة واردة حديثة من المستهدف على الجلسة نفسها،
@@ -329,7 +339,7 @@ export function AgentTasksPanel() {
                         className="h-10 w-full rounded-md border bg-background px-3">
                         <option value="latest">اتصال أحدث رسالة واردة</option>
                         {connections.map((c) => (
-                          <option key={c.id} value={c.id} disabled={!c.ready || c.archived}>
+                          <option key={c.id} value={c.id} disabled={!c.ready || c.archived || (c.provider === 'openwa' && task.taskType === 'coverage.sourcing' && task.version < 2)}>
                             {connectionLabel(c)}
                           </option>
                         ))}

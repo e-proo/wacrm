@@ -56,6 +56,34 @@ export async function GET() {
     if (connectionsError || agentsError || requestsError || tasksError || runtimeError) {
       throw connectionsError ?? agentsError ?? requestsError ?? tasksError ?? runtimeError
     }
+    // Only disclose the Task Type versions authorized by each published
+    // revision, never the full revision policy/tool grants/credentials.
+    const revisionIds = (agents ?? [])
+      .filter((agent) => typeof agent.published_revision_id === 'string')
+      .map((agent) => agent.published_revision_id as string)
+    let publishedRevisions: Array<{ id: string; outreach_policy: unknown }> = []
+    if (revisionIds.length > 0) {
+      const { data: revisions, error: revisionError } = await db
+        .from('ai_agent_revisions')
+        .select('id,outreach_policy')
+        .eq('account_id', ctx.accountId)
+        .eq('status', 'published')
+        .in('id', revisionIds)
+      if (revisionError) throw revisionError
+      publishedRevisions = revisions ?? []
+    }
+    const versionsByRevision = new Map<string, number[]>()
+    for (const revision of publishedRevisions) {
+      const policy = record(revision.outreach_policy) ? revision.outreach_policy : {}
+      const values = Array.isArray(policy.bindings) ? policy.bindings : []
+      const versions = values
+        .filter(record)
+        .filter((binding) =>
+          binding.taskType === 'coverage.sourcing' &&
+          (binding.taskTypeVersion === 1 || binding.taskTypeVersion === 2))
+        .map((binding) => binding.taskTypeVersion as number)
+      versionsByRevision.set(revision.id, versions)
+    }
     return NextResponse.json({
       connections: (connections ?? []).map((row) => ({
         id: row.id,
@@ -70,6 +98,8 @@ export async function GET() {
       agents: (agents ?? []).map((row) => ({
         id: row.id, name: row.name, slug: row.slug,
         status: row.status, published: Boolean(row.published_revision_id),
+        coverageVersions: row.published_revision_id
+          ? versionsByRevision.get(row.published_revision_id) ?? [] : [],
       })),
       coverageRequests: requests ?? [],
       tasks: (tasks ?? []).map((row) => ({

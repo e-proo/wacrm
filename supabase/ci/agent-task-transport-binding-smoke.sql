@@ -17,6 +17,12 @@ DECLARE
   v_task uuid := gen_random_uuid();
   v_task_meta uuid := gen_random_uuid();
   v_pending_task uuid := gen_random_uuid();
+  v_second_task uuid := gen_random_uuid();
+  v_second_target uuid := gen_random_uuid();
+  v_second_contact uuid := gen_random_uuid();
+  v_second_conv uuid := gen_random_uuid();
+  v_second_run uuid;
+  v_second_reservation uuid;
   v_contact uuid := gen_random_uuid();
   v_contact_meta uuid := gen_random_uuid();
   v_conv uuid := gen_random_uuid();
@@ -188,6 +194,72 @@ BEGIN
   );
   IF v_result->>'reason'<>'connection_session_window_closed' THEN
     RAISE EXCEPTION 'SOF59 accepted text on a different session: %',v_result;
+  END IF;
+
+  -- Two independent OpenWA sessions are usable under the same Agent/account.
+  -- The reservation of session B must never rewrite session A's binding.
+  INSERT INTO public.contacts(id,user_id,account_id,phone,name)
+    VALUES (v_second_contact,v_user,v_account,'+967700001861','SOF62 second OpenWA');
+  INSERT INTO public.conversations(id,user_id,account_id,contact_id)
+    VALUES (v_second_conv,v_user,v_account,v_second_contact);
+  INSERT INTO public.messages(
+    conversation_id,sender_type,content_type,content_text,
+    status,provider,connection_id,created_at
+  ) VALUES (
+    v_second_conv,'customer','text','second session opt-in',
+    'sent','openwa',v_wa_other,now()
+  );
+  INSERT INTO public.ai_agent_tasks(
+    id,account_id,task_type,task_type_version,agent_id,agent_revision_id,
+    trigger_type,status,objective,target_policy,channel,max_targets,
+    max_attempts_per_target,idempotency_key,correlation_id,created_by
+  ) VALUES (
+    v_second_task,v_account,'coverage.sourcing',2,v_agent,v_revision,
+    'manual','running','SOF62 second OpenWA independent Task',
+    jsonb_build_object('whatsappConnectionId',v_wa_other::text),
+    'whatsapp',1,1,'sof62-second-openwa-task','sof62-second-openwa',v_user
+  );
+  INSERT INTO public.ai_agent_task_targets(
+    id,account_id,task_id,contact_id,counterparty_role,status,
+    conversation_id,attempt_count,idempotency_key
+  ) VALUES (
+    v_second_target,v_account,v_second_task,v_second_contact,
+    'supplier','in_progress',v_second_conv,1,'sof62-second-openwa-target'
+  );
+  v_second_run:=public.create_agent_execution(
+    v_account,v_second_conv,null,v_agent,v_revision,v_ai_connection,
+    null,'SOF62','customer','outbound',v_second_task,v_second_target,
+    'task_target','attempt:1','supplier','sof62-second-openwa-run'
+  );
+  IF public.claim_agent_run(v_second_run,'sof62-worker',300)<>'claimed' THEN
+    RAISE EXCEPTION 'SOF62 second session Agent Run claim failed';
+  END IF;
+  v_result:=public.reserve_expected_provider_agent_task_outbound_message(
+    v_second_run,'coverage.sourcing_message',2,'text',
+    'Second safe TEST text',null,null,'[]'::jsonb,0,60,1440,true,
+    'openwa'
+  );
+  IF v_result->>'reserved'<>'true'
+     OR (v_result->>'connection_id')::uuid<>v_wa_other
+     OR v_result->>'provider'<>'openwa' THEN
+    RAISE EXCEPTION 'SOF62 session B was not independently bound: %',v_result;
+  END IF;
+  v_second_reservation:=(v_result->>'reservation_id')::uuid;
+  UPDATE public.whatsapp_connections SET status='disconnected'
+    WHERE id=v_wa_other;
+  v_result:=public.claim_bound_agent_task_outbound_message(
+    v_second_reservation,'sof62-transport',120
+  );
+  IF v_result->>'reason'<>'connection_not_ready' THEN
+    RAISE EXCEPTION 'SOF62 dispatched disconnected session B: %',v_result;
+  END IF;
+  UPDATE public.whatsapp_connections SET status='ready'
+    WHERE id=v_wa_other;
+  v_result:=public.claim_bound_agent_task_outbound_message(
+    v_second_reservation,'sof62-transport',120
+  );
+  IF v_result->>'claimed'<>'true' THEN
+    RAISE EXCEPTION 'SOF62 session B did not recover safely: %',v_result;
   END IF;
 
   -- A session in another tenant is not a valid route, even when ready.
