@@ -25,6 +25,7 @@ interface OpenWAConnection {
   session_id: string | null
   engine: string | null
   gateway_base_url?: string | null
+  webhook_url?: string | null
   guardrail?: { manual_paused: boolean; pilot_enabled: boolean }
   provider_metadata?: {
     onboarding_stage?: string
@@ -70,6 +71,7 @@ export function OpenWAConnections() {
   const [editName, setEditName] = useState('')
   const [editBaseUrl, setEditBaseUrl] = useState('')
   const [editApiKey, setEditApiKey] = useState('')
+  const [editWebhookUrl, setEditWebhookUrl] = useState('')
 
   useEffect(() => {
     if (!qr) return
@@ -116,6 +118,7 @@ export function OpenWAConnections() {
     setEditingConnection(connection)
     setEditName(connection.display_name || 'WhatsApp Web')
     setEditBaseUrl(connection.gateway_base_url || '')
+    setEditWebhookUrl(connection.webhook_url || '')
     // Never retrieve or prefill decrypted API keys in the browser.
     setEditApiKey('')
   }
@@ -146,8 +149,13 @@ export function OpenWAConnections() {
     const url = editBaseUrl.trim()
     const nameChanged = name !== (editingConnection.display_name || 'WhatsApp Web')
     const gatewayChanged = url !== (editingConnection.gateway_base_url || '') || editApiKey.trim().length > 0
+    const webhookChanged = editWebhookUrl.trim() !== (editingConnection.webhook_url || '')
+    const syncWebhook = webhookChanged || (gatewayChanged && editWebhookUrl.trim().length > 0)
     if (!name || name.length > 120) return toast.error(w('sessionNameRequired'))
-    if (!nameChanged && !gatewayChanged) { setEditingConnection(null); setEditApiKey(''); return }
+    if (!nameChanged && !gatewayChanged && !syncWebhook) { setEditingConnection(null); setEditApiKey(''); return }
+    if (webhookChanged && (!gatewayRotationAllowed || !editWebhookUrl.trim())) {
+      return toast.error(w('sessionWebhookTestOnly'))
+    }
     if (gatewayChanged) {
       if (!gatewayRotationAllowed) return toast.error(w('sessionGatewayTestOnly'))
       if (!editingConnection.session_id) return toast.error(w('sessionGatewayMissingId'))
@@ -155,23 +163,41 @@ export function OpenWAConnections() {
     }
     setBusy(`save_settings:${editingConnection.id}`)
     try {
-      const response = await fetch(`/api/whatsapp/connections/openwa/${editingConnection.id}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'update_settings',
-          ...(nameChanged ? { display_name: name } : {}),
-          ...(gatewayChanged ? { base_url: url, api_key: editApiKey.trim() } : {}),
-        }),
-        cache: 'no-store',
-      })
-      const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
-      if (!response.ok) throw new Error(data.error || w('actionFailed'))
+      // Local gateway credentials and the provider's inbound webhook are two
+      // independent configurations; do not claim sync until OpenWA confirms it.
+      if (nameChanged || gatewayChanged) {
+        const response = await fetch(`/api/whatsapp/connections/openwa/${editingConnection.id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update_settings',
+            ...(nameChanged ? { display_name: name } : {}),
+            ...(gatewayChanged ? { base_url: url, api_key: editApiKey.trim() } : {}),
+          }),
+          cache: 'no-store',
+        })
+        const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
+        if (!response.ok) throw new Error(data.error || w('actionFailed'))
+      }
+      if (syncWebhook) {
+        const response = await fetch(`/api/whatsapp/connections/openwa/${editingConnection.id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'configure_webhook', webhook_url: editWebhookUrl.trim() }),
+          cache: 'no-store',
+        })
+        const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
+        if (!response.ok || data.synced !== true) {
+          throw new Error(`${w('sessionWebhookSyncFailed')} ${data.error || w('actionFailed')}`)
+        }
+      }
       setEditingConnection(null)
       setEditApiKey('')
-      toast.success(w('sessionSettingsSaved'))
+      if (gatewayChanged && !syncWebhook) toast.warning(w('sessionWebhookNotSynced'))
+      else toast.success(w('sessionSettingsSaved'))
       await load()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : w('actionFailed'))
+      // Another step may already have saved; surface the actual DB state.
+      await load()
     } finally { setBusy(null) }
   }
 
@@ -452,6 +478,14 @@ export function OpenWAConnections() {
               onChange={(event) => setEditApiKey(event.target.value)}
               disabled={busy !== null || !gatewayRotationAllowed} />
             <p className="text-xs text-muted-foreground">{w('sessionApiKeyHint')}</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="openwa-edit-webhook">{w('sessionWebhookUrl')}</Label>
+            <Input id="openwa-edit-webhook" type="url"
+              placeholder="https://wacrm.example.com/api/whatsapp/openwa/webhook"
+              value={editWebhookUrl} onChange={(event) => setEditWebhookUrl(event.target.value)}
+              disabled={busy !== null || !gatewayRotationAllowed} />
+            <p className="text-xs text-muted-foreground">{w('sessionWebhookHint')}</p>
           </div>
           {editBaseUrl.toLowerCase().includes('.trycloudflare.com') && <Alert>
             <AlertDescription>{w('quickTunnelWarning')}</AlertDescription>
