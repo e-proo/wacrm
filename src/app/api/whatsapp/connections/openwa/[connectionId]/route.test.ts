@@ -122,6 +122,8 @@ describe('OpenWA session removal from WACRM', () => {
 
 describe('OpenWA signed webhook configuration', () => {
   const previousUrl = process.env.OPENWA_WEBHOOK_URL
+  const previousProject = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const savedWebhookUrls: string[] = []
   let session: { session_id: string | null } | null
   let configure: ReturnType<typeof vi.fn>
   let lookupFilters: Array<[string, unknown]>
@@ -129,6 +131,7 @@ describe('OpenWA signed webhook configuration', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    savedWebhookUrls.length = 0
     process.env.OPENWA_WEBHOOK_URL = 'https://wacrm.example.com/api/whatsapp/openwa/webhook'
     session = { session_id: 'gateway-session-1' }
     configure = vi.fn().mockResolvedValue(undefined)
@@ -138,7 +141,17 @@ describe('OpenWA signed webhook configuration', () => {
       is: (key: string, value: unknown) => { lookupFilters.push([key, value]); return lookup },
       maybeSingle: async () => ({ data: session, error: null }),
     }
-    dbFrom = vi.fn(() => ({ select: () => lookup }))
+    const write = {
+      eq: () => write,
+      select: () => write,
+      maybeSingle: async () => ({ data: { connection_id: CONNECTION }, error: null }),
+    }
+    dbFrom = vi.fn((table: string) => table === 'whatsapp_connection_credentials'
+      ? { update: (values: { webhook_url?: string }) => {
+        if (values.webhook_url) savedWebhookUrls.push(values.webhook_url)
+        return write
+      } }
+      : { select: () => lookup })
     h.auth.mockResolvedValue({
       accountId: ACCOUNT, user: { id: ACTOR }, adminDb: { from: dbFrom },
     })
@@ -151,23 +164,26 @@ describe('OpenWA signed webhook configuration', () => {
   afterEach(() => {
     if (previousUrl === undefined) delete process.env.OPENWA_WEBHOOK_URL
     else process.env.OPENWA_WEBHOOK_URL = previousUrl
+    if (previousProject === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = previousProject
   })
 
   it('rejects absent URL with HTTP 400 and no credential or gateway side effects', async () => {
     delete process.env.OPENWA_WEBHOOK_URL
     const response = await POST(request('configure_webhook'), context())
     expect(response.status).toBe(400)
-    expect(await response.json()).toMatchObject({ code: 'invalid_request', stage: 'webhook_url' })
-    expect(dbFrom).not.toHaveBeenCalled()
-    expect(h.credentials).not.toHaveBeenCalled()
+    expect(await response.json()).toMatchObject({ code: 'invalid_request', stage: 'credentials' })
+    expect(configure).not.toHaveBeenCalled()
+    expect(savedWebhookUrls).toHaveLength(0)
   })
 
   it('rejects wrong WACRM URL path before secret persistence', async () => {
     process.env.OPENWA_WEBHOOK_URL = 'https://wacrm.example.com/incorrect/webhook'
     const response = await POST(request('configure_webhook'), context())
     expect(response.status).toBe(400)
-    expect(await response.json()).toMatchObject({ code: 'invalid_request', stage: 'webhook_url' })
-    expect(dbFrom).not.toHaveBeenCalled()
+    expect(await response.json()).toMatchObject({ code: 'invalid_request', stage: 'credentials' })
+    expect(configure).not.toHaveBeenCalled()
+    expect(savedWebhookUrls).toHaveLength(0)
   })
 
   it('reports upstream webhook list rejection without a misleading WACRM route 404', async () => {
@@ -199,9 +215,78 @@ describe('OpenWA signed webhook configuration', () => {
   it('enables the signed webhook using a previously persisted secret', async () => {
     const response = await POST(request('configure_webhook'), context())
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ enabled: true })
+    expect(await response.json()).toEqual({
+      enabled: true, synced: true, webhook_url: process.env.OPENWA_WEBHOOK_URL,
+    })
     expect(configure).toHaveBeenCalledTimes(1)
     expect(h.credentials).toHaveBeenCalledTimes(1)
+  })
+
+  it('updates one TEST session webhook in OpenWA and persists only the verified URL', async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://pqirsnfupofhulmewakq.supabase.co'
+    const next = 'https://new-wacrm.example.com/api/whatsapp/openwa/webhook'
+    const response = await POST(new Request('https://localhost/', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'configure_webhook', webhook_url: next }),
+    }), context())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ synced: true, webhook_url: next })
+    expect(configure).toHaveBeenCalledWith('gateway-session-1', next, 'existing-server-only-secret', CONNECTION)
+    expect(savedWebhookUrls).toEqual([next])
+    expect(lookupFilters).toContainEqual(['account_id', ACCOUNT])
+    expect(dbFrom).toHaveBeenCalledWith('whatsapp_connection_credentials')
+  })
+
+  it('cannot redirect production callbacks through per-session settings', async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://production.supabase.co'
+    const response = await POST(new Request('https://localhost/', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'configure_webhook', webhook_url: 'https://unauthorized.example.com/api/whatsapp/openwa/webhook',
+      }),
+    }), context())
+    expect(response.status).toBe(409)
+    expect(configure).not.toHaveBeenCalled()
+    expect(dbFrom).not.toHaveBeenCalled()
+    expect(savedWebhookUrls).toHaveLength(0)
+  })
+
+  it('does not store a webhook URL if OpenWA rejects the update', async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://pqirsnfupofhulmewakq.supabase.co'
+    configure.mockRejectedValue(new WhatsAppTransportError('connection_restricted', 'duplicate callbacks'))
+    const response = await POST(new Request('https://localhost/', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'configure_webhook', webhook_url: 'https://new-wacrm.example.com/api/whatsapp/openwa/webhook',
+      }),
+    }), context())
+    expect(response.status).toBe(409)
+    expect((await response.json()).stage).toBe('gateway_registration')
+    expect(savedWebhookUrls).toHaveLength(0)
+  })
+
+  it('rejects invalid custom webhook URLs before loading session credentials', async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://pqirsnfupofhulmewakq.supabase.co'
+    const response = await POST(new Request('https://localhost/', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'configure_webhook', webhook_url: 'https://attacker.example.com/unrelated' }),
+    }), context())
+    expect(response.status).toBe(400)
+    expect(dbFrom).not.toHaveBeenCalled()
+    expect(configure).not.toHaveBeenCalled()
+  })
+
+  it('prefers the verified per-connection webhook over stale deployment env', async () => {
+    h.credentials.mockResolvedValueOnce({
+      credentials: { webhookSecret: 'existing-server-only-secret',
+        webhookUrl: 'https://saved.example.com/api/whatsapp/openwa/webhook' },
+      client: { configureWebhook: configure },
+    })
+    const response = await POST(request('configure_webhook'), context())
+    expect(response.status).toBe(200)
+    expect(configure).toHaveBeenCalledWith('gateway-session-1',
+      'https://saved.example.com/api/whatsapp/openwa/webhook', 'existing-server-only-secret', CONNECTION)
+    expect(savedWebhookUrls).toHaveLength(0)
   })
 })
 
