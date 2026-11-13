@@ -1292,11 +1292,11 @@ export function MessageThread({
               <DropdownMenuItem onClick={() => setChoiceRefreshToken((value) => value + 1)}>
                 <RefreshCw className="mr-2 h-3.5 w-3.5" />{w("conversationConnectionReload")}
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/settings?tab=whatsapp">
-                  <Link2 className="mr-2 h-3.5 w-3.5" />{w("conversationConnectionManage")}
-                </Link>
-              </DropdownMenuItem>
+              <Link href="/settings?tab=whatsapp"
+                className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent"
+              >
+                <Link2 className="mr-2 h-3.5 w-3.5" />{w("conversationConnectionManage")}
+              </Link>
             </DropdownMenuContent>
           </DropdownMenu>
           {activeOpenWAChoices.can_refresh && activeOpenWAChoices.unavailable_options.map((option) => (
