@@ -6,6 +6,7 @@ const h = vi.hoisted(() => ({
   status: vi.fn(),
   encrypt: vi.fn((key: string) => 'encrypted:' + key),
   updates: [] as Record<string, unknown>[],
+  nameUpdates: [] as Record<string, unknown>[],
   lookups: [] as Array<[string, unknown]>,
   connection: { session_id: 'gateway-session-1' } as { session_id: string } | null,
 }))
@@ -70,6 +71,13 @@ function db() {
         },
         maybeSingle: async () => {
           if (table === 'whatsapp_connections') {
+            if (update) {
+              if (filters.account_id === ACCOUNT && filters.id === CONNECTION && h.connection) {
+                h.nameUpdates.push(update)
+                return { data: { id: CONNECTION }, error: null }
+              }
+              return { data: null, error: null }
+            }
             return { data: filters.account_id === ACCOUNT && filters.id === CONNECTION
               ? h.connection : null, error: null }
           }
@@ -89,6 +97,7 @@ describe('OpenWA TEST tunnel URL rotation for an existing session', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     h.updates.length = 0
+    h.nameUpdates.length = 0
     h.lookups.length = 0
     h.connection = { session_id: 'gateway-session-1' }
     h.status.mockResolvedValue({ sessionId: 'gateway-session-1', status: 'ready' })
@@ -125,6 +134,51 @@ describe('OpenWA TEST tunnel URL rotation for an existing session', () => {
     const response = await POST(request(), context())
     expect(response.status, JSON.stringify(await response.clone().json())).toBe(409)
     expect(h.updates).toHaveLength(0)
+  })
+  it('renames an existing scoped connection independently of Pilot and TEST gateway restrictions', async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://production.supabase.co'
+    const response = await POST(new Request('https://localhost/', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'update_settings', display_name: 'Sales WhatsApp' }),
+    }), context())
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+    expect(h.nameUpdates).toEqual([{ display_name: 'Sales WhatsApp' }])
+    expect(h.status).not.toHaveBeenCalled()
+    expect(h.updates).toHaveLength(0)
+  })
+  it('blocks renaming another account session without modifying any data', async () => {
+    h.auth.mockResolvedValue({ accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      adminDb: db(), user: { id: 'actor-1' } })
+    const response = await POST(new Request('https://localhost/', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'update_settings', display_name: 'Wrong tenant' }),
+    }), context())
+    expect(response.status).toBe(409)
+    expect(h.nameUpdates).toHaveLength(0)
+    expect(h.updates).toHaveLength(0)
+  })
+  it('rejects empty session names before making any writes', async () => {
+    const response = await POST(new Request('https://localhost/', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'update_settings', display_name: '   ' }),
+    }), context())
+    expect(response.status).toBe(400)
+    expect(h.nameUpdates).toHaveLength(0)
+    expect(h.updates).toHaveLength(0)
+  })
+  it('can update name and gateway together only after the exact session is verified', async () => {
+    const response = await POST(new Request('https://localhost/', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update_settings', display_name: 'New Name',
+        base_url: 'https://new-quick-tunnel.trycloudflare.com', api_key: 'new-private-key',
+      }),
+    }), context())
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+    expect(h.status).toHaveBeenCalledWith('gateway-session-1', CONNECTION)
+    expect(h.nameUpdates).toEqual([{ display_name: 'New Name' }])
+    expect(h.updates).toEqual([expect.objectContaining({ api_key_encrypted: 'encrypted:new-private-key' })])
+    expect(JSON.stringify(await response.json())).not.toContain('new-private-key')
   })
   it('updates only scoped encrypted credentials on verified existing session without creating one', async () => {
     const response = await POST(request(), context())

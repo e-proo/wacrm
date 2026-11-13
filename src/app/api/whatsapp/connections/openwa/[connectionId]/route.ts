@@ -40,39 +40,56 @@ export async function POST(request: Request, context: Context) {
     const { connectionId } = await context.params
     const { accountId, adminDb, user } = await requireOpenWASessionAdmin()
     const body = await request.json() as Record<string, unknown>
-    if (body.action === 'update_gateway') {
-      // This management flow is authorized for isolated TEST development only.
-      let testEnvironment = false
-      try { testEnvironment = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').hostname === 'pqirsnfupofhulmewakq.supabase.co' }
-      catch { /* fail closed */ }
-      if (!testEnvironment) throw new WhatsAppTransportError('connection_restricted', 'Gateway rotation is only available on TEST')
-      // Tunnel URLs rotate. Verify this is the SAME upstream session before
-      // updating the encrypted credential record. No POST /sessions or /start.
+    if (body.action === 'update_gateway' || body.action === 'update_settings') {
+      const updateName = body.action === 'update_settings' && body.display_name !== undefined
+      const updateGateway = body.action === 'update_gateway' || body.base_url !== undefined || body.api_key !== undefined
+      if (!updateName && !updateGateway) throw new WhatsAppTransportError('invalid_request', 'No session settings changes were provided')
+      const displayName = updateName && typeof body.display_name === 'string' ? body.display_name.trim() : ''
+      if (updateName && (!displayName || displayName.length > 120)) {
+        throw new WhatsAppTransportError('invalid_request', 'Enter a session name of up to 120 characters')
+      }
+      // Gateway rotation remains restricted to the pinned TEST project, but
+      // renaming an existing tenant-scoped session is independent of Pilot.
+      if (updateGateway && !isOpenWATestProject()) {
+        throw new WhatsAppTransportError('connection_restricted', 'Gateway rotation is only available on TEST')
+      }
       const { data: connection, error: lookupError } = await adminDb.from('whatsapp_connections')
         .select('session_id').eq('id', connectionId).eq('account_id', accountId)
         .eq('provider', 'openwa').is('archived_at', null).maybeSingle()
-      if (lookupError || !connection?.session_id) {
-        throw new WhatsAppTransportError('connection_restricted', 'Existing OpenWA session identity is required to update its gateway', lookupError)
+      if (lookupError || !connection) {
+        throw new WhatsAppTransportError('connection_restricted', 'OpenWA connection was not found for this account', lookupError)
       }
-      const baseUrl = typeof body.base_url === 'string' ? body.base_url.trim() : ''
-      const apiKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
-      if (!baseUrl || !apiKey) throw new WhatsAppTransportError('invalid_request', 'Enter the new OpenWA URL and API key')
-      const allowedHosts = (process.env.OPENWA_ALLOWED_HOSTS ?? '').split(',').map((item) => item.trim()).filter(Boolean)
-      const verifiedUrl = validateOpenWABaseUrl(baseUrl, allowedHosts)
-      const client = new OpenWAClient({ baseUrl: verifiedUrl.toString(), apiKey, allowedHosts, timeoutMs: 8000 })
-      // Read-only provider verification: an arbitrary, stale or different
-      // OpenWA gateway MUST NOT overwrite the connection's credentials.
-      const existingSession = await client.getSessionStatus(connection.session_id, connectionId)
-      if (existingSession.sessionId !== connection.session_id) {
-        throw new WhatsAppTransportError('connection_restricted', 'The new gateway did not confirm this exact OpenWA session')
+      if (updateGateway) {
+        // Verify the same upstream session read-only; never POST /sessions or /start.
+        if (!connection.session_id) throw new WhatsAppTransportError('connection_restricted', 'Existing OpenWA session identity is required to update its gateway')
+        const baseUrl = typeof body.base_url === 'string' ? body.base_url.trim() : ''
+        const apiKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
+        if (!baseUrl || !apiKey) throw new WhatsAppTransportError('invalid_request', 'Enter the new OpenWA URL and API key')
+        const allowedHosts = (process.env.OPENWA_ALLOWED_HOSTS ?? '').split(',').map((item) => item.trim()).filter(Boolean)
+        const verifiedUrl = validateOpenWABaseUrl(baseUrl, allowedHosts)
+        const client = new OpenWAClient({ baseUrl: verifiedUrl.toString(), apiKey, allowedHosts, timeoutMs: 8000 })
+        const existingSession = await client.getSessionStatus(connection.session_id, connectionId)
+        if (existingSession.sessionId !== connection.session_id) {
+          throw new WhatsAppTransportError('connection_restricted', 'The new gateway did not confirm this exact OpenWA session')
+        }
+        const { data: updated, error: writeError } = await adminDb.from('whatsapp_connection_credentials')
+          .update({ base_url: verifiedUrl.origin + (verifiedUrl.pathname === '/' ? '' : verifiedUrl.pathname),
+            api_key_encrypted: encrypt(apiKey), updated_at: new Date().toISOString() })
+          .eq('connection_id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
+          .select('connection_id').maybeSingle()
+        if (writeError || !updated) {
+          throw new WhatsAppTransportError('retryable_provider_failure', 'Could not update existing OpenWA gateway credentials', writeError)
+        }
       }
-      const { data: updated, error: writeError } = await adminDb.from('whatsapp_connection_credentials')
-        .update({ base_url: verifiedUrl.origin + (verifiedUrl.pathname === '/' ? '' : verifiedUrl.pathname),
-          api_key_encrypted: encrypt(apiKey), updated_at: new Date().toISOString() })
-        .eq('connection_id', connectionId).eq('account_id', accountId).eq('provider', 'openwa')
-        .select('connection_id').maybeSingle()
-      if (writeError || !updated) {
-        throw new WhatsAppTransportError('retryable_provider_failure', 'Could not update existing OpenWA gateway credentials', writeError)
+      if (updateName) {
+        const { data: renamed, error: nameError } = await adminDb.from('whatsapp_connections')
+          .update({ display_name: displayName }).eq('id', connectionId).eq('account_id', accountId)
+          .eq('provider', 'openwa').is('archived_at', null).select('id').maybeSingle()
+        if (nameError || !renamed) {
+          // Gateway writes, if requested, may already have succeeded.
+          throw new WhatsAppTransportError('retryable_provider_failure',
+            'Could not update the session name; refresh the connection before retrying', nameError)
+        }
       }
       return NextResponse.json({ updated: true, sessionId: connection.session_id }, { headers: noStore })
     }

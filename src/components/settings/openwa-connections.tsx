@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
-import { Loader2, LogOut, Pause, Play, QrCode, RefreshCw, RotateCcw, Trash2, Webhook } from 'lucide-react'
+import { Loader2, LogOut, Pause, Play, QrCode, RefreshCw, RotateCcw, Settings2, Trash2, Webhook } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useAuth } from '@/hooks/use-auth'
@@ -24,6 +24,7 @@ interface OpenWAConnection {
   status: string
   session_id: string | null
   engine: string | null
+  gateway_base_url?: string | null
   guardrail?: { manual_paused: boolean; pilot_enabled: boolean }
   provider_metadata?: {
     onboarding_stage?: string
@@ -41,6 +42,7 @@ interface OpenWAApiPayload extends Record<string, unknown> {
   reconciliation_required?: boolean
   connections?: OpenWAConnection[]
   pilot?: { enforced: boolean; devMode: boolean; automaticallyEnforced?: boolean }
+  gateway_settings?: { rotation_allowed: boolean }
   connection?: { id: string }
   qr?: string
   expires_at?: string
@@ -53,6 +55,7 @@ export function OpenWAConnections() {
   const [connections, setConnections] = useState<OpenWAConnection[]>([])
   const [pilotEnforced, setPilotEnforced] = useState<boolean | null>(null)
   const [pilotDevMode, setPilotDevMode] = useState(false)
+  const [gatewayRotationAllowed, setGatewayRotationAllowed] = useState(false)
   const [selectedPilotId, setSelectedPilotId] = useState('')
   const pilotSectionRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
@@ -63,6 +66,10 @@ export function OpenWAConnections() {
   const [displayName, setDisplayName] = useState('WhatsApp Web')
   const [qr, setQr] = useState<QrState | null>(null)
   const [pendingRemoval, setPendingRemoval] = useState<OpenWAConnection | null>(null)
+  const [editingConnection, setEditingConnection] = useState<OpenWAConnection | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editBaseUrl, setEditBaseUrl] = useState('')
+  const [editApiKey, setEditApiKey] = useState('')
 
   useEffect(() => {
     if (!qr) return
@@ -84,12 +91,14 @@ export function OpenWAConnections() {
         : (available.find((c) => ['ready', 'connected'].includes(c.status))?.id ?? available[0]?.id ?? ''))
       setPilotEnforced(typeof data.pilot?.enforced === 'boolean' ? data.pilot.enforced : null)
       setPilotDevMode(data.pilot?.devMode === true)
+      setGatewayRotationAllowed(data.gateway_settings?.rotation_allowed === true)
       setLoadError(null)
     } catch (error) {
       const reason = error instanceof Error ? error.message : w('loadOpenwa')
       setLoadError(reason)
       setPilotEnforced(null)
       setPilotDevMode(false)
+      setGatewayRotationAllowed(false)
       toast.error(reason)
     } finally {
       setLoading(false)
@@ -101,6 +110,69 @@ export function OpenWAConnections() {
   function focusPilot(connectionId: string) {
     setSelectedPilotId(connectionId)
     pilotSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  function openSessionSettings(connection: OpenWAConnection) {
+    setEditingConnection(connection)
+    setEditName(connection.display_name || 'WhatsApp Web')
+    setEditBaseUrl(connection.gateway_base_url || '')
+    // Never retrieve or prefill decrypted API keys in the browser.
+    setEditApiKey('')
+  }
+
+  async function checkEditedGateway() {
+    if (!editingConnection || !gatewayRotationAllowed || !editBaseUrl.trim() || !editApiKey.trim()) {
+      toast.error(w('required'))
+      return
+    }
+    setBusy(`check_settings:${editingConnection.id}`)
+    try {
+      const response = await fetch('/api/whatsapp/connections/openwa/check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base_url: editBaseUrl.trim(), api_key: editApiKey.trim() }),
+      })
+      const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
+      if (!response.ok || !data.reachable) throw new Error(data.error || w('gatewayCheckFailed'))
+      // This verifies gateway reachability; save verifies the exact session identity.
+      toast.success(w('gatewayCheckSuccess'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : w('gatewayCheckFailed'))
+    } finally { setBusy(null) }
+  }
+
+  async function saveSessionSettings() {
+    if (!editingConnection || busy !== null) return
+    const name = editName.trim()
+    const url = editBaseUrl.trim()
+    const nameChanged = name !== (editingConnection.display_name || 'WhatsApp Web')
+    const gatewayChanged = url !== (editingConnection.gateway_base_url || '') || editApiKey.trim().length > 0
+    if (!name || name.length > 120) return toast.error(w('sessionNameRequired'))
+    if (!nameChanged && !gatewayChanged) { setEditingConnection(null); setEditApiKey(''); return }
+    if (gatewayChanged) {
+      if (!gatewayRotationAllowed) return toast.error(w('sessionGatewayTestOnly'))
+      if (!editingConnection.session_id) return toast.error(w('sessionGatewayMissingId'))
+      if (!url || !editApiKey.trim()) return toast.error(w('sessionGatewayKeyRequired'))
+    }
+    setBusy(`save_settings:${editingConnection.id}`)
+    try {
+      const response = await fetch(`/api/whatsapp/connections/openwa/${editingConnection.id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_settings',
+          ...(nameChanged ? { display_name: name } : {}),
+          ...(gatewayChanged ? { base_url: url, api_key: editApiKey.trim() } : {}),
+        }),
+        cache: 'no-store',
+      })
+      const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
+      if (!response.ok) throw new Error(data.error || w('actionFailed'))
+      setEditingConnection(null)
+      setEditApiKey('')
+      toast.success(w('sessionSettingsSaved'))
+      await load()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : w('actionFailed'))
+    } finally { setBusy(null) }
   }
 
   async function checkGateway() {
@@ -173,18 +245,13 @@ export function OpenWAConnections() {
     } finally { setBusy(null) }
   }
 
-  async function action(connectionId: string, actionName: 'refresh' | 'reconnect' | 'logout' | 'configure_webhook' | 'pause' | 'resume' | 'update_gateway') {
-    if (actionName === 'update_gateway' && (!baseUrl.trim() || !apiKey.trim())) {
-      toast.error(w('required'))
-      return
-    }
+  async function action(connectionId: string, actionName: 'refresh' | 'reconnect' | 'logout' | 'configure_webhook' | 'pause' | 'resume') {
     setBusy(`${actionName}:${connectionId}`)
     try {
       const response = await fetch(`/api/whatsapp/connections/openwa/${connectionId}`, {
         method: actionName === 'logout' ? 'DELETE' : actionName === 'refresh' ? 'GET' : 'POST',
         headers: actionName !== 'refresh' && actionName !== 'logout' ? { 'Content-Type': 'application/json' } : undefined,
-        body: actionName !== 'refresh' && actionName !== 'logout' ? JSON.stringify({ action: actionName,
-          ...(actionName === 'update_gateway' ? { base_url: baseUrl.trim(), api_key: apiKey.trim() } : {}) }) : undefined,
+        body: actionName !== 'refresh' && actionName !== 'logout' ? JSON.stringify({ action: actionName }) : undefined,
         cache: 'no-store',
       })
       const data = await parseOpenWAApiResponse<OpenWAApiPayload>(response)
@@ -194,7 +261,6 @@ export function OpenWAConnections() {
       }
       if (actionName === 'logout') setQr(null)
       if (actionName === 'configure_webhook') toast.success(w('webhookConfigured'))
-      if (actionName === 'update_gateway') { setApiKey(''); toast.success(w('devPilotGatewayUpdated')) }
       if (actionName === 'pause') toast.success(w('sendingPaused'))
       if (actionName === 'resume') toast.success(w('sendingResumed'))
       await load()
@@ -290,19 +356,6 @@ export function OpenWAConnections() {
             {w('connectionReference')}: {selectedPilotId}
             {' · '}{w('devPilotState')}: {connections.find((c) => c.id === selectedPilotId)?.status ?? 'unknown'}
           </p>}
-          <p className="text-sm text-muted-foreground">{w('devPilotGatewayUpdateHint')}</p>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" disabled={busy !== null || !selectedPilotId}
-              onClick={() => { if (selectedPilotId) void action(selectedPilotId, 'refresh') }}>
-              <RefreshCw className="mr-2 h-4 w-4" />{w('refresh')}
-            </Button>
-            <Button variant="outline" size="sm"
-              disabled={busy !== null || !selectedPilotId || !baseUrl.trim() || !apiKey.trim() ||
-                !connections.find((c) => c.id === selectedPilotId)?.session_id}
-              onClick={() => { if (selectedPilotId) void action(selectedPilotId, 'update_gateway') }}>
-              {w('devPilotGatewayUpdate')}
-            </Button>
-          </div>
         </CardContent>
       </Card>
       {selectedPilotId && <OpenWAPilotControls key={selectedPilotId}
@@ -343,9 +396,9 @@ export function OpenWAConnections() {
           {pilotDevMode && <Button variant="outline" size="sm" onClick={() => focusPilot(connection.id)}>
             {w('devPilotManageThisConnection')}
           </Button>}
-          {pilotDevMode && connection.session_id && <Button variant="outline" size="sm"
-            disabled={busy !== null || !baseUrl.trim() || !apiKey.trim()}
-            onClick={() => action(connection.id, 'update_gateway')}>{w('devPilotGatewayUpdate')}</Button>}
+          <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => openSessionSettings(connection)}>
+            <Settings2 className="mr-2 h-4 w-4" />{w('editSessionSettings')}
+          </Button>
           {['creating', 'waiting_qr', 'authenticating', 'disconnected'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => showQr(connection.id)}><QrCode className="mr-2 h-4 w-4" />{w('showQr')}</Button>}
           {['disconnected', 'failed'].includes(connection.status) && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'reconnect')}><RotateCcw className="mr-2 h-4 w-4" />{w('reconnect')}</Button>}
           {connection.session_id && connection.status !== 'logged_out' && <Button variant="outline" size="sm" onClick={() => action(connection.id, 'configure_webhook')} disabled={busy === `configure_webhook:${connection.id}`}><Webhook className="mr-2 h-4 w-4" />{w('configureWebhook')}</Button>}
@@ -369,6 +422,60 @@ export function OpenWAConnections() {
         </div>}
       </CardContent>
     </Card>)}
+    <Dialog open={editingConnection !== null} onOpenChange={(open) => {
+      if (!open && busy === null) { setEditingConnection(null); setEditApiKey('') }
+    }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{w('editSessionSettings')}</DialogTitle>
+          <DialogDescription>
+            {editingConnection?.display_name || 'WhatsApp Web'}
+            {editingConnection?.phone_identity ? ` · ${editingConnection.phone_identity}` : ''}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="openwa-edit-name">{w('name')}</Label>
+            <Input id="openwa-edit-name" value={editName} maxLength={120}
+              onChange={(event) => setEditName(event.target.value)} disabled={busy !== null} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="openwa-edit-url">{w('baseUrl')}</Label>
+            <Input id="openwa-edit-url" type="url" placeholder="https://openwa.example.com"
+              value={editBaseUrl} onChange={(event) => setEditBaseUrl(event.target.value)}
+              disabled={busy !== null || !gatewayRotationAllowed} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="openwa-edit-key">{w('apiKey')}</Label>
+            <Input id="openwa-edit-key" type="password" autoComplete="new-password"
+              placeholder={w('sessionApiKeyPlaceholder')} value={editApiKey}
+              onChange={(event) => setEditApiKey(event.target.value)}
+              disabled={busy !== null || !gatewayRotationAllowed} />
+            <p className="text-xs text-muted-foreground">{w('sessionApiKeyHint')}</p>
+          </div>
+          {editBaseUrl.toLowerCase().includes('.trycloudflare.com') && <Alert>
+            <AlertDescription>{w('quickTunnelWarning')}</AlertDescription>
+          </Alert>}
+          {!gatewayRotationAllowed && <Alert>
+            <AlertDescription>{w('sessionGatewayTestOnly')}</AlertDescription>
+          </Alert>}
+          <p className="text-xs text-muted-foreground">{w('sessionSettingsIdentityHint')}</p>
+        </div>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={() => { setEditingConnection(null); setEditApiKey('') }}
+            disabled={busy !== null}>{w('removeSessionCancel')}</Button>
+          {gatewayRotationAllowed && <Button variant="outline" onClick={() => void checkEditedGateway()}
+            disabled={busy !== null || !editBaseUrl.trim() || !editApiKey.trim()}>
+            {busy?.startsWith('check_settings:') && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {w('gatewayCheck')}
+          </Button>}
+          <Button onClick={() => void saveSessionSettings()} disabled={busy !== null || !editingConnection}>
+            {busy?.startsWith('save_settings:') && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {w('sessionSettingsSave')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog open={pendingRemoval !== null} onOpenChange={(open) => { if (!open && busy === null) setPendingRemoval(null) }}>
       <DialogContent>
         <DialogHeader>

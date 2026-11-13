@@ -510,6 +510,46 @@ const labels = {
     "en": "Pilot controls prepared and sending paused on this connection.",
     "ar": "تم تجهيز حدود Pilot وإيقاف الإرسال لهذا الاتصال."
   },
+  "editSessionSettings": {
+    "en": "Edit session settings",
+    "ar": "تعديل إعدادات الجلسة"
+  },
+  "sessionSettingsSave": {
+    "en": "Save session settings",
+    "ar": "حفظ إعدادات الجلسة"
+  },
+  "sessionSettingsSaved": {
+    "en": "Session settings saved successfully.",
+    "ar": "تم حفظ إعدادات الجلسة بنجاح."
+  },
+  "sessionNameRequired": {
+    "en": "Enter a session name (up to 120 characters).",
+    "ar": "أدخل اسمًا للجلسة لا يتجاوز 120 حرفًا."
+  },
+  "sessionApiKeyPlaceholder": {
+    "en": "Enter a new API key to rotate the gateway",
+    "ar": "أدخل مفتاح API الجديد عند تحديث البوابة"
+  },
+  "sessionApiKeyHint": {
+    "en": "The saved API key is never displayed. Leave this blank to keep it unchanged when editing only the session name.",
+    "ar": "لا يُعرض مفتاح API المحفوظ. اترك الحقل فارغًا إذا كنت تعدّل اسم الجلسة فقط."
+  },
+  "sessionGatewayKeyRequired": {
+    "en": "To update the gateway URL, enter its API key as well.",
+    "ar": "لتحديث رابط البوابة، أدخل مفتاح API الخاص بها أيضًا."
+  },
+  "sessionGatewayMissingId": {
+    "en": "This connection has no confirmed OpenWA session ID. Reconcile it before changing the gateway.",
+    "ar": "لا يوجد معرّف مؤكد لهذه الجلسة على OpenWA. تحقق من تطابق الجلسة قبل تحديث البوابة."
+  },
+  "sessionGatewayTestOnly": {
+    "en": "Gateway URL and API key rotation is currently restricted to TEST. You can still rename this session.",
+    "ar": "تحديث رابط البوابة ومفتاح API متاح حاليًا في TEST فقط. يمكنك تعديل اسم الجلسة هنا."
+  },
+  "sessionSettingsIdentityHint": {
+    "en": "Changing a gateway verifies this exact upstream session; it will not create or resend a session. Pilot controls are separate.",
+    "ar": "عند تغيير البوابة سيتم التحقق من هوية الجلسة نفسها دون إنشاء جلسة أو إعادة إرسال. إعدادات Pilot منفصلة."
+  },
   "devPilotGatewayUpdate": {
     "en": "Update this connection's gateway URL",
     "ar": "تحديث رابط البوابة لهذا الاتصال"

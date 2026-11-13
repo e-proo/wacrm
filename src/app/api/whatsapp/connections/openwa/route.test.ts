@@ -125,6 +125,7 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     vi.clearAllMocks()
     const connectionFilters: Array<[string, unknown]> = []
     const guardrailFilters: Array<[string, unknown]> = []
+    const gatewayFilters: Array<[string, unknown]> = []
     const connQuery: Record<string, unknown> = {
       select: () => connQuery,
       eq: (field: string, value: unknown) => { connectionFilters.push([field, value]); return connQuery },
@@ -136,17 +137,25 @@ describe('OW-13 admin-only emergency stop visibility', () => {
       eq: (field: string, value: unknown) => { guardrailFilters.push([field, value]); return guardrailQuery },
       then: (resolve: (result: unknown) => unknown) => resolve({ data: [{ connection_id: 'conn-1', manual_paused: true, pilot_enabled: false }], error: null }),
     }
+    const gatewayQuery: Record<string, unknown> = {
+      select: () => gatewayQuery,
+      eq: (field: string, value: unknown) => { gatewayFilters.push([field, value]); return gatewayQuery },
+      then: (resolve: (result: unknown) => unknown) => resolve({ data: [
+        { connection_id: 'conn-1', base_url: 'https://gateway.example.com' },
+      ], error: null }),
+    }
     const userFrom = vi.fn(() => connQuery)
-    const adminFrom = vi.fn(() => guardrailQuery)
+    const adminFrom = vi.fn((table: string) => table === 'whatsapp_connection_credentials' ? gatewayQuery : guardrailQuery)
     h.requireAdmin.mockResolvedValue({ accountId: 'acct-1', userDb: { from: userFrom }, adminDb: { from: adminFrom } })
     const response = await GET()
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       connections: [
-        { id: 'conn-1', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true, pilot_enabled: false } },
-        { id: 'conn-2', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true, pilot_enabled: true } },
-        { id: 'conn-3', status: 'ready', provider: 'openwa', guardrail: { manual_paused: true, pilot_enabled: true } },
+        { id: 'conn-1', status: 'ready', provider: 'openwa', gateway_base_url: 'https://gateway.example.com', guardrail: { manual_paused: true, pilot_enabled: false } },
+        { id: 'conn-2', status: 'ready', provider: 'openwa', gateway_base_url: null, guardrail: { manual_paused: true, pilot_enabled: true } },
+        { id: 'conn-3', status: 'ready', provider: 'openwa', gateway_base_url: null, guardrail: { manual_paused: true, pilot_enabled: true } },
       ],
+      gateway_settings: { rotation_allowed: process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co' },
       pilot: { enforced: process.env.OPENWA_PILOT_MODE === 'enforce' ||
           process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co',
         devMode: process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co',
@@ -156,6 +165,10 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     expect(connectionFilters).toContainEqual(['provider', 'openwa'])
     expect(guardrailFilters).toContainEqual(['account_id', 'acct-1'])
     expect(adminFrom).toHaveBeenCalledWith('whatsapp_connection_guardrails')
+    expect(adminFrom).toHaveBeenCalledWith('whatsapp_connection_credentials')
+    expect(gatewayFilters).toContainEqual(['account_id', 'acct-1'])
+    expect(gatewayFilters).toContainEqual(['provider', 'openwa'])
+    expect(JSON.stringify(await response.clone().json())).not.toContain('api_key')
     expect(response.headers.get('cache-control')).toContain('no-store')
   })
 
