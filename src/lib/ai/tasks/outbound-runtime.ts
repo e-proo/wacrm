@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../admin-client'
+import { resolveTaskMessageConnection, TaskMessageConnectionError } from './outbound-message-connection'
 import { recordRuntimeCircuitEvent } from '../runtime/circuit-breaker'
 import { CURRENT_AGENT_TASK_PLATFORM } from './current-platform'
 import {
@@ -21,6 +22,11 @@ export type PrepareAgentTaskOutboundResult =
       status: 'reserved' | 'denied'
       candidate: AgentTaskOutboundMessageCandidate
       decision: AgentTaskOutboundReservationDecision
+    }
+  | {
+      status: 'denied'
+      candidate: null
+      decision: null
     }
   | {
       status:
@@ -90,7 +96,7 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
         .maybeSingle(),
       db
         .from('ai_agent_task_targets')
-        .select('id, account_id, task_id, counterparty_role')
+        .select('id, account_id, task_id, counterparty_role, conversation_id')
         .eq('account_id', runRow.account_id)
         .eq('task_id', runRow.task_id)
         .eq('id', runRow.task_target_id)
@@ -119,6 +125,7 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
   const targetRow = target as {
     id: string
     counterparty_role: string
+    conversation_id: string | null
   }
 
   const manifest = CURRENT_AGENT_TASK_PLATFORM.taskTypes.get(
@@ -149,6 +156,39 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
     }
   }
 
+  // V1 keeps its Meta-template-only frozen behavior. V2 must know the
+  // server-resolved provider before choosing the deterministic message.
+  let expectedProvider: 'meta_cloud' | 'openwa' | null = null
+  if (manifest.messagePolicy.version >= 2) {
+    if (!targetRow.conversation_id) {
+      return { status: 'denied', candidate: null, decision: null }
+    }
+    try {
+      const binding = await resolveTaskMessageConnection(db, {
+        accountId: runRow.account_id,
+        conversationId: targetRow.conversation_id,
+        targetPolicy: taskRow.target_policy ?? {},
+      })
+      expectedProvider = binding.provider
+    } catch (error) {
+      if (!(error instanceof TaskMessageConnectionError)) throw error
+      await recordRuntimeCircuitEvent({
+        accountId: runRow.account_id,
+        scopeType: 'task_type',
+        scopeKey: taskRow.task_type + '@' + taskRow.task_type_version,
+        outcome: 'rejection',
+        errorCode: error.code,
+        runId: runRow.id,
+        taskId: taskRow.id,
+      })
+      return {
+        status: 'denied',
+        candidate: null,
+        decision: null,
+      }
+    }
+  }
+
   const candidate = assertValidOutboundMessageCandidate(
     await policy.prepare({
       accountId: runRow.account_id,
@@ -164,14 +204,17 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
         targetRow.counterparty_role || runRow.counterparty_role || 'counterparty',
       policy: manifest.messagePolicy,
       modelCandidateText: input.modelCandidateText?.trim() || null,
+      whatsappProvider: expectedProvider ?? undefined,
     }),
   )
 
   const params =
     candidate.kind === 'template' ? [...candidate.params] : []
 
-  const { data, error } = await db.rpc('reserve_bound_agent_task_outbound_message', {
+  const { data, error } = await db.rpc(
+    expectedProvider ? 'reserve_expected_provider_agent_task_outbound_message' : 'reserve_bound_agent_task_outbound_message', {
     p_run_id: runRow.id,
+    ...(expectedProvider ? { p_expected_provider: expectedProvider } : {}),
     p_policy_key: policy.key,
     p_policy_version: policy.version,
     p_message_kind: candidate.kind,
@@ -189,7 +232,8 @@ export async function prepareAndReserveCurrentTaskOutboundMessage(input: {
     p_stop_on_reply: manifest.followupPolicy.stopOnReply,
   })
   if (error) {
-    const guardReason = outboundBudgetGuardReason(error)
+    const guardReason = outboundBudgetGuardReason(error) ??
+      (error.message?.includes('AGENT_TASK_PROVIDER_CHANGED') ? 'provider_changed' : null)
     if (!guardReason) throw error
 
     await recordRuntimeCircuitEvent({

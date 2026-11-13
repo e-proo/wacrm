@@ -1,5 +1,5 @@
 import { COVERAGE_SOURCING_TASK_MODULE } from '@/lib/services/coverage/agent-task'
-import { COVERAGE_SOURCING_TRIGGER_HANDLER } from '@/lib/services/coverage/agent-task-trigger'
+import { COVERAGE_SOURCING_TRIGGER_HANDLER, COVERAGE_SOURCING_TRIGGER_HANDLER_V2 } from '@/lib/services/coverage/agent-task-trigger'
 import { SERVICE_PROMOTION_TASK_MODULE } from '@/lib/services/service-catalog/agent-task'
 import { SERVICE_PROMOTION_TRIGGER_HANDLER } from '@/lib/services/service-catalog/agent-task-trigger'
 import {
@@ -32,6 +32,7 @@ export const CURRENT_AGENT_TASK_PLATFORM = buildAgentTaskPlatform(
 export const CURRENT_AGENT_TASK_TRIGGER_REGISTRY =
   buildAgentTaskTriggerRegistry([
     COVERAGE_SOURCING_TRIGGER_HANDLER,
+    COVERAGE_SOURCING_TRIGGER_HANDLER_V2,
     SERVICE_PROMOTION_TRIGGER_HANDLER,
   ])
 

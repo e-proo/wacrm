@@ -1,4 +1,5 @@
 import type { AgentTaskPolicyReference } from './contracts'
+import type { WhatsAppProvider } from '@/lib/whatsapp/transport/types'
 
 export type AgentTaskOutboundMessageCandidate =
   | {
@@ -25,6 +26,8 @@ export interface AgentTaskOutboundPolicyContext {
   counterpartyRole: string
   policy: AgentTaskPolicyReference
   modelCandidateText: string | null
+  /** Transport is resolved server-side from the Task's tenant-scoped target, never from model text. */
+  whatsappProvider?: WhatsAppProvider
 }
 
 export interface AgentTaskOutboundMessagePolicy {

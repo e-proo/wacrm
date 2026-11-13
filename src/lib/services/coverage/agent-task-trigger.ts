@@ -13,10 +13,11 @@ const COVERAGE_REQUEST_TRIGGER_EVENTS = new Set([
   'coverage.request.activated',
 ])
 
-export const COVERAGE_SOURCING_TRIGGER_HANDLER: AgentTaskTriggerHandler = {
+function buildCoverageSourcingTriggerHandler(version: 1 | 2): AgentTaskTriggerHandler {
+  return {
   domain: 'coverage',
   taskType: 'coverage.sourcing',
-  taskTypeVersion: 1,
+  taskTypeVersion: version,
 
   validate(definition: AgentTaskTriggerDefinition) {
     if (definition.triggerKind === 'schedule') {
@@ -55,6 +56,7 @@ export const COVERAGE_SOURCING_TRIGGER_HANDLER: AgentTaskTriggerHandler = {
       coverageRequestId,
       agentId: firing.agentId,
       actorUserId: firing.createdBy,
+      requestedTaskTypeVersion: version,
       trigger: {
         triggerType:
           firing.triggerKind === 'business_event'
@@ -70,7 +72,11 @@ export const COVERAGE_SOURCING_TRIGGER_HANDLER: AgentTaskTriggerHandler = {
 
     return { taskId: result.taskId }
   },
+  }
 }
+
+export const COVERAGE_SOURCING_TRIGGER_HANDLER = buildCoverageSourcingTriggerHandler(1)
+export const COVERAGE_SOURCING_TRIGGER_HANDLER_V2 = buildCoverageSourcingTriggerHandler(2)
 
 function requestIdFromBusinessEvent(
   firing: AgentTaskTriggerFiring,

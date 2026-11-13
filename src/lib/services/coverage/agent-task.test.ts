@@ -4,6 +4,8 @@ import {
   COVERAGE_SOURCING_MESSAGE_POLICY,
   COVERAGE_SOURCING_TASK_MODULE,
   COVERAGE_SOURCING_TASK_TYPE,
+  COVERAGE_SOURCING_TASK_TYPE_V2,
+  COVERAGE_SOURCING_MESSAGE_POLICY_V2,
   buildCoverageSupplierCandidates,
   coverageOfferMatchesSourcingRequest,
   supplierHistorySortKey,
@@ -190,6 +192,46 @@ describe('Coverage sourcing Agent Task', () => {
     })
     expect(JSON.stringify(candidate)).not.toContain('MUST_NOT_LEAK')
     expect(JSON.stringify(candidate)).not.toContain('model free text')
+  })
+
+  it('registers v2 without modifying the frozen v1 policy', () => {
+    const platform = buildAgentTaskPlatform([COVERAGE_SOURCING_TASK_MODULE])
+    expect(platform.taskTypes.get('coverage.sourcing', 1)?.messagePolicy.version).toBe(1)
+    expect(platform.taskTypes.get('coverage.sourcing', 2)?.messagePolicy.version).toBe(2)
+    expect(platform.outboundMessagePolicies.get('coverage.sourcing_message', 2)).toBeTruthy()
+  })
+
+  it('selects Meta approved template or deterministic OpenWA text by frozen provider', async () => {
+    const ctx = {
+      accountId: 'account', runId: 'run', taskId: 'task', taskTargetId: 'target',
+      taskType: 'coverage.sourcing', taskTypeVersion: 2,
+      objective: 'source', taskContext: {
+        request: { remainingAmount: '75000', currency: 'SAR', requesterName: 'PRIVATE' },
+        requesterName: 'PRIVATE',
+      }, targetPolicy: {}, counterpartyRole: 'coverage_supplier',
+      policy: COVERAGE_SOURCING_TASK_TYPE_V2.messagePolicy,
+      modelCandidateText: 'MODEL_INJECTION_PRIVATE',
+    }
+    const meta = await COVERAGE_SOURCING_MESSAGE_POLICY_V2.prepare({
+      ...ctx, whatsappProvider: 'meta_cloud',
+    })
+    expect(meta).toEqual({
+      kind: 'template', templateName: 'coverage_sourcing_supplier_v1',
+      language: 'ar', params: ['75000', 'SAR'],
+    })
+    const wa = await COVERAGE_SOURCING_MESSAGE_POLICY_V2.prepare({
+      ...ctx, whatsappProvider: 'openwa',
+    })
+    expect(wa.kind).toBe('text')
+    expect(wa).toMatchObject({ text: expect.stringContaining('75000 SAR') })
+    expect(JSON.stringify(wa)).not.toMatch(/PRIVATE|MODEL_INJECTION/)
+    expect(JSON.stringify(wa)).toContain('إيقاف')
+    await expect(COVERAGE_SOURCING_MESSAGE_POLICY_V2.prepare(ctx))
+      .rejects.toThrow(/PROVIDER_UNRESOLVED/)
+    await expect(COVERAGE_SOURCING_MESSAGE_POLICY_V2.prepare({
+      ...ctx, whatsappProvider: 'openwa',
+      taskContext: { request: { remainingAmount: '1;SECRET', currency: 'SAR' } },
+    })).rejects.toThrow(/MESSAGE_FACTS_INVALID/)
   })
 
   it('fails closed when the frozen request snapshot is missing', async () => {

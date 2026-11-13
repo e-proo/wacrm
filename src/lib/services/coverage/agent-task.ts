@@ -84,6 +84,17 @@ export const COVERAGE_SOURCING_TASK_TYPE = defineAgentTaskType({
   },
 })
 
+// Version 1 is frozen for existing Meta-first Tasks. Version 2 adds
+// account-scoped provider-aware outreach without changing old Task behavior.
+export const COVERAGE_SOURCING_TASK_TYPE_V2 = defineAgentTaskType({
+  ...COVERAGE_SOURCING_TASK_TYPE,
+  version: 2,
+  messagePolicy: {
+    ...COVERAGE_SOURCING_TASK_TYPE.messagePolicy,
+    version: 2,
+  },
+})
+
 interface CoverageRequestRow {
   id: string
   service_id: string
@@ -432,6 +443,55 @@ export const COVERAGE_SOURCING_MESSAGE_POLICY: AgentTaskOutboundMessagePolicy = 
 }
 
 
+/**
+ * SOF-60: OpenWA has no Meta approved-template transport.
+ * We never fabricate Meta approval or allow free-form LLM outreach here.
+ * SQL independently requires a fresh inbound on the exact bound session,
+ * opt-out checks and all account/task/channel budgets.
+ */
+export const COVERAGE_SOURCING_MESSAGE_POLICY_V2: AgentTaskOutboundMessagePolicy = {
+  key: 'coverage.sourcing_message',
+  version: 2,
+  domain: 'coverage',
+  async prepare(context): Promise<AgentTaskOutboundMessageCandidate> {
+    if (context.taskType !== COVERAGE_SOURCING_TASK_TYPE.key ||
+        context.taskTypeVersion !== 2 ||
+        context.counterpartyRole !== 'coverage_supplier') {
+      throw new Error('COVERAGE_SOURCING_MESSAGE_CONTEXT_INVALID')
+    }
+    // Missing provider is a denied route, not permission to send a template
+    // through an unrelated Meta connection.
+    if (context.whatsappProvider !== 'meta_cloud' &&
+        context.whatsappProvider !== 'openwa') {
+      throw new Error('COVERAGE_SOURCING_PROVIDER_UNRESOLVED')
+    }
+    const remainingAmount = contextString(context, 'remainingAmount')
+    const currency = contextString(context, 'currency')
+    // The same frozen business facts are used for either provider; validate
+    // their shapes so snapshots cannot inject instructions into the text.
+    if (!/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,4})?$/.test(remainingAmount) ||
+        !/^[A-Z]{3}$/.test(currency)) {
+      throw new Error('COVERAGE_SOURCING_MESSAGE_FACTS_INVALID')
+    }
+    if (context.whatsappProvider === 'meta_cloud') {
+      return {
+        kind: 'template',
+        templateName: policyString(context, 'templateName', 'coverage_sourcing_supplier_v1'),
+        language: policyString(context, 'templateLanguage', 'ar'),
+        params: [remainingAmount, currency],
+      }
+    }
+    return {
+      kind: 'text',
+      text:
+        `مرحبًا، لدينا استفسار عن إمكانية توفير تغطية بقيمة ${remainingAmount} ${currency}. ` +
+        'هل يمكنكم توفيرها؟ يرجى الرد على هذه المحادثة. ' +
+        'إذا لم ترغب في تلقي رسائل مماثلة مستقبلًا، اكتب "إيقاف".',
+    }
+  },
+}
+
+
 export const COVERAGE_SOURCING_COMPLETION_POLICY: AgentTaskCompletionPolicy = {
   key: 'coverage.sourcing_completion',
   version: 1,
@@ -566,8 +626,8 @@ export const COVERAGE_SOURCING_COMPLETION_POLICY: AgentTaskCompletionPolicy = {
 
 export const COVERAGE_SOURCING_TASK_MODULE: AgentTaskModule = {
   domain: 'coverage',
-  taskTypes: [COVERAGE_SOURCING_TASK_TYPE],
+  taskTypes: [COVERAGE_SOURCING_TASK_TYPE, COVERAGE_SOURCING_TASK_TYPE_V2],
   targetResolvers: [COVERAGE_SUPPLIER_CANDIDATE_RESOLVER],
-  outboundMessagePolicies: [COVERAGE_SOURCING_MESSAGE_POLICY],
+  outboundMessagePolicies: [COVERAGE_SOURCING_MESSAGE_POLICY, COVERAGE_SOURCING_MESSAGE_POLICY_V2],
   completionPolicies: [COVERAGE_SOURCING_COMPLETION_POLICY],
 }

@@ -198,6 +198,36 @@ BEGIN
     RAISE EXCEPTION 'SOF59 OpenWA reservation did not bind: %',v_result;
   END IF;
   v_reservation:=(v_result->>'reservation_id')::uuid;
+
+  -- An expected-provider disagreement MUST roll back the new policy call.
+  v_rejected := false;
+  BEGIN
+    PERFORM public.reserve_expected_provider_agent_task_outbound_message(
+      v_run,'coverage.sourcing_message',2,'text',
+      'Wrong provider test',null,null,'[]'::jsonb,0,60,1440,true,
+      'meta_cloud'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    IF position('AGENT_TASK_PROVIDER_CHANGED' in SQLERRM)>0 THEN
+      v_rejected:=true;
+    ELSE
+      RAISE;
+    END IF;
+  END;
+  IF NOT v_rejected THEN
+    RAISE EXCEPTION 'SOF60 permitted provider switch between policy and reserve';
+  END IF;
+
+  v_result:=public.reserve_expected_provider_agent_task_outbound_message(
+    v_run,'coverage.sourcing_message',2,'text',
+    'Same provider authorized',null,null,'[]'::jsonb,0,60,1440,true,
+    'openwa'
+  );
+  IF v_result->>'reserved'<>'true'
+     OR v_result->>'provider'<>'openwa'
+     OR (v_result->>'reservation_id')::uuid<>v_reservation THEN
+    RAISE EXCEPTION 'SOF60 matched provider lost idempotency: %',v_result;
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM public.ai_agent_task_outbound_messages
     WHERE id=v_reservation AND account_id=v_account
@@ -312,6 +342,22 @@ BEGIN
       'EXECUTE'
     ) THEN
     RAISE EXCEPTION 'SOF59 RPC grants are too broad';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.reserve_expected_provider_agent_task_outbound_message(uuid,text,integer,text,text,text,text,jsonb,integer,integer,integer,boolean,text)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.reserve_expected_provider_agent_task_outbound_message(uuid,text,integer,text,text,text,text,jsonb,integer,integer,integer,boolean,text)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.reserve_expected_provider_agent_task_outbound_message(uuid,text,integer,text,text,text,text,jsonb,integer,integer,integer,boolean,text)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'SOF60 provider-locked RPC grants are unsafe';
   END IF;
 
   RAISE NOTICE 'SOF59 bound transport smoke passed';

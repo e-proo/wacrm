@@ -13,8 +13,11 @@ import {
 import type { AgentTaskStartSource } from '@/lib/ai/tasks/triggers'
 import {
   COVERAGE_SOURCING_TASK_TYPE,
+  COVERAGE_SOURCING_TASK_TYPE_V2,
   loadCoverageSourcingTaskContext,
 } from './agent-task'
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const ACTIVE_TASK_STATUSES = [
   'validating',
@@ -46,6 +49,10 @@ export interface StartCoverageSourcingTaskInput {
   coverageRequestId: string
   agentId: string
   actorUserId: string | null
+  whatsappConnectionId?: string | null
+  maxTargets?: number
+  maxAttemptsPerTarget?: number
+  requestedTaskTypeVersion?: 1 | 2
   trigger?: AgentTaskStartSource
 }
 
@@ -58,14 +65,18 @@ export interface StartCoverageSourcingTaskResult {
 
 function findCoverageBinding(
   bindings: readonly AgentBuilderTaskBinding[],
+  requestedVersion?: 1 | 2,
 ): AgentBuilderTaskBinding | null {
-  return (
-    bindings.find(
+  const candidateVersions = requestedVersion ? [requestedVersion] : [2, 1]
+  for (const version of candidateVersions) {
+    const found = bindings.find(
       (binding) =>
         binding.taskType === COVERAGE_SOURCING_TASK_TYPE.key &&
-        binding.taskTypeVersion === COVERAGE_SOURCING_TASK_TYPE.version,
-    ) ?? null
-  )
+        binding.taskTypeVersion === version,
+    )
+    if (found) return found
+  }
+  return null
 }
 
 function taskIdempotencyKey(input: {
@@ -111,10 +122,10 @@ export async function startCoverageSourcingTask(
 
   const { data: existingTask, error: existingError } = await db
     .from('ai_agent_tasks')
-    .select('id, agent_id, agent_revision_id')
+    .select('id, agent_id, agent_revision_id, target_policy')
     .eq('account_id', input.accountId)
     .eq('task_type', COVERAGE_SOURCING_TASK_TYPE.key)
-    .eq('task_type_version', COVERAGE_SOURCING_TASK_TYPE.version)
+    .in('task_type_version', [1, 2])
     .in('status', [...ACTIVE_TASK_STATUSES])
     .contains('task_context', {
       coverageRequestId: input.coverageRequestId,
@@ -129,11 +140,19 @@ export async function startCoverageSourcingTask(
       id: string
       agent_id: string
       agent_revision_id: string
+      target_policy: Record<string, unknown> | null
     }
     if (row.agent_id !== input.agentId) {
       throw new CoverageSourcingTaskError(
         'COVERAGE_SOURCING_ALREADY_ACTIVE',
         'This Coverage Request already has an active sourcing task assigned to another agent.',
+      )
+    }
+    if (input.whatsappConnectionId &&
+        row.target_policy?.whatsappConnectionId !== input.whatsappConnectionId) {
+      throw new CoverageSourcingTaskError(
+        'COVERAGE_SOURCING_CONNECTION_CHANGE_REQUIRES_TASK_EDIT',
+        'This request already has an active Task on a different connection. Edit its pending configuration or wait for it to finish.',
       )
     }
     return {
@@ -238,7 +257,7 @@ export async function startCoverageSourcingTask(
     )
   }
 
-  const binding = findCoverageBinding(configCandidate.bindings)
+  const binding = findCoverageBinding(configCandidate.bindings, input.requestedTaskTypeVersion)
   if (!binding) {
     throw new CoverageSourcingTaskError(
       'COVERAGE_SOURCING_BINDING_MISSING',
@@ -265,7 +284,7 @@ export async function startCoverageSourcingTask(
 
   const manifest = CURRENT_AGENT_TASK_PLATFORM.taskTypes.get(
     COVERAGE_SOURCING_TASK_TYPE.key,
-    COVERAGE_SOURCING_TASK_TYPE.version,
+    binding.taskTypeVersion,
   )
   if (!manifest) {
     throw new CoverageSourcingTaskError(
@@ -303,6 +322,56 @@ export async function startCoverageSourcingTask(
     )
   }
 
+  // Route is selected per Task, never from global Agent configuration.
+  // The server derives provider and validates tenant/status; the worker
+  // rechecks against the immutable reservation before any provider dispatch.
+  let connectionId: string | null = null
+  if (input.whatsappConnectionId != null) {
+    if (!UUID_RE.test(input.whatsappConnectionId)) {
+      throw new CoverageSourcingTaskError(
+        'COVERAGE_SOURCING_CONNECTION_ID_INVALID',
+        'Select a valid WhatsApp connection.',
+        400,
+      )
+    }
+    const { data: wa, error: waError } = await db.from('whatsapp_connections')
+      .select('id,provider,status,archived_at,session_id')
+      .eq('account_id', input.accountId)
+      .eq('id', input.whatsappConnectionId).maybeSingle()
+    if (waError) throw waError
+    if (!wa || wa.archived_at ||
+        !(wa.provider === 'meta_cloud' ? wa.status === 'connected'
+          : wa.provider === 'openwa' &&
+            (wa.status === 'ready' || wa.status === 'connected') &&
+            wa.session_id)) {
+      throw new CoverageSourcingTaskError(
+        'COVERAGE_SOURCING_CONNECTION_UNAVAILABLE',
+        'The selected WhatsApp connection is not ready and authorized in this account.',
+        409,
+      )
+    }
+    if (manifest.messagePolicy.version === 1 && wa.provider !== 'meta_cloud') {
+      throw new CoverageSourcingTaskError(
+        'COVERAGE_SOURCING_V2_REQUIRED_FOR_OPENWA',
+        'The published Agent Task binding must use Coverage sourcing V2 for OpenWA.',
+        409,
+      )
+    }
+    connectionId = wa.id
+  }
+  const desiredMaxTargets = input.maxTargets ?? binding.maxTargets
+  const desiredAttempts = input.maxAttemptsPerTarget ?? binding.maxAttemptsPerTarget
+  if (!Number.isInteger(desiredMaxTargets) || desiredMaxTargets < 1 ||
+      desiredMaxTargets > binding.maxTargets ||
+      !Number.isInteger(desiredAttempts) || desiredAttempts < 1 ||
+      desiredAttempts > binding.maxAttemptsPerTarget) {
+    throw new CoverageSourcingTaskError(
+      'COVERAGE_SOURCING_TASK_CAPS_INVALID',
+      'Task caps must remain within the published agent Builder limits.',
+      400,
+    )
+  }
+
   const taskContext = {
     coverageRequestId: input.coverageRequestId,
     request: {
@@ -317,6 +386,7 @@ export async function startCoverageSourcingTask(
     maxContactsPerAgentPerDay: binding.maxContactsPerAgentPerDay,
     cooldownMinutes: binding.cooldownMinutes,
     coverageRegionIds: [...binding.targetScope.regionIds],
+    ...(connectionId ? { whatsappConnectionId: connectionId } : {}),
   }
   const budgetPolicy = {
     source: 'agent_builder_v2',
@@ -348,7 +418,7 @@ export async function startCoverageSourcingTask(
     {
       p_account_id: input.accountId,
       p_task_type: COVERAGE_SOURCING_TASK_TYPE.key,
-      p_task_type_version: COVERAGE_SOURCING_TASK_TYPE.version,
+      p_task_type_version: manifest.version,
       p_agent_id: input.agentId,
       p_agent_revision_id: revisionId,
       p_trigger_type: input.trigger?.triggerType ?? 'manual',
@@ -360,8 +430,8 @@ export async function startCoverageSourcingTask(
       p_task_context: taskContext,
       p_target_policy: targetPolicy,
       p_channel: 'whatsapp',
-      p_max_targets: binding.maxTargets,
-      p_max_attempts_per_target: binding.maxAttemptsPerTarget,
+      p_max_targets: desiredMaxTargets,
+      p_max_attempts_per_target: desiredAttempts,
       p_budget_policy: budgetPolicy,
       p_scheduled_at: null,
       p_idempotency_key: idempotencyKey,
