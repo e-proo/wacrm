@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     } else if (raw) {
       // PostgREST's .or() expression must not accept commas, parentheses,
       // wildcard syntax or control characters from untrusted user input.
-      const safe = raw.replace(/[^\p{L}\p{N} +@._-]/gu, '').trim()
+      const safe = raw.replace(/[^\p{L}\p{N} +@_-]/gu, '').trim()
       if (!safe) return NextResponse.json({ contacts: [], eligibility: null })
       query = query.or(`name.ilike.%${safe}%,phone.ilike.%${safe}%`)
     }
