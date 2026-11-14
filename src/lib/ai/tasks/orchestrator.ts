@@ -6,6 +6,7 @@ import {
   materializeCurrentTaskTargets,
 } from './current-platform'
 import { authorizeStoredAgentTask } from './capability-policy'
+import type { TargetMaterializationResult } from './target-resolution'
 import { sweepAgentTaskOutboundReservations } from './outbound-runtime'
 
 export interface AgentTaskSweepResult {
@@ -33,6 +34,33 @@ export interface AgentTaskWorkerResult {
 
 export function normalizeAgentTaskWorkerLimit(limit?: number): number {
   return Math.max(1, Math.min(limit ?? 20, 100))
+}
+
+/**
+ * "No candidates" and "candidate temporarily denied by a safety gate"
+ * must never be conflated. The domain completion policy may correctly close
+ * a Task with no supplier history, but a cooldown is a temporary block.
+ *
+ * The worker rechecks the SQL authority after this delay: do not fake target
+ * materialization or bypass cooldown/agent daily/hourly admission limits.
+ */
+export function deferredTargetAdmission(input: Pick<
+  TargetMaterializationResult, 'considered' | 'accepted' | 'decisions'
+>): { delaySeconds: number; reasons: string[] } | null {
+  if (input.considered < 1 || input.accepted !== 0 ||
+      input.decisions.length !== input.considered) return null
+  const delays = new Map<string, number>([
+    ['contact_cooldown', 300],
+    ['account_hourly_contact_limit', 300],
+    ['agent_daily_contact_limit', 3600],
+  ])
+  if (input.decisions.some(d => d.accepted || !delays.has(d.reason))) {
+    return null
+  }
+  return {
+    delaySeconds: Math.max(...input.decisions.map(d => delays.get(d.reason) ?? 0)),
+    reasons: [...new Set(input.decisions.map(d => d.reason))],
+  }
 }
 
 function normalizeSweep(raw: unknown): AgentTaskSweepResult {
@@ -210,6 +238,21 @@ export async function processAgentTaskQueue(input: {
       try {
         const resolution = await materializeCurrentTaskTargets(taskId)
         materializedTargets += resolution.accepted
+
+        const temporaryAdmission = deferredTargetAdmission(resolution)
+        if (temporaryAdmission) {
+          // Crucially, do not run completion policy while an otherwise
+          // eligible contact is in a DB-enforced cooldown or quota window.
+          deferredTasks += 1
+          console.info(
+            '[task orchestrator] temporarily deferred target admission',
+            { taskPrefix: taskId.slice(0, 8), reasons: temporaryAdmission.reasons },
+          )
+          await releaseTaskClaim(
+            db, taskId, input.workerId, temporaryAdmission.delaySeconds,
+          )
+          continue
+        }
 
         if (resolution.accepted > 0) {
           const retryClaim = await db.rpc('claim_next_agent_task_target', {

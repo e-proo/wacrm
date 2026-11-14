@@ -99,3 +99,32 @@ npm run test:agent-task-one-target-live
 Inspect the one Target and one queued outbound Run plus zero reservations **before** considering `send`. Stage `send` must again be explicitly confirmed and only run once after gateway-native connection verification, live grant not expired, inbound within 24h, and zero uncertain results. The previous test's failure must never be mistaken for success.
 
 The new worker source is an intentionally exact-ID-bounded operator TEST acceptance command, **not a generic task scheduler or production rollout mechanism**. Do not invoke the general AI worker because unrelated approved change requests remain outside SOF-63's scope.
+
+## Third isolated TEST attempt — temporary contact cooldown (2026-11-14)
+
+The operator's second `prepare` for Task `37be3db6-8f09-4c58-98db-95394c74f330` failed with `materializedTargets=0`, not because no supplier history existed. Hosted TEST task events show `task.claimed` followed by `task.partially_completed` with misleading reason `no_supplier_candidates`, **zero targets, zero runs and zero message reservations**. The exact SQL `materialize_agent_task_contact_target` contact guard rejected the sole selected supplier due to `contact_cooldown` of **60 minutes** from previous TEST Target's last attempt at 2026-11-14 **14:11:31 UTC**. Cooldown ended at **15:11:31 UTC** (18:11:31 Yemen local). Prior Test Task has no real send.
+
+**Safety correction:** The orchestrator now distinguishes `considered>0, accepted=0` with *all* temporary admissions denied (`contact_cooldown`, `account_hourly_contact_limit`, `agent_daily_contact_limit`) from genuinely zero supplier candidates. It records a sanitized, temporary deferral and uses the existing `release_agent_task_claim` with an appropriate minimum delay rather than terminalizing the Task. SQL remains the authority on cooldown/quota and tenant scoping. Permanent rejection (`suppressed`, `contact_not_found`, segment denial, etc.) still fails closed and does not become an automatic send. The scoped TEST operator's `prepare` stage also checks contact's previous Target timestamps against the frozen `cooldownMinutes` **before claiming the Task**, and blocks with a clear cooldown-until error; no override or limit relaxation.
+
+Because the second Task was already terminal when this was diagnosed, it **must not be reopened**. A third distinct isolated, active Coverage Request `4bec8b51-3542-4fb1-933c-699408d69e62` was added under the same service `4648674f-8107-424c-aa63-b2e6c78f81df`, 100 SAR, same single owned TEST supplier and verified anti-parallel attributes; **0 active business events / 0 new tasks / 0 reservations at creation**. No live messages were sent. The earlier first/second requests and Tasks remain as audit history.
+
+To avoid repeated source commits for each bounded TEST fixture, the operator test requires `WACRM_AGENT_TASK_ONE_TARGET_REQUEST_ID` at runtime. It still fails closed unless the request is from the fixed TEST account, fixed isolated TEST service, notes starting `[SOF63 TEST ONLY]`, created after initial failure, exactly 100 SAR and active, with only the one historical owned supplier. It refuses a different account/contact/connection, an existing other Task for the Request, nonexclusive due queue, expired `agent` grant or unsigned session window. The historical `finalize_failed` branch remains pinned to the first, already-closed task.
+
+**Operator workflow after exact-HEAD CI succeeds:**
+
+1. Confirm actual OpenWA gateway session and the **current** same-session inbound and single `agent` hashed grant. If grant expired, renew using administrative TEST Pilot controls and another consented inbound; never adjust RLS or treat TEST `ready` alone as gateway proof.
+2. Create **one** Task from the UI: `Phase 18 Coverage Pilot` / third Request `4bec8b51` / same `WhatsApp Web TEST` session / own eligible contact, `maxTargets=1`, `maxAttemptsPerTarget=1`. Confirm returned Task ID/HTTP 201. Do not create a duplicate.
+3. Run scoped **prepare only**, with both new IDs supplied:
+
+```powershell
+$env:WACRM_AGENT_TASK_CUTOVER_ACCOUNT_ID = "8ed95309-96cd-4347-b725-bd8c5039ed4f"
+$env:WACRM_AGENT_TASK_ONE_TARGET_REQUEST_ID = "4bec8b51-3542-4fb1-933c-699408d69e62"
+$env:WACRM_AGENT_TASK_ONE_TARGET_TASK_ID = "<NEW_QUEUED_TASK_UUID>"
+$env:WACRM_AGENT_TASK_ONE_TARGET_LIVE = "1"
+$env:WACRM_AGENT_TASK_ONE_TARGET_STAGE = "prepare"
+$env:WACRM_AGENT_TASK_ONE_TARGET_CONFIRM = "PREPARE_ONE_TARGET_NO_SEND"
+npm run test:agent-task-one-target-live
+```
+
+Expected: `SOF63 PREPARED: one target, one queued run; no WhatsApp send.` Inspect TEST DB and wait for a separate operator-authorized `send` and receipt/reply/rollback. **Never run the general AI Worker** (unrelated approved change requests are out of scope). If preflight or the single Tick fails, do NOT repeat until checking actual Task/Run/reservation state. Mark SOF-63 live acceptance complete **only** after recorded real send, reply correlation, no duplicate and rollback evidence.
+

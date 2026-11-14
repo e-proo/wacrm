@@ -19,12 +19,13 @@ const enabled = process.env.WACRM_AGENT_TASK_ONE_TARGET_LIVE === '1'
 const stage = process.env.WACRM_AGENT_TASK_ONE_TARGET_STAGE
 const TEST_PROJECT = 'pqirsnfupofhulmewakq'
 const TEST_ACCOUNT = '8ed95309-96cd-4347-b725-bd8c5039ed4f'
-const TEST_REQUEST = '82e81d51-7a14-4d83-91cc-b8b40534f7d0'
+// Explicit operator-supplied TEST-only request. Never accept arbitrary CRM services.
+const TEST_REQUEST = process.env.WACRM_AGENT_TASK_ONE_TARGET_REQUEST_ID
 const HISTORICAL_FAILED_REQUEST = '013d52e8-fe89-42a5-9656-01e02006dc21'
 const TEST_SERVICE = '4648674f-8107-424c-aa63-b2e6c78f81df'
 const TEST_CONTACT = '98461de0-d275-49cb-b7f5-b7fae06739bf'
 const TEST_CONNECTION = '02527740-9806-45ae-b9b1-1354c25f1d3f'
-const TEST_REQUEST_NOTE = '[SOF63 TEST ONLY] second isolated request after pre-reservation handoff; no production value'
+const TEST_REQUEST_NOTE_PREFIX = '[SOF63 TEST ONLY]'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function must(condition: unknown, code: string): asserts condition {
@@ -59,15 +60,31 @@ async function loadExclusiveTask(stageName: 'prepare' | 'send') {
   const policy = fields(task.target_policy)
   const context = fields(task.task_context)
   must(task.task_type === 'coverage.sourcing' && task.task_type_version === 2, 'NOT_COVERAGE_V2')
+  must(typeof TEST_REQUEST === 'string' && UUID_RE.test(TEST_REQUEST),
+    'EXPECTED_TEST_REQUEST_ID_REQUIRED')
   must(context.coverageRequestId === TEST_REQUEST, 'NOT_TEST_FIXTURE_REQUEST')
   const { data: fixture, error: fixtureError } = await db.from('coverage_requests')
-    .select('id,service_id,status,notes,currency,requested_amount,requester_contact_id')
+    .select('id,service_id,status,notes,currency,requested_amount,requester_contact_id,created_at')
     .eq('account_id', accountId).eq('id', TEST_REQUEST).maybeSingle()
   if (fixtureError) throw fixtureError
   must(fixture?.id === TEST_REQUEST && fixture.service_id === TEST_SERVICE &&
-    fixture.status === 'active' && fixture.notes === TEST_REQUEST_NOTE &&
+    fixture.status === 'active' &&
+    typeof fixture.notes === 'string' &&
+    fixture.notes.startsWith(TEST_REQUEST_NOTE_PREFIX) &&
+    // Exclude the original request that was created before first acceptance.
+    Date.parse(fixture.created_at) > Date.parse('2026-11-14T14:33:15Z') &&
     fixture.currency === 'SAR' && Number(fixture.requested_amount) === 100,
     'NOT_ISOLATED_TEST_REQUEST')
+
+  // Existing Tasks (even terminal) cannot be reused as a new one-target pilot
+  // merely by changing the agent revision or idempotency key.
+  const { data: priorTasks, error: otherTaskError } = await db
+    .from('ai_agent_tasks').select('id')
+    .eq('account_id', accountId)
+    .contains('task_context', { coverageRequestId: TEST_REQUEST })
+    .neq('id', taskId).limit(2)
+  if (otherTaskError) throw otherTaskError
+  must(priorTasks?.length === 0, 'REQUEST_HAS_ANOTHER_TASK')
   must(task.max_targets === 1 && task.max_attempts_per_target === 1, 'TASK_LIMIT_NOT_ONE')
   const contactId = policy.selectedContactId
   const connectionId = policy.whatsappConnectionId
@@ -84,6 +101,40 @@ async function loadExclusiveTask(stageName: 'prepare' | 'send') {
   must(supplierHistory?.length === 1 &&
     supplierHistory[0].provider_contact_id === TEST_CONTACT &&
     supplierHistory[0].status === 'fulfilled', 'NOT_SOLE_TEST_SUPPLIER')
+  // A supplier can match Coverage history yet be temporarily ineligible
+  // because this *same contact* was targeted by an earlier Task. Check the
+  // exact 60-minute DB cooldown before the irreversible worker claim, so
+  // a TEST operator sees the block instead of generating a false failure.
+  if (stageName === 'prepare') {
+    const cooldownMinutes = policy.cooldownMinutes
+    must(typeof cooldownMinutes === 'number' &&
+      Number.isInteger(cooldownMinutes) && cooldownMinutes >= 0 &&
+      cooldownMinutes <= 525600, 'COOLDOWN_POLICY_INVALID')
+    if (cooldownMinutes > 0) {
+      const { data: priorTargets, error: priorError } = await db
+        .from('ai_agent_task_targets')
+        .select('id,created_at,last_attempt_at,first_contacted_at')
+        .eq('account_id', accountId)
+        .eq('contact_id', contactId)
+        .neq('task_id', taskId)
+        .order('created_at', { ascending: false })
+        .limit(100)
+      if (priorError) throw priorError
+      must((priorTargets ?? []).length < 100, 'COOLDOWN_HISTORY_TRUNCATED')
+      for (const prior of priorTargets ?? []) {
+        const timestamps = [
+          prior.first_contacted_at ?? prior.created_at,
+          prior.last_attempt_at ?? prior.created_at,
+          prior.created_at,
+        ].map((value: string) => Date.parse(value))
+        must(timestamps.every(Number.isFinite), 'COOLDOWN_TIMESTAMP_INVALID')
+        const safeAt = Math.max(...timestamps) + cooldownMinutes * 60_000
+        must(safeAt <= Date.now(),
+          'CONTACT_COOLDOWN_ACTIVE_UNTIL_' + new Date(safeAt).toISOString())
+      }
+    }
+  }
+
   must(task.status === (stageName === 'prepare' ? 'queued' : 'running'), 'UNEXPECTED_TASK_STATUS')
   if (stageName === 'prepare') must(typeof task.available_at === 'string' && task.available_at <= now, 'NOT_DUE')
 
