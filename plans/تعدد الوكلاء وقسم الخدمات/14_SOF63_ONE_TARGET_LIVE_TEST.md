@@ -22,9 +22,19 @@
 - Immediately rollback cutover to `disabled` with the existing confirmation-gated mechanism. Verify outbound_task_delivery_enabled=false, channel scope disabled, count zero active/sending, no accidental queued sends. Leave inbound running. Pause or restore OpenWA pilot controls to their prior safe state.
 - Record precise GitHub HEAD, CI runs, TEST evidence, sanitized message IDs, user approval of the TEST number, and before/after guardrail settings on SOF-63.
 
-## Current blocker (observed 2026-11-13)
+## Updated readiness (2026-11-14)
 
-The inspected TEST account had no non-archived OpenWA connection in status `ready`; its only current OpenWA connection was `disconnected`. The provided account also has no active Agent Task deliveries or authorized TEST recipient evidence in this conversation. **Do not activate or send until this changes.** Keep SOF-63 Backlog / blocked, irrespective of green CI.
+- Hosted TEST now has one **ready, non-archived** OpenWA connection for the Phase 18 account. Confirm gateway-native session status before operator activation; database `ready` alone is not sufficient.
+- Published `Phase 18 Coverage Pilot` revision #4 has both `coverage.sourcing@1` and `@2`; cutover mode remains `disabled` with no nonterminal Tasks or reconciliation.
+- The OpenWA Pilot admin controls previously granted only `manual` workload, which cannot authorize an Agent Task (`workload=agent`). The new `grant_agent` action is explicitly admin-approved on TEST, requires verified same-session inbound within 24h, strict 1/hour + 1/day limits, and creates only one hashed `agent` allowlist row. The normal manual grant path remains unchanged.
+- Pilot sequence: get a fresh inbound from the owner's test number, select the existing ready OpenWA session, choose **Enable Pilot** (pauses sends), verify gateway, prepare if needed, set limits to hourly=1/daily=1/first-touch<=1, enter that consented number, then select **اعتماد رقم اختبار الوكيل (agent)**. Verify the status says `approved_workload=agent`, `active_admissions=1`, and `paused=true` before considering activation.
+- **Operator authorization is still required** for enabling the OpenWA pilot, unpausing it and activating the separate Agent Task cutover. Do not confuse whitelisting a recipient with permission to send.
+- The test phone must also be the **sole eligible Coverage supplier target**, not merely any contact that has chatted. Verify eligibility/target scope before Task creation; choosing `maxTargets=1` alone does not prove the right recipient was selected.
+- A recorded real send, reply/opt-out correlation, no duplicate and rollback are mandatory to close SOF-63. Do not activate or send while any prerequisite is missing.
+
+## Historical blocker (observed 2026-11-13)
+
+At that time the inspected TEST account had no non-archived OpenWA connection in status `ready`; its only current OpenWA connection was `disconnected`. The provided account also has no active Agent Task deliveries or authorized TEST recipient evidence in this conversation. **Do not activate or send until this changes.** Keep SOF-63 Backlog / blocked, irrespective of green CI.
 
 ## Acceptance result criteria
 

@@ -12,6 +12,9 @@ const h = vi.hoisted(() => ({
   guard: { pilot_enabled: true, manual_paused: true, hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
     minimum_interval_ms: 15000, jitter_ms: 3000, warmup_hourly_cap: 3, warmup_daily_cap: 10 },
   active: 0,
+  grantWorkload: 'manual' as 'manual' | 'agent',
+  recentInbound: true,
+  inboundInTenant: true,
   guardConfigured: true,
   pending: 0,
   duplicates: 1,
@@ -65,6 +68,13 @@ function dbFrom(table: string) {
         filters.id === h.connection.id && filters.account_id === ACCOUNT && filters.provider === 'openwa'
           ? h.connection : null, error: null }
       if (table === 'whatsapp_connection_guardrails') return { data: h.guardConfigured ? h.guard : null, error: null }
+      if (table === 'messages') return {
+        data: h.recentInbound ? { conversation_id: 'verified-test-conversation' } : null, error: null,
+      }
+      if (table === 'conversations') return {
+        data: h.inboundInTenant && filters.account_id === ACCOUNT
+          ? { id: 'verified-test-conversation' } : null, error: null,
+      }
       return { data: null, error: null }
     },
     update: (payload: Record<string, unknown>) => {
@@ -76,7 +86,10 @@ function dbFrom(table: string) {
     },
     upsert: async (payload: Record<string, unknown>) => {
       h.calls.push({ table, type: 'upsert', payload })
-      if (table === 'whatsapp_openwa_pilot_allowlist') h.active = 1
+      if (table === 'whatsapp_openwa_pilot_allowlist') {
+        h.active = 1
+        h.grantWorkload = payload.workload === 'agent' ? 'agent' : 'manual'
+      }
       if (table === 'whatsapp_connection_guardrails') {
         h.guardConfigured = true
         Object.assign(h.guard, payload)
@@ -88,7 +101,8 @@ function dbFrom(table: string) {
       return { error: null }
     },
     then: (resolve: (value: unknown) => unknown) => {
-      const count = table === 'whatsapp_openwa_pilot_allowlist' ? h.active
+      const count = table === 'whatsapp_openwa_pilot_allowlist'
+        ? (filters.workload && filters.workload !== h.grantWorkload ? 0 : h.active)
         : table === 'whatsapp_connections' ? h.duplicates : h.pending
       return Promise.resolve(resolve({ data: null, count, error: null }))
     },
@@ -108,6 +122,9 @@ describe('OW-13 DEV pilot protected UI API', () => {
       first_touch_daily_cap: 1, minimum_interval_ms: 15000, jitter_ms: 3000,
       warmup_hourly_cap: 3, warmup_daily_cap: 10 })
     h.active = 0
+    h.grantWorkload = 'manual'
+    h.recentInbound = true
+    h.inboundInTenant = true
     h.guardConfigured = true
     h.pending = 0
     h.duplicates = 1
@@ -257,6 +274,89 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(JSON.stringify(h.calls)).not.toContain(nativeLid)
     expect(JSON.stringify(h.calls)).not.toContain('12345678901')
   })
+  it('denies Agent Task grants until explicitly confirmed and capped to one message', async () => {
+    h.resolveRecipient.mockResolvedValue({ recipient: '12345678901@c.us', source: 'verified_inbound_chat' })
+    expect((await POST(request({
+      action: 'grant_agent', recipient: '12345678901', consent_confirmed: true,
+    }), context())).status).toBe(400)
+    expect((await POST(request({
+      action: 'grant_agent', recipient: '12345678901', consent_confirmed: true,
+      confirm_agent_task_test: true,
+    }), context())).status).toBe(409)
+    expect(h.calls).toEqual([])
+  })
+
+  it('does not approve an Agent Task recipient without a verified inbound chat mapping', async () => {
+    Object.assign(h.guard, { hourly_cap: 1, daily_cap: 1,
+      warmup_hourly_cap: 1, warmup_daily_cap: 1 })
+    h.resolveRecipient.mockResolvedValue({
+      recipient: '12345678901@c.us', source: 'phone_without_inbound',
+    })
+    expect((await POST(request({
+      action: 'grant_agent', recipient: '12345678901',
+      consent_confirmed: true, confirm_agent_task_test: true,
+    }), context())).status).toBe(409)
+    expect(h.calls).toEqual([])
+  })
+
+  it('requires a fresh inbound from the exact TEST chat and tenant for Agent Task grant', async () => {
+    Object.assign(h.guard, { hourly_cap: 1, daily_cap: 1,
+      warmup_hourly_cap: 1, warmup_daily_cap: 1 })
+    h.resolveRecipient.mockResolvedValue({
+      recipient: '12345678901@c.us', source: 'verified_inbound_chat',
+    })
+    h.recentInbound = false
+    expect((await POST(request({
+      action: 'grant_agent', recipient: '12345678901',
+      consent_confirmed: true, confirm_agent_task_test: true,
+    }), context())).status).toBe(409)
+    expect(h.calls).toEqual([])
+    h.recentInbound = true
+    h.inboundInTenant = false
+    expect((await POST(request({
+      action: 'grant_agent', recipient: '12345678901',
+      consent_confirmed: true, confirm_agent_task_test: true,
+    }), context())).status).toBe(409)
+    expect(h.calls).toEqual([])
+  })
+
+  it('grants only Agent Task workload for verified TEST inbound and activates with strict caps', async () => {
+    Object.assign(h.guard, { hourly_cap: 1, daily_cap: 1,
+      warmup_hourly_cap: 1, warmup_daily_cap: 1 })
+    h.resolveRecipient.mockResolvedValue({
+      recipient: '12345678901@c.us', source: 'verified_inbound_chat',
+    })
+    const res = await POST(request({
+      action: 'grant_agent', recipient: '12345678901', consent_confirmed: true,
+      confirm_agent_task_test: true, hours: 1,
+    }), context())
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      approved_workload: 'agent', active_admissions: 1, paused: true,
+    })
+    expect(h.calls).toContainEqual(expect.objectContaining({
+      table: 'whatsapp_openwa_pilot_allowlist', type: 'upsert',
+      payload: expect.objectContaining({
+        recipient_hash: 'a'.repeat(64), workload: 'agent', active: true, approved_by: USER,
+      }),
+    }))
+    expect(JSON.stringify(h.calls)).not.toContain('12345678901')
+    const started = await POST(request({ action: 'activate' }), context())
+    expect(started.status).toBe(200)
+    expect(await started.json()).toMatchObject({ active: true, approved_workload: 'agent' })
+    expect(h.calls).toContainEqual(expect.objectContaining({
+      table: 'whatsapp_guardrail_events', type: 'insert',
+      payload: expect.objectContaining({ workload: 'agent', decision: 'resumed' }),
+    }))
+  })
+
+  it('refuses to activate Agent Task grant when caps are raised after approval', async () => {
+    h.active = 1
+    h.grantWorkload = 'agent'
+    expect((await POST(request({ action: 'activate' }), context())).status).toBe(409)
+    expect(h.calls).toEqual([])
+  })
+
   it('does not persist an approval when native chat identity cannot be resolved safely', async () => {
     h.resolveRecipient.mockRejectedValue(new WhatsAppTransportError(
       'connection_restricted', 'Multiple native identities for this contact',

@@ -78,6 +78,11 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     .eq('connection_id', connectionId).eq('active', true).eq('workload', 'manual')
     .gt('expires_at', new Date().toISOString())
   checkDb(manualError, 'manual-grants')
+  const { count: agentGrants, error: agentError } = await db.from('whatsapp_openwa_pilot_allowlist')
+    .select('id', { count: 'exact', head: true }).eq('account_id', accountId)
+    .eq('connection_id', connectionId).eq('active', true).eq('workload', 'agent')
+    .gt('expires_at', new Date().toISOString())
+  checkDb(agentError, 'agent-grants')
   const { count: pending, error: me } = await db.from('messages')
     .select('id', { count: 'exact', head: true }).eq('provider', 'openwa')
     .eq('connection_id', connectionId).eq('status', 'sending').is('provider_message_id', null)
@@ -95,7 +100,8 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
   // pilot flag was misconfigured. Unknown values deny activation/sends.
   let enforced = false
   try { enforced = openWAPilotEnforcementEnabled() } catch { enforced = false }
-  return { connection, guard: safeGuard, configured, grants: grants ?? 0, manualGrants: manualGrants ?? 0,
+  return { connection, guard: safeGuard, configured, grants: grants ?? 0,
+    manualGrants: manualGrants ?? 0, agentGrants: agentGrants ?? 0,
     pending: pending ?? 0, duplicates, enforced,
     active: configured && safeGuard.pilot_enabled && enforced && !safeGuard.manual_paused && (grants ?? 0) > 0 }
 }
@@ -109,7 +115,11 @@ function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
       minimum_interval_ms: s.guard.minimum_interval_ms, jitter_ms: s.guard.jitter_ms,
       warmup_hourly_cap: s.guard.warmup_hourly_cap, warmup_daily_cap: s.guard.warmup_daily_cap,
     },
-    active_admissions: s.grants, unsettled_outbound: s.pending, same_identity_ready_connections: s.duplicates }
+    active_admissions: s.grants,
+    approved_workload: s.grants === 1
+      ? (s.agentGrants === 1 ? 'agent' : s.manualGrants === 1 ? 'manual' : null)
+      : null,
+    unsettled_outbound: s.pending, same_identity_ready_connections: s.duplicates }
 }
 
 function requireLimits(s: Awaited<ReturnType<typeof snapshot>>) {
@@ -144,7 +154,7 @@ export async function POST(request: Request, context: Context) {
     assertTestConnectionId(connectionId)
     const body = await request.json() as Record<string, unknown>
     const action = body.action
-    if (!['prepare', 'limits', 'grant', 'activate', 'stop', 'disable', 'enable'].includes(String(action))) return deny('Unknown pilot action', 400)
+    if (!['prepare', 'limits', 'grant', 'grant_agent', 'activate', 'stop', 'disable', 'enable'].includes(String(action))) return deny('Unknown pilot action', 400)
     const s = await snapshot(adminDb, accountId, connectionId)
 
     if (action === 'disable' || action === 'enable') {
@@ -238,7 +248,11 @@ export async function POST(request: Request, context: Context) {
       return NextResponse.json(safeStatus(await snapshot(adminDb, accountId, connectionId)), { headers: noStore })
     }
 
-    if (action === 'grant') {
+    if (action === 'grant' || action === 'grant_agent') {
+      const workload = action === 'grant_agent' ? 'agent' : 'manual'
+      if (workload === 'agent' && body.confirm_agent_task_test !== true) {
+        return deny('Explicit Agent Task TEST approval is required', 400)
+      }
       if (!s.configured || !s.guard.pilot_enabled || !s.enforced || !s.guard.manual_paused) return deny('Enable the server-side gate and pause before granting a recipient', 409)
       if (body.consent_confirmed !== true) return deny('Recipient consent is required', 400)
       if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) return deny('Duplicate connection identity must be reviewed', 409)
@@ -246,6 +260,11 @@ export async function POST(request: Request, context: Context) {
         return deny('Pilot session is not ready, has unsettled sends or already has a grant', 409)
       }
       requireLimits(s)
+      if (workload === 'agent' &&
+          (s.guard.hourly_cap !== 1 || s.guard.daily_cap !== 1 || s.guard.first_touch_daily_cap > 1 ||
+           s.guard.warmup_hourly_cap !== 1 || s.guard.warmup_daily_cap !== 1)) {
+        return deny('Agent Task TEST requires one message per hour and per day', 409)
+      }
       const rawRecipient = typeof body.recipient === 'string' ? body.recipient.trim() : ''
       if (!canonicalOpenWAPilotRecipient(rawRecipient)) return deny('Invalid OpenWA recipient identity', 400)
       // The inbound chat may have a verified @lid identity even when the
@@ -254,29 +273,59 @@ export async function POST(request: Request, context: Context) {
       const resolvedRecipient = await resolveOpenWAPilotRecipientForGrant(
         adminDb, accountId, connectionId, rawRecipient,
       )
+      if (workload === 'agent' && resolvedRecipient.source === 'phone_without_inbound') {
+        return deny('Agent Task TEST recipient must be linked to a verified inbound chat', 409)
+      }
+      if (workload === 'agent') {
+        // Cold outreach is not permitted for this TEST cohort. The inbound
+        // identity must match the exact OpenWA chat, connection and tenant.
+        const { data: inbound, error: inboundError } = await adminDb.from('messages')
+          .select('conversation_id')
+          .eq('connection_id', connectionId).eq('provider', 'openwa')
+          .eq('sender_type', 'customer')
+          .eq('provider_chat_id', resolvedRecipient.recipient)
+          .gte('created_at', new Date(Date.now() - 24 * 3600_000).toISOString())
+          .order('created_at', { ascending: false }).limit(1).maybeSingle()
+        checkDb(inboundError, 'agent-recent-inbound')
+        if (!inbound?.conversation_id) {
+          return deny('Agent Task TEST requires a verified inbound chat within 24 hours', 409)
+        }
+        const { data: scoped, error: scopedError } = await adminDb.from('conversations')
+          .select('id').eq('id', inbound.conversation_id)
+          .eq('account_id', accountId).maybeSingle()
+        checkDb(scopedError, 'agent-inbound-scope')
+        if (!scoped) return deny('Agent Task TEST conversation does not belong to this account', 409)
+      }
       const hash = openWAPilotRecipientHash(accountId, connectionId, resolvedRecipient.recipient)
       if (!hash) return deny('Invalid recipient', 400)
       const hours = int(body.hours ?? 4, 1, 4, 'expiry')
       const now = new Date()
       const { error } = await adminDb.from('whatsapp_openwa_pilot_allowlist')
         .upsert({ account_id: accountId, connection_id: connectionId,
-          recipient_hash: hash, workload: 'manual', active: true, approved_by: user.id,
+          recipient_hash: hash, workload, active: true, approved_by: user.id,
           approved_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3600000).toISOString() },
         { onConflict: 'account_id,connection_id,recipient_hash,workload' })
       checkDb(error, 'grant')
       return NextResponse.json({
         ...safeStatus(await snapshot(adminDb, accountId, connectionId)),
         recipient_identity_source: resolvedRecipient.source,
+        approved_workload: workload,
       }, { headers: noStore })
     }
 
     if (action === 'activate') {
-      if (!s.configured || !s.guard.pilot_enabled || !s.enforced || !s.guard.manual_paused || s.grants !== 1 || s.manualGrants !== 1 || s.pending !== 0 ||
+      if (!s.configured || !s.guard.pilot_enabled || !s.enforced || !s.guard.manual_paused || s.grants !== 1 || (s.manualGrants !== 1 && s.agentGrants !== 1) || s.pending !== 0 ||
           !s.connection.session_id || !['ready','connected'].includes(s.connection.status)) {
         return deny('Pilot activation requires enforce mode, one approval, paused/ready connection and zero unsettled sends', 409)
       }
       if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) return deny('Duplicate sessions need explicit review', 409)
       requireLimits(s)
+      if (s.agentGrants === 1 &&
+          (s.guard.hourly_cap !== 1 || s.guard.daily_cap !== 1 ||
+           s.guard.warmup_hourly_cap !== 1 || s.guard.warmup_daily_cap !== 1 ||
+           s.guard.first_touch_daily_cap > 1)) {
+        return deny('Agent Task TEST requires one-message caps before activation', 409)
+      }
       // WACRM DB readiness can be stale after a Cloudflare URL rotation.
       // Make a read-only provider-native status check immediately before
       // lifting the emergency pause. Never create/retry a gateway session.
@@ -288,10 +337,17 @@ export async function POST(request: Request, context: Context) {
       // have revoked the approval or stopped the pilot while it was pending.
       const latest = await snapshot(adminDb, accountId, connectionId)
       if (!latest.configured || !latest.guard.pilot_enabled || !latest.enforced || !latest.guard.manual_paused ||
-        latest.grants !== 1 || latest.manualGrants !== 1 || latest.pending !== 0) {
+        latest.grants !== 1 || latest.manualGrants !== s.manualGrants ||
+        latest.agentGrants !== s.agentGrants || latest.pending !== 0) {
         return deny('Pilot state changed during verification; refresh and review', 409, 'pilot_state_changed')
       }
       requireLimits(latest)
+      if (latest.agentGrants === 1 &&
+          (latest.guard.hourly_cap !== 1 || latest.guard.daily_cap !== 1 ||
+           latest.guard.warmup_hourly_cap !== 1 || latest.guard.warmup_daily_cap !== 1 ||
+           latest.guard.first_touch_daily_cap > 1)) {
+        return deny('Agent Task TEST caps changed while validating gateway', 409)
+      }
       const { data: updated, error } = await adminDb.from('whatsapp_connection_guardrails')
         .update({ manual_paused: false, updated_at: new Date().toISOString() })
         .eq('account_id', accountId).eq('connection_id', connectionId).eq('manual_paused', true)
@@ -299,7 +355,7 @@ export async function POST(request: Request, context: Context) {
       checkDb(error, 'activate')
       if (!updated) return deny('Pilot state changed; refresh first', 409)
       const { error: auditError } = await adminDb.from('whatsapp_guardrail_events')
-        .insert({ account_id: accountId, connection_id: connectionId, workload: 'manual',
+        .insert({ account_id: accountId, connection_id: connectionId, workload: s.agentGrants === 1 ? 'agent' : 'manual',
           decision: 'resumed', reason: 'ow13_dev_pilot_admin_activate' })
       if (auditError) {
         // Compensate: audit failure must not leave an untracked activated cohort.

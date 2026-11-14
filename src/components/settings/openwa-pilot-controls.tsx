@@ -22,6 +22,7 @@ interface PilotState extends Record<string, unknown> {
   active: boolean
   paused: boolean
   active_admissions: number
+  approved_workload?: 'manual' | 'agent' | null
   unsettled_outbound: number
   same_identity_ready_connections: number
   error?: string
@@ -35,7 +36,7 @@ interface PilotState extends Record<string, unknown> {
 }
 
 type RelatedConnection = { id: string; status: string; sessionId: string | null }
-type PilotAction = 'prepare' | 'limits' | 'grant' | 'activate' | 'stop' | 'disable' | 'enable'
+type PilotAction = 'prepare' | 'limits' | 'grant' | 'grant_agent' | 'activate' | 'stop' | 'disable' | 'enable'
 type PilotStep = 'protected' | 'pending' | 'needsStop' | 'verify' | 'prepare' | 'approve' | 'start' | 'active' | 'multiple' | 'normal'
 
 const defaultLimits = { hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
@@ -120,9 +121,10 @@ export function OpenWAPilotControls({
       const body: Record<string, unknown> = { action }
       if (action === 'prepare') body.confirm_prepare = true
       if (action === 'limits') Object.assign(body, limits)
-      if (action === 'grant') Object.assign(body, {
+      if (action === 'grant' || action === 'grant_agent') Object.assign(body, {
         recipient: normalizedRecipient, consent_confirmed: consent,
         ack_duplicate_sessions: duplicateAck, hours: 4,
+        ...(action === 'grant_agent' ? { confirm_agent_task_test: true } : {}),
       })
       if (action === 'activate' || action === 'disable') body.ack_duplicate_sessions = duplicateAck
       if (action === 'disable') body.confirm_normal_sending = true
@@ -133,16 +135,16 @@ export function OpenWAPilotControls({
       const data = await parseOpenWAApiResponse<PilotState>(res)
       if (!res.ok) throw new Error(data.error || w('devPilotActionRejected'))
       setState(data)
-      if (action === 'grant') { setRecipient(''); setConsent(false) }
+      if (action === 'grant' || action === 'grant_agent') { setRecipient(''); setConsent(false) }
       if (['stop', 'disable', 'enable'].includes(action)) { setVerified(false); setDuplicateAck(false); setVerifiedStatus(null) }
       if (action === 'stop' || action === 'disable' || action === 'enable') onPilotChange?.()
       setNotice(w(action === 'prepare' ? 'devPilotPrepared'
         : action === 'disable' ? 'devPilotDisabled' : action === 'enable' ? 'devPilotEnabled'
         : action === 'stop' ? 'devPilotStopped'
         : action === 'activate' ? 'devPilotStarted'
-        : action === 'grant' && data.recipient_identity_source === 'verified_inbound_chat'
+        : (action === 'grant' || action === 'grant_agent') && data.recipient_identity_source === 'verified_inbound_chat'
           ? 'devPilotGrantedNativeChat'
-          : action === 'grant' ? 'devPilotGranted' : 'devPilotLimitsSaved'))
+          : (action === 'grant' || action === 'grant_agent') ? 'devPilotGranted' : 'devPilotLimitsSaved'))
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : w('devPilotActionRejected'))
@@ -302,13 +304,29 @@ export function OpenWAPilotControls({
           </div>
           {needsDuplicateReview && !duplicateAck &&
             <p className="text-xs text-amber-600 dark:text-amber-400">{w('devPilotMustReviewDuplicates')}</p>}
-          <Button disabled={running || !canApprove} onClick={() => void submit('grant')}>
-            {w('devPilotGrant')}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={running || !canApprove} onClick={() => void submit('grant')}>
+              {w('devPilotGrant')} — manual
+            </Button>
+            <Button variant="outline" disabled={running || !canApprove ||
+              limits.hourly_cap !== 1 || limits.daily_cap !== 1 ||
+              limits.first_touch_daily_cap > 1}
+              onClick={() => {
+                if (window.confirm('اعتماد هذا الرقم فقط لتجربة مهمة الوكيل (agent)؟ يلزم وجود رسالة واردة خلال 24 ساعة على جلسة OpenWA نفسها. لن يحدث إرسال الآن.'))
+                  void submit('grant_agent')
+              }}>
+              اعتماد رقم اختبار الوكيل (agent)
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            تجربة مهام الوكلاء تتطلب ضبط الحد الساعي واليومي إلى 1 في الإعدادات المتقدمة.
+            إذن manual لا يسمح برسالة Agent Task.
+          </p>
         </section>}
 
         {step === 'start' && <section className="space-y-3 rounded-lg border p-4">
           <p className="font-semibold">{w('devPilotReadyToStart')}</p>
+          <p className="text-sm">نوع السماح: {state.approved_workload === 'agent' ? 'مهام الوكلاء (agent)' : 'الرسائل اليدوية (manual)'}</p>
           <p className="text-sm text-muted-foreground">{w('devPilotStartDescription')}</p>
           {needsDuplicateReview && !duplicateAck &&
             <p className="text-xs text-amber-600 dark:text-amber-400">{w('devPilotMustReviewDuplicates')}</p>}
@@ -319,7 +337,9 @@ export function OpenWAPilotControls({
 
         {step === 'active' && <section className="space-y-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4">
           <p className="flex items-center gap-2 font-semibold"><CheckCircle2 className="size-5" />{w('devPilotNowActive')}</p>
-          <p className="text-sm text-muted-foreground">{w('devPilotSendOneMessage')}</p>
+          <p className="text-sm text-muted-foreground">{w('devPilotSendOneMessage')}
+            {state.approved_workload === 'agent' ? ' — السماح محصور بمهمة الوكيل والرقم المختبر.' : ''}
+          </p>
           <Button variant="destructive" disabled={running} onClick={() => void submit('stop')}>
             <Square className="me-2 size-4" />{w('devPilotStop')}
           </Button>
