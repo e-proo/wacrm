@@ -5,6 +5,8 @@ DO $$
 DECLARE
   v_fn regprocedure;
   v_body text;
+  v_legacy_fn regprocedure;
+  v_legacy_body text;
   v_check jsonb;
 BEGIN
   v_fn:=to_regprocedure(
@@ -30,6 +32,20 @@ BEGIN
     OR position('update_pending_agent_task_connection' in v_body)=0
     OR position('selectedContactIds' in v_body)=0 THEN
     RAISE EXCEPTION 'SOF66_BATCH_EDITOR_GUARD_MISSING';
+  END IF;
+
+  -- Guard against legacy scalar editor silently turning a precise batch into
+  -- mixed/automatic targeting after the additive migration.
+  v_legacy_fn:=to_regprocedure(
+    'public.update_pending_agent_task_target(uuid,uuid,uuid,uuid,uuid,integer,integer)'
+  );
+  IF v_legacy_fn IS NULL THEN
+    RAISE EXCEPTION 'SOF66_LEGACY_EDITOR_MISSING';
+  END IF;
+  v_legacy_body:=pg_get_functiondef(v_legacy_fn);
+  IF position('multi_contact_requires_list_editor' in v_legacy_body)=0
+    OR position('selected_contact_cannot_be_cleared' in v_legacy_body)=0 THEN
+    RAISE EXCEPTION 'SOF66_LEGACY_EDITOR_SELECTION_GUARD_MISSING';
   END IF;
 
   -- No tenant or authenticated actor may edit anything, even with

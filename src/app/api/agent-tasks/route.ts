@@ -5,6 +5,7 @@ import { checkCoverageSelectedContactEligibility } from '@/lib/services/coverage
 import {
   MAX_EXPLICIT_COVERAGE_CONTACTS,
   normalizeExplicitCoverageContactIds,
+  parseExplicitCoverageContactIds,
 } from '@/lib/services/coverage/selected-targets'
 import {
   CoverageSourcingTaskError,
@@ -222,18 +223,32 @@ export async function PATCH(request: Request) {
     if (selectedIds && body.maxTargets !== selectedIds.length) {
       return NextResponse.json({ error: 'عدد المستهدفين يجب أن يساوي عدد الأرقام المحددة.', code: 'CONTACT_TARGET_COUNT_MISMATCH' }, { status: 400 })
     }
+    const { data: task, error: taskError } = await db.from('ai_agent_tasks')
+      .select('task_type,task_context,target_policy')
+      .eq('account_id', ctx.accountId)
+      .eq('id', body.taskId).maybeSingle()
+    if (taskError) throw taskError
+    if (!task || task.task_type !== 'coverage.sourcing' ||
+        !record(task.task_context) ||
+        !isUUID(task.task_context.coverageRequestId)) {
+      return NextResponse.json({ error: 'تعذّر التحقق من سياق المهمة.', code: 'TASK_CONTEXT_INVALID' }, { status: 409 })
+    }
+    const original = record(task.target_policy) ? task.target_policy : {}
+    let originalIds: readonly string[] | null
+    try {
+      originalIds = parseExplicitCoverageContactIds(original)
+    } catch {
+      return NextResponse.json({ error: 'استهداف المهمة الحالي غير صالح.', code: 'TASK_CONTACT_POLICY_INVALID' }, { status: 409 })
+    }
+    // Never let the legacy one-contact RPC mix a scalar with selectedContactIds,
+    // or silently downgrade a Task with exact recipients to automatic sourcing.
+    if (originalIds && !selectedIds) {
+      return NextResponse.json({ error: 'لا يمكن حذف قائمة الأرقام المحددة من المهمة.', code: 'SELECTED_CONTACTS_CANNOT_BE_CLEARED' }, { status: 409 })
+    }
+    if (Array.isArray(original.selectedContactIds) && !Array.isArray(body.selectedContactIds)) {
+      return NextResponse.json({ error: 'استخدم تعديل قائمة الأرقام لهذه المهمة.', code: 'MULTI_CONTACT_TASK_REQUIRES_LIST' }, { status: 409 })
+    }
     if (selectedIds) {
-      const { data: task, error: taskError } = await db.from('ai_agent_tasks')
-        .select('task_type,task_context,target_policy')
-        .eq('account_id', ctx.accountId)
-        .eq('id', body.taskId).maybeSingle()
-      if (taskError) throw taskError
-      if (!task || task.task_type !== 'coverage.sourcing' ||
-          !record(task.task_context) ||
-          !isUUID(task.task_context.coverageRequestId)) {
-        return NextResponse.json({ error: 'تعذّر التحقق من سياق المهمة.', code: 'TASK_CONTEXT_INVALID' }, { status: 409 })
-      }
-      const original = record(task.target_policy) ? task.target_policy : {}
       const regions = Array.isArray(original.coverageRegionIds) &&
         original.coverageRegionIds.every(isUUID) ? original.coverageRegionIds as string[] : []
       for (const contactId of selectedIds) {

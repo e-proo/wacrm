@@ -264,4 +264,45 @@ describe('per-Task WhatsApp configuration API (SOF-64)', () => {
     expect(stubs.rpc).not.toHaveBeenCalled()
   })
 
+  it('never downgrades a multi-contact Task through the legacy scalar editor', async () => {
+    const second = '88888888-8888-4888-8888-888888888888'
+    stubs.from.mockReturnValue({
+      select() { return this }, eq() { return this },
+      async maybeSingle() { return { data: {
+        task_type: 'coverage.sourcing',
+        task_context: { coverageRequestId: requestId },
+        target_policy: { selectedContactIds: [contactId, second] },
+      }, error: null } },
+    })
+    for (const payload of [
+      { selectedContactId: contactId },
+      { selectedContactId: null },
+    ]) {
+      const response = await PATCH(jsonRequest('PATCH', {
+        taskId, whatsappConnectionId: connectionId,
+        maxTargets: 1, maxAttemptsPerTarget: 1, ...payload,
+      }))
+      expect(response.status).toBe(409)
+    }
+    expect(stubs.rpc).not.toHaveBeenCalled()
+  })
+
+  it('rejects clearing a legacy exact recipient to automatic targeting', async () => {
+    stubs.from.mockReturnValue({
+      select() { return this }, eq() { return this },
+      async maybeSingle() { return { data: {
+        task_type: 'coverage.sourcing',
+        task_context: { coverageRequestId: requestId },
+        target_policy: { selectedContactId: contactId },
+      }, error: null } },
+    })
+    const response = await PATCH(jsonRequest('PATCH', {
+      taskId, whatsappConnectionId: null,
+      selectedContactId: null, maxTargets: 1, maxAttemptsPerTarget: 1,
+    }))
+    expect(response.status).toBe(409)
+    expect((await response.json()).code).toBe('SELECTED_CONTACTS_CANNOT_BE_CLEARED')
+    expect(stubs.rpc).not.toHaveBeenCalled()
+  })
+
 })
