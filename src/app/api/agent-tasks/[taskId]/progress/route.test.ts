@@ -33,7 +33,7 @@ function query(name: string) {
       skip_reason: null, failure_code: null, last_outbound_message_id: messageId,
     }],
     ai_agent_task_outbound_messages: [{
-      id: messageId, status: 'sent', provider: 'openwa', error_code: null,
+      local_message_id: messageId, status: 'sent', provider: 'openwa', error_code: null,
     }],
   }
   const q = {
@@ -65,6 +65,7 @@ describe('SOF-66 per-recipient progress, read-only and tenant-scoped', () => {
     })
     const queries = stubs.from.mock.results.map(({ value }) => value)
     expect(queries).toHaveLength(4)
+    expect(queries[3].in).toHaveBeenCalledWith('local_message_id', [messageId])
     for (const q of queries) expect(q.eq).toHaveBeenCalledWith('account_id', acct)
     expect(stubs.requireAgentCapability).toHaveBeenCalledWith('agents.manage_tasks')
   })

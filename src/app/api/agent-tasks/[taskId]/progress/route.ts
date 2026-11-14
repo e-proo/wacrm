@@ -57,12 +57,12 @@ export async function GET(
       typeof t.last_outbound_message_id === 'string' ? [t.last_outbound_message_id] : [])
     const outboundResult = outboundIds.length
       ? await db.from('ai_agent_task_outbound_messages')
-        .select('id,status,provider,error_code')
+        .select('local_message_id,status,provider,error_code')
         .eq('account_id', ctx.accountId).eq('task_id', taskId)
-        .in('id', outboundIds).limit(outboundIds.length)
+        .in('local_message_id', outboundIds).limit(outboundIds.length)
       : { data: [], error: null }
     if (outboundResult.error) throw outboundResult.error
-    const outbounds = new Map((outboundResult.data ?? []).map(m => [m.id, m]))
+    const outbounds = new Map((outboundResult.data ?? []).map(m => [m.local_message_id, m]))
 
     return NextResponse.json({
       taskStatus: task.status,
