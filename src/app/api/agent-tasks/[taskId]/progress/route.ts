@@ -66,7 +66,7 @@ export async function GET(
         .limit(selected.length * 20)
       : { data: [], error: null }
     if (outboundResult.error) throw outboundResult.error
-    const outbounds = new Map<string, (typeof outboundResult.data)[number]>()
+    const outbounds = new Map<string, { status: string; provider: string | null; error_code: string | null }>()
     for (const outbound of outboundResult.data ?? []) {
       if (!outbounds.has(outbound.task_target_id)) {
         outbounds.set(outbound.task_target_id, outbound)
