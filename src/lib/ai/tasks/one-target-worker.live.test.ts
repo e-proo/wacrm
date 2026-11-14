@@ -5,7 +5,7 @@ import { inspectAgentTaskTestCutoverReadiness } from './cutover'
 import { processAgentTaskQueue } from './orchestrator'
 import { processAgentTaskOutboundRunQueue } from './outbound-worker'
 import { evaluateCurrentTaskCompletion } from './current-platform'
-import { inspectOpenWAGuardrailReservationWindow } from './one-target-guardrail-preflight'
+import { assertScopedOpenWATestPilotMode, inspectOpenWAGuardrailReservationWindow } from './one-target-guardrail-preflight'
 
 /**
  * SOF-63: manually tick only the Task Orchestrator and the outbound
@@ -172,20 +172,47 @@ async function loadExclusiveTask(stageName: 'prepare' | 'send') {
     .eq('account_id', accountId).eq('connection_id', connectionId).maybeSingle()
   if (guardError) throw guardError
   const guard = fields(rawGuard)
-  must(guard.pilot_enabled === true && guard.manual_paused === false &&
-    guard.hourly_cap === 1 && guard.daily_cap === 1 &&
-    typeof guard.first_touch_daily_cap === 'number' && guard.first_touch_daily_cap <= 1 &&
-    guard.warmup_hourly_cap === 1 &&
-    guard.warmup_daily_cap === 1 && !guard.circuit_open_until,
-    'OPENWA_PILOT_NOT_STRICT')
+  // The operator deliberately disabled this connection's OpenWA Pilot
+  // on the pinned TEST project. Keep the separate, more restrictive SOF-63
+  // one-target/one-attempt acceptance fence, without silently reenabling
+  // Pilot or widening the original account, service or recipient identity.
+  // Even with Pilot off, the transport still enforces all connection
+  // guardrail capacity limits, pause/circuit and signing boundaries.
+  const pilotEnabled = guard.pilot_enabled
+  must(typeof pilotEnabled === 'boolean', 'OPENWA_PILOT_STATE_UNKNOWN')
+  must(guard.manual_paused === false && guard.circuit_open_until === null &&
+    typeof guard.hourly_cap === 'number' && guard.hourly_cap >= 1 && guard.hourly_cap <= 60 &&
+    typeof guard.daily_cap === 'number' && guard.daily_cap >= 1 && guard.daily_cap <= 500 &&
+    typeof guard.first_touch_daily_cap === 'number' &&
+    guard.first_touch_daily_cap >= 1 && guard.first_touch_daily_cap <= 100 &&
+    typeof guard.warmup_hourly_cap === 'number' &&
+    guard.warmup_hourly_cap >= 1 && guard.warmup_hourly_cap <= 60 &&
+    typeof guard.warmup_daily_cap === 'number' &&
+    guard.warmup_daily_cap >= 1 && guard.warmup_daily_cap <= 500,
+    'OPENWA_TEST_SESSION_GUARDRAILS_OUT_OF_BOUNDS')
 
+  // This previously verified signed, *historical* agent grant identifies
+  // the operator's ONE owned TEST recipient even when an admin has revoked
+  // Pilot and the grant itself is inactive. It does not authorize outreach
+  // to a new number. Verify the hash against a recent same-session inbound
+  // below; a revoked historical grant is never an admission token for the
+  // provider when Pilot is enabled.
   const { data: grants, error: grantsError } = await db.from('whatsapp_openwa_pilot_allowlist')
-    .select('workload,recipient_hash')
+    .select('workload,recipient_hash,active,expires_at')
     .eq('account_id', accountId).eq('connection_id', connectionId)
-    .eq('active', true).gt('expires_at', now).limit(2)
+    .eq('workload', 'agent').limit(2)
   if (grantsError) throw grantsError
   const grant = grants?.[0]
-  must(grants?.length === 1 && grant?.workload === 'agent', 'NOT_EXACTLY_ONE_AGENT_GRANT')
+  must(grants?.length === 1 && grant?.workload === 'agent' &&
+    typeof grant.recipient_hash === 'string' && grant.recipient_hash.length === 64,
+    'NOT_EXACTLY_ONE_HISTORIC_TEST_RECIPIENT')
+  assertScopedOpenWATestPilotMode({
+    pilotEnabled,
+    acknowledgment: process.env.WACRM_AGENT_TASK_ONE_TARGET_PILOT_OFF_ACK,
+    grant: { active: grant.active === true,
+      expiresAt: typeof grant.expires_at === 'string' ? grant.expires_at : null },
+    nowMs: Date.now(),
+  })
 
   // Verify the sole grant belongs to the chosen account contact's *real*
   // inbound chat on this exact frozen OpenWA connection, not just any TEST JID.

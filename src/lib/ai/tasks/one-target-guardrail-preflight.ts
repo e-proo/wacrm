@@ -39,3 +39,29 @@ export function inspectOpenWAGuardrailReservationWindow(input: {
   }
   return { allowed: true }
 }
+
+/**
+ * Explicit opt-in for a named operator-owned TEST contact when OpenWA Pilot
+ * admission is disabled for the connection. This NEVER authorizes a new
+ * contact: the caller still verifies an exact frozen CRM contact, historical
+ * signed recipient hash and a fresh inbound from that same OpenWA session.
+ */
+export function assertScopedOpenWATestPilotMode(input: {
+  pilotEnabled: boolean
+  acknowledgment?: string
+  grant: { active: boolean; expiresAt: string | null }
+  nowMs: number
+}): void {
+  if (!input.pilotEnabled) {
+    if (input.acknowledgment !== 'TEST_OWN_NUMBER_SCOPED') {
+      throw new Error('PILOT_OFF_REQUIRES_EXPLICIT_TEST_ACK')
+    }
+    return
+  }
+  if (input.grant.active !== true ||
+      typeof input.grant.expiresAt !== 'string' ||
+      !Number.isFinite(Date.parse(input.grant.expiresAt)) ||
+      Date.parse(input.grant.expiresAt) <= input.nowMs) {
+    throw new Error('ACTIVE_AGENT_PILOT_GRANT_REQUIRED')
+  }
+}
