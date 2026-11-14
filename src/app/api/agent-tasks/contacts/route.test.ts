@@ -78,6 +78,10 @@ describe('Agent Task existing CRM contact picker API', () => {
     expect(searched.status).toBe(200)
     const query = stubs.from.mock.results[0].value
     expect(query.or).toHaveBeenCalledWith(expect.not.stringContaining('id.eq'))
-    expect(query.or).toHaveBeenCalledWith(expect.not.stringContaining(','))
+    // One comma is the required PostgREST OR separator. The user-supplied
+    // comma, parentheses, and query operator punctuation must be stripped.
+    expect(query.or).toHaveBeenCalledWith(
+      'name.ilike.%TESTideqforeign%,phone.ilike.%TESTideqforeign%',
+    )
   })
 })
