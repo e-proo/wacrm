@@ -183,6 +183,39 @@ describe('Coverage sourcing Agent Task', () => {
     ], [], SUPPLIER_A)).toHaveLength(0)
   })
 
+  it('materializes only the explicitly chosen supplier IDs in their selected order', () => {
+    const request = {
+      id: '00000000-0000-4000-8000-000000000666',
+      service_id: '00000000-0000-4000-8000-000000000777',
+      requester_contact_id: REQUESTER,
+      requested_amount: '100', reserved_amount: '0', fulfilled_amount: '0',
+      currency: 'SAR',
+      attributes: requestAttributes() as unknown as Record<string, unknown>,
+      status: 'active' as const,
+    }
+    const rows = [
+      { provider_contact_id: SUPPLIER_A,
+        attributes: matchingOfferAttributes() as unknown as Record<string, unknown>,
+        status: 'active' as const, created_at: '2026-11-14T12:00:00Z' },
+      { provider_contact_id: SUPPLIER_B,
+        attributes: matchingOfferAttributes() as unknown as Record<string, unknown>,
+        status: 'active' as const, created_at: '2026-11-14T12:01:00Z' },
+      { provider_contact_id: REQUESTER,
+        attributes: matchingOfferAttributes() as unknown as Record<string, unknown>,
+        status: 'active' as const, created_at: '2026-11-14T12:02:00Z' },
+    ]
+    const candidates = buildCoverageSupplierCandidates(
+      request,rows,[],[SUPPLIER_B,SUPPLIER_A],
+    )
+    expect(candidates.map(row => row.contactId)).toEqual([SUPPLIER_B,SUPPLIER_A])
+    expect(candidates.every(row => row.counterpartyRole === 'coverage_supplier')).toBe(true)
+    expect(buildCoverageSupplierCandidates(request,rows,[],[SUPPLIER_A,REQUESTER])
+      .map(row => row.contactId)).toEqual([SUPPLIER_A])
+    expect(buildCoverageSupplierCandidates(request,[{
+      ...rows[1], attributes: requestAttributes() as unknown as Record<string, unknown>,
+    }],[],[SUPPLIER_B])).toHaveLength(0)
+  })
+
   it('validates manually selected contact ID and never treats malformed selection as automatic', () => {
     expect(parseCoverageSelectedContactId({})).toBe(null)
     expect(parseCoverageSelectedContactId({ selectedContactId: SUPPLIER_B })).toBe(SUPPLIER_B)

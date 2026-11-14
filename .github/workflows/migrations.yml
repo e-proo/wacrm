@@ -71,6 +71,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-builder-v2-smoke.sql
       - name: Verify generic Agent Task creation
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-creation-smoke.sql
+      - name: Verify SOF-66 exact multiple-recipient Task editor and service-only grants
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-multiple-targets-smoke.sql
       - name: Verify Agent Task scheduling and Business Event triggers
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-trigger-smoke.sql
       - name: Seed shared Agent Task account fixture

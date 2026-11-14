@@ -1,0 +1,28 @@
+# SOF-66 — Exact multi-recipient selection in one Coverage Agent Task
+
+**Scope:** additive UI/API/runtime/SQL support for assigning several *existing and eligible account-scoped CRM contacts* to the same `coverage.sourcing` Task. This is not a bulk broadcast platform, general number import, or unconsented cold outreach. A new Task may have 1–20 manually chosen contacts, further capped by its **published Builder** `maxTargets`, account/agent/channel limits and transport guardrails.
+
+## Current architecture and compatibility
+
+- Prior single-contact workflow stored `ai_agent_tasks.target_policy.selectedContactId` and forced `max_targets=1`. It remains readable and fully supported.
+- Multi-contact workflow stores an **ordered, unique** `target_policy.selectedContactIds` UUID array when there is more than one selection; a single new selection still uses the legacy scalar field. Combining fields, empty arrays, duplicate IDs, malformed UUIDs and over 20 contacts are rejected. The ordered set and maximum Targets are frozen per Task.
+- The existing `coverage.supplier_candidates` resolver remains the domain authority. It queries matching historical Coverage supplier offers **separately for each selected contact before LIMIT**, then applies source request attributes, currency, service, region scope and requester exclusion. It never falls back to another supplier when an explicitly chosen one lacks matching history. Existing kernel `materialize_agent_task_contact_target` applies tenant, suppression, opt-out, cooldown, tags, hourly/day quotas and anti-abuse to EACH chosen contact. OpenWA/Meta message policies and reply correlation are shared with the existing single-target pipeline; provider dispatch is still frozen on the Task's selected connection and per-recipient conversation identity.
+- Task creation is tenant/admin gated through `agents.manage_tasks` and existing `startCoverageSourcingTask` service. The service re-checks the published revision, Builder grants, exact count `maxTargets`, and eligibility of **every** chosen contact before creating a Task. One ineligible selection denies the whole new Task. No credentials or raw provider/session internals are disclosed by the UI.
+- A pending Task (`queued/scheduled`) may change the ordered list via service-role-only `update_pending_agent_task_targets` migration 163. Admin/owner, account, contact existence, 1–20 unique IDs, no Targets/Runs/reservations and frozen maximum Targets/attempts are checked inside the transaction; existing `update_pending_agent_task_connection` remains the serializing connection validation authority. Changing a started or ambiguous Task is forbidden; adding more contacts beyond its original `maxTargets` requires a new Task. Legacy single-contact update RPC is untouched.
+
+## User workflow
+
+1. Open **الوكلاء → مهام الوكلاء → إنشاء مهمة Coverage**.
+2. Select the published Agent and applicable Coverage Request; explicitly select the WhatsApp session or the validated per-target latest inbound route.
+3. Search existing WACRM CRM contacts by name or phone, press **+** next to each intended contact (up to 20 and published Builder cap), review the selected list and eligibility status, and remove mistakes before creating.
+4. Confirm each recipient's consent/opt-out status and an OpenWA recent inbound 24h conversation (or Meta's approved-template constraints). Set per-target attempt count within the Builder limit; `maxTargets` equals the number of selected contacts.
+5. After explicit confirmation, create ONE Task. When an authorized Task worker and Task cutover are enabled, the existing runtime materializes **separate Targets and Runs per approved contact**; safety blocks/temporary cooldowns can prevent or defer individual contacts. Each initial outreach has its own durable reservation/idempotency identity. Replies correlate by conversation/Task Target, not by the shared Task alone.
+6. Track the Task/Targets and their outcome. Do not assume all numbers were sent merely because the Task was created; review skip reasons and unsettled provider outcomes. Never blindly resend on timeout.
+
+## Rollout and gates
+
+- Initial deployment is **code + additive migration only**, no live sends. TEST `Agent Task Cutover` remains `disabled` after SOF-63 rollback; per-session OpenWA Pilot remains operator-controlled. Do NOT silently reactivate Task cutover or loosen any connection guardrail.
+- Automated CI: strict selection parser, explicit recipient order/domain filter, POST/PATCH auth/eligibility/count checks, GET batch contact preview, no permission leak on migration 163, clean migration replay, lint/typecheck/tests/build, existing Meta/OpenWA regressions.
+- **Live TEST acceptance pending** until the operator chooses 2–3 owned/consenting TEST CRM contacts with compatible Coverage supplier history, the exact provider/session is available, no ambiguous sends, cutover is explicitly re-authorized, and a bounded multi-target worker is safely deployed. Require one Task with exact 2–3 Targets, at most 1 initial outreach each, correct provider IDs, no cross-contact replies, no duplicate/ambiguous replay, safe pause/rollback and post-rollback inbound. The prior SOF-63 one-target harness is deliberately frozen to one TEST identity; **do not reuse it for multi-target outreach**.
+- Current CI and implementation alone indicate **implementation complete** once verified, not `TEST verified` or `live acceptance complete` for SOF-66. Parent Phase 18 bounded-batch gate remains open until separately accepted.
+- No Production readiness assertion. Supabase `PROJECT_NOTES.md` NOTE-001 remains open.

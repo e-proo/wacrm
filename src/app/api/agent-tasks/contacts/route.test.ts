@@ -30,9 +30,10 @@ beforeEach(() => {
   stubs.eligible.mockResolvedValue({ eligible: true })
   stubs.from.mockImplementation(() => {
     const q = {
-      eq: vi.fn(), or: vi.fn(), select: vi.fn(), order: vi.fn(), limit: vi.fn(),
+      eq: vi.fn(), in: vi.fn(), or: vi.fn(), select: vi.fn(), order: vi.fn(), limit: vi.fn(),
     }
     q.eq.mockReturnValue(q)
+    q.in.mockReturnValue(q)
     q.or.mockReturnValue(q)
     q.select.mockReturnValue(q)
     q.order.mockReturnValue(q)
@@ -84,4 +85,37 @@ describe('Agent Task existing CRM contact picker API', () => {
       'name.ilike.%TESTideqforeign%,phone.ilike.%TESTideqforeign%',
     )
   })
+  it('checks each selected contact without returning an unscoped phone list', async () => {
+    const second = '55555555-5555-4555-8555-555555555555'
+    const url = new URL('http://localhost/api/agent-tasks/contacts')
+    url.searchParams.set('contactIds',[contactId,second].join(','))
+    url.searchParams.set('coverageRequestId',requestId)
+    const response = await GET(new Request(url))
+    const data = await response.json()
+    expect(response.status).toBe(200)
+    expect(data.eligibilityById[contactId]).toEqual({eligible:true})
+    expect(data.eligibilityById[second]).toEqual({
+      eligible:false,reason:'contact_not_found',
+    })
+    const q = stubs.from.mock.results[0].value
+    expect(q.eq).toHaveBeenCalledWith('account_id',acct)
+    expect(q.in).toHaveBeenCalledWith('id',[contactId,second])
+    expect(stubs.eligible).toHaveBeenCalledTimes(1)
+  })
+  it('does not query the CRM for malformed, duplicated or excessive recipient IDs', async () => {
+    for (const ids of [
+      contactId + ',' + contactId,
+      contactId + ',invalid-phone',
+      '',
+      Array.from({length:21},(_,i) =>
+        `00000000-0000-4000-8000-${String(i).padStart(12,'0')}`).join(','),
+    ]) {
+      const url = new URL('http://localhost/api/agent-tasks/contacts')
+      url.searchParams.set('contactIds',ids)
+      const response = await GET(new Request(url))
+      expect(response.status).toBe(400)
+    }
+    expect(stubs.from).not.toHaveBeenCalled()
+  })
+
 })

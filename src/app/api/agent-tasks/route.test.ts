@@ -190,4 +190,78 @@ describe('per-Task WhatsApp configuration API (SOF-64)', () => {
     expect(stubs.startCoverageSourcingTask).not.toHaveBeenCalled()
   })
 
+  it('accepts several exact CRM recipients in one Task while ignoring client tenant IDs', async () => {
+    const otherContact = '88888888-8888-4888-8888-888888888888'
+    const response = await POST(jsonRequest('POST', {
+      accountId: 'foreign-account', actorUserId: 'foreign-user',
+      agentId, coverageRequestId: requestId, whatsappConnectionId: connectionId,
+      selectedContactIds: [contactId, otherContact],
+      maxTargets: 2, maxAttemptsPerTarget: 1,
+    }))
+    expect(response.status).toBe(201)
+    expect(stubs.startCoverageSourcingTask).toHaveBeenCalledWith(expect.objectContaining({
+      accountId, actorUserId: userId,
+      selectedContactIds: [contactId, otherContact], maxTargets: 2,
+    }))
+  })
+
+  it('rejects duplicate, malformed, too-long or ambiguous contact choices', async () => {
+    for (const invalid of [
+      { selectedContactIds: [contactId, contactId] },
+      { selectedContactIds: [] },
+      { selectedContactIds: [contactId,'random-phone'] },
+      { selectedContactId: contactId, selectedContactIds: [contactId] },
+      { selectedContactIds: Array.from({ length: 21 },(_,i) =>
+        `00000000-0000-4000-8000-${String(i).padStart(12,'0')}`) },
+    ]) {
+      const response = await POST(jsonRequest('POST', {
+        agentId, coverageRequestId: requestId, whatsappConnectionId: connectionId,
+        maxTargets: 2, maxAttemptsPerTarget: 1, ...invalid,
+      }))
+      expect(response.status).toBe(400)
+    }
+    expect(stubs.startCoverageSourcingTask).not.toHaveBeenCalled()
+  })
+
+  it('validates EACH selected supplier before updating pending Task with service-only RPC', async () => {
+    const otherContact = '88888888-8888-4888-8888-888888888888'
+    const response = await PATCH(jsonRequest('PATCH', {
+      taskId, whatsappConnectionId: connectionId,
+      selectedContactIds: [contactId,otherContact],
+      maxTargets: 2, maxAttemptsPerTarget: 1,
+      accountId: 'foreign-account',
+    }))
+    expect(response.status).toBe(200)
+    expect(stubs.eligibility).toHaveBeenCalledTimes(2)
+    expect(stubs.rpc).toHaveBeenCalledWith('update_pending_agent_task_targets',{
+      p_account_id: accountId,p_task_id:taskId,p_actor_user_id:userId,
+      p_connection_id:connectionId,
+      p_selected_contact_ids:[contactId,otherContact],
+      p_max_targets:2,p_max_attempts_per_target:1,
+    })
+  })
+
+  it('refuses the entire selection if even the second supplier is ineligible', async () => {
+    const otherContact = '88888888-8888-4888-8888-888888888888'
+    stubs.eligibility.mockResolvedValueOnce({eligible:true})
+      .mockResolvedValueOnce({eligible:false,reason:'not_eligible_supplier'})
+    const response = await PATCH(jsonRequest('PATCH', {
+      taskId,whatsappConnectionId:connectionId,
+      selectedContactIds:[contactId,otherContact],
+      maxTargets:2,maxAttemptsPerTarget:1,
+    }))
+    expect(response.status).toBe(409)
+    expect((await response.json()).code).toBe('COVERAGE_CONTACT_NOT_ELIGIBLE')
+    expect(stubs.rpc).not.toHaveBeenCalled()
+  })
+
+  it('rejects a multi-recipient edit when its target count differs from selected IDs', async () => {
+    const response = await PATCH(jsonRequest('PATCH', {
+      taskId,whatsappConnectionId:connectionId,
+      selectedContactIds:[contactId],maxTargets:2,maxAttemptsPerTarget:1,
+    }))
+    expect(response.status).toBe(400)
+    expect(stubs.rpc).not.toHaveBeenCalled()
+  })
+
 })

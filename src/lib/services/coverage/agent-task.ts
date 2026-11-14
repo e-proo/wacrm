@@ -16,6 +16,7 @@ import {
   type CoverageAttributes,
   type CoverageMethod,
 } from './attributes'
+import { parseExplicitCoverageContactIds } from './selected-targets'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -268,19 +269,25 @@ export async function loadCoverageSourcingTaskContext(
 export function parseCoverageSelectedContactId(
   targetPolicy: Readonly<Record<string, unknown>>,
 ): string | null {
-  if (!Object.prototype.hasOwnProperty.call(targetPolicy, 'selectedContactId')) return null
-  const id = targetPolicy.selectedContactId
-  if (typeof id !== 'string' || !UUID_RE.test(id)) {
+  // Kept for backward-compatible one-recipient callers. A multi-target policy
+  // MUST use parseExplicitCoverageContactIds instead of silently picking one.
+  let ids: readonly string[] | null
+  try {
+    ids = parseExplicitCoverageContactIds(targetPolicy)
+  } catch {
     throw new Error('COVERAGE_SOURCING_SELECTED_CONTACT_INVALID')
   }
-  return id
+  if (ids && ids.length !== 1) {
+    throw new Error('COVERAGE_SOURCING_SELECTED_CONTACT_INVALID')
+  }
+  return ids?.[0] ?? null
 }
 
 export function buildCoverageSupplierCandidates(
   request: CoverageRequestRow,
   offerRows: readonly CoverageOfferHistoryRow[],
   allowedRegionIds: readonly string[] = [],
-  selectedContactId: string | null = null,
+  selectedContactIds: string | readonly string[] | null = null,
 ): AgentTaskTargetCandidate[] {
   const normalizedRequest = normalizeCoverageAttributes(request.attributes)
   if (!normalizedRequest.ok) {
@@ -288,41 +295,47 @@ export function buildCoverageSupplierCandidates(
   }
   const requestAttributes = normalizedRequest.normalized
   const regionScope = new Set(allowedRegionIds)
+  const selected = typeof selectedContactIds === 'string'
+    ? [selectedContactIds]
+    : selectedContactIds
+  const selectedSet = selected ? new Set(selected) : null
   const candidates: AgentTaskTargetCandidate[] = []
 
   for (const row of offerRows) {
-    if (selectedContactId && row.provider_contact_id !== selectedContactId) continue
+    if (selectedSet && !selectedSet.has(row.provider_contact_id)) continue
     if (row.provider_contact_id === request.requester_contact_id) continue
     if (!UUID_RE.test(row.provider_contact_id)) continue
 
     const normalizedOffer = normalizeCoverageAttributes(row.attributes)
     if (!normalizedOffer.ok) continue
     const offerAttributes = normalizedOffer.normalized
-    if (
-      !coverageOfferMatchesSourcingRequest(
-        requestAttributes,
-        offerAttributes,
-      )
-    ) {
-      continue
-    }
+    if (!coverageOfferMatchesSourcingRequest(
+      requestAttributes, offerAttributes,
+    )) continue
     if (
       regionScope.size > 0 &&
       ![offerAttributes.pay_region_id, offerAttributes.receive_region_id].some(
-        (regionId) => regionId !== null && regionScope.has(regionId),
+        regionId => regionId !== null && regionScope.has(regionId),
       )
-    ) {
-      continue
-    }
+    ) continue
 
+    // Respect an operator's exact selected order before the normal
+    // deterministic supplier-history rank. The kernel still deduplicates
+    // contact identities and SQL independently checks admission per contact.
+    const selectedRank = selected && selected.length > 1
+      ? String(selected.indexOf(row.provider_contact_id)).padStart(3, '0') + ':'
+      : ''
     candidates.push({
       contactId: row.provider_contact_id,
       counterpartyRole: 'coverage_supplier',
-      sortKey:
+      sortKey: selectedRank +
         supplierHistorySortKey(row) + ':' + row.provider_contact_id,
     })
   }
-
+  if (selected && selected.length > 1) {
+    candidates.sort((a,b) =>
+      selected.indexOf(a.contactId) - selected.indexOf(b.contactId))
+  }
   return candidates
 }
 
@@ -354,28 +367,34 @@ export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
     }
     if (!(positiveRemaining(request) > 0)) return []
 
-    const selectedContactId = parseCoverageSelectedContactId(context.targetPolicy)
-    const queryLimit = selectedContactId ? 1000 : Math.max(
+    const selectedContactIds = parseExplicitCoverageContactIds(context.targetPolicy)
+    const queryLimit = selectedContactIds ? 1000 : Math.max(
       20,
       Math.min(context.maxCandidates * 10, 1000),
     )
 
-    // Filter in SQL *before* LIMIT, so a manual selection cannot be missed
-    // merely because another supplier has more recent history.
-    let offersQuery = db
-      .from('coverage_offers')
-      .select('provider_contact_id, attributes, status, created_at')
-      .eq('account_id', context.accountId)
-      .eq('service_id', request.service_id)
-      .eq('currency', request.currency)
-      .in('status', [...SUPPLIER_HISTORY_STATUSES])
-      .neq('provider_contact_id', request.requester_contact_id)
-    if (selectedContactId) offersQuery = offersQuery.eq('provider_contact_id', selectedContactId)
-    const { data: offerRows, error: offersError } = await offersQuery
-      .order('created_at', { ascending: false })
-      .limit(queryLimit)
-
-    if (offersError) throw offersError
+    // Filter by EACH explicit contact in SQL *before* LIMIT. A single shared
+    // LIMIT after .in() can hide a selected supplier with older history if
+    // another selected supplier has many more recent offers.
+    const loadOffers = (contactId: string | null) => {
+      let query = db.from('coverage_offers')
+        .select('provider_contact_id, attributes, status, created_at')
+        .eq('account_id', context.accountId)
+        .eq('service_id', request.service_id)
+        .eq('currency', request.currency)
+        .in('status', [...SUPPLIER_HISTORY_STATUSES])
+        .neq('provider_contact_id', request.requester_contact_id)
+      if (contactId) query = query.eq('provider_contact_id', contactId)
+      return query.order('created_at', { ascending: false }).limit(queryLimit)
+    }
+    const groups = selectedContactIds
+      ? await Promise.all(selectedContactIds.map(contactId => loadOffers(contactId)))
+      : [await loadOffers(null)]
+    const offerRows: CoverageOfferHistoryRow[] = []
+    for (const group of groups) {
+      if (group.error) throw group.error
+      offerRows.push(...((group.data ?? []) as CoverageOfferHistoryRow[]))
+    }
 
     const coverageRegionIds = context.targetPolicy.coverageRegionIds
     const allowedRegionIds =
@@ -393,9 +412,9 @@ export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
 
     return buildCoverageSupplierCandidates(
       request,
-      (offerRows ?? []) as CoverageOfferHistoryRow[],
+      offerRows,
       allowedRegionIds,
-      selectedContactId,
+      selectedContactIds,
     )
   },
 }

@@ -13,6 +13,11 @@ import {
 import type { AgentTaskStartSource } from '@/lib/ai/tasks/triggers'
 import { checkCoverageSelectedContactEligibility } from './selected-contact'
 import {
+  normalizeExplicitCoverageContactIds,
+  parseExplicitCoverageContactIds,
+  sameExplicitCoverageContacts,
+} from './selected-targets'
+import {
   COVERAGE_SOURCING_TASK_TYPE,
   COVERAGE_SOURCING_TASK_TYPE_V2,
   loadCoverageSourcingTaskContext,
@@ -51,8 +56,10 @@ export interface StartCoverageSourcingTaskInput {
   agentId: string
   actorUserId: string | null
   whatsappConnectionId?: string | null
-  /** Explicit, single WACRM contact for the manual Task; no agent-selected recipient. */
+  /** Legacy one-recipient input; mutually exclusive with selectedContactIds. */
   selectedContactId?: string | null
+  /** Ordered list of existing eligible CRM contacts, never raw phone numbers. */
+  selectedContactIds?: readonly string[] | null
   maxTargets?: number
   maxAttemptsPerTarget?: number
   requestedTaskTypeVersion?: 1 | 2
@@ -101,6 +108,17 @@ function taskIdempotencyKey(input: {
 export async function startCoverageSourcingTask(
   input: StartCoverageSourcingTaskInput,
 ): Promise<StartCoverageSourcingTaskResult> {
+  let explicitContacts: readonly string[] | null
+  try {
+    explicitContacts = normalizeExplicitCoverageContactIds(input)
+  } catch {
+    throw new CoverageSourcingTaskError(
+      'COVERAGE_SOURCING_SELECTED_CONTACTS_INVALID',
+      'Choose between 1 and 20 unique CRM contacts; do not mix single and multiple selections.',
+      400,
+    )
+  }
+
   const db = supabaseAdmin()
 
   const runtimePolicy = await loadAccountRuntimePolicy(db, input.accountId)
@@ -158,8 +176,11 @@ export async function startCoverageSourcingTask(
         'This request already has an active Task on a different connection. Edit its pending configuration or wait for it to finish.',
       )
     }
-    if (input.selectedContactId &&
-        row.target_policy?.selectedContactId !== input.selectedContactId) {
+    if (explicitContacts &&
+        !sameExplicitCoverageContacts(
+          explicitContacts,
+          parseExplicitCoverageContactIds(row.target_policy ?? {}),
+        )) {
       throw new CoverageSourcingTaskError(
         'COVERAGE_SOURCING_TARGET_CHANGE_REQUIRES_PENDING_EDIT',
         'An active Task already targets another contact. Only a pending Task can be edited.',
@@ -369,8 +390,8 @@ export async function startCoverageSourcingTask(
     }
     connectionId = wa.id
   }
-  // A manual OpenWA Task must identify its actual recipient, not merely a
-  // maxTargets=1 cap that might select another supplier in sorted history.
+  // A manual OpenWA Task must identify all intended recipients, not merely
+  // set a maxTargets cap that could reach an arbitrary sorted supplier.
   if (connectionId && input.whatsappConnectionId &&
       manifest.messagePolicy.version === 2) {
     const { data: chosen, error: chosenError } = await db.from('whatsapp_connections')
@@ -378,39 +399,47 @@ export async function startCoverageSourcingTask(
       .eq('id', connectionId).maybeSingle()
     if (chosenError) throw chosenError
     if (chosen?.provider === 'openwa' &&
-        input.trigger == null && !input.selectedContactId) {
+        input.trigger == null && !explicitContacts) {
       throw new CoverageSourcingTaskError(
         'COVERAGE_SOURCING_EXPLICIT_CONTACT_REQUIRED',
-        'Select one verified contact for a manual OpenWA Task.', 400,
+        'Select verified CRM contacts for this manual OpenWA Task.', 400,
       )
     }
   }
-  if (input.selectedContactId != null) {
-    if (!UUID_RE.test(input.selectedContactId)) {
-      throw new CoverageSourcingTaskError('COVERAGE_SOURCING_CONTACT_ID_INVALID',
-        'Select a valid contact from the account.', 400)
-    }
-    if (input.maxTargets !== undefined && input.maxTargets !== 1) {
-      throw new CoverageSourcingTaskError('COVERAGE_SOURCING_SINGLE_CONTACT_LIMIT',
-        'An explicitly selected contact requires maxTargets=1.', 400)
-    }
-    const eligibility = await checkCoverageSelectedContactEligibility(db, {
-      accountId: input.accountId,
-      coverageRequestId: input.coverageRequestId,
-      contactId: input.selectedContactId,
-      coverageRegionIds: binding.targetScope.regionIds,
-    })
-    if (!eligibility.eligible) {
+  if (explicitContacts) {
+    if (input.maxTargets !== undefined &&
+        input.maxTargets !== explicitContacts.length) {
       throw new CoverageSourcingTaskError(
-        'COVERAGE_SOURCING_CONTACT_NOT_ELIGIBLE',
-        eligibility.reason === 'contact_not_found'
-          ? 'The selected contact does not belong to this account.'
-          : 'The selected contact has no matching Coverage supplier history for this request.',
-        409,
+        'COVERAGE_SOURCING_SELECTED_COUNT_MISMATCH',
+        'maxTargets must equal the number of explicitly selected contacts.',
+        400,
       )
     }
+    // Check every selected contact (not just the first or newest offer).
+    // Each must already exist in this tenant and match the same Coverage
+    // request. SQL materialization independently checks opt-out, suppression,
+    // cooldown, budgets and per-provider admission before each real send.
+    for (const contactId of explicitContacts) {
+      const eligibility = await checkCoverageSelectedContactEligibility(db, {
+        accountId: input.accountId,
+        coverageRequestId: input.coverageRequestId,
+        contactId,
+        coverageRegionIds: binding.targetScope.regionIds,
+      })
+      if (!eligibility.eligible) {
+        throw new CoverageSourcingTaskError(
+          'COVERAGE_SOURCING_CONTACT_NOT_ELIGIBLE',
+          eligibility.reason === 'contact_not_found'
+            ? 'A selected contact does not belong to this account.'
+            : 'A selected contact has no matching Coverage supplier history.',
+          409,
+        )
+      }
+    }
   }
-  const desiredMaxTargets = input.selectedContactId ? 1 : (input.maxTargets ?? binding.maxTargets)
+  const desiredMaxTargets = explicitContacts
+    ? explicitContacts.length
+    : (input.maxTargets ?? binding.maxTargets)
   const desiredAttempts = input.maxAttemptsPerTarget ?? binding.maxAttemptsPerTarget
   if (!Number.isInteger(desiredMaxTargets) || desiredMaxTargets < 1 ||
       desiredMaxTargets > binding.maxTargets ||
@@ -438,7 +467,11 @@ export async function startCoverageSourcingTask(
     cooldownMinutes: binding.cooldownMinutes,
     coverageRegionIds: [...binding.targetScope.regionIds],
     ...(connectionId ? { whatsappConnectionId: connectionId } : {}),
-    ...(input.selectedContactId ? { selectedContactId: input.selectedContactId } : {}),
+    ...(explicitContacts && explicitContacts.length === 1
+      ? { selectedContactId: explicitContacts[0] }
+      : explicitContacts
+        ? { selectedContactIds: [...explicitContacts] }
+        : {}),
   }
   const budgetPolicy = {
     source: 'agent_builder_v2',
