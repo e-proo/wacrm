@@ -1798,6 +1798,8 @@ OpenAI-compatible / Anthropic / Gemini native حسب الاتصالات المد
 13. rollback
 ```
 
+**Phase 18 one-target live TEST checkpoint — 2026-11-14:** SOF-63 (`SOF-23E`) completed its **one-target OpenWA live TEST acceptance** at `bb86ef4e808fbd6de4413a856a21e167be7bfb1c` (CI [#43614965165](https://github.com/e-proo/wacrm/actions/runs/43614965165) successful). A single consented TEST contact received one real outbound; four distinct replies correlated and were answered without duplicate initial outreach; guarded `disabled` rollback, safe cancellation of test-only Task (no fabricated Coverage completion), and **post-rollback inbound CRM receipt** were independently verified with 0 unsettled messages. Test used explicit operator-authorized **OpenWA Pilot OFF** with a frozen own-number hash gate; Agent Task Cutover later disabled. See [SOF-63 acceptance runbook](14_SOF63_ONE_TARGET_LIVE_TEST.md) for exact IDs, timestamps, security caveats and CI/TEST evidence. **This closes only the SOF-63 one-target subgate**, not the broader Phase 18 sequence (including small bounded batch, pause/resume, crash/recovery), nor Production readiness. `NOTE-001` remains open.
+
 ---
 
 # Phase 19 — Coverage Sourcing Pilot
