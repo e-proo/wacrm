@@ -20,3 +20,18 @@ Hosted TEST evidence: `ai_agent_runs.status=failed`, `error_code=AGENT_OUTBOUND_
 Because the original Task target was exhausted without any reservation, it **cannot** be safely retried or requeued: `max_attempts_per_target=1` was an intentionally frozen safety cap. The existing Task completion policy can finalize the exhausted Task after checking zero reservations; a new isolated TEST Task with a unique idempotency identity/revision or a new TEST-only Request can then be created *after* fresh recipient consent/inbound and a renewed `agent` allowlist grant. Do not create a duplicate Task until the previous one is terminal, and don't silently expand caps.
 
 Re-run existing automated CI and TEST-only dry run. One-target **live acceptance still pending**: new Task, scoped prepare, scoped send, receipt, reply and rollback. Production readiness remains out of scope.
+
+## Scoped failure finalization — no send, no retry
+
+The existing `evaluateCurrentTaskCompletion` policy finalizes a `running` Coverage Task with only `exhausted` targets as `partially_completed / supplier_targets_exhausted`. This is a terminal state, not delivery success. An opt-in `finalize_failed` stage was added to the SOF-63 live test command to call **only** this domain completion policy after verifying that the exact TEST Task has one exhausted target, one failed outbound Run, both with `AGENT_OUTBOUND_NEEDS_HUMAN`, and zero reservations.
+
+```powershell
+$env:WACRM_AGENT_TASK_CUTOVER_ACCOUNT_ID="8ed95309-96cd-4347-b725-bd8c5039ed4f"
+$env:WACRM_AGENT_TASK_ONE_TARGET_TASK_ID="86e1cbc3-4d2b-4f1f-8f81-45fd64889c1d"
+$env:WACRM_AGENT_TASK_ONE_TARGET_LIVE="1"
+$env:WACRM_AGENT_TASK_ONE_TARGET_STAGE="finalize_failed"
+$env:WACRM_AGENT_TASK_ONE_TARGET_CONFIRM="FINALIZE_FAILED_NO_SEND"
+npm run test:agent-task-one-target-live
+```
+
+This stage never calls the worker, creates a Target/Run/reservation, sends WhatsApp, or resets attempts. It must be invoked **only after green CI** and with operator confirmation. Do not run `prepare` or `send` against the failed Task. After finalization, create a *new TEST-only request/Task identity* (because the existing manual Coverage idempotency key includes request + agent + frozen revision), and verify renewed consent/inbound and OpenWA recipient grant before a second live acceptance attempt. No automatic resend.

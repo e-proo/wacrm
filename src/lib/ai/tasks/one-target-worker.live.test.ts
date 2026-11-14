@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../admin-client'
 import { inspectAgentTaskTestCutoverReadiness } from './cutover'
 import { processAgentTaskQueue } from './orchestrator'
 import { processAgentTaskOutboundRunQueue } from './outbound-worker'
+import { evaluateCurrentTaskCompletion } from './current-platform'
 
 /**
  * SOF-63: manually tick only the Task Orchestrator and the outbound
@@ -184,9 +185,68 @@ async function loadExclusiveTask(stageName: 'prepare' | 'send') {
   return { accountId, taskId, contactId, connectionId, db }
 }
 
+/**
+ * Close an exhausted, unsent TEST Task using the existing domain completion
+ * policy. It never calls either worker and never creates a new attempt.
+ * The only permitted prior failure is the observed pre-reservation handoff.
+ */
+async function finalizeFailedHandoffTask(): Promise<void> {
+  const { accountId, taskId } = accountConfig()
+  const db = supabaseAdmin()
+  const { data: task, error: taskError } = await db.from('ai_agent_tasks')
+    .select('id,status,task_type,task_type_version,task_context')
+    .eq('account_id', accountId).eq('id', taskId).maybeSingle()
+  if (taskError) throw taskError
+  const row = fields(task)
+  const context = fields(row.task_context)
+  must(row.status === 'running' &&
+    row.task_type === 'coverage.sourcing' &&
+    row.task_type_version === 2 &&
+    context.coverageRequestId === TEST_REQUEST, 'FINALIZE_UNEXPECTED_TASK')
+
+  const [{ data: targets, error: targetError },
+    { data: runs, error: runError },
+    { data: reservations, error: reservationsError }] = await Promise.all([
+    db.from('ai_agent_task_targets').select('id,status,attempt_count,failure_code')
+      .eq('account_id',accountId).eq('task_id',taskId).limit(2),
+    db.from('ai_agent_runs').select('id,status,attempt_count,error_code')
+      .eq('account_id',accountId).eq('task_id',taskId)
+      .eq('run_mode','outbound').limit(2),
+    db.from('ai_agent_task_outbound_messages').select('id')
+      .eq('account_id',accountId).eq('task_id',taskId).limit(1),
+  ])
+  if (targetError) throw targetError
+  if (runError) throw runError
+  if (reservationsError) throw reservationsError
+  must(reservations?.length === 0, 'FINALIZE_RESERVATION_EXISTS')
+  must(targets?.length === 1 && targets[0].status === 'exhausted' &&
+    targets[0].attempt_count === 1 &&
+    targets[0].failure_code === 'AGENT_OUTBOUND_NEEDS_HUMAN',
+    'FINALIZE_TARGET_NOT_EXPECTED_FAILURE')
+  must(runs?.length === 1 && runs[0].status === 'failed' &&
+    runs[0].attempt_count === 1 &&
+    runs[0].error_code === 'AGENT_OUTBOUND_NEEDS_HUMAN',
+    'FINALIZE_RUN_NOT_EXPECTED_FAILURE')
+  const completion = await evaluateCurrentTaskCompletion(taskId)
+  expect(completion.finalized).toBe(true)
+  expect(completion.status).toBe('partially_completed')
+  expect(completion.reason).toBe('supplier_targets_exhausted')
+  const { data: remaining, error: verifyError } = await db.from('ai_agent_tasks')
+    .select('status').eq('account_id', accountId).eq('id',taskId).maybeSingle()
+  if (verifyError) throw verifyError
+  expect(remaining?.status).toBe('partially_completed')
+  console.info('SOF63 FINALIZED: exhausted unsent Task closed; no send, no retry.')
+}
+
 (enabled ? describe : describe.skip)('SOF-63 scoped TEST-only worker', () => {
   it('runs precisely the approved stage; the generic worker is never called', async () => {
-    must(stage === 'prepare' || stage === 'send', 'STAGE_REQUIRED')
+    must(stage === 'prepare' || stage === 'send' || stage === 'finalize_failed', 'STAGE_REQUIRED')
+    if (stage === 'finalize_failed') {
+      must(process.env.WACRM_AGENT_TASK_ONE_TARGET_CONFIRM === 'FINALIZE_FAILED_NO_SEND',
+        'FINALIZE_EXPLICIT_CONFIRM_REQUIRED')
+      await finalizeFailedHandoffTask()
+      return
+    }
     const confirmed = stage === 'prepare'
       ? 'PREPARE_ONE_TARGET_NO_SEND'
       : 'SEND_ONE_TARGET_TEST_NOW'
