@@ -260,10 +260,27 @@ export async function loadCoverageSourcingTaskContext(
   }
 }
 
+/**
+ * An administrator can narrow sourcing to a single contact already in WACRM.
+ * This is a FILTER on eligible supplier history, never a substitute for
+ * supplier matching, consent/opt-out policy or outbound transport checks.
+ */
+export function parseCoverageSelectedContactId(
+  targetPolicy: Readonly<Record<string, unknown>>,
+): string | null {
+  if (!Object.prototype.hasOwnProperty.call(targetPolicy, 'selectedContactId')) return null
+  const id = targetPolicy.selectedContactId
+  if (typeof id !== 'string' || !UUID_RE.test(id)) {
+    throw new Error('COVERAGE_SOURCING_SELECTED_CONTACT_INVALID')
+  }
+  return id
+}
+
 export function buildCoverageSupplierCandidates(
   request: CoverageRequestRow,
   offerRows: readonly CoverageOfferHistoryRow[],
   allowedRegionIds: readonly string[] = [],
+  selectedContactId: string | null = null,
 ): AgentTaskTargetCandidate[] {
   const normalizedRequest = normalizeCoverageAttributes(request.attributes)
   if (!normalizedRequest.ok) {
@@ -274,6 +291,7 @@ export function buildCoverageSupplierCandidates(
   const candidates: AgentTaskTargetCandidate[] = []
 
   for (const row of offerRows) {
+    if (selectedContactId && row.provider_contact_id !== selectedContactId) continue
     if (row.provider_contact_id === request.requester_contact_id) continue
     if (!UUID_RE.test(row.provider_contact_id)) continue
 
@@ -336,12 +354,15 @@ export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
     }
     if (!(positiveRemaining(request) > 0)) return []
 
-    const queryLimit = Math.max(
+    const selectedContactId = parseCoverageSelectedContactId(context.targetPolicy)
+    const queryLimit = selectedContactId ? 1000 : Math.max(
       20,
       Math.min(context.maxCandidates * 10, 1000),
     )
 
-    const { data: offerRows, error: offersError } = await db
+    // Filter in SQL *before* LIMIT, so a manual selection cannot be missed
+    // merely because another supplier has more recent history.
+    let offersQuery = db
       .from('coverage_offers')
       .select('provider_contact_id, attributes, status, created_at')
       .eq('account_id', context.accountId)
@@ -349,6 +370,8 @@ export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
       .eq('currency', request.currency)
       .in('status', [...SUPPLIER_HISTORY_STATUSES])
       .neq('provider_contact_id', request.requester_contact_id)
+    if (selectedContactId) offersQuery = offersQuery.eq('provider_contact_id', selectedContactId)
+    const { data: offerRows, error: offersError } = await offersQuery
       .order('created_at', { ascending: false })
       .limit(queryLimit)
 
@@ -372,6 +395,7 @@ export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
       request,
       (offerRows ?? []) as CoverageOfferHistoryRow[],
       allowedRegionIds,
+      selectedContactId,
     )
   },
 }

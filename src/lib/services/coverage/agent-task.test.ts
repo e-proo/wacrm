@@ -7,6 +7,7 @@ import {
   COVERAGE_SOURCING_TASK_TYPE_V2,
   COVERAGE_SOURCING_MESSAGE_POLICY_V2,
   buildCoverageSupplierCandidates,
+  parseCoverageSelectedContactId,
   coverageOfferMatchesSourcingRequest,
   supplierHistorySortKey,
 } from './agent-task'
@@ -145,6 +146,50 @@ describe('Coverage sourcing Agent Task', () => {
     ])
     expect(candidates.every((candidate) => candidate.counterpartyRole === 'coverage_supplier')).toBe(true)
     expect(candidates.some((candidate) => candidate.contactId === REQUESTER)).toBe(false)
+  })
+
+  it('restricts manual sourcing to the selected existing supplier only', () => {
+    const request = {
+      id: '00000000-0000-4000-8000-000000000666',
+      service_id: '00000000-0000-4000-8000-000000000777',
+      requester_contact_id: REQUESTER,
+      requested_amount: '100000',
+      reserved_amount: '0',
+      fulfilled_amount: '0',
+      currency: 'SAR',
+      attributes: requestAttributes() as unknown as Record<string, unknown>,
+      status: 'active',
+    }
+    const eligibleRows = [
+      {
+        provider_contact_id: SUPPLIER_A,
+        attributes: matchingOfferAttributes() as unknown as Record<string, unknown>,
+        status: 'active' as const, created_at: '2026-11-14T12:00:00Z',
+      },
+      {
+        provider_contact_id: SUPPLIER_B,
+        attributes: matchingOfferAttributes() as unknown as Record<string, unknown>,
+        status: 'active' as const, created_at: '2026-11-14T12:01:00Z',
+      },
+    ]
+    expect(buildCoverageSupplierCandidates(request, eligibleRows, [], SUPPLIER_A)
+      .map((item) => item.contactId)).toEqual([SUPPLIER_A])
+    expect(buildCoverageSupplierCandidates(request, eligibleRows, [], REQUESTER))
+      .toHaveLength(0)
+    expect(buildCoverageSupplierCandidates(request, eligibleRows, [], NORTH))
+      .toHaveLength(0)
+    expect(buildCoverageSupplierCandidates(request, [
+      { ...eligibleRows[0], attributes: requestAttributes() as unknown as Record<string, unknown> },
+    ], [], SUPPLIER_A)).toHaveLength(0)
+  })
+
+  it('validates manually selected contact ID and never treats malformed selection as automatic', () => {
+    expect(parseCoverageSelectedContactId({})).toBe(null)
+    expect(parseCoverageSelectedContactId({ selectedContactId: SUPPLIER_B })).toBe(SUPPLIER_B)
+    expect(() => parseCoverageSelectedContactId({ selectedContactId: null }))
+      .toThrow('COVERAGE_SOURCING_SELECTED_CONTACT_INVALID')
+    expect(() => parseCoverageSelectedContactId({ selectedContactId: 'another-tenant' }))
+      .toThrow('COVERAGE_SOURCING_SELECTED_CONTACT_INVALID')
   })
 
   it('prioritizes currently active supplier history before old terminal history', () => {

@@ -11,6 +11,7 @@ import {
   loadAgentRevisionToolGrants,
 } from '@/lib/ai/tasks/capability-policy'
 import type { AgentTaskStartSource } from '@/lib/ai/tasks/triggers'
+import { checkCoverageSelectedContactEligibility } from './selected-contact'
 import {
   COVERAGE_SOURCING_TASK_TYPE,
   COVERAGE_SOURCING_TASK_TYPE_V2,
@@ -50,6 +51,8 @@ export interface StartCoverageSourcingTaskInput {
   agentId: string
   actorUserId: string | null
   whatsappConnectionId?: string | null
+  /** Explicit, single WACRM contact for the manual Task; no agent-selected recipient. */
+  selectedContactId?: string | null
   maxTargets?: number
   maxAttemptsPerTarget?: number
   requestedTaskTypeVersion?: 1 | 2
@@ -153,6 +156,13 @@ export async function startCoverageSourcingTask(
       throw new CoverageSourcingTaskError(
         'COVERAGE_SOURCING_CONNECTION_CHANGE_REQUIRES_TASK_EDIT',
         'This request already has an active Task on a different connection. Edit its pending configuration or wait for it to finish.',
+      )
+    }
+    if (input.selectedContactId &&
+        row.target_policy?.selectedContactId !== input.selectedContactId) {
+      throw new CoverageSourcingTaskError(
+        'COVERAGE_SOURCING_TARGET_CHANGE_REQUIRES_PENDING_EDIT',
+        'An active Task already targets another contact. Only a pending Task can be edited.',
       )
     }
     return {
@@ -359,7 +369,48 @@ export async function startCoverageSourcingTask(
     }
     connectionId = wa.id
   }
-  const desiredMaxTargets = input.maxTargets ?? binding.maxTargets
+  // A manual OpenWA Task must identify its actual recipient, not merely a
+  // maxTargets=1 cap that might select another supplier in sorted history.
+  if (connectionId && input.whatsappConnectionId &&
+      manifest.messagePolicy.version === 2) {
+    const { data: chosen, error: chosenError } = await db.from('whatsapp_connections')
+      .select('provider').eq('account_id', input.accountId)
+      .eq('id', connectionId).maybeSingle()
+    if (chosenError) throw chosenError
+    if (chosen?.provider === 'openwa' &&
+        input.trigger == null && !input.selectedContactId) {
+      throw new CoverageSourcingTaskError(
+        'COVERAGE_SOURCING_EXPLICIT_CONTACT_REQUIRED',
+        'Select one verified contact for a manual OpenWA Task.', 400,
+      )
+    }
+  }
+  if (input.selectedContactId != null) {
+    if (!UUID_RE.test(input.selectedContactId)) {
+      throw new CoverageSourcingTaskError('COVERAGE_SOURCING_CONTACT_ID_INVALID',
+        'Select a valid contact from the account.', 400)
+    }
+    if (input.maxTargets !== undefined && input.maxTargets !== 1) {
+      throw new CoverageSourcingTaskError('COVERAGE_SOURCING_SINGLE_CONTACT_LIMIT',
+        'An explicitly selected contact requires maxTargets=1.', 400)
+    }
+    const eligibility = await checkCoverageSelectedContactEligibility(db, {
+      accountId: input.accountId,
+      coverageRequestId: input.coverageRequestId,
+      contactId: input.selectedContactId,
+      coverageRegionIds: binding.targetScope.regionIds,
+    })
+    if (!eligibility.eligible) {
+      throw new CoverageSourcingTaskError(
+        'COVERAGE_SOURCING_CONTACT_NOT_ELIGIBLE',
+        eligibility.reason === 'contact_not_found'
+          ? 'The selected contact does not belong to this account.'
+          : 'The selected contact has no matching Coverage supplier history for this request.',
+        409,
+      )
+    }
+  }
+  const desiredMaxTargets = input.selectedContactId ? 1 : (input.maxTargets ?? binding.maxTargets)
   const desiredAttempts = input.maxAttemptsPerTarget ?? binding.maxAttemptsPerTarget
   if (!Number.isInteger(desiredMaxTargets) || desiredMaxTargets < 1 ||
       desiredMaxTargets > binding.maxTargets ||
@@ -387,6 +438,7 @@ export async function startCoverageSourcingTask(
     cooldownMinutes: binding.cooldownMinutes,
     coverageRegionIds: [...binding.targetScope.regionIds],
     ...(connectionId ? { whatsappConnectionId: connectionId } : {}),
+    ...(input.selectedContactId ? { selectedContactId: input.selectedContactId } : {}),
   }
   const budgetPolicy = {
     source: 'agent_builder_v2',

@@ -8,6 +8,7 @@ DECLARE
   v_other_user uuid := '00000000-0000-4000-8000-000000001860';
   v_other_account uuid;
   v_other_connection uuid := gen_random_uuid();
+  v_other_contact uuid := gen_random_uuid();
   v_ai_connection uuid := gen_random_uuid();
   v_agent uuid := gen_random_uuid();
   v_revision uuid := gen_random_uuid();
@@ -51,6 +52,8 @@ BEGIN
   ) VALUES (
     v_other_connection,v_other_account,'openwa','ready','sof59-foreign-session'
   );
+  INSERT INTO public.contacts(id,user_id,account_id,phone,name)
+  VALUES (v_other_contact,v_other_user,v_other_account,'+967700001862','Foreign target');
 
   INSERT INTO public.whatsapp_connections(
     id,account_id,provider,status,session_id
@@ -156,12 +159,50 @@ BEGIN
   IF v_result->>'reason'<>'caps_cannot_increase' THEN
     RAISE EXCEPTION 'SOF64 increased Task caps after creation: %',v_result;
   END IF;
+  -- SOF-65: manual contact choice is account-scoped, owner-authorized,
+  -- one-target-only, and can never be changed after Task processing starts.
+  v_result:=public.update_pending_agent_task_target(
+    v_account,v_pending_task,v_other_user,v_wa,v_contact,1,1
+  );
+  IF v_result->>'reason'<>'admin_required' THEN
+    RAISE EXCEPTION 'SOF65 accepted a foreign actor: %',v_result;
+  END IF;
+  v_result:=public.update_pending_agent_task_target(
+    v_account,v_pending_task,v_user,v_wa,v_other_contact,1,1
+  );
+  IF v_result->>'reason'<>'contact_not_found' THEN
+    RAISE EXCEPTION 'SOF65 accepted a foreign contact: %',v_result;
+  END IF;
+  v_result:=public.update_pending_agent_task_target(
+    v_account,v_pending_task,v_user,v_wa,null,1,1
+  );
+  IF v_result->>'reason'<>'selected_contact_required' THEN
+    RAISE EXCEPTION 'SOF65 allowed unselected OpenWA recipient: %',v_result;
+  END IF;
+  v_result:=public.update_pending_agent_task_target(
+    v_account,v_pending_task,v_user,v_wa,v_contact,1,1
+  );
+  IF v_result->>'updated'<>'true' OR
+      NOT EXISTS (
+        SELECT 1 FROM public.ai_agent_tasks WHERE account_id=v_account
+          AND id=v_pending_task
+          AND target_policy->>'selectedContactId'=v_contact::text
+          AND target_policy->>'whatsappConnectionId'=v_wa::text
+      ) THEN
+    RAISE EXCEPTION 'SOF65 pending selected contact was not saved: %',v_result;
+  END IF;
   UPDATE public.ai_agent_tasks SET status='running' WHERE id=v_pending_task;
   v_result:=public.update_pending_agent_task_connection(
     v_account,v_pending_task,v_user,v_wa_other,1,1
   );
   IF v_result->>'reason'<>'task_not_editable' THEN
     RAISE EXCEPTION 'SOF64 edited a started Task: %',v_result;
+  END IF;
+  v_result:=public.update_pending_agent_task_target(
+    v_account,v_pending_task,v_user,v_wa,v_contact_meta,1,1
+  );
+  IF v_result->>'reason'<>'task_not_editable' THEN
+    RAISE EXCEPTION 'SOF65 edited a selected contact after Task start: %',v_result;
   END IF;
 
   INSERT INTO public.ai_agent_task_targets(
@@ -495,6 +536,22 @@ BEGIN
     'EXECUTE'
   ) THEN
     RAISE EXCEPTION 'SOF64 edit RPC grants are too broad';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.update_pending_agent_task_target(uuid,uuid,uuid,uuid,uuid,integer,integer)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.update_pending_agent_task_target(uuid,uuid,uuid,uuid,uuid,integer,integer)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.update_pending_agent_task_target(uuid,uuid,uuid,uuid,uuid,integer,integer)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'SOF65 selected recipient RPC grants unsafe';
   END IF;
 
   RAISE NOTICE 'SOF59 bound transport smoke passed';

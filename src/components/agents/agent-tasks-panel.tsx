@@ -5,6 +5,7 @@ import { RefreshCw, ShieldAlert, Send, Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { AgentTaskContactPicker } from './agent-task-contact-picker'
 
 interface Connection {
   id: string
@@ -35,6 +36,8 @@ interface Task {
   version: number
   status: string
   connectionId: string | null
+  selectedContactId: string | null
+  coverageRequestId: string | null
   maxTargets: number
   maxAttemptsPerTarget: number
   createdAt: string
@@ -81,12 +84,14 @@ export function AgentTasksPanel() {
   const [agentId, setAgentId] = useState('')
   const [requestId, setRequestId] = useState('')
   const [selectedConnection, setSelectedConnection] = useState('')
-  const [maxTargets, setMaxTargets] = useState(1)
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null)
+  const [contactEligible, setContactEligible] = useState<boolean | null>(null)
   const [maxAttempts, setMaxAttempts] = useState(1)
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editConnection, setEditConnection] = useState('')
-  const [editTargets, setEditTargets] = useState(1)
+  const [editContactId, setEditContactId] = useState<string | null>(null)
+  const [editContactEligible, setEditContactEligible] = useState<boolean | null>(null)
   const [editAttempts, setEditAttempts] = useState(1)
 
   const reload = useCallback(async () => {
@@ -118,12 +123,13 @@ export function AgentTasksPanel() {
   const canCreate = !busy && data?.outboundDeliveryEnabled === true &&
     Boolean(agentId) && Boolean(requestId) && Boolean(selectedConnection) &&
     currentReady && agentCanUseCoverage &&
+    Boolean(selectedContactId) && contactEligible === true &&
     (selectedProvider !== 'openwa' || agentCanUseOpenWA)
 
   async function createTask() {
     if (!canCreate) return
     if (!window.confirm(
-      'سيتم إنشاء مهمة مؤهلة للتنفيذ. إذا كانت بوابات التشغيل مفعّلة فقد يبدأ إرسال رسالة إلى جهة مؤهلة. هل تأكدت من إعداد الحدود والمستهدفين؟',
+      'سيتم إنشاء مهمة لمستهدف واحد محدد. عند تفعيل بوابات Pilot قد تُرسل رسالة واتساب إلى هذه الجهة. هل تحققت من موافقتها وحدود الإرسال؟',
     )) return
     setBusy(true)
     setError(null)
@@ -136,7 +142,8 @@ export function AgentTasksPanel() {
           body: JSON.stringify({
             agentId, coverageRequestId: requestId,
             whatsappConnectionId: selectedConnection === 'latest' ? null : selectedConnection,
-            maxTargets, maxAttemptsPerTarget: maxAttempts,
+            selectedContactId,
+            maxTargets: 1, maxAttemptsPerTarget: maxAttempts,
           }),
         }),
       )
@@ -154,14 +161,16 @@ export function AgentTasksPanel() {
   function beginEdit(task: Task) {
     setEditingId(task.id)
     setEditConnection(task.connectionId ?? 'latest')
-    setEditTargets(task.maxTargets)
+    setEditContactId(task.selectedContactId)
+    setEditContactEligible(null)
     setEditAttempts(task.maxAttemptsPerTarget)
     setError(null)
     setSuccess(null)
   }
 
   async function saveEdit() {
-    if (!editingId || !editConnection || busy) return
+    if (!editingId || !editConnection || busy ||
+        !editContactId || editContactEligible !== true) return
     if (editConnection !== 'latest' &&
         !available.some((connection) => connection.id === editConnection)) {
       setError('الجلسة المختارة غير جاهزة أو مؤرشفة.')
@@ -178,7 +187,8 @@ export function AgentTasksPanel() {
           body: JSON.stringify({
             taskId: editingId,
             whatsappConnectionId: editConnection === 'latest' ? null : editConnection,
-            maxTargets: editTargets,
+            selectedContactId: editContactId,
+            maxTargets: 1,
             maxAttemptsPerTarget: editAttempts,
           }),
         }),
@@ -243,7 +253,7 @@ export function AgentTasksPanel() {
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium">طلب Coverage المصدر</span>
-              <select value={requestId} onChange={(e) => setRequestId(e.target.value)}
+              <select value={requestId} onChange={(e) => { setRequestId(e.target.value); setSelectedContactId(null); setContactEligible(null) }}
                 className="h-10 w-full rounded-md border bg-background px-3" disabled={loading || busy}>
                 <option value="">— اختر طلب تغطية —</option>
                 {(data?.coverageRequests ?? []).map((req) => (
@@ -271,12 +281,17 @@ export function AgentTasksPanel() {
               سياسة Coverage V2 ونافذة محادثة واردة صالحة.
             </span>
           </label>
+          <AgentTaskContactPicker
+            selectedContactId={selectedContactId}
+            onChange={setSelectedContactId}
+            coverageRequestId={requestId}
+            disabled={loading || busy}
+            onEligibilityChange={setContactEligible}
+          />
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1 text-sm">
               <span className="font-medium">أقصى مستهدفين</span>
-              <Input type="number" min={1} max={100} value={maxTargets}
-                onChange={(e) => setMaxTargets(Number(e.target.value))}
-                disabled={busy} />
+              <Input type="number" min={1} max={1} value={1} readOnly disabled />
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium">أقصى محاولات لكل مستهدف</span>
@@ -320,6 +335,7 @@ export function AgentTasksPanel() {
                     <span>{task.status}</span>
                     <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
                       {task.id.slice(0, 8)} · {conn ? connectionLabel(conn) : (task.connectionId ? 'اتصال غير متاح' : 'اتصال أحدث وارد')}
+                      {task.selectedContactId ? ' · جهة محددة' : ' · استهداف تلقائي'}
                     </p>
                   </div>
                   <Button type="button" size="sm" variant="outline"
@@ -345,11 +361,16 @@ export function AgentTasksPanel() {
                         ))}
                       </select>
                     </label>
+                    <AgentTaskContactPicker
+                      selectedContactId={editContactId}
+                      onChange={setEditContactId}
+                      coverageRequestId={task.coverageRequestId ?? ''}
+                      onEligibilityChange={setEditContactEligible}
+                    />
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="space-y-1 text-sm">
                         الحد الأقصى للمستهدفين
-                        <Input type="number" min={1} max={task.maxTargets} value={editTargets}
-                          onChange={(e) => setEditTargets(Number(e.target.value))} />
+                        <Input type="number" min={1} max={1} value={1} readOnly disabled />
                       </label>
                       <label className="space-y-1 text-sm">
                         المحاولات لكل مستهدف
@@ -358,7 +379,7 @@ export function AgentTasksPanel() {
                       </label>
                     </div>
                     <div className="flex gap-2">
-                      <Button size="sm" disabled={busy} onClick={() => void saveEdit()}>حفظ إعدادات المهمة</Button>
+                      <Button size="sm" disabled={busy || !editContactId || editContactEligible !== true} onClick={() => void saveEdit()}>حفظ إعدادات المهمة</Button>
                       <Button type="button" size="sm" variant="outline" onClick={() => setEditingId(null)}>إلغاء</Button>
                     </div>
                   </div>

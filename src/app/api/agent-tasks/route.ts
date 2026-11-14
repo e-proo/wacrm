@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
+import { checkCoverageSelectedContactEligibility } from '@/lib/services/coverage/selected-contact'
 import {
   CoverageSourcingTaskError,
   startCoverageSourcingTask,
@@ -46,7 +47,7 @@ export async function GET() {
         .in('status', ['active','partially_reserved'])
         .order('created_at', { ascending: false }).limit(100),
       db.from('ai_agent_tasks')
-        .select('id,task_type,task_type_version,status,target_policy,max_targets,max_attempts_per_target,created_at,agent_id')
+        .select('id,task_type,task_type_version,status,target_policy,task_context,max_targets,max_attempts_per_target,created_at,agent_id')
         .eq('account_id', ctx.accountId)
         .order('created_at', { ascending: false }).limit(80),
       db.from('ai_runtime_policies')
@@ -108,6 +109,12 @@ export async function GET() {
         connectionId: record(row.target_policy) &&
           typeof row.target_policy.whatsappConnectionId === 'string'
           ? row.target_policy.whatsappConnectionId : null,
+        selectedContactId: record(row.target_policy) &&
+          typeof row.target_policy.selectedContactId === 'string'
+          ? row.target_policy.selectedContactId : null,
+        coverageRequestId: record(row.task_context) &&
+          typeof row.task_context.coverageRequestId === 'string'
+          ? row.task_context.coverageRequestId : null,
         maxTargets: row.max_targets,
         maxAttemptsPerTarget: row.max_attempts_per_target,
         createdAt: row.created_at,
@@ -130,6 +137,7 @@ export async function POST(request: Request) {
     if (!record(body) || !isUUID(body.agentId) ||
         !isUUID(body.coverageRequestId) ||
         !(body.whatsappConnectionId === null || isUUID(body.whatsappConnectionId)) ||
+        !(body.selectedContactId === undefined || body.selectedContactId === null || isUUID(body.selectedContactId)) ||
         !intInRange(body.maxTargets, 100) ||
         !intInRange(body.maxAttemptsPerTarget, 20)) {
       return NextResponse.json({ error: 'بيانات المهمة أو الاتصال غير صالحة.', code: 'INVALID_TASK_INPUT' }, { status: 400 })
@@ -140,6 +148,7 @@ export async function POST(request: Request) {
       coverageRequestId: body.coverageRequestId,
       actorUserId: ctx.userId,
       whatsappConnectionId: body.whatsappConnectionId,
+      ...(body.selectedContactId ? { selectedContactId: body.selectedContactId as string } : {}),
       maxTargets: body.maxTargets,
       maxAttemptsPerTarget: body.maxAttemptsPerTarget,
     })
@@ -162,16 +171,44 @@ export async function PATCH(request: Request) {
     const body: unknown = await request.json().catch(() => null)
     if (!record(body) || !isUUID(body.taskId) ||
         !(body.whatsappConnectionId === null || isUUID(body.whatsappConnectionId)) ||
+        !(body.selectedContactId === null || isUUID(body.selectedContactId)) ||
         !intInRange(body.maxTargets, 10000) ||
         !intInRange(body.maxAttemptsPerTarget, 20)) {
       return NextResponse.json({ error: 'بيانات التعديل غير صالحة.', code: 'INVALID_TASK_UPDATE' }, { status: 400 })
     }
     const db = supabaseAdmin()
-    const { data, error } = await db.rpc('update_pending_agent_task_connection', {
+    // Verify selected contact's Coverage business eligibility before allowing
+    // a pending Task to change its frozen recipient selection.
+    if (typeof body.selectedContactId === 'string') {
+      const { data: task, error: taskError } = await db.from('ai_agent_tasks')
+        .select('task_type,task_context,target_policy')
+        .eq('account_id', ctx.accountId)
+        .eq('id', body.taskId).maybeSingle()
+      if (taskError) throw taskError
+      if (!task || task.task_type !== 'coverage.sourcing' ||
+          !record(task.task_context) ||
+          !isUUID(task.task_context.coverageRequestId)) {
+        return NextResponse.json({ error: 'تعذّر التحقق من سياق المهمة.', code: 'TASK_CONTEXT_INVALID' }, { status: 409 })
+      }
+      const original = record(task.target_policy) ? task.target_policy : {}
+      const regions = Array.isArray(original.coverageRegionIds) &&
+        original.coverageRegionIds.every(isUUID) ? original.coverageRegionIds as string[] : []
+      const eligibility = await checkCoverageSelectedContactEligibility(db, {
+        accountId: ctx.accountId,
+        coverageRequestId: task.task_context.coverageRequestId,
+        contactId: body.selectedContactId,
+        coverageRegionIds: regions,
+      })
+      if (!eligibility.eligible) {
+        return NextResponse.json({ error: 'جهة الاتصال غير مؤهلة لهذا الطلب أو لا تتبع الحساب.', code: 'COVERAGE_CONTACT_NOT_ELIGIBLE' }, { status: 409 })
+      }
+    }
+    const { data, error } = await db.rpc('update_pending_agent_task_target', {
       p_account_id: ctx.accountId,
       p_task_id: body.taskId,
       p_actor_user_id: ctx.userId,
       p_connection_id: body.whatsappConnectionId,
+      p_selected_contact_id: body.selectedContactId,
       p_max_targets: body.maxTargets,
       p_max_attempts_per_target: body.maxAttemptsPerTarget,
     })
