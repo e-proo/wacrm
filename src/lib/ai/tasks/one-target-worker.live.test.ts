@@ -1,0 +1,228 @@
+import { createHash } from 'node:crypto'
+import { describe, expect, it } from 'vitest'
+import { supabaseAdmin } from '../admin-client'
+import { inspectAgentTaskTestCutoverReadiness } from './cutover'
+import { processAgentTaskQueue } from './orchestrator'
+import { processAgentTaskOutboundRunQueue } from './outbound-worker'
+
+/**
+ * SOF-63: manually tick only the Task Orchestrator and the outbound
+ * Agent Task worker, NOT the generic /api/internal/ai-agent-worker handler.
+ *
+ * Stage prepare NEVER sends. Stage send requires a *second* explicit command.
+ * The global queues must be exclusive to the designated TEST Task because
+ * the existing claim_next_agent_task RPC is not account-scoped.
+ * No background scheduling, no retries and no legacy change-request worker.
+ */
+const enabled = process.env.WACRM_AGENT_TASK_ONE_TARGET_LIVE === '1'
+const stage = process.env.WACRM_AGENT_TASK_ONE_TARGET_STAGE
+const TEST_PROJECT = 'pqirsnfupofhulmewakq'
+const TEST_REQUEST = '013d52e8-fe89-42a5-9656-01e02006dc21'
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function must(condition: unknown, code: string): asserts condition {
+  if (!condition) throw new Error('SOF63_ONE_TARGET_' + code)
+}
+
+function fields(row: unknown): Record<string, unknown> {
+  must(row && typeof row === 'object' && !Array.isArray(row), 'INVALID_ROW')
+  return row as Record<string, unknown>
+}
+
+function accountConfig() {
+  const accountId = process.env.WACRM_AGENT_TASK_CUTOVER_ACCOUNT_ID
+  const taskId = process.env.WACRM_AGENT_TASK_ONE_TARGET_TASK_ID
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  must(accountId && UUID_RE.test(accountId), 'ACCOUNT_REQUIRED')
+  must(taskId && UUID_RE.test(taskId), 'TASK_ID_REQUIRED')
+  must(url && new URL(url).hostname === TEST_PROJECT + '.supabase.co', 'TEST_PROJECT_REQUIRED')
+  must(process.env.SUPABASE_SERVICE_ROLE_KEY, 'SERVICE_ROLE_REQUIRED')
+  return { accountId, taskId }
+}
+
+async function loadExclusiveTask(stageName: 'prepare' | 'send') {
+  const { accountId, taskId } = accountConfig()
+  const db = supabaseAdmin()
+  const now = new Date().toISOString()
+  const { data: rawTask, error: taskError } = await db.from('ai_agent_tasks')
+    .select('id,account_id,status,task_type,task_type_version,task_context,target_policy,agent_revision_id,max_targets,max_attempts_per_target,available_at')
+    .eq('account_id', accountId).eq('id', taskId).maybeSingle()
+  if (taskError) throw taskError
+  const task = fields(rawTask)
+  const policy = fields(task.target_policy)
+  const context = fields(task.task_context)
+  must(task.task_type === 'coverage.sourcing' && task.task_type_version === 2, 'NOT_COVERAGE_V2')
+  must(context.coverageRequestId === TEST_REQUEST, 'NOT_TEST_FIXTURE_REQUEST')
+  must(task.max_targets === 1 && task.max_attempts_per_target === 1, 'TASK_LIMIT_NOT_ONE')
+  const contactId = policy.selectedContactId
+  const connectionId = policy.whatsappConnectionId
+  must(typeof contactId === 'string' && UUID_RE.test(contactId), 'CONTACT_NOT_FROZEN')
+  must(typeof connectionId === 'string' && UUID_RE.test(connectionId), 'CONNECTION_NOT_FROZEN')
+  must(task.status === (stageName === 'prepare' ? 'queued' : 'running'), 'UNEXPECTED_TASK_STATUS')
+  if (stageName === 'prepare') must(typeof task.available_at === 'string' && task.available_at <= now, 'NOT_DUE')
+
+  const readiness = await inspectAgentTaskTestCutoverReadiness({ accountId })
+  must(readiness.mode === 'pilot' && readiness.runtime.outboundTaskDeliveryEnabled &&
+    readiness.whatsappScope.enabled && !readiness.runtime.killSwitch, 'CUTOVER_NOT_PILOT')
+  must(readiness.counts.reconciliationMessages === 0 &&
+    readiness.counts.sendingMessages === 0 && readiness.counts.openWhatsappCircuits === 0,
+    'IN_FLIGHT_OR_UNCERTAIN_DELIVERY')
+
+  const { data: revision, error: revError } = await db.from('ai_agent_revisions')
+    .select('status,outreach_policy').eq('account_id', accountId)
+    .eq('id', String(task.agent_revision_id)).maybeSingle()
+  if (revError) throw revError
+  const rev = fields(revision)
+  const outreach = fields(rev.outreach_policy)
+  const bindings = outreach.bindings
+  must(rev.status === 'published' && Array.isArray(bindings) &&
+    bindings.some(x => {
+      const b = x && typeof x === 'object' ? x as Record<string, unknown> : {}
+      return b.taskType === 'coverage.sourcing' && b.taskTypeVersion === 2 && b.maxFollowups === 0
+    }), 'PUBLISHED_NO_FOLLOWUPS_REQUIRED')
+
+  const { data: rawConn, error: connectionError } = await db.from('whatsapp_connections')
+    .select('id,provider,status,archived_at,session_id')
+    .eq('account_id', accountId).eq('id', connectionId).maybeSingle()
+  if (connectionError) throw connectionError
+  const conn = fields(rawConn)
+  must(conn.provider === 'openwa' && conn.status === 'ready' &&
+    conn.archived_at === null && !!conn.session_id, 'OPENWA_CONNECTION_NOT_READY')
+
+  const { data: rawGuard, error: guardError } = await db.from('whatsapp_connection_guardrails')
+    .select('pilot_enabled,manual_paused,hourly_cap,daily_cap,first_touch_daily_cap,warmup_hourly_cap,warmup_daily_cap,circuit_open_until')
+    .eq('account_id', accountId).eq('connection_id', connectionId).maybeSingle()
+  if (guardError) throw guardError
+  const guard = fields(rawGuard)
+  must(guard.pilot_enabled === true && guard.manual_paused === false &&
+    guard.hourly_cap === 1 && guard.daily_cap === 1 &&
+    typeof guard.first_touch_daily_cap === 'number' && guard.first_touch_daily_cap <= 1 &&
+    guard.warmup_hourly_cap === 1 &&
+    guard.warmup_daily_cap === 1 && !guard.circuit_open_until,
+    'OPENWA_PILOT_NOT_STRICT')
+
+  const { data: grants, error: grantsError } = await db.from('whatsapp_openwa_pilot_allowlist')
+    .select('workload,recipient_hash')
+    .eq('account_id', accountId).eq('connection_id', connectionId)
+    .eq('active', true).gt('expires_at', now).limit(2)
+  if (grantsError) throw grantsError
+  const grant = grants?.[0]
+  must(grants?.length === 1 && grant?.workload === 'agent', 'NOT_EXACTLY_ONE_AGENT_GRANT')
+
+  // Verify the sole grant belongs to the chosen account contact's *real*
+  // inbound chat on this exact frozen OpenWA connection, not just any TEST JID.
+  const { data: convs, error: convError } = await db.from('conversations')
+    .select('id').eq('account_id', accountId).eq('contact_id', contactId).limit(100)
+  if (convError) throw convError
+  const convIds = (convs ?? []).map(x => x.id)
+  must(convIds.length > 0, 'SELECTED_CONTACT_NO_CONVERSATION')
+  const { data: inbound, error: inboundError } = await db.from('messages')
+    .select('provider_chat_id')
+    .in('conversation_id', convIds)
+    .eq('connection_id', connectionId).eq('provider', 'openwa')
+    .eq('sender_type', 'customer')
+    .gte('created_at', new Date(Date.now()-24*3600_000).toISOString())
+    .order('created_at', { ascending: false }).limit(100)
+  if (inboundError) throw inboundError
+  must((inbound ?? []).some(msg => {
+    if (typeof msg.provider_chat_id !== 'string') return false
+    const hash = createHash('sha256')
+      .update('openwa-pilot:v1:' + accountId + ':' + connectionId + ':' + msg.provider_chat_id)
+      .digest('hex')
+    return hash === grant.recipient_hash
+  }), 'GRANT_NOT_SELECTED_RECIPIENT')
+
+  const { data: reserved, error: reservedError } = await db
+    .from('ai_agent_task_outbound_messages')
+    .select('id,status').eq('account_id', accountId)
+    .eq('task_id', taskId).limit(2)
+  if (reservedError) throw reservedError
+  must(reserved?.length === 0, 'RESERVATION_EXISTS_DO_NOT_RETRY')
+
+  const { data: globallyUnsettled, error: ambiguousError } = await db
+    .from('ai_agent_task_outbound_messages').select('id,status')
+    .in('status', ['reserved','sending','requires_reconciliation'])
+    .limit(2)
+  if (ambiguousError) throw ambiguousError
+  must(globallyUnsettled?.length === 0, 'GLOBAL_UNSETTLED_SEND_DO_NOT_TICK')
+
+  const { data: targetRows, error: targetsError } = await db
+    .from('ai_agent_task_targets').select('id,contact_id,task_id')
+    .eq('account_id', accountId).eq('task_id', taskId).limit(2)
+  if (targetsError) throw targetsError
+  const { data: runRows, error: runError } = await db
+    .from('ai_agent_runs').select('id,account_id,status,run_mode,task_id,task_target_id')
+    .eq('account_id', accountId).eq('task_id', taskId).limit(2)
+  if (runError) throw runError
+
+  if (stageName === 'prepare') {
+    must(targetRows?.length === 0 && runRows?.length === 0, 'PREPARE_ALREADY_PROGRESSING')
+    const { data: dueTasks, error: dueError } = await db.from('ai_agent_tasks')
+      .select('id').in('status', ['queued','scheduled','running'])
+      .lte('available_at', now).limit(2)
+    if (dueError) throw dueError
+    must(dueTasks?.length === 1 && dueTasks[0].id === taskId, 'OTHER_AGENT_TASKS_DUE')
+    const { data: otherRuns, error: pendingError } = await db.from('ai_agent_runs')
+      .select('id').eq('run_mode','outbound').eq('status','queued')
+      .lte('available_at',now).limit(2)
+    if (pendingError) throw pendingError
+    must(otherRuns?.length === 0, 'OTHER_OUTBOUND_RUNS_DUE')
+  } else {
+    must(targetRows?.length === 1 &&
+      targetRows[0].contact_id === contactId &&
+      runRows?.length === 1 &&
+      runRows[0].run_mode === 'outbound' && runRows[0].status === 'queued' &&
+      runRows[0].task_target_id === targetRows[0].id,
+      'TARGET_OR_RUN_NOT_EXCLUSIVE')
+    const { data: dueRuns, error: dueRunsError } = await db.from('ai_agent_runs')
+      .select('id,task_id').eq('run_mode','outbound').eq('status','queued')
+      .lte('available_at',now).limit(2)
+    if (dueRunsError) throw dueRunsError
+    must(dueRuns?.length === 1 && dueRuns[0].task_id === taskId, 'OTHER_OUTBOUND_RUNS_DUE')
+  }
+
+  return { accountId, taskId, contactId, connectionId, db }
+}
+
+(enabled ? describe : describe.skip)('SOF-63 scoped TEST-only worker', () => {
+  it('runs precisely the approved stage; the generic worker is never called', async () => {
+    must(stage === 'prepare' || stage === 'send', 'STAGE_REQUIRED')
+    const confirmed = stage === 'prepare'
+      ? 'PREPARE_ONE_TARGET_NO_SEND'
+      : 'SEND_ONE_TARGET_TEST_NOW'
+    must(process.env.WACRM_AGENT_TASK_ONE_TARGET_CONFIRM === confirmed,
+      'EXPLICIT_CONFIRM_REQUIRED')
+    const scope = await loadExclusiveTask(stage)
+
+    if (stage === 'prepare') {
+      const result = await processAgentTaskQueue({
+        workerId: 'sof63-test-prepare:' + scope.taskId, limit: 1,
+      })
+      expect(result.failed).toBe(0)
+      expect(result.claimedTasks).toBe(1)
+      expect(result.materializedTargets).toBe(1)
+      expect(result.createdRuns).toBe(1)
+
+      const { data: outboundRuns, error } = await scope.db.from('ai_agent_runs')
+        .select('id,task_id,status').eq('account_id',scope.accountId)
+        .eq('task_id',scope.taskId).eq('run_mode','outbound').limit(2)
+      if (error) throw error
+      expect(outboundRuns).toHaveLength(1)
+      expect(outboundRuns?.[0].status).toBe('queued')
+      console.info('SOF63 PREPARED: one target, one queued run; no WhatsApp send.')
+      return
+    }
+
+    const result = await processAgentTaskOutboundRunQueue({
+      workerId: 'sof63-test-send:' + scope.taskId, limit: 1,
+    })
+    console.info('SOF63 SEND RESULT:', JSON.stringify(result))
+    // If the provider accepted a send but outcome is ambiguous, do NOT
+    // repeat this stage. Inspect the frozen reservation and reconcile.
+    expect(result.scanned).toBe(1)
+    expect(result.attempted).toBe(1)
+    expect(result.sent).toBe(1)
+    expect(result.reconciliation).toBe(0)
+    expect(result.failed).toBe(0)
+  }, 180_000)
+})

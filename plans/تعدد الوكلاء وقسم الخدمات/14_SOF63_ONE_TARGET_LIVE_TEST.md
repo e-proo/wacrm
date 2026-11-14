@@ -39,3 +39,36 @@ At that time the inspected TEST account had no non-archived OpenWA connection in
 ## Acceptance result criteria
 
 SOF-63 is **live acceptance complete** only with one real approved TEST send, real reply correlation, verified no duplicate and rollback. Green dry run, DB smoke or local template tests alone do not satisfy it. NOTE-001 security debt still precludes a general Production-ready declaration.
+
+## Local-development worker gap — scoped operator tick (2026-11-14)
+
+`POST /api/agent-tasks` persists a queued Task; it does **not** process the queue or send WhatsApp. `npm run dev` does not automatically run the CRON-authenticated `/api/internal/ai-agent-worker` endpoint. That generic worker also handles unrelated approved change requests and customer notifications and **MUST NOT** be called manually as a shortcut during this one-target pilot.
+
+Observed hosted TEST Task: `86e1cbc3-4d2b-4f1f-8f81-45fd64889c1d`, `status=queued`, `attempt_count=0`, no Target, no Run, no Reservation and one `task.created` event. An unrelated approved change request exists; the new scoped operator command deliberately does not process it.
+
+Opt-in script `npm run test:agent-task-one-target-live` has two independent steps. Both require the exact TEST Supabase URL, service role, one expected account + Task ID, published `coverage.sourcing@2` with `maxFollowups=0`, exact consented contact/connection, one hashed `workload=agent` grant with fresh same-connection inbound, OpenWA Pilot one/day caps, `Cutover=pilot` and no ambiguous reservations. It explicitly rejects any other due Task/queued outbound run globally because the underlying work-claim RPCs are globally scoped. It does NOT invoke the generic Worker or unrelated change requests.
+
+**Stage 1 — Prepare only, no WhatsApp transport:**
+
+```powershell
+$env:WACRM_AGENT_TASK_CUTOVER_ACCOUNT_ID = "8ed95309-96cd-4347-b725-bd8c5039ed4f"
+$env:WACRM_AGENT_TASK_ONE_TARGET_TASK_ID = "86e1cbc3-4d2b-4f1f-8f81-45fd64889c1d"
+$env:WACRM_AGENT_TASK_ONE_TARGET_LIVE = "1"
+$env:WACRM_AGENT_TASK_ONE_TARGET_STAGE = "prepare"
+$env:WACRM_AGENT_TASK_ONE_TARGET_CONFIRM = "PREPARE_ONE_TARGET_NO_SEND"
+npm run test:agent-task-one-target-live
+```
+
+Verify exactly one accepted Target, one `queued` outbound Run, **zero reservations/sends**; fail closed otherwise. If the worker fails, inspect DB events, do not create another Task.
+
+**Stage 2 — Sends actual WhatsApp message** only with explicit operator authorization after inspecting stage 1:
+
+```powershell
+$env:WACRM_AGENT_TASK_ONE_TARGET_STAGE = "send"
+$env:WACRM_AGENT_TASK_ONE_TARGET_CONFIRM = "SEND_ONE_TARGET_TEST_NOW"
+npm run test:agent-task-one-target-live
+```
+
+This second invocation executes provider-backed model work + deterministic outbound policy and **may send a real message**. It requires exactly one due outbound run, exactly one matching Target and zero reservations, so it cannot be repeated if a send becomes ambiguous. If `requires_reconciliation`, do **not** repeat; inspect official message/provider event and reconcile. Follow with real reply/Task correlation and the separately confirmed `ROLLBACK_TEST` command. Pause/revoke Pilot after verification.
+
+This operator-only TEST command is **not** a production scheduler. A dedicated recurring worker/cron service and workflow operational controls are required for unattended queues after live acceptance, not an unscoped UI auto-dispatch side effect.
