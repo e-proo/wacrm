@@ -39,6 +39,9 @@ export interface AgentTaskOutboundMessagePolicy {
    * message policy changes incompatibly.
    */
   version: number
+  /** A domain may opt into a server-owned, deterministic message policy.
+   * Missing value keeps legacy model-first execution and handoff behavior. */
+  generation?: 'model' | 'deterministic'
   prepare(
     context: AgentTaskOutboundPolicyContext,
   ): Promise<AgentTaskOutboundMessageCandidate>

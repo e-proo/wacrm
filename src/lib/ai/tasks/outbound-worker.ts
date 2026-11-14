@@ -12,6 +12,8 @@ import {
 } from '../runtime/circuit-breaker'
 import { deliverAgentTaskOutboundReservation } from './outbound-delivery'
 import { prepareAndReserveCurrentTaskOutboundMessage } from './outbound-runtime'
+import { CURRENT_AGENT_TASK_PLATFORM } from './current-platform'
+import { authorizeStoredAgentTask } from './capability-policy'
 
 export interface AgentTaskOutboundWorkerResult {
   scanned: number
@@ -193,10 +195,80 @@ export async function processAgentTaskOutboundRunQueue(input: {
         sourceMessageId: null,
       }
 
-      const execution = await runClaimedAgentExecution({
-        context,
-        revision: revision.revision,
-      })
+      // The Coverage V2 message is a deterministic, domain-owned policy.
+      // It deliberately ignores model prose: running the shared model loop
+      // first can produce a spurious handoff (and consume a one-attempt Task)
+      // even though no model-generated outreach is authorized or needed.
+      //
+      // Opt-in is per registered/frozen message policy version. Legacy tasks
+      // and model-authored policies retain model-first and handoff semantics.
+      const { data: storedTask, error: storedTaskError } = await db
+        .from('ai_agent_tasks')
+        .select('task_type, task_type_version')
+        .eq('account_id', run.account_id)
+        .eq('agent_id', run.ai_agent_id)
+        .eq('agent_revision_id', run.agent_revision_id)
+        .eq('id', run.task_id)
+        .maybeSingle()
+      if (storedTaskError) throw storedTaskError
+      if (!storedTask) {
+        await failOutboundRun({
+          runId: run.id, code: 'AGENT_OUTBOUND_TASK_CONTEXT_MISSING',
+        })
+        result.failed += 1
+        continue
+      }
+      const manifest = CURRENT_AGENT_TASK_PLATFORM.taskTypes.get(
+        storedTask.task_type, storedTask.task_type_version,
+      )
+      const messagePolicy = manifest
+        ? CURRENT_AGENT_TASK_PLATFORM.outboundMessagePolicies.get(
+            manifest.messagePolicy.key, manifest.messagePolicy.version,
+          )
+        : null
+      if (!manifest || !messagePolicy || messagePolicy.domain !== manifest.domain) {
+        await failOutboundRun({
+          runId: run.id, code: 'AGENT_OUTBOUND_MESSAGE_POLICY_NOT_REGISTERED',
+        })
+        result.failed += 1
+        continue
+      }
+
+      const deterministic = messagePolicy.generation === 'deterministic'
+      // Normally runClaimedAgentExecution performs this authorization. For
+      // policies that deliberately skip the model, perform it explicitly:
+      // still enforce Task status, frozen revision, capabilities and tool scope.
+      if (deterministic) {
+        const auth = await authorizeStoredAgentTask(db, {
+          taskId: run.task_id,
+          taskTypes: CURRENT_AGENT_TASK_PLATFORM.taskTypes,
+        })
+        if (!auth.ok ||
+            auth.task.accountId !== run.account_id ||
+            auth.task.agentId !== run.ai_agent_id ||
+            auth.task.agentRevisionId !== run.agent_revision_id ||
+            auth.task.taskType !== storedTask.task_type ||
+            auth.task.taskTypeVersion !== storedTask.task_type_version) {
+          await failOutboundRun({
+            runId: run.id,
+            code: !auth.ok ? auth.code : 'AGENT_OUTBOUND_AUTH_CONTEXT_MISMATCH',
+          })
+          result.failed += 1
+          continue
+        }
+      }
+
+      const execution = deterministic
+        ? {
+            status: 'no_message' as const,
+            customerMessage: null,
+            usage: { inputTokens: 0, outputTokens: 0 },
+            error: null,
+          }
+        : await runClaimedAgentExecution({
+            context,
+            revision: revision.revision,
+          })
 
       if (execution.status === 'failed' || execution.status === 'needs_human') {
         await failOutboundRun({

@@ -477,6 +477,7 @@ export const COVERAGE_SOURCING_MESSAGE_POLICY_V2: AgentTaskOutboundMessagePolicy
   key: 'coverage.sourcing_message',
   version: 2,
   domain: 'coverage',
+  generation: 'deterministic',
   async prepare(context): Promise<AgentTaskOutboundMessageCandidate> {
     if (context.taskType !== COVERAGE_SOURCING_TASK_TYPE.key ||
         context.taskTypeVersion !== 2 ||
