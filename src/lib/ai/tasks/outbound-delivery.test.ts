@@ -65,4 +65,25 @@ describe('Agent Task outbound delivery boundary', () => {
     expect(claim).toBeGreaterThan(preclaim)
     expect(delivery).toContain("reason: 'connection_preflight_failed'")
   })
+  it('classifies only typed, proven OpenWA pre-dispatch denials as terminal unsent', () => {
+    const delivery = readFileSync(
+      new URL('./outbound-delivery.ts', import.meta.url), 'utf8',
+    )
+    const worker = readFileSync(
+      new URL('./outbound-worker.ts', import.meta.url), 'utf8',
+    )
+    const before = delivery.indexOf('error instanceof OpenWAPreDispatchDenied')
+    const after = delivery.indexOf("'mark_agent_task_outbound_reconciliation'")
+    expect(delivery).toContain('error.providerDispatchAttempted === false')
+    expect(delivery).toContain("row.provider === 'openwa'")
+    expect(delivery).toContain("'finalize_agent_task_outbound_pre_dispatch_denial'")
+    expect(delivery).toContain("status: 'denied'")
+    expect(delivery).toContain("reason: 'openwa_pre_dispatch_denied'")
+    expect(before).toBeGreaterThan(-1)
+    expect(after).toBeGreaterThan(before)
+    expect(worker).toContain("delivery.reason === 'openwa_pre_dispatch_denied'")
+    expect(worker).toContain('result.denied += 1')
+    expect(worker).toContain("if (delivery.status === 'requires_reconciliation')")
+  })
+
 })

@@ -326,6 +326,15 @@ export async function processAgentTaskOutboundRunQueue(input: {
         continue
       }
 
+      // This specific denial has already atomically terminalized the
+      // reservation, run, and target as *unsent* in SQL. Calling failOutboundRun
+      // again would create a misleading duplicate failure transition.
+      if (delivery.status === 'denied' &&
+          delivery.reason === 'openwa_pre_dispatch_denied') {
+        result.denied += 1
+        continue
+      }
+
       await failOutboundRun({
         runId: run.id,
         code: delivery.reason || delivery.status,

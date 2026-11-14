@@ -5,6 +5,7 @@ import { inspectAgentTaskTestCutoverReadiness } from './cutover'
 import { processAgentTaskQueue } from './orchestrator'
 import { processAgentTaskOutboundRunQueue } from './outbound-worker'
 import { evaluateCurrentTaskCompletion } from './current-platform'
+import { inspectOpenWAGuardrailReservationWindow } from './one-target-guardrail-preflight'
 
 /**
  * SOF-63: manually tick only the Task Orchestrator and the outbound
@@ -167,7 +168,7 @@ async function loadExclusiveTask(stageName: 'prepare' | 'send') {
     conn.archived_at === null && !!conn.session_id, 'OPENWA_CONNECTION_NOT_READY')
 
   const { data: rawGuard, error: guardError } = await db.from('whatsapp_connection_guardrails')
-    .select('pilot_enabled,manual_paused,hourly_cap,daily_cap,first_touch_daily_cap,warmup_hourly_cap,warmup_daily_cap,circuit_open_until')
+    .select('pilot_enabled,manual_paused,hourly_cap,daily_cap,first_touch_daily_cap,warmup_hourly_cap,warmup_daily_cap,warmup_until,circuit_open_until')
     .eq('account_id', accountId).eq('connection_id', connectionId).maybeSingle()
   if (guardError) throw guardError
   const guard = fields(rawGuard)
@@ -256,6 +257,38 @@ async function loadExclusiveTask(stageName: 'prepare' | 'send') {
       .lte('available_at',now).limit(2)
     if (dueRunsError) throw dueRunsError
     must(dueRuns?.length === 1 && dueRuns[0].task_id === taskId, 'OTHER_OUTBOUND_RUNS_DUE')
+  }
+
+  if (stageName === 'send') {
+    // Guardrail SQL counts every workload's "reserved" event in the rolling
+    // hour/day. Do this BEFORE a Run is claimed or an outbound reservation is
+    // made; the guardrail RPC is still the authoritative atomic gate.
+    const { data: history, error: historyError } = await db
+      .from('whatsapp_guardrail_events')
+      .select('created_at')
+      .eq('account_id', accountId)
+      .eq('connection_id', connectionId)
+      .eq('decision', 'reserved')
+      .gte('created_at', new Date(Date.now() - 86_400_000).toISOString())
+      .order('created_at', { ascending: true })
+      .limit(1000)
+    if (historyError) throw historyError
+    must((history ?? []).length < 1000, 'GUARDRAIL_HISTORY_TRUNCATED')
+    const warmupActive = typeof guard.warmup_until === 'string' &&
+      Date.parse(guard.warmup_until) > Date.now()
+    const hourlyCap = warmupActive
+      ? Math.min(Number(guard.hourly_cap),Number(guard.warmup_hourly_cap))
+      : Number(guard.hourly_cap)
+    const dailyCap = warmupActive
+      ? Math.min(Number(guard.daily_cap),Number(guard.warmup_daily_cap))
+      : Number(guard.daily_cap)
+    const availability = inspectOpenWAGuardrailReservationWindow({
+      nowMs: Date.now(), hourlyCap, dailyCap,
+      reservedAt: (history ?? []).map(x => x.created_at),
+    })
+    must(availability.allowed,
+      'OPENWA_' + (availability.allowed ? '' : availability.quota.toUpperCase()) +
+      '_EXHAUSTED_UNTIL_' + (availability.allowed ? '' : availability.availableAt))
   }
 
   return { accountId, taskId, contactId, connectionId, db }

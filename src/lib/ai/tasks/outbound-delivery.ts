@@ -1,5 +1,6 @@
 import { engineSendTemplate, engineSendText } from '@/lib/automations/meta-send'
 import { preflightAgentTaskConnection } from './outbound-connection'
+import { OpenWAPreDispatchDenied } from '@/lib/whatsapp/transport/guardrails'
 import { supabaseAdmin } from '../admin-client'
 import {
   assertRuntimeCircuitClosed,
@@ -342,6 +343,46 @@ export async function deliverAgentTaskOutboundReservation(input: {
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
+
+    // Only this concrete, typed guardrail exception proves that the provider
+    // adapter was NEVER invoked for this attempt. It is NOT a transport timeout.
+    // Persist an unsent, terminal identity atomically, rather than incorrectly
+    // requiring reconciliation or retrying the one-target TEST pilot.
+    if (
+      row.provider === 'openwa' &&
+      !transportSucceeded &&
+      error instanceof OpenWAPreDispatchDenied &&
+      error.providerDispatchAttempted === false
+    ) {
+      const { data: denied, error: denialError } = await db.rpc(
+        'finalize_agent_task_outbound_pre_dispatch_denial', {
+          p_account_id: row.account_id,
+          p_reservation_id: row.id,
+          p_worker_id: input.workerId,
+          p_reason_code: outboundErrorCode(error),
+        },
+      )
+      if (!denialError && denied === true) {
+        console.warn('[agent outbound] OpenWA pre-dispatch rejection; no provider call', {
+          reservationId: row.id,
+          code: outboundErrorCode(error),
+        })
+        return {
+          status: 'denied',
+          reason: 'openwa_pre_dispatch_denied',
+          reservationId: row.id,
+          localMessageId: null,
+          whatsappMessageId: null,
+        }
+      }
+      // If persistence was unavailable or a competing claim changed state,
+      // fail closed into reconciliation. Never assume absence of a send from
+      // the failed write alone.
+      console.error('[agent outbound] pre-dispatch denial transition unavailable', {
+        reservationId: row.id, error: denialError,
+      })
+    }
+
     if (!transportSucceeded) {
       await recordRuntimeCircuitEvent({
         accountId: row.account_id,

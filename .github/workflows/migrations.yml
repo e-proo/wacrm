@@ -61,6 +61,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-outbound-messaging-policy-smoke.sql
       - name: Verify SOF-59 provider-bound Agent Task outbound transport
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-transport-binding-smoke.sql
+      - name: Verify typed OpenWA pre-dispatch denial cannot bypass tenant or SQL claim boundary
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-openwa-pre-dispatch-smoke.sql
       - name: Verify Agent Task reply correlation
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-reply-correlation-smoke.sql
       - name: Verify Agent Outbound capabilities
