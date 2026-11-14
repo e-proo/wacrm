@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { RefreshCw, ShieldAlert, Send, Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -51,6 +51,36 @@ interface ResponseData {
   tasks: Task[]
   outboundDeliveryEnabled: boolean
 }
+interface TaskRecipientProgress {
+  contactId: string
+  name: string | null
+  phone: string | null
+  targetStatus: string | null
+  attemptCount: number
+  skipReason: string | null
+  failureCode: string | null
+  outboundStatus: string | null
+  provider: string | null
+  errorCode: string | null
+}
+interface TaskProgressResponse {
+  taskStatus: string
+  recipients: TaskRecipientProgress[]
+}
+const targetStatusLabel: Record<string, string> = {
+  candidate: 'مرشح', eligible: 'مؤهل', queued: 'في الانتظار',
+  preparing: 'قيد التحضير', sending: 'قيد الإرسال',
+  contacted: 'تم التواصل', awaiting_reply: 'بانتظار الرد',
+  replied: 'تم الرد', in_progress: 'قيد المعالجة',
+  completed: 'اكتمل', skipped: 'تم التجاوز',
+  failed: 'تعثر', paused_for_human: 'بانتظار مراجعة بشرية',
+}
+const outboundStatusLabel: Record<string, string> = {
+  reserved: 'محجوز', queued: 'بانتظار الإرسال',
+  sending: 'قيد الإرسال', sent: 'أُرسل',
+  failed: 'فشل', cancelled: 'أُلغي',
+  needs_reconciliation: 'يلزم التحقق من نتيجة الإرسال',
+}
 
 async function loadResponse<T>(response: Response): Promise<T> {
   const text = await response.text()
@@ -95,6 +125,11 @@ export function AgentTasksPanel() {
   const [editContactIds, setEditContactIds] = useState<string[]>([])
   const [editContactEligible, setEditContactEligible] = useState<boolean | null>(null)
   const [editAttempts, setEditAttempts] = useState(1)
+  const [progressTaskId, setProgressTaskId] = useState<string | null>(null)
+  const [progress, setProgress] = useState<TaskProgressResponse | null>(null)
+  const [progressLoading, setProgressLoading] = useState(false)
+  const [progressError, setProgressError] = useState<string | null>(null)
+  const progressRequest = useRef<AbortController | null>(null)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -172,6 +207,34 @@ export function AgentTasksPanel() {
     setEditAttempts(task.maxAttemptsPerTarget)
     setError(null)
     setSuccess(null)
+  }
+
+  async function toggleProgress(taskId: string, refresh = false) {
+    progressRequest.current?.abort()
+    if (progressTaskId === taskId && !refresh) {
+      setProgressTaskId(null)
+      setProgress(null)
+      return
+    }
+    const controller = new AbortController()
+    progressRequest.current = controller
+    setProgressTaskId(taskId)
+    setProgress(null)
+    setProgressError(null)
+    setProgressLoading(true)
+    try {
+      const next = await loadResponse<TaskProgressResponse>(await fetch(
+        '/api/agent-tasks/' + encodeURIComponent(taskId) + '/progress',
+        { cache: 'no-store', signal: controller.signal },
+      ))
+      if (!controller.signal.aborted) setProgress(next)
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        setProgressError(cause instanceof Error ? cause.message : 'تعذّر تحميل حالة الأرقام.')
+      }
+    } finally {
+      if (!controller.signal.aborted) setProgressLoading(false)
+    }
   }
 
   async function saveEdit() {
@@ -347,11 +410,50 @@ export function AgentTasksPanel() {
                          ? ` · ${task.selectedContactIds.length} جهة محددة` : ' · استهداف تلقائي'}
                     </p>
                   </div>
-                  <Button type="button" size="sm" variant="outline"
-                    disabled={!editable || busy} onClick={() => beginEdit(task)}>
-                    <Settings2 className="ms-2 h-4 w-4" /> تعديل إعدادات المهمة
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" size="sm" variant="outline"
+                      onClick={() => void toggleProgress(task.id)}>
+                      {progressTaskId === task.id ? 'إخفاء حالة الأرقام' : 'حالة كل رقم'}
+                    </Button>
+                    <Button type="button" size="sm" variant="outline"
+                      disabled={!editable || busy} onClick={() => beginEdit(task)}>
+                      <Settings2 className="ms-2 h-4 w-4" /> تعديل إعدادات المهمة
+                    </Button>
+                  </div>
                 </div>
+                {progressTaskId === task.id ? (
+                  <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                    <p className="text-sm font-semibold">نتائج المستهدفين لهذا الطلب</p>
+                    {progressLoading ? <p className="text-xs text-muted-foreground">جارٍ تحميل الحالة...</p> : null}
+                    {progressError ? <p role="alert" className="text-xs text-destructive">{progressError}</p> : null}
+                    {!progressLoading && progress && progress.recipients.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">لا توجد أرقام محددة في هذه المهمة.</p>
+                    ) : null}
+                    {progress?.recipients.map((recipient, index) => (
+                      <div key={recipient.contactId} className="space-y-1 rounded-md border bg-background p-2 text-xs">
+                        <p className="font-medium">{index + 1}. {recipient.name || 'جهة اتصال'} · <bdi>{recipient.phone || recipient.contactId.slice(0, 8)}</bdi></p>
+                        <p>حالة المستهدف: {recipient.targetStatus
+                          ? targetStatusLabel[recipient.targetStatus] || recipient.targetStatus
+                          : 'لم يبدأ التنفيذ'}</p>
+                        <p>الإرسال: {recipient.outboundStatus
+                          ? outboundStatusLabel[recipient.outboundStatus] || recipient.outboundStatus
+                          : 'لم تُحجز رسالة'} · المحاولات: {recipient.attemptCount}</p>
+                        {recipient.skipReason || recipient.failureCode || recipient.errorCode ? (
+                          <p className="text-amber-700 dark:text-amber-400">
+                            السبب: {recipient.errorCode || recipient.failureCode || recipient.skipReason}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                    <p className="text-xs text-muted-foreground">
+                      إنشاء المهمة لا يعني وصول الرسالة لكل رقم. حالات الإرسال غير المؤكدة تتطلب مطابقة مع المزوّد دون إعادة إرسال تلقائي.
+                    </p>
+                    <Button size="sm" type="button" variant="outline" disabled={progressLoading}
+                      onClick={() => void toggleProgress(task.id, true)}>
+                      تحديث حالة الأرقام
+                    </Button>
+                  </div>
+                ) : null}
                 {editingId === task.id ? (
                   <div className="space-y-3 rounded-md bg-muted/30 p-3">
                     <p className="text-xs text-muted-foreground">
