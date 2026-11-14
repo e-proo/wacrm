@@ -61,6 +61,9 @@ function dbFrom(table: string) {
     eq: (key: string, value: unknown) => { filters[key] = value; return q },
     is: (_key: string, _value: unknown) => q,
     gt: (_key: string, _value: unknown) => q,
+    gte: (_key: string, _value: unknown) => q,
+    order: (_key: string, _options?: unknown) => q,
+    limit: (_n: number) => q,
     in: (_key: string, _value: unknown) => q,
     maybeSingle: async () => {
       if (operation === 'update') return { data: { connection_id: CONNECTION }, error: null }
