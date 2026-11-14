@@ -33,12 +33,12 @@ function query(name: string) {
       skip_reason: null, failure_code: null, last_outbound_message_id: messageId,
     }],
     ai_agent_task_outbound_messages: [{
-      local_message_id: messageId, status: 'sent', provider: 'openwa', error_code: null,
+      task_target_id: targetId, status: 'sent', provider: 'openwa', error_code: null,
     }],
   }
   const q = {
     select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
-    in: vi.fn().mockReturnThis(),
+    in: vi.fn().mockReturnThis(), order: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn(async () => ({ data: data[name]?.[0] ?? null, error: null })),
     limit: vi.fn(async () => ({ data: data[name] ?? [], error: null })),
   }
@@ -65,7 +65,7 @@ describe('SOF-66 per-recipient progress, read-only and tenant-scoped', () => {
     })
     const queries = stubs.from.mock.results.map(({ value }) => value)
     expect(queries).toHaveLength(4)
-    expect(queries[3].in).toHaveBeenCalledWith('local_message_id', [messageId])
+    expect(queries[3].in).toHaveBeenCalledWith('task_target_id', [targetId])
     for (const q of queries) expect(q.eq).toHaveBeenCalledWith('account_id', acct)
     expect(stubs.requireAgentCapability).toHaveBeenCalledWith('agents.manage_tasks')
   })

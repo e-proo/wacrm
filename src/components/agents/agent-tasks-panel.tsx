@@ -437,7 +437,8 @@ export function AgentTasksPanel() {
                           : 'لم يبدأ التنفيذ'}</p>
                         <p>الإرسال: {recipient.outboundStatus
                           ? outboundStatusLabel[recipient.outboundStatus] || recipient.outboundStatus
-                          : 'لم تُحجز رسالة'} · المحاولات: {recipient.attemptCount}</p>
+                          : 'لم تُحجز رسالة'} · المحاولات: {recipient.attemptCount}
+                          {recipient.provider ? ' · ' + (recipient.provider === 'openwa' ? 'OpenWA' : 'Meta Cloud') : ''}</p>
                         {recipient.skipReason || recipient.failureCode || recipient.errorCode ? (
                           <p className="text-amber-700 dark:text-amber-400">
                             السبب: {recipient.errorCode || recipient.failureCode || recipient.skipReason}

@@ -53,24 +53,32 @@ export async function GET(
 
     const contacts = new Map((contactResult.data ?? []).map(c => [c.id, c]))
     const targets = new Map((targetResult.data ?? []).map(t => [t.contact_id, t]))
-    const outboundIds = (targetResult.data ?? []).flatMap(t =>
-      typeof t.last_outbound_message_id === 'string' ? [t.last_outbound_message_id] : [])
-    const outboundResult = outboundIds.length
+    // A reservation may exist before a durable messages.id is assigned. Query
+    // by the per-target reservation FK, not last_outbound_message_id (which
+    // references messages.id), so ambiguous/unsettled attempts remain visible.
+    const targetIds = (targetResult.data ?? []).map(t => t.id)
+    const outboundResult = targetIds.length
       ? await db.from('ai_agent_task_outbound_messages')
-        .select('local_message_id,status,provider,error_code')
+        .select('task_target_id,status,provider,error_code,updated_at')
         .eq('account_id', ctx.accountId).eq('task_id', taskId)
-        .in('local_message_id', outboundIds).limit(outboundIds.length)
+        .in('task_target_id', targetIds)
+        .order('updated_at', { ascending: false })
+        .limit(selected.length * 20)
       : { data: [], error: null }
     if (outboundResult.error) throw outboundResult.error
-    const outbounds = new Map((outboundResult.data ?? []).map(m => [m.local_message_id, m]))
+    const outbounds = new Map<string, (typeof outboundResult.data)[number]>()
+    for (const outbound of outboundResult.data ?? []) {
+      if (!outbounds.has(outbound.task_target_id)) {
+        outbounds.set(outbound.task_target_id, outbound)
+      }
+    }
 
     return NextResponse.json({
       taskStatus: task.status,
       recipients: selected.map(contactId => {
         const contact = contacts.get(contactId)
         const target = targets.get(contactId)
-        const outbound = target?.last_outbound_message_id
-          ? outbounds.get(target.last_outbound_message_id) : null
+        const outbound = target ? outbounds.get(target.id) : null
         return {
           contactId,
           name: contact?.name ?? null,
