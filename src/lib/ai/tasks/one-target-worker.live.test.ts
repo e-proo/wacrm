@@ -18,7 +18,13 @@ import { evaluateCurrentTaskCompletion } from './current-platform'
 const enabled = process.env.WACRM_AGENT_TASK_ONE_TARGET_LIVE === '1'
 const stage = process.env.WACRM_AGENT_TASK_ONE_TARGET_STAGE
 const TEST_PROJECT = 'pqirsnfupofhulmewakq'
-const TEST_REQUEST = '013d52e8-fe89-42a5-9656-01e02006dc21'
+const TEST_ACCOUNT = '8ed95309-96cd-4347-b725-bd8c5039ed4f'
+const TEST_REQUEST = '82e81d51-7a14-4d83-91cc-b8b40534f7d0'
+const HISTORICAL_FAILED_REQUEST = '013d52e8-fe89-42a5-9656-01e02006dc21'
+const TEST_SERVICE = '4648674f-8107-424c-aa63-b2e6c78f81df'
+const TEST_CONTACT = '98461de0-d275-49cb-b7f5-b7fae06739bf'
+const TEST_CONNECTION = '02527740-9806-45ae-b9b1-1354c25f1d3f'
+const TEST_REQUEST_NOTE = '[SOF63 TEST ONLY] second isolated request after pre-reservation handoff; no production value'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function must(condition: unknown, code: string): asserts condition {
@@ -34,7 +40,7 @@ function accountConfig() {
   const accountId = process.env.WACRM_AGENT_TASK_CUTOVER_ACCOUNT_ID
   const taskId = process.env.WACRM_AGENT_TASK_ONE_TARGET_TASK_ID
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  must(accountId && UUID_RE.test(accountId), 'ACCOUNT_REQUIRED')
+  must(accountId === TEST_ACCOUNT, 'EXPECTED_TEST_ACCOUNT_REQUIRED')
   must(taskId && UUID_RE.test(taskId), 'TASK_ID_REQUIRED')
   must(url && new URL(url).hostname === TEST_PROJECT + '.supabase.co', 'TEST_PROJECT_REQUIRED')
   must(process.env.SUPABASE_SERVICE_ROLE_KEY, 'SERVICE_ROLE_REQUIRED')
@@ -54,11 +60,30 @@ async function loadExclusiveTask(stageName: 'prepare' | 'send') {
   const context = fields(task.task_context)
   must(task.task_type === 'coverage.sourcing' && task.task_type_version === 2, 'NOT_COVERAGE_V2')
   must(context.coverageRequestId === TEST_REQUEST, 'NOT_TEST_FIXTURE_REQUEST')
+  const { data: fixture, error: fixtureError } = await db.from('coverage_requests')
+    .select('id,service_id,status,notes,currency,requested_amount,requester_contact_id')
+    .eq('account_id', accountId).eq('id', TEST_REQUEST).maybeSingle()
+  if (fixtureError) throw fixtureError
+  must(fixture?.id === TEST_REQUEST && fixture.service_id === TEST_SERVICE &&
+    fixture.status === 'active' && fixture.notes === TEST_REQUEST_NOTE &&
+    fixture.currency === 'SAR' && Number(fixture.requested_amount) === 100,
+    'NOT_ISOLATED_TEST_REQUEST')
   must(task.max_targets === 1 && task.max_attempts_per_target === 1, 'TASK_LIMIT_NOT_ONE')
   const contactId = policy.selectedContactId
   const connectionId = policy.whatsappConnectionId
   must(typeof contactId === 'string' && UUID_RE.test(contactId), 'CONTACT_NOT_FROZEN')
   must(typeof connectionId === 'string' && UUID_RE.test(connectionId), 'CONNECTION_NOT_FROZEN')
+  must(contactId === TEST_CONTACT && connectionId === TEST_CONNECTION &&
+    fixture?.requester_contact_id !== contactId, 'WRONG_TEST_RECIPIENT_OR_SESSION')
+  const { data: supplierHistory, error: supplierError } = await db.from('coverage_offers')
+    .select('id,provider_contact_id,status').eq('account_id', accountId)
+    .eq('service_id', TEST_SERVICE).eq('currency','SAR')
+    .in('status',['active','partially_reserved','fully_reserved','fulfilled','expired'])
+    .limit(3)
+  if (supplierError) throw supplierError
+  must(supplierHistory?.length === 1 &&
+    supplierHistory[0].provider_contact_id === TEST_CONTACT &&
+    supplierHistory[0].status === 'fulfilled', 'NOT_SOLE_TEST_SUPPLIER')
   must(task.status === (stageName === 'prepare' ? 'queued' : 'running'), 'UNEXPECTED_TASK_STATUS')
   if (stageName === 'prepare') must(typeof task.available_at === 'string' && task.available_at <= now, 'NOT_DUE')
 
@@ -202,7 +227,7 @@ async function finalizeFailedHandoffTask(): Promise<void> {
   must(row.status === 'running' &&
     row.task_type === 'coverage.sourcing' &&
     row.task_type_version === 2 &&
-    context.coverageRequestId === TEST_REQUEST, 'FINALIZE_UNEXPECTED_TASK')
+    context.coverageRequestId === HISTORICAL_FAILED_REQUEST, 'FINALIZE_UNEXPECTED_TASK')
 
   const [{ data: targets, error: targetError },
     { data: runs, error: runError },

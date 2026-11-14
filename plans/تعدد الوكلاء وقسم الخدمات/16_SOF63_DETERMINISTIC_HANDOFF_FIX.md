@@ -35,3 +35,9 @@ npm run test:agent-task-one-target-live
 ```
 
 This stage never calls the worker, creates a Target/Run/reservation, sends WhatsApp, or resets attempts. It must be invoked **only after green CI** and with operator confirmation. Do not run `prepare` or `send` against the failed Task. After finalization, create a *new TEST-only request/Task identity* (because the existing manual Coverage idempotency key includes request + agent + frozen revision), and verify renewed consent/inbound and OpenWA recipient grant before a second live acceptance attempt. No automatic resend.
+
+## Second isolated TEST attempt fixture
+
+The first Task was closed on hosted TEST at 2026-11-14 14:33 UTC (`partially_completed`, zero reservations). Additive second Coverage Request `82e81d51-7a14-4d83-91cc-b8b40534f7d0` uses the same `SOF63-TEST-20261114` isolated service and one previously confirmed supplier; previous Request remains unchanged. New service-owned request is `active`, 100 SAR, no active business-event rows. No Agent Task or WhatsApp message was created by the fixture operation.
+
+The TEST acceptance worker is now restricted to the new Request, the exact TEST account, the explicit approved CRM contact and OpenWA session. The `finalize_failed` stage remains pinned to the previous Request for historical cleanup only. Green CI, a new UI-created Task, and fresh preflight must precede any new live send; the operator's explicit action is still required.

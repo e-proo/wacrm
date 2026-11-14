@@ -69,6 +69,33 @@ $env:WACRM_AGENT_TASK_ONE_TARGET_CONFIRM = "SEND_ONE_TARGET_TEST_NOW"
 npm run test:agent-task-one-target-live
 ```
 
-This second invocation executes provider-backed model work + deterministic outbound policy and **may send a real message**. It requires exactly one due outbound run, exactly one matching Target and zero reservations, so it cannot be repeated if a send becomes ambiguous. If `requires_reconciliation`, do **not** repeat; inspect official message/provider event and reconcile. Follow with real reply/Task correlation and the separately confirmed `ROLLBACK_TEST` command. Pause/revoke Pilot after verification.
+For Coverage V2 this second invocation invokes the **deterministic, domain-owned** message policy without generating model text, and **may send a real WhatsApp message**; other task types retain their model execution. It requires exactly one due outbound run, exactly one matching Target and zero reservations, so it cannot be repeated if a send becomes ambiguous. If `requires_reconciliation`, do **not** repeat; inspect official message/provider event and reconcile. Follow with real reply/Task correlation and the separately confirmed `ROLLBACK_TEST` command. Pause/revoke Pilot after verification.
 
 This operator-only TEST command is **not** a production scheduler. A dedicated recurring worker/cron service and workflow operational controls are required for unattended queues after live acceptance, not an unscoped UI auto-dispatch side effect.
+
+## Second TEST attempt after deterministic handoff fix — 2026-11-14
+
+The **first** TEST Task `86e1cbc3-4d2b-4f1f-8f81-45fd64889c1d` was properly finalized by operator after a *pre-reservation* model handoff. Status `partially_completed`, single Target `exhausted`, single Run `failed`; zero WhatsApp reservations. Do not select/retry this Task. The original `013d52e8` request and old scripts above are historical.
+
+A separate isolated, active **second** TEST Coverage Request `82e81d51-7a14-4d83-91cc-b8b40534f7d0` was created inside the *same sandbox-only service* `4648674f-8107-424c-aa63-b2e6c78f81df`: 100 SAR, exactly one matching historical supplier, no active business-event delivery. The selected contact remains only the verified owned TEST recipient; no other real contacts/requests are eligible for this service. The live test command explicitly freezes these exact TEST account/service/request/contact/session IDs and checks the request note, service, currency, amount, recipient, historical supplier and same-session hashed `agent` allowlist before processing.
+
+**Operator UI step** after latest CI succeeds: select Phase 18 Coverage Pilot, new request `82e81d51` (100 SAR), the existing OpenWA TEST session, and **only** the eligible own-number CRM contact; use `maxTargets=1` and `maxAttemptsPerTarget=1`. Click Create once; if an existing Task is returned, do not repeat. `POST 201` means created/queued, not sent. Obtain the resulting Task ID from WACRM or a scoped TEST database query.
+
+**Scoped prepare command** (requires exactly one due Task globally; no WhatsApp send):
+
+```powershell
+git switch refactor/service-platform-v2
+git pull --ff-only origin refactor/service-platform-v2
+$env:WACRM_AGENT_TASK_CUTOVER_ACCOUNT_ID="8ed95309-96cd-4347-b725-bd8c5039ed4f"
+$env:WACRM_AGENT_TASK_ONE_TARGET_TASK_ID="<NEW_QUEUED_TASK_UUID>"
+$env:WACRM_AGENT_TASK_ONE_TARGET_LIVE="1"
+$env:WACRM_AGENT_TASK_ONE_TARGET_STAGE="prepare"
+$env:WACRM_AGENT_TASK_ONE_TARGET_CONFIRM="PREPARE_ONE_TARGET_NO_SEND"
+$env:WACRM_AGENT_TASK_CUTOVER_ACTIVATE_LIVE="0"
+$env:WACRM_AGENT_TASK_CUTOVER_ROLLBACK_LIVE="0"
+npm run test:agent-task-one-target-live
+```
+
+Inspect the one Target and one queued outbound Run plus zero reservations **before** considering `send`. Stage `send` must again be explicitly confirmed and only run once after gateway-native connection verification, live grant not expired, inbound within 24h, and zero uncertain results. The previous test's failure must never be mistaken for success.
+
+The new worker source is an intentionally exact-ID-bounded operator TEST acceptance command, **not a generic task scheduler or production rollout mechanism**. Do not invoke the general AI worker because unrelated approved change requests remain outside SOF-63's scope.
