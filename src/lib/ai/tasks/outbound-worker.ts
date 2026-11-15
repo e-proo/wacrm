@@ -15,6 +15,8 @@ import { prepareAndReserveCurrentTaskOutboundMessage } from './outbound-runtime'
 import { CURRENT_AGENT_TASK_PLATFORM } from './current-platform'
 import { authorizeStoredAgentTask } from './capability-policy'
 import { deferredTestOpenWATaskReason } from './test-openwa-task-admission'
+import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
+import { resolveTaskMessageConnection } from './outbound-message-connection'
 
 export interface AgentTaskOutboundWorkerResult {
   scanned: number
@@ -135,34 +137,61 @@ export async function processAgentTaskOutboundRunQueue(input: {
       throw error
     }
 
-    // Re-evaluate the specific recipient before claiming its one-attempt Run.
-    // Pause/revoked grant must leave it QUEUED, not terminalize as a denied
-    // provider attempt. The transport still revalidates after this precheck.
-    try {
-      const { data: taskTarget, error: targetLookupError } = await db
-        .from('ai_agent_task_targets')
-        .select('contact_id')
-        .eq('account_id', run.account_id)
-        .eq('task_id', run.task_id)
-        .eq('id', run.task_target_id)
-        .maybeSingle()
-      if (targetLookupError) throw targetLookupError
-      if (taskTarget?.contact_id) {
+    // Only on pinned TEST: re-evaluate the exact WhatsApp session and
+    // recipient BEFORE claiming the one-attempt Run. Critically,
+    // ai_agent_runs.provider_connection_id is the AI MODEL provider, NOT
+    // whatsapp_connections.id. Obtain transport through the same frozen
+    // Task policy resolver used by the SQL reservation instead.
+    // Pause/revoked grants leave the Run QUEUED, never terminalize/send it.
+    if (isOpenWATestProject()) {
+      try {
+        const [
+          { data: taskTarget, error: targetLookupError },
+          { data: task, error: taskLookupError },
+        ] = await Promise.all([
+          db.from('ai_agent_task_targets')
+            .select('contact_id,conversation_id')
+            .eq('account_id', run.account_id)
+            .eq('task_id', run.task_id)
+            .eq('id', run.task_target_id)
+            .maybeSingle(),
+          db.from('ai_agent_tasks')
+            .select('target_policy')
+            .eq('account_id', run.account_id)
+            .eq('id', run.task_id)
+            .maybeSingle(),
+        ])
+        if (targetLookupError || taskLookupError) {
+          throw targetLookupError ?? taskLookupError
+        }
+        if (!taskTarget?.contact_id || !taskTarget.conversation_id || !task) {
+          result.gated += 1
+          continue
+        }
+        const policy = task.target_policy && typeof task.target_policy === 'object' &&
+          !Array.isArray(task.target_policy)
+          ? task.target_policy as Record<string, unknown>
+          : {}
+        const transport = await resolveTaskMessageConnection(db, {
+          accountId: run.account_id,
+          conversationId: taskTarget.conversation_id,
+          targetPolicy: policy,
+        })
         const hold = await deferredTestOpenWATaskReason({
           db, accountId: run.account_id,
-          connectionId: run.provider_connection_id,
+          connectionId: transport.connectionId,
           contactIds: [taskTarget.contact_id],
         })
         if (hold) {
           result.gated += 1
           continue
         }
+      } catch (preflightError) {
+        result.gated += 1
+        console.error('[agent outbound worker] TEST WhatsApp transport preflight unavailable',
+          run.id.slice(0, 8), preflightError)
+        continue
       }
-    } catch (preflightError) {
-      result.gated += 1
-      console.error('[agent outbound worker] TEST OpenWA preflight unavailable',
-        run.id.slice(0, 8), preflightError)
-      continue
     }
 
     result.attempted += 1
