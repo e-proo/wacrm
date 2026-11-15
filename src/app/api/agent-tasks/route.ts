@@ -258,9 +258,9 @@ export async function PATCH(request: Request) {
           contactId,
           coverageRegionIds: regions,
         })
-        if (!eligibility.eligible) {
+        if (!eligibility.eligible && eligibility.reason !== 'not_eligible_supplier') {
           return NextResponse.json({
-            error: 'إحدى جهات الاتصال غير مؤهلة لهذا الطلب أو لا تتبع الحساب.',
+            error: 'جهة الاتصال غير موجودة في حسابك، أو هي صاحبة طلب التغطية نفسه.',
             code: 'COVERAGE_CONTACT_NOT_ELIGIBLE',
           }, { status: 409 })
         }

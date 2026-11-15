@@ -368,34 +368,6 @@ export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
     if (!(positiveRemaining(request) > 0)) return []
 
     const selectedContactIds = parseExplicitCoverageContactIds(context.targetPolicy)
-    const queryLimit = selectedContactIds ? 1000 : Math.max(
-      20,
-      Math.min(context.maxCandidates * 10, 1000),
-    )
-
-    // Filter by EACH explicit contact in SQL *before* LIMIT. A single shared
-    // LIMIT after .in() can hide a selected supplier with older history if
-    // another selected supplier has many more recent offers.
-    const loadOffers = (contactId: string | null) => {
-      let query = db.from('coverage_offers')
-        .select('provider_contact_id, attributes, status, created_at')
-        .eq('account_id', context.accountId)
-        .eq('service_id', request.service_id)
-        .eq('currency', request.currency)
-        .in('status', [...SUPPLIER_HISTORY_STATUSES])
-        .neq('provider_contact_id', request.requester_contact_id)
-      if (contactId) query = query.eq('provider_contact_id', contactId)
-      return query.order('created_at', { ascending: false }).limit(queryLimit)
-    }
-    const groups = selectedContactIds
-      ? await Promise.all(selectedContactIds.map(contactId => loadOffers(contactId)))
-      : [await loadOffers(null)]
-    const offerRows: CoverageOfferHistoryRow[] = []
-    for (const group of groups) {
-      if (group.error) throw group.error
-      offerRows.push(...((group.data ?? []) as CoverageOfferHistoryRow[]))
-    }
-
     const coverageRegionIds = context.targetPolicy.coverageRegionIds
     const allowedRegionIds =
       coverageRegionIds === undefined
@@ -410,11 +382,47 @@ export const COVERAGE_SUPPLIER_CANDIDATE_RESOLVER: AgentTaskTargetResolver = {
               throw new Error('COVERAGE_SOURCING_REGION_SCOPE_INVALID')
             })()
 
+
+    if (selectedContactIds) {
+      // An operator may explicitly target a known CRM contact even without
+      // matching Coverage offer history. The recommendation is UI-only.
+      // Only these exact account-owned contacts can become Task Targets.
+      // Transport opt-out/consent, limits and session policy remain mandatory.
+      const { data: scoped, error: selectedError } = await db.from('contacts')
+        .select('id').eq('account_id', context.accountId)
+        .in('id', selectedContactIds).limit(selectedContactIds.length)
+      if (selectedError) throw selectedError
+      const existing = new Set((scoped ?? []).map(row => row.id))
+      if (selectedContactIds.some(id => !existing.has(id))) {
+        throw new Error('COVERAGE_SOURCING_SELECTED_CONTACT_OUTSIDE_ACCOUNT')
+      }
+      return selectedContactIds
+        .filter(id => id !== request.requester_contact_id)
+        .map((contactId, index) => ({
+          contactId,
+          counterpartyRole: 'coverage_supplier',
+          sortKey: String(index).padStart(3, '0') + ':operator_selected:' + contactId,
+        }))
+    }
+
+    // Automatic sourcing still requires matching historic supplier offers.
+    const queryLimit = Math.max(20, Math.min(context.maxCandidates * 10, 1000))
+    const { data: rows, error: offersError } = await db.from('coverage_offers')
+      .select('provider_contact_id,attributes,status,created_at')
+      .eq('account_id', context.accountId)
+      .eq('service_id', request.service_id)
+      .eq('currency', request.currency)
+      .in('status', [...SUPPLIER_HISTORY_STATUSES])
+      .neq('provider_contact_id', request.requester_contact_id)
+      .order('created_at', { ascending: false }).limit(queryLimit)
+    if (offersError) throw offersError
+    const offerRows = (rows ?? []) as CoverageOfferHistoryRow[]
+
     return buildCoverageSupplierCandidates(
       request,
       offerRows,
       allowedRegionIds,
-      selectedContactIds,
+      null,
     )
   },
 }

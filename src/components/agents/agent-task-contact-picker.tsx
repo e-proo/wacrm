@@ -111,8 +111,8 @@ export function AgentTaskContactPicker({
     <div className="space-y-2 rounded-md border p-3">
       <p className="text-sm font-medium">جهة الاتصال المستهدفة من WACRM</p>
       <p className="text-xs text-muted-foreground">
-        ابحث بالاسم أو الرقم واختر جهة موجودة. يجب أن تكون موردًا مؤهلًا
-        لطلب Coverage، مع موافقة وسجل محادثة واتساب صالح.
+        ابحث بالاسم أو الرقم واختر جهة موجودة. مطابقة سجل التغطيات توصية فقط؛
+        لا تُتجاوز موافقة واتساب أو حدود الرسائل.
       </p>
       <Input value={search} disabled={disabled}
         onChange={(e) => setSearch(e.target.value)} placeholder="ابحث عن اسم أو رقم جهة الاتصال..."
@@ -132,8 +132,7 @@ export function AgentTaskContactPicker({
       {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
       {selectedContactId && coverageRequestId && eligible === false ? (
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          جهة الاتصال ليست مؤهلة بعد لهذا الطلب: يلزم عرض Coverage متوافق.
-          لن يُسمح بإنشاء مهمة ترسل إليها قبل تحقق الأهلية.
+          لا يوجد سجل تغطية مطابق سابق؛ هذا تنبيه استشاري، وليس شرطًا لاختيار الجهة.
         </p>
       ) : null}
       {selectedContactId && coverageRequestId && eligible === true ? (
@@ -148,8 +147,8 @@ export function AgentTaskContactPicker({
 
 /**
  * One Task, multiple explicit CRM recipients. Each selected identity is shown
- * separately and verified against Coverage supplier eligibility before the
- * caller enables Create/Save. The server repeats that verification at commit.
+ * separately and checked for CRM ownership. Supplier matching is advisory;
+ * the server still blocks missing/foreign/requester identities.
  * Selecting a contact never initiates WhatsApp delivery.
  */
 export function AgentTaskMultiContactPicker({
@@ -218,7 +217,8 @@ export function AgentTaskMultiContactPicker({
         const statuses = response.eligibilityById ?? {}
         setVerified(statuses)
         onEligibilityChange?.(selectedContactIds.every(id =>
-          statuses[id]?.eligible === true &&
+          statuses[id]?.reason !== 'contact_not_found' &&
+          statuses[id]?.reason !== 'requester_contact' &&
           response.contacts.some(contact => contact.id === id)))
         setError(null)
       } catch (cause) {
@@ -251,7 +251,8 @@ export function AgentTaskMultiContactPicker({
         <p className="text-sm font-medium">الأرقام المستهدفة لهذه المهمة</p>
         <p className="text-xs text-muted-foreground">
           أضف عدة جهات من CRM بالاسم أو الرقم. سيتم التعامل مع كل رقم كمستهدف مستقل،
-          ولن تُرسل رسالة لأي جهة غير مؤهلة أو غير مصرح لها بالإرسال.
+          مطابقة سجل التغطيات توصية فقط، ويمكنك اختيار جهة معروفة دون سجل سابق.
+          يظل الحظر والموافقة وحدود واتساب إلزامية.
         </p>
       </div>
       <p className="text-xs text-muted-foreground">
@@ -266,7 +267,7 @@ export function AgentTaskMultiContactPicker({
               <li key={id} className="flex items-center justify-between gap-2 rounded border p-2 text-sm">
                 <span className="min-w-0 truncate">
                   {index + 1}. {contact?.name?.trim() || 'جهة اتصال'} · {contact?.phone ?? id.slice(0,8)}
-                  {checking ? ' · جارٍ التحقق' : !isAllowed ? ' · غير مؤهلة' : ' · مؤهلة'}
+                  {checking ? ' · جارٍ التحقق' : !isAllowed ? ' · لا يوجد تطابق سابق' : ' · تطابق سابق'}
                 </span>
                 <button type="button" disabled={disabled} className="shrink-0 text-destructive underline"
                   onClick={() => onChange(selectedContactIds.filter(value => value !== id))}>
@@ -296,14 +297,14 @@ export function AgentTaskMultiContactPicker({
       {selectedContactIds.length > 0 && !checking &&
         selectedContactIds.some(id => verified[id]?.eligible !== true) ? (
           <p role="alert" className="text-xs text-amber-700 dark:text-amber-400">
-            واحدة أو أكثر من الجهات ليست مؤهلة لهذا الطلب. يلزم سجل عرض Coverage
-            متوافق قبل إنشاء المهمة. لا يتم تجاوز الحظر أو الموافقة.
+            تنبيه فقط: بعض الجهات لا تملك سجل تغطية مطابقًا، لكن يمكن اختيارها
+            يدويًا. لا يسمح ذلك بتجاوز عدم الموافقة أو حظر التواصل.
           </p>
         ) : null}
       {selectedContactIds.length > 0 && !checking &&
         selectedContactIds.every(id => verified[id]?.eligible === true) ? (
           <p role="status" className="text-xs text-emerald-700 dark:text-emerald-400">
-            جميع الجهات المختارة مؤهلة تجاريًا. فحوص موافقة WhatsApp والحدود
+            كل الجهات لديها سجل تغطية مطابق. فحوص موافقة WhatsApp والحدود
             والرسائل السابقة ستُطبّق مجددًا عند الإرسال لكل رقم.
           </p>
         ) : null}

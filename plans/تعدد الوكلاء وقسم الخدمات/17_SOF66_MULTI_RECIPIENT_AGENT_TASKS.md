@@ -43,3 +43,7 @@
 ### Verified OpenWA multi-target pilot blocker (2026-11-15)
 
 `src/app/api/whatsapp/connections/openwa/[connectionId]/pilot/route.ts` currently requires `s.grants === 0` to add an Agent recipient, `s.grants === 1` to activate, and `hourly_cap === daily_cap === 1` for Agent admission. Consequently one OpenWA session cannot send to 2–3 distinct contacts in the same bounded Agent Task test under current protections. This is **not** solved by toggling the account-wide Agent Task cutover gate. Do not change OpenWA into normal unbounded sending as a workaround. Choose approved Meta template path or implement a proper multi-recipient TEST cohort with explicit grants, bounded caps, dedup and new live acceptance before SOF-66 can close for OpenWA.
+
+## Operator override: supplier matching is advisory (2026-11-15)
+
+For a manual **exact existing CRM contact** selection, matching historic supplier offers is only a recommendation, not a Task creation/materialization veto. The Coverage Task resolver verifies tenant-owned selected IDs, retains exact ordered recipients and requester exclusion, and never falls back to unrelated contacts. Automatic sourcing **continues to require** domain supplier matching. A missing/foreign CRM contact or the original requester's own identity remains a hard rejection. Opt-out, consent, verified inbound window/Meta template requirements, OpenWA pilot admission, circuit breaker, cooldowns and all account/task/provider budgets remain hard gates. This is not permission for arbitrary new cold numbers or bulk unsolicited sends.

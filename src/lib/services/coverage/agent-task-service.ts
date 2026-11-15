@@ -416,8 +416,8 @@ export async function startCoverageSourcingTask(
       )
     }
     // Check every selected contact (not just the first or newest offer).
-    // Each must already exist in this tenant and match the same Coverage
-    // request. SQL materialization independently checks opt-out, suppression,
+    // Each must exist in this tenant and must not be the requester. Supplier
+    // history is only an advisory. SQL materialization checks opt-out, suppression,
     // cooldown, budgets and per-provider admission before each real send.
     for (const contactId of explicitContacts) {
       const eligibility = await checkCoverageSelectedContactEligibility(db, {
@@ -426,12 +426,12 @@ export async function startCoverageSourcingTask(
         contactId,
         coverageRegionIds: binding.targetScope.regionIds,
       })
-      if (!eligibility.eligible) {
+      if (!eligibility.eligible && eligibility.reason !== 'not_eligible_supplier') {
         throw new CoverageSourcingTaskError(
           'COVERAGE_SOURCING_CONTACT_NOT_ELIGIBLE',
           eligibility.reason === 'contact_not_found'
             ? 'A selected contact does not belong to this account.'
-            : 'A selected contact has no matching Coverage supplier history.',
+            : 'The Coverage request owner cannot be targeted as a supplier.',
           409,
         )
       }
