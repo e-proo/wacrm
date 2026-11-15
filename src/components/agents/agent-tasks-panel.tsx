@@ -323,7 +323,7 @@ export function AgentTasksPanel() {
       {error ? <p role="alert" className="rounded-md border border-destructive/50 p-3 text-sm text-destructive">{error}</p> : null}
       {success ? <p role="status" className="rounded-md border p-3 text-sm">{success}</p> : null}
 
-      <AgentTaskCutoverControls onChanged={reload} />
+      <AgentTaskCutoverControls onChanged={async () => { await reload() }} />
 
       <Card>
         <CardHeader><CardTitle className="text-base">إنشاء مهمة Coverage</CardTitle></CardHeader>
