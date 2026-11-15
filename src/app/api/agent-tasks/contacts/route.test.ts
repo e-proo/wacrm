@@ -156,6 +156,37 @@ describe('TEST phone-call opted-in prospect registration', () => {
     } finally { vi.unstubAllEnvs() }
   })
 
+  it('refuses conflicting legacy and normalized CRM contact identities without creating a new contact', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://pqirsnfupofhulmewakq.supabase.co')
+    const conflicting = '88888888-8888-4888-8888-888888888888'
+    const inserts = vi.fn()
+    stubs.from.mockImplementation((table: string) => {
+      let normalized = false
+      const q = {
+        select: () => q,
+        eq: (field: string) => { if (field === 'phone_normalized') normalized = true; return q },
+        in: () => q,
+        is: () => q,
+        maybeSingle: async () => ({ data: table === 'whatsapp_connections'
+          ? { id: connectionId }
+          : table === 'coverage_requests'
+            ? { id: requestId, requester_contact_id: null }
+            : null, error: null }),
+        limit: async () => ({ data: table === 'contacts'
+          ? [{ id: normalized ? contactId : conflicting, name: 'Old', phone: '+967700000001' }]
+          : [], error: null }),
+        insert: inserts,
+      }
+      return q
+    })
+    try {
+      const result = await POST(request({}))
+      expect(result.status).toBe(409)
+      expect((await result.json()).code).toBe('DUPLICATE_CONTACT_PHONE_IDENTITY')
+      expect(inserts).not.toHaveBeenCalled()
+    } finally { vi.unstubAllEnvs() }
+  })
+
   it('creates a tenant-owned CRM contact but does not send WhatsApp or authorize Pilot', async () => {
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://pqirsnfupofhulmewakq.supabase.co')
     stubs.requireAgentCapability.mockResolvedValue({ accountId: acct, userId })
