@@ -33,7 +33,8 @@ vi.mock('@/lib/whatsapp/transport/openwa/pilot-recipient', () => ({
 vi.mock('@/lib/whatsapp/transport/guardrails', () => ({
   isOpenWATestProject: () => process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co',
   openWAPilotEnforcementEnabled: () => { if (h.envMode.invalid) throw new Error('invalid mode'); return h.envMode.enabled },
-  canonicalOpenWAPilotRecipient: (value: string) => /^[1-9][0-9]{6,14}$/.test(value) ? value + '@c.us' : null,
+  canonicalOpenWAPilotRecipient: (value: string) => /^[1-9][0-9]{6,14}$/.test(value)
+    ? value + '@c.us' : /^[0-9]{5,20}@lid$/.test(value) ? value : null,
   openWAPilotRecipientHash: h.recipientHash,
 }))
 import { GET, POST } from './route'
@@ -324,6 +325,23 @@ describe('OW-13 DEV pilot protected UI API', () => {
       action: 'grant_agent', recipient: '12345678901',
       consent_confirmed: true, confirm_agent_task_test: true,
     }), context())).status).toBe(409)
+    expect(h.calls).toEqual([])
+  })
+
+  it('refuses a bare native @lid for telephone consent even with an attestation', async () => {
+    Object.assign(h.guard, {
+      hourly_cap: 1, daily_cap: 1, first_touch_daily_cap: 1,
+      warmup_hourly_cap: 1, warmup_daily_cap: 1,
+    })
+    h.resolveRecipient.mockResolvedValue({
+      recipient: '1234567890123@lid', source: 'direct_recipient',
+    })
+    const result = await POST(request({
+      action: 'grant_agent', recipient: '1234567890123@lid',
+      consent_confirmed: true, confirm_agent_task_test: true,
+      consent_basis: 'phone_call', phone_call_opt_in_confirmed: true,
+    }), context())
+    expect(result.status).toBe(400)
     expect(h.calls).toEqual([])
   })
 
