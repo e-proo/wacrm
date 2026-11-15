@@ -479,3 +479,14 @@ A single transaction on `pqirsnfupofhulmewakq` repeated the above evidence as SQ
 4. **Different unapproved recipient** must still return `409`. The other conversation's archived original session must be explicitly changed to a current same-phone verified session, not silently reused. Read-ack `409` and webhook `503` require their own provider-specific evidence before closure.
 
 **Acceptance remains open:** no real provider send has been made by ChatGPT and successful local live send/ACK has not been reported after this patch. SOF-47 tracks TEST reconciliation and inbound retry acceptance, SOF-45 remains DEV Pilot In Progress, SOF-44 live Agent/Viewer negative, OW-12/SOF-41 and SOF-43 formal Pilot still blocked, NOTE-001 must be reviewed before Production GA.
+
+
+## 21. TEST-only extended configurable rate caps — 2026-11-15
+
+**Change level:** bounded schema + UI/API implementation. **Not live acceptance, not rollout approval.**
+
+- Admin may set at most **100 messages/hour** and **1000 messages/rolling 24 hours** for a specifically selected OpenWA TEST session. `agent` and `manual` workload ceilings are separate and never exceed the **shared** session caps. Only the pinned TEST Pilot admin API accepts these higher caps; the ordinary Production transport is unchanged.
+- Additive `167_openwa_test_pilot_extended_caps.sql` replaces the four per-workload `CHECK` constraints from 165, preserving nullable inheritance and all account/connection fields. A new `openwa-pilot-extended-caps-smoke.sql` runs in the clean Migrations workflow and checks boundary definitions and service-only privileges.
+- Defaults are intentionally **unchanged at 3/hour, 10/day, first-touch 1/day**. This expanded configuration ceiling is not an automatic save, admission, pause change, or broadcast enablement. First-touch remains separately capped at **10 new recipients/day**; every recipient must have documented WhatsApp consent and a short-lived scoped Pilot approval. The approved cohort remains at most 10 identities per grant. Minimum 15-second pacing, warmup, opt-out/suppression, circuit breaker and no-blind-resend persist.
+- To change saved settings, the operator must first pause the session and revoke existing grants via the controlled Stop action, inspect unresolved outbound sends, then explicitly save caps and reapprove exact recipients before Start. No cap edit or TEST migration itself dispatches a message.
+- Verification: [Migrations clean replay 43735129062](https://github.com/e-proo/wacrm/actions/runs/43735129062) passed; TEST remote migration applied and four CHECK bounds confirmed at 100/1000; full latest-HEAD CI and bounded live consenting-recipient acceptance are tracked separately. NOTE-001 Production security debt and OW-13/OW-14 GO decisions are not waived.
