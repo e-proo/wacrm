@@ -30,8 +30,9 @@ and no direct WhatsApp adapter call in this runner.
 
 The Task Orchestrator and Outbound Worker additionally defer pinned TEST
 OpenWA Task/Run claims when the **exact session is paused**, or any
-explicitly selected recipient lacks verified 24-hour session inbound or
-an unexpired hashed `agent` Pilot grant. This avoids wasting the only
+explicitly selected recipient lacks either (a) verified recent session inbound
+or (b) an explicitly attested phone-call WhatsApp opt-in plus a scoped, unexpired
+hashed `agent` Pilot grant. This avoids wasting the only
 attempt before approval. The actual send pathway rechecks all normal
 transport, tenant, consent/suppression, budgets, message reservation and
 ambiguous-outcome rules. Meta and non-TEST behavior are unchanged.
@@ -47,8 +48,10 @@ there is a queued/scheduled/running task; this is read-only.
 3. For the existing queued three-contact Task, the bound OpenWA connection
    was `02527740-9806-45ae-b9b1-1354c25f1d3f`, **paused** with
    **zero** active agent recipient grants when checked. Review session
-   identity, collect verified inbound for every chosen consenting contact,
-   approve exact 3-recipient cohort (hashed, expiring) in its TEST Pilot,
+   identity, confirm that every intended recipient explicitly agreed to WhatsApp contact
+   (including opt-in confirmed by phone call for first-time prospects),
+   approve the exact three-number cohort using its appropriate consent basis
+   in TEST Pilot (hashed, expiring),
    then explicitly Start session. Do not disable anti-abuse protections.
 4. Verify Task acquires target/run claims with no duplicates and every
    authorized WhatsApp receipt/reply and reconciliation is correlated.
@@ -56,6 +59,15 @@ there is a queued/scheduled/running task; this is read-only.
 5. To stop automatic task processing without altering the CRM, set
    `WACRM_DEV_AGENT_TASK_WORKER=off` and restart. The account-level
    Agent Task Cutover stop is a separate *immediate outbound* control.
+
+## First contact by phone-call consent (TEST only)
+
+- Operator may explicitly attest that each recipient agreed **to WhatsApp messages** in a phone call; a phone conversation alone does not establish consent.
+- In session settings > OpenWA Agent Pilot, select the exact cohort, check explicit telephone WhatsApp opt-in, choose `agent`, and approve. No inbound WhatsApp message or existing CRM contact is needed to **approve the pilot recipient**.
+- In the Task creation picker, an operator can add a previously unknown normalized international telephone number; the server atomically handles the selection in the existing account-scoped CRM identity path by creating or reusing a CRM contact. This does not send or approve that number in Pilot.
+- The new additive migration `166_openwa_agent_phone_call_consent.sql` adds a short-lived consent basis and limits the exception to account + exact OpenWA connection + canonical recipient. Existing Meta Cloud template/session policies, STOP, suppression, budgets, anti-abuse limits, reconciliation and no-blind-resend remain in place.
+- Verified-inbound Pilot approval still requires the existing 24-hour chat evidence. Telephone consent is a separate explicit route, not a broad override.
+- **Do not start the paused session** or consider SOF-66 live accepted until the operator has reviewed all 2–3 recipient approvals and run the bounded acceptance checks.
 
 ## Deployment boundary
 
