@@ -1,83 +1,72 @@
-# Automatic Agent Task execution — local TEST only (2026-11-15)
+# Automatic Agent Task execution — local pinned TEST (2026-11-15)
 
-## Diagnosis and scope
+## Diagnosis
 
-One Coverage Task `f54c1176-1dbd-4472-ba57-e405043eb51c` on the
-pinned TEST project was `queued`, `available_at <= now`, with only
-`task.created` in `ai_agent_task_events`, zero Targets and zero outbound
-Runs. No competing task caused the wait; creating a Task and processing its
-durable queue were intentionally separate. Previously `npm run dev` did not
-start a Task worker, so operators had to call the protected endpoint or
-run a terminal-based live test to make progress.
+TEST task `f54c1176-1dbd-4472-ba57-e405043eb51c` was created
+15 November 2026 13:47 UTC, `coverage.sourcing@2`, queued and due with
+three explicit CRM contacts. It had only `task.created`, no Target
+materialization and no outbound Run. This is a missing scheduled worker:
+creating the durable task is not the same as running it.
 
-## Implemented local workflow
+## Behavior added
 
-- `src/instrumentation.ts` starts a bounded worker on a **long-running
-  Next.js Node.js development server** pointing to the exact authorized
-  Supabase TEST URL `https://pqirsnfupofhulmewakq.supabase.co`.
-- Startup is automatically enabled for that pinned TEST environment and
-  explicitly disabled elsewhere. Set `WACRM_DEV_AGENT_TASK_WORKER=off` in
-  `.env.local` and **restart** to opt out. Unknown mode fails closed.
-- A single-process scheduler runs `processAgentTaskTriggerQueue`,
-  `processAgentTaskQueue`, and `processAgentTaskOutboundRunQueue`
-  in order, every 15 seconds, at most 3 items per phase per tick. No overlap
-  within a process; SQL leases, idempotency and safeguards coordinate
-  multiple workers and restart recovery. A failed tick does not grant a
-  new send attempt outside existing durable retry/reconciliation rules.
-- Does **not** call the general worker for approved Change Requests,
-  Business Event notifications or inbound recovery. It does not dispatch
-  WhatsApp directly. Existing outbound gate, per-target consent and opt-out,
-  Pilot allowlist per session and workload, queue quotas, pause/circuit
-  breakers, business hours and reconciliation continue to apply. Starting
-  Next.js automatically *can* send already approved queued Tasks.
-- Task list performs a quiet read-only status refresh every 15 seconds
-  while it contains queued/running/scheduled work; the manual refresh
-  button remains available. The browser does not run any worker itself.
+`npm run dev` launches the normal Next.js development server **and** an
+independent local Node timer which requests the dedicated, secret-protected
+`POST /api/internal/ai-agent-task-worker`. The timer is enabled only if
+`NEXT_PUBLIC_SUPABASE_URL=https://pqirsnfupofhulmewakq.supabase.co`
+and `WACRM_DEV_AGENT_TASK_WORKER` is unset or `on`.
+Use `WACRM_DEV_AGENT_TASK_WORKER=off` in `.env.local` to opt out and
+restart. Unknown values fail closed.
 
-## Environment and deployment
+The runner loads `.env.local` through Next's env loader, inherits
+or generates a **process-local random** `CRON_SECRET` for Next and the
+local timer (never logs it), and sends requests only to `127.0.0.1`.
+It starts only a bounded 2-item-per-stage Task trigger, Task orchestrator
+and Task outbound tick; no automatic approved Change Request execution,
+customer Business Event dispatch or inbound AI recovery. One local timer
+does not overlap its previous tick; SQL leases and idempotency coordinate
+possible separate instances. It retries every 15 seconds. No migration
+and no direct WhatsApp adapter call in this runner.
 
-```powershell
-git switch refactor/service-platform-v2
-git pull origin refactor/service-platform-v2
-npm run dev
-```
+The Task Orchestrator and Outbound Worker additionally defer pinned TEST
+OpenWA Task/Run claims when the **exact session is paused**, or any
+explicitly selected recipient lacks verified 24-hour session inbound or
+an unexpired hashed `agent` Pilot grant. This avoids wasting the only
+attempt before approval. The actual send pathway rechecks all normal
+transport, tenant, consent/suppression, budgets, message reservation and
+ambiguous-outcome rules. Meta and non-TEST behavior are unchanged.
 
-No separate test harness or second terminal is required. Verify that Next
-logged `[TEST Agent Task auto-worker] enabled`. If missing, confirm
-`NODE_ENV=development`, the exact TEST URL, `WACRM_DEV_AGENT_TASK_WORKER`
-not `off`, and a running persistent Node.js server; do not bypass gates.
+The Agent Tasks UI polls GET `/api/agent-tasks` every 15 seconds while
+there is a queued/scheduled/running task; this is read-only.
 
-**Non-TEST and production:** instrumentation never starts this loop.
-A production deployment must run a separately managed protected cron job
-against `POST /api/internal/ai-agent-worker` using `CRON_SECRET`, with
-an uptime/alerting/reconciliation policy before production acceptance.
-Do not assume a serverless Next.js instance runs background timers.
+## Local operator checklist
 
-## Operator acceptance (NOT yet done)
+1. `git switch refactor/service-platform-v2`; `git pull origin refactor/service-platform-v2`; stop old `npm run dev`; `npm run dev`.
+2. Verify startup log `[WACRM TEST] Agent Tasks auto-run every 15 seconds`.
+   If TEST URL differs, it correctly reports disabled and does not run.
+3. For the existing queued three-contact Task, the bound OpenWA connection
+   was `02527740-9806-45ae-b9b1-1354c25f1d3f`, **paused** with
+   **zero** active agent recipient grants when checked. Review session
+   identity, collect verified inbound for every chosen consenting contact,
+   approve exact 3-recipient cohort (hashed, expiring) in its TEST Pilot,
+   then explicitly Start session. Do not disable anti-abuse protections.
+4. Verify Task acquires target/run claims with no duplicates and every
+   authorized WhatsApp receipt/reply and reconciliation is correlated.
+   Use Pause/Stop if unsure; never blindly replay ambiguous sends.
+5. To stop automatic task processing without altering the CRM, set
+   `WACRM_DEV_AGENT_TASK_WORKER=off` and restart. The account-level
+   Agent Task Cutover stop is a separate *immediate outbound* control.
 
-1. TEST-only authenticated operator confirms task id and selected target
-   identities, all active account/provider/recipient Pilot approvals, consent,
-   and daily caps. No blanket outbound authorization.
-2. Restart `npm run dev` and observe exactly one bounded tick at a time;
-   verify Task leaves queued as policy allows, and Targets/Runs are each
-   created exactly once.
-3. Verify each actual authorized WhatsApp receipt, reply routing, opt-out,
-   handoff, anti-duplicate replay and ambiguous-send reconciliation.
-4. Disable `WACRM_DEV_AGENT_TASK_WORKER=off` and restart to confirm queued
-   work no longer auto-advances; confirm the account Cutover stop button
-   blocks **new** deliveries even while the dev worker is running.
-5. Capture HEAD, CI run and TEST event/Target/Run/transport evidence before
-   closing SOF-66 or Phase 18/19. NOTE-001 security debt is separate.
+## Deployment boundary
 
-### TEST Pilot anti-premature-failure protection
+The local runner is not a production service. `npm run start`,
+serverless deployment and any non-TEST Supabase project do not run it.
+A production environment requires a separately managed recurring
+`POST /api/internal/ai-agent-worker` with `CRON_SECRET` and
+uptime/alerting/reconciliation evidence before production readiness.
 
-Before a Task creates targets/runs, the orchestrator checks the exact pinned
-OpenWA session for pause, circuit, each explicitly selected CRM contact's unique
-provider-native recent inbound and active hashed `agent` Pilot grant. If any
-are missing, it **releases the Task claim as deferred** and re-evaluates later,
-rather than consuming the only send attempt. Before an already queued outbound
-Run is claimed, the outbound worker independently rechecks the exact target
-contact and session. The final transport performs its normal durable
-authorization again; a race between checks can still cause a safely recorded
-pre-dispatch denial, without a provider send. This gate does not change Meta,
-non-TEST or production behavior.
+## Verification status
+
+Implementation and unit tests must pass CI; then operator must restart
+the actual local TEST server and capture real Target/Run/outbound evidence
+before claiming live acceptance for SOF-66/Phase 18/19.

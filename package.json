@@ -29,7 +29,8 @@
   },
   "packageManager": "npm@10.9.9",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev-with-agent-tasks.mjs",
+    "dev:next": "next dev",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
