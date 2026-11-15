@@ -131,8 +131,10 @@ export function AgentTasksPanel() {
   const [progressLoading, setProgressLoading] = useState(false)
   const [progressError, setProgressError] = useState<string | null>(null)
   const progressRequest = useRef<AbortController | null>(null)
+  const submissionRef = useRef<{ fingerprint: string; submissionId: string } | null>(null)
+  const [tasksRefreshedAt, setTasksRefreshedAt] = useState<string | null>(null)
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (): Promise<ResponseData | null> => {
     setLoading(true)
     setError(null)
     try {
@@ -140,8 +142,10 @@ export function AgentTasksPanel() {
         await fetch('/api/agent-tasks', { cache: 'no-store' }),
       )
       setData(json)
+      return json
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'تعذّر تحميل المهام والاتصالات.')
+      return null
     } finally {
       setLoading(false)
     }
@@ -175,26 +179,53 @@ export function AgentTasksPanel() {
     setError(null)
     setSuccess(null)
     try {
+      const payload = {
+        agentId, coverageRequestId: requestId,
+        whatsappConnectionId: selectedConnection === 'latest' ? null : selectedConnection,
+        selectedContactIds,
+        maxTargets: selectedContactIds.length, maxAttemptsPerTarget: maxAttempts,
+      }
+      // Preserve the same submission ID on uncertain network retries.
+      // A new form submission after success gets a NEW ID, so an older
+      // cancelled/completed Task cannot silently swallow the new task.
+      const fingerprint = JSON.stringify(payload)
+      if (!submissionRef.current || submissionRef.current.fingerprint !== fingerprint) {
+        submissionRef.current = { fingerprint, submissionId: crypto.randomUUID() }
+      }
       const json = await loadResponse<{ taskId: string; created: boolean }>(
         await fetch('/api/agent-tasks', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            agentId, coverageRequestId: requestId,
-            whatsappConnectionId: selectedConnection === 'latest' ? null : selectedConnection,
-            selectedContactIds,
-            maxTargets: selectedContactIds.length, maxAttemptsPerTarget: maxAttempts,
+            ...payload, submissionId: submissionRef.current.submissionId,
           }),
         }),
       )
-      setSuccess(json.created
-        ? `أُنشئت المهمة ${json.taskId.slice(0, 8)} على الاتصال المختار.`
-        : 'توجد مهمة نشطة لهذا الطلب؛ لم نُنشئ نسخة مكررة.')
-      await reload()
+      const latest = await reload()
+      if (latest && latest.tasks.some(task => task.id === json.taskId)) {
+        setSuccess(json.created
+          ? `أُنشئت المهمة ${json.taskId.slice(0, 8)} وظهرت ضمن المهام الحالية.`
+          : `المهمة ${json.taskId.slice(0, 8)} موجودة مسبقًا؛ لم يُنشأ تكرار.`)
+        submissionRef.current = null
+      } else if (latest) {
+        setError(`أعاد الخادم معرّف المهمة ${json.taskId} لكنها لا تظهر في قائمة الحساب الحالي. تحقق من بيئة TEST والحساب، ثم اضغط تحديث المهام.`)
+      } else {
+        setError(`تمت معالجة طلب المهمة ${json.taskId} لكن تعذّر تأكيد ظهورها في القائمة. استخدم تحديث المهام أو أعد المحاولة بنفس الإعدادات؛ لن يُنشأ تكرار بسبب خطأ الشبكة.`)
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'تعذّر إنشاء المهمة.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function refreshCurrentTasks() {
+    const latest = await reload()
+    if (latest) {
+      setTasksRefreshedAt(new Date().toLocaleTimeString('ar', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      }))
+      if (progressTaskId) await toggleProgress(progressTaskId, true)
     }
   }
 
@@ -392,7 +423,22 @@ export function AgentTasksPanel() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">المهام الحالية وتعديل الجلسة</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="space-y-1">
+              <CardTitle className="text-base">المهام الحالية وتعديل الجلسة</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                المعروضة: {data?.tasks.length ?? 0} مهمة
+                {tasksRefreshedAt ? ` · آخر تحديث: ${tasksRefreshedAt}` : ''}
+              </p>
+            </div>
+            <Button type="button" size="sm" variant="outline" disabled={loading || busy}
+              onClick={() => void refreshCurrentTasks()} aria-label="تحديث المهام الحالية">
+              <RefreshCw className={`ms-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'جارٍ التحديث...' : 'تحديث المهام'}
+            </Button>
+          </div>
+        </CardHeader>
         <CardContent className="space-y-3">
           {(data?.tasks ?? []).length === 0 && !loading ? (
             <p className="text-sm text-muted-foreground">لا توجد مهام Agent Task مسجلة حاليًا.</p>

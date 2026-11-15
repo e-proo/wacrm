@@ -14,6 +14,7 @@ import {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const allowedStatus = new Set(['ready', 'connected'])
+const noStore = { 'Cache-Control': 'private, no-store, max-age=0' }
 const isUUID = (value: unknown): value is string =>
   typeof value === 'string' && UUID_RE.test(value)
 const intInRange = (value: unknown, max: number): value is number =>
@@ -147,7 +148,7 @@ export async function GET() {
         createdAt: row.created_at,
       })),
       outboundDeliveryEnabled: runtime?.outbound_task_delivery_enabled === true,
-    })
+    }, { headers: noStore })
   } catch (error) {
     return toErrorResponse(error)
   }
@@ -163,6 +164,7 @@ export async function POST(request: Request) {
     const body: unknown = await request.json().catch(() => null)
     if (!record(body) || !isUUID(body.agentId) ||
         !isUUID(body.coverageRequestId) ||
+        !(body.submissionId === undefined || isUUID(body.submissionId)) ||
         !(body.whatsappConnectionId === null || isUUID(body.whatsappConnectionId)) ||
         !validSelectedContacts(body) ||
         (Array.isArray(body.selectedContactIds) &&
@@ -177,6 +179,8 @@ export async function POST(request: Request) {
       agentId: body.agentId,
       coverageRequestId: body.coverageRequestId,
       actorUserId: ctx.userId,
+      ...(typeof body.submissionId === 'string'
+        ? { manualSubmissionId: body.submissionId } : {}),
       whatsappConnectionId: body.whatsappConnectionId,
       ...(body.selectedContactId ? { selectedContactId: body.selectedContactId as string } : {}),
       ...(Array.isArray(body.selectedContactIds)
@@ -184,7 +188,9 @@ export async function POST(request: Request) {
       maxTargets: body.maxTargets,
       maxAttemptsPerTarget: body.maxAttemptsPerTarget,
     })
-    return NextResponse.json(result, { status: result.created ? 201 : 200 })
+    return NextResponse.json(result, {
+      status: result.created ? 201 : 200, headers: noStore,
+    })
   } catch (error) {
     if (error instanceof CoverageSourcingTaskError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })

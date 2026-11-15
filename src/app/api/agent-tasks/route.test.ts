@@ -69,6 +69,46 @@ beforeEach(() => {
 })
 
 describe('per-Task WhatsApp configuration API (SOF-64)', () => {
+  it('passes a manual submission UUID to the task service, never a client-supplied tenant', async () => {
+    const submissionId = '99999999-9999-4999-8999-999999999999'
+    const response = await POST(jsonRequest('POST', {
+      agentId, coverageRequestId: requestId, whatsappConnectionId: connectionId,
+      selectedContactIds: [contactId], maxTargets: 1, maxAttemptsPerTarget: 1,
+      submissionId, accountId: 'foreign',
+    }))
+    expect(response.status).toBe(201)
+    expect(stubs.startCoverageSourcingTask).toHaveBeenCalledWith(expect.objectContaining({
+      accountId, actorUserId: userId,
+      manualSubmissionId: submissionId, selectedContactIds: [contactId],
+    }))
+    expect(response.headers.get('Cache-Control')).toContain('no-store')
+  })
+
+  it('rejects malformed manual submission identifiers before invoking the creator', async () => {
+    for (const submissionId of ['not-a-uuid', null, 'foreign-user']) {
+      const response = await POST(jsonRequest('POST', {
+        agentId, coverageRequestId: requestId, whatsappConnectionId: connectionId,
+        selectedContactIds: [contactId], maxTargets: 1, maxAttemptsPerTarget: 1,
+        submissionId,
+      }))
+      expect(response.status).toBe(400)
+    }
+    expect(stubs.startCoverageSourcingTask).not.toHaveBeenCalled()
+  })
+
+  it('reports existing tasks as reused, not as newly created', async () => {
+    stubs.startCoverageSourcingTask.mockResolvedValue({
+      taskId, agentId, revisionId: agentId, created: false,
+    })
+    const response = await POST(jsonRequest('POST', {
+      agentId, coverageRequestId: requestId, whatsappConnectionId: connectionId,
+      selectedContactIds: [contactId], maxTargets: 1, maxAttemptsPerTarget: 1,
+      submissionId: '99999999-9999-4999-8999-999999999999',
+    }))
+    expect(response.status).toBe(200)
+    expect((await response.json()).created).toBe(false)
+  })
+
   it('accepts the exact Task connection and refuses client-supplied tenant identities', async () => {
     const response = await POST(jsonRequest('POST', {
       accountId: 'other-tenant', actorUserId: 'other-user',

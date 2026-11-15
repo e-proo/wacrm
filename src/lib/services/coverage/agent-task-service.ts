@@ -12,6 +12,7 @@ import {
 } from '@/lib/ai/tasks/capability-policy'
 import type { AgentTaskStartSource } from '@/lib/ai/tasks/triggers'
 import { checkCoverageSelectedContactEligibility } from './selected-contact'
+import { coverageSourcingCorrelationId, coverageSourcingIdempotencyKey } from './task-idempotency'
 import {
   normalizeExplicitCoverageContactIds,
   parseExplicitCoverageContactIds,
@@ -55,6 +56,8 @@ export interface StartCoverageSourcingTaskInput {
   coverageRequestId: string
   agentId: string
   actorUserId: string | null
+  /** Stable across HTTP retries; a NEW value represents a deliberate new manual task. */
+  manualSubmissionId?: string
   whatsappConnectionId?: string | null
   /** Legacy one-recipient input; mutually exclusive with selectedContactIds. */
   selectedContactId?: string | null
@@ -89,25 +92,17 @@ function findCoverageBinding(
   return null
 }
 
-function taskIdempotencyKey(input: {
-  coverageRequestId: string
-  agentId: string
-  revisionId: string
-  sourceKey?: string | null
-}): string {
-  const base =
-    'coverage:sourcing:request:' +
-    input.coverageRequestId +
-    ':agent:' +
-    input.agentId +
-    ':revision:' +
-    input.revisionId
-  return input.sourceKey ? base + ':source:' + input.sourceKey : base
-}
-
 export async function startCoverageSourcingTask(
   input: StartCoverageSourcingTaskInput,
 ): Promise<StartCoverageSourcingTaskResult> {
+  if (input.manualSubmissionId !== undefined &&
+      (!UUID_RE.test(input.manualSubmissionId) || input.trigger)) {
+    throw new CoverageSourcingTaskError(
+      'COVERAGE_SOURCING_SUBMISSION_INVALID',
+      'A manual task requires a valid unique submission ID without a trigger.',
+      400,
+    )
+  }
   let explicitContacts: readonly string[] | null
   try {
     explicitContacts = normalizeExplicitCoverageContactIds(input)
@@ -485,18 +480,51 @@ export async function startCoverageSourcingTask(
     dailyTokenBudget: binding.dailyTokenBudget,
   }
 
-  const idempotencyKey = taskIdempotencyKey({
+  const identity = {
     coverageRequestId: input.coverageRequestId,
     agentId: input.agentId,
     revisionId,
     sourceKey: input.trigger?.sourceKey,
-  })
-  const correlationId =
-    'coverage:sourcing:' +
-    input.coverageRequestId +
-    ':' +
-    revisionId +
-    (input.trigger ? ':source:' + input.trigger.sourceKey : '')
+    manualSubmissionId: input.manualSubmissionId,
+  }
+  const idempotencyKey = coverageSourcingIdempotencyKey(identity)
+  const correlationId = coverageSourcingCorrelationId(identity)
+
+  // An earlier terminal Task must never be reported as a NEW creation.
+  // The UI sends a fresh manualSubmissionId for a deliberate new task while
+  // retaining it for uncertain HTTP retries. Lookups always remain tenant scoped.
+  const { data: replay, error: replayError } = await db.from('ai_agent_tasks')
+    .select('id,agent_id,agent_revision_id,target_policy,max_targets,max_attempts_per_target')
+    .eq('account_id', input.accountId)
+    .eq('idempotency_key', idempotencyKey)
+    .maybeSingle()
+  if (replayError) throw replayError
+  if (replay) {
+    let previousRecipients: readonly string[] | null
+    try {
+      previousRecipients = parseExplicitCoverageContactIds(replay.target_policy ?? {})
+    } catch {
+      throw new CoverageSourcingTaskError(
+        'COVERAGE_SOURCING_REPLAY_SCOPE_CONFLICT',
+        'A previous submission has an incompatible recipient policy.',
+      )
+    }
+    const policy = replay.target_policy && typeof replay.target_policy === 'object'
+      ? replay.target_policy as Record<string, unknown> : {}
+    const previousConnection = typeof policy.whatsappConnectionId === 'string'
+      ? policy.whatsappConnectionId : null
+    if (replay.agent_id !== input.agentId || replay.agent_revision_id !== revisionId ||
+        !sameExplicitCoverageContacts(explicitContacts, previousRecipients) ||
+        previousConnection !== connectionId ||
+        replay.max_targets !== desiredMaxTargets ||
+        replay.max_attempts_per_target !== desiredAttempts) {
+      throw new CoverageSourcingTaskError(
+        'COVERAGE_SOURCING_REPLAY_SCOPE_CONFLICT',
+        'This submission ID was already used with different task settings.',
+      )
+    }
+    return { taskId: replay.id, agentId: input.agentId, revisionId, created: false }
+  }
 
   const { data: taskId, error: createError } = await db.rpc(
     'create_ai_agent_task',
