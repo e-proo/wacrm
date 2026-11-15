@@ -135,28 +135,29 @@ export async function POST(request: Request) {
         error: 'اختر جلسة OpenWA وطلب تغطية نشطين في الحساب نفسه.',
       }, { status: 409 })
     }
-    const { data: normalized, error: lookupError } = await db.from('contacts')
-      .select('id,name,phone').eq('account_id', ctx.accountId)
-      .eq('phone_normalized', phone).limit(2)
-    if (lookupError) throw lookupError
-    if ((normalized?.length ?? 0) > 1) {
+    // Match BOTH normalized and older display-phone representations, so
+    // conflicting account-owned identities cannot slip into a Task where
+    // the OpenWA resolver would later refuse to dispatch.
+    const [
+      { data: normalized, error: normalizedError },
+      { data: legacy, error: legacyError },
+    ] = await Promise.all([
+      db.from('contacts').select('id,name,phone').eq('account_id', ctx.accountId)
+        .eq('phone_normalized', phone).limit(3),
+      db.from('contacts').select('id,name,phone').eq('account_id', ctx.accountId)
+        .in('phone', [phone, '+' + phone]).limit(3),
+    ])
+    if (normalizedError || legacyError) throw normalizedError ?? legacyError
+    const matches = new Map(
+      [...(normalized ?? []), ...(legacy ?? [])].map(row => [row.id, row]),
+    )
+    if (matches.size > 1) {
       return NextResponse.json({
-        error: 'يوجد أكثر من جهة اتصال بنفس الرقم؛ راجع التكرارات أولًا.',
+        error: 'هناك أكثر من جهة اتصال للرقم نفسه ضمن الحساب. عالج التكرار قبل اعتماد المستهدف.',
+        code: 'DUPLICATE_CONTACT_PHONE_IDENTITY',
       }, { status: 409 })
     }
-    let contact = normalized?.[0] ?? null
-    if (!contact) {
-      const { data: legacy, error: legacyError } = await db.from('contacts')
-        .select('id,name,phone').eq('account_id', ctx.accountId)
-        .in('phone', [phone, '+' + phone]).limit(2)
-      if (legacyError) throw legacyError
-      if ((legacy?.length ?? 0) > 1) {
-        return NextResponse.json({
-          error: 'رقم مكرر في CRM؛ راجع جهات الاتصال أولًا.',
-        }, { status: 409 })
-      }
-      contact = legacy?.[0] ?? null
-    }
+    let contact = [...matches.values()][0] ?? null
     if (contact?.id === source.requester_contact_id) {
       return NextResponse.json({
         error: 'لا يمكن استهداف صاحب طلب التغطية نفسه.',
