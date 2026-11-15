@@ -67,6 +67,7 @@ interface TaskRecipientProgress {
 }
 interface TaskProgressResponse {
   taskStatus: string
+  holdReason?: string | null
   recipients: TaskRecipientProgress[]
 }
 const targetStatusLabel: Record<string, string> = {
@@ -76,6 +77,14 @@ const targetStatusLabel: Record<string, string> = {
   replied: 'تم الرد', in_progress: 'قيد المعالجة',
   completed: 'اكتمل', skipped: 'تم التجاوز',
   failed: 'تعثر', paused_for_human: 'بانتظار مراجعة بشرية',
+}
+const taskHoldLabel: Record<string, string> = {
+  connection_not_ready: 'جلسة واتساب المختارة غير جاهزة؛ تحقق من الاتصال.',
+  connection_paused: 'إرسال هذه الجلسة موقوف. لن يبدأ العامل حتى تستأنفه بصلاحية المسؤول.',
+  connection_circuit_open: 'الحماية أوقفت الإرسال مؤقتًا بسبب مشكلة في الاتصال.',
+  pilot_guardrail_missing: 'إعدادات OpenWA Pilot لهذه الجلسة غير مكتملة.',
+  pilot_recipient_not_verified: 'تعذّر مطابقة رقم واحد أو أكثر مع هوية OpenWA الصحيحة على هذه الجلسة.',
+  pilot_recipient_not_approved: 'بعض الأرقام المحددة لم تُعتمد بعد في OpenWA Agent Pilot، أو انتهت صلاحية الاعتماد. اعتمد جميع الأرقام المقصودة قبل التشغيل.',
 }
 const outboundStatusLabel: Record<string, string> = {
   reserved: 'محجوز', queued: 'بانتظار الإرسال',
@@ -441,8 +450,9 @@ export function AgentTasksPanel() {
           ) : null}
           {selectedProvider === 'openwa' ? (
             <p className="text-xs text-muted-foreground">
-              يتطلب إرسال OpenWA محادثة واردة حديثة من المستهدف على الجلسة نفسها،
-              وعدم وجود حظر أو إلغاء اشتراك، والسماح بالرقم في ضوابط Pilot.
+              في TEST يقبل OpenWA إما محادثة واردة حديثة، أو موافقة صريحة على رسائل واتساب
+              موثّقة من مكالمة هاتفية لكل مستهدف. يجب اعتماد الأرقام المختارة في Pilot،
+              مع الالتزام بالحظر وإلغاء الاشتراك والحدود والإيقاف.
             </p>
           ) : null}
           <Button type="button" onClick={() => void createTask()} disabled={!canCreate}>
@@ -519,6 +529,11 @@ export function AgentTasksPanel() {
                     <p className="text-sm font-semibold">نتائج المستهدفين لهذا الطلب</p>
                     {progressLoading ? <p className="text-xs text-muted-foreground">جارٍ تحميل الحالة...</p> : null}
                     {progressError ? <p role="alert" className="text-xs text-destructive">{progressError}</p> : null}
+                    {progress?.holdReason ? (
+                      <p role="status" className="rounded-md border border-amber-400/50 p-2 text-sm text-amber-700 dark:text-amber-400">
+                        العامل مؤجّل مؤقتًا: {taskHoldLabel[progress.holdReason] ?? progress.holdReason}
+                      </p>
+                    ) : null}
                     {!progressLoading && progress && progress.recipients.length === 0 ? (
                       <p className="text-xs text-muted-foreground">لا توجد أرقام محددة في هذه المهمة.</p>
                     ) : null}
