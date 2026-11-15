@@ -222,10 +222,51 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(h.calls).toEqual([])
   })
 
-  it('rejects invalid higher pilot caps without changes', async () => {
+  it('rejects values above 100/hour and 1000/day, or an excessive first-touch cap', async () => {
+    for (const invalid of [
+      { hourly_cap: 101, daily_cap: 1000, first_touch_daily_cap: 10 },
+      { hourly_cap: 100, daily_cap: 1001, first_touch_daily_cap: 10 },
+      { hourly_cap: 100, daily_cap: 1000, first_touch_daily_cap: 11 },
+    ]) {
+      const response = await POST(request({
+        action: 'limits', ...invalid,
+        minimum_interval_ms: 15000, jitter_ms: 0,
+      }), context())
+      expect(response.status).toBe(400)
+    }
+    expect(h.calls).toEqual([])
+  })
+
+  it('accepts 100/hour and 1000/day on paused TEST with explicit bounded workload caps', async () => {
     const response = await POST(request({
-      action: 'limits', hourly_cap: 60, daily_cap: 500,
-      first_touch_daily_cap: 1, minimum_interval_ms: 15000, jitter_ms: 0,
+      action: 'limits',
+      hourly_cap: 100, daily_cap: 1000, first_touch_daily_cap: 10,
+      minimum_interval_ms: 15000, jitter_ms: 3000,
+      pilot_agent_hourly_cap: 100, pilot_agent_daily_cap: 1000,
+      pilot_manual_hourly_cap: 100, pilot_manual_daily_cap: 1000,
+    }), context())
+    expect(response.status).toBe(200)
+    expect(h.calls).toContainEqual(expect.objectContaining({
+      table: 'whatsapp_connection_guardrails', type: 'update',
+      payload: expect.objectContaining({
+        hourly_cap: 100, daily_cap: 1000,
+        pilot_agent_hourly_cap: 100, pilot_agent_daily_cap: 1000,
+        pilot_manual_hourly_cap: 100, pilot_manual_daily_cap: 1000,
+        first_touch_daily_cap: 10,
+        warmup_hourly_cap: 100, warmup_daily_cap: 1000,
+        manual_paused: undefined,
+      }),
+    }))
+    expect(h.guard.manual_paused).toBe(true)
+    expect(h.active).toBe(0)
+  })
+
+  it('refuses workload caps higher than shared per-session caps', async () => {
+    const response = await POST(request({
+      action: 'limits', hourly_cap: 20, daily_cap: 200,
+      first_touch_daily_cap: 3, minimum_interval_ms: 15000, jitter_ms: 1000,
+      pilot_agent_hourly_cap: 100, pilot_agent_daily_cap: 1000,
+      pilot_manual_hourly_cap: 20, pilot_manual_daily_cap: 200,
     }), context())
     expect(response.status).toBe(400)
     expect(h.calls).toEqual([])
