@@ -10,6 +10,8 @@ const CHAT = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 
 function fakeDb(input: {
   contacts?: Array<{ id: string }>
+  normalizedContacts?: Array<{ id: string }>
+  legacyContacts?: Array<{ id: string }>
   conversations?: Array<{ id: string }>
   inbound?: Array<{ conversation_id: string; provider_chat_id: string | null }>
   rejectTable?: string
@@ -26,7 +28,10 @@ function fakeDb(input: {
         limit: () => builder,
         then: (callback: (data: unknown) => unknown) => {
           reads.push({ table, filters: { ...filters } })
-          const data = table === 'contacts' ? (input.contacts ?? [{ id: 'contact-1' }])
+          const data = table === 'contacts' ? (
+            'phone_normalized' in filters
+              ? (input.normalizedContacts ?? input.contacts ?? [{ id: 'contact-1' }])
+              : (input.legacyContacts ?? input.contacts ?? [{ id: 'contact-1' }]))
             : table === 'conversations' ? (input.conversations ?? [{ id: CHAT }])
               : table === 'messages' ? (input.inbound ?? [{ conversation_id: CHAT, provider_chat_id: LID }]) : []
           return Promise.resolve(callback(input.rejectTable === table
@@ -52,6 +57,22 @@ describe('OpenWA Pilot resolves consent to the same native chat as inbox send', 
       { table: 'messages', filters: { conversation_id: [CHAT], connection_id: CONNECTION, provider: 'openwa', sender_type: 'customer' } },
     ])
   })
+  it('finds the native chat for a formatted CRM phone stored by normalized identity', async () => {
+    const { db, reads } = fakeDb({normalizedContacts:[{id:'contact-1'}],legacyContacts:[]})
+    expect(await resolveOpenWAPilotRecipientForGrant(db, ACCOUNT, CONNECTION, PHONE))
+      .toEqual({recipient:LID, source:'verified_inbound_chat'})
+    expect(reads.some(r=>r.table==='contacts' && r.filters.phone_normalized===PHONE)).toBe(true)
+  })
+
+  it('rejects different contacts matching normalized and legacy representations', async () => {
+    const { db } = fakeDb({
+      normalizedContacts:[{id:'contact-1'}],
+      legacyContacts:[{id:'contact-2'}],
+    })
+    await expect(resolveOpenWAPilotRecipientForGrant(db, ACCOUNT, CONNECTION, PHONE))
+      .rejects.toMatchObject({code:'connection_restricted'})
+  })
+
   it('preserves the explicit verified @lid without converting its digits to a phone number', async () => {
     const { db, reads } = fakeDb()
     expect(await resolveOpenWAPilotRecipientForGrant(db, ACCOUNT, CONNECTION, LID))
