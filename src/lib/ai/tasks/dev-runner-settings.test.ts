@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import {
   DEV_TASK_TEST_URL, developmentPort, shouldRunDevTaskWorker,
@@ -19,5 +20,23 @@ describe('local TEST dev runner safety gate and port', () => {
     expect(developmentPort(['--port=3210'])).toBe(3210)
     expect(() => developmentPort(['--port','0'])).toThrow()
     expect(() => developmentPort(['-p','injected'])).toThrow()
+  })
+  it('loads the real dev runner with native Node ESM before any server starts', () => {
+    // --port=0 aborts immediately after module imports and env loading.
+    // This catches the @next/env CommonJS named-export error under Node 22
+    // without starting Next.js, a timer, or any WhatsApp work.
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/dev-with-agent-tasks.mjs', '--port=0'],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        timeout: 10_000,
+        env: { ...process.env, WACRM_DEV_AGENT_TASK_WORKER: 'off' },
+      },
+    )
+    expect(result.error).toBeUndefined()
+    expect(result.status).not.toBe(0)
+    expect(result.stderr).toContain('Invalid Next.js development port')
   })
 })
