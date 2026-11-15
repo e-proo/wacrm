@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { canonicalOpenWAPilotRecipient, isOpenWATestProject, openWAPilotEnforcementEnabled, openWAPilotRecipientHash } from '@/lib/whatsapp/transport/guardrails'
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
 import { resolveOpenWAPilotRecipientForGrant } from '@/lib/whatsapp/transport/openwa/pilot-recipient'
-import { missingPilotCohortCaps } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
+import { missingPilotCohortCaps, OPENWA_TEST_PILOT_MAX_HOURLY, OPENWA_TEST_PILOT_MAX_DAILY, OPENWA_TEST_PILOT_MAX_FIRST_TOUCH, OPENWA_TEST_PILOT_MIN_INTERVAL_MS } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
 import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
@@ -13,11 +13,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DEFAULT_HOURLY = 3
 const DEFAULT_DAILY = 10
 const DEFAULT_FIRST_TOUCH = 1
-const MAX_HOURLY = 10
-const MAX_DAILY = 30
-const MAX_FIRST_TOUCH = 10
+const MAX_HOURLY = OPENWA_TEST_PILOT_MAX_HOURLY
+const MAX_DAILY = OPENWA_TEST_PILOT_MAX_DAILY
+const MAX_FIRST_TOUCH = OPENWA_TEST_PILOT_MAX_FIRST_TOUCH
 const MAX_BATCH_CONTACTS = 10
-const MIN_INTERVAL = 15000
+const MIN_INTERVAL = OPENWA_TEST_PILOT_MIN_INTERVAL_MS
 
 type Db = Awaited<ReturnType<typeof requireOpenWASessionAdmin>>['adminDb']
 
