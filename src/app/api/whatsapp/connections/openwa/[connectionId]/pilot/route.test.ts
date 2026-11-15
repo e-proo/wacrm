@@ -254,7 +254,6 @@ describe('OW-13 DEV pilot protected UI API', () => {
         pilot_manual_hourly_cap: 100, pilot_manual_daily_cap: 1000,
         first_touch_daily_cap: 10,
         warmup_hourly_cap: 100, warmup_daily_cap: 1000,
-        manual_paused: undefined,
       }),
     }))
     expect(h.guard.manual_paused).toBe(true)
