@@ -59,6 +59,29 @@ export async function GET(
       }
     }
 
+    // In TEST, when the agent cohort is held by Pilot admission, inspect
+    // each frozen recipient independently through the SAME authoritative
+    // preclaim routine. Never approve, reserve, send, or expose hashed IDs.
+    // Pilot grants are capped at ten exact recipients per cohort.
+    const pilotRecipientApproval = new Map<string, 'approved' | 'missing' | 'unverified'>()
+    if (holdReason === 'pilot_recipient_not_approved' &&
+        typeof connectionId === 'string' && selected.length <= 10) {
+      const checks = await Promise.all(selected.map(async contactId => {
+        try {
+          const reason = await deferredTestOpenWATaskReason({
+            db, accountId: ctx.accountId, connectionId, contactIds: [contactId],
+          })
+          const status: 'approved' | 'missing' | 'unverified' =
+            reason === null ? 'approved'
+              : reason === 'pilot_recipient_not_approved' ? 'missing' : 'unverified'
+          return { contactId, status }
+        } catch {
+          return { contactId, status: 'unverified' as const }
+        }
+      }))
+      for (const check of checks) pilotRecipientApproval.set(check.contactId, check.status)
+    }
+
     const [contactResult, targetResult] = await Promise.all([
       db.from('contacts').select('id,name,phone')
         .eq('account_id', ctx.accountId).in('id', [...selected]).limit(selected.length),
@@ -101,6 +124,7 @@ export async function GET(
         const outbound = target ? outbounds.get(target.id) : null
         return {
           contactId,
+          pilotApproval: pilotRecipientApproval.get(contactId) ?? null,
           name: contact?.name ?? null,
           phone: contact?.phone ?? null,
           targetStatus: target?.status ?? null,
