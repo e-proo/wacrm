@@ -437,6 +437,65 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect((await activated.json()).active).toBe(true)
   })
 
+  it('explains which bounded TEST caps block three recipients, with no grant or send', async () => {
+    h.resolveRecipient.mockImplementation(async (_db: unknown, _a: string, _c: string, raw: string) => ({
+      recipient: raw + '@c.us', source: 'phone_without_inbound',
+    }))
+    const result = await POST(request({
+      action: 'grant_batch', workload: 'agent',
+      recipients: ['12345678901', '23456789012', '34567890123'],
+      consent_confirmed: true, confirm_agent_task_test: true,
+      consent_basis: 'phone_call', phone_call_opt_in_confirmed: true,
+    }), context())
+    expect(result.status).toBe(409)
+    expect(await result.json()).toMatchObject({
+      code: 'pilot_cohort_caps_insufficient',
+      required_count: 3,
+      missing_caps: ['first_touch_daily_cap'],
+    })
+    expect(h.calls).toEqual([])
+  })
+
+  it('accepts a three-number Agent cohort only after an explicit bounded limits save', async () => {
+    // Existing cap rows can contain workload limits larger than the session.
+    Object.assign(h.guard, {
+      pilot_agent_hourly_cap: 10, pilot_agent_daily_cap: 30,
+      pilot_manual_hourly_cap: 10, pilot_manual_daily_cap: 30,
+    })
+    const saved = await POST(request({
+      action: 'limits',
+      hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 3,
+      minimum_interval_ms: 15000, jitter_ms: 3000,
+      pilot_agent_hourly_cap: 3, pilot_agent_daily_cap: 10,
+      pilot_manual_hourly_cap: 3, pilot_manual_daily_cap: 10,
+    }), context())
+    expect(saved.status).toBe(200)
+    expect(h.guard.first_touch_daily_cap).toBe(3)
+    expect(h.guard.pilot_agent_hourly_cap).toBe(3)
+    expect(h.guard.warmup_hourly_cap).toBe(3)
+    h.resolveRecipient.mockImplementation(async (_db: unknown, _a: string, _c: string, raw: string) => ({
+      recipient: raw + '@c.us', source: 'phone_without_inbound',
+    }))
+    h.recipientHash.mockImplementation((_a: string, _c: string, raw: string) => (
+      raw.startsWith('123') ? '1'.repeat(64)
+        : raw.startsWith('234') ? '2'.repeat(64) : '3'.repeat(64)
+    ))
+    const approved = await POST(request({
+      action: 'grant_batch', workload: 'agent',
+      recipients: ['12345678901', '23456789012', '34567890123'],
+      consent_confirmed: true, confirm_agent_task_test: true,
+      consent_basis: 'phone_call', phone_call_opt_in_confirmed: true,
+    }), context())
+    expect(approved.status).toBe(200)
+    expect(await approved.json()).toMatchObject({
+      approved_count: 3, agent_admissions: 3, paused: true,
+    })
+    const approval = h.calls.find(call => call.table === 'whatsapp_openwa_pilot_allowlist')
+    expect(approval).toBeDefined()
+    expect(Array.isArray(approval?.payload)).toBe(true)
+    expect(h.guard.manual_paused).toBe(true)
+  })
+
   it('accepts explicit phone-call opt-in for a new Agent number without an inbound chat or CRM contact', async () => {
     Object.assign(h.guard, {first_touch_daily_cap: 2})
     h.recentInbound = false
