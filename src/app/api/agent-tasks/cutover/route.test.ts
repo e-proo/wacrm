@@ -80,7 +80,7 @@ describe('TEST Agent Task cutover UI API', () => {
     await expect(GET()).rejects.toThrow('forbidden')
     expect(stubs.inspect).not.toHaveBeenCalled()
     stubs.requireRole.mockResolvedValue({ accountId, userId })
-    stubs.assertAgentCapability.mockImplementation(() => { throw new Error('capability denied') })
+    stubs.assertAgentCapability.mockImplementationOnce(() => { throw new Error('capability denied') })
     await expect(POST(request({ mode: 'disabled', confirmation: 'DISABLE_TEST_AGENT_TASK_PILOT' }))).rejects.toThrow('capability denied')
     expect(stubs.change).not.toHaveBeenCalled()
   })
