@@ -18,7 +18,7 @@ vi.mock('@/lib/services/coverage/selected-contact', () => ({
   checkCoverageSelectedContactEligibility: stubs.eligible,
 }))
 
-import { GET } from './route'
+import { GET, POST } from './route'
 
 const acct = '11111111-1111-4111-8111-111111111111'
 const contactId = '33333333-3333-4333-8333-333333333333'
@@ -118,4 +118,82 @@ describe('Agent Task existing CRM contact picker API', () => {
     expect(stubs.from).not.toHaveBeenCalled()
   })
 
+})
+
+
+describe('TEST phone-call opted-in prospect registration', () => {
+  const connectionId = '66666666-6666-4666-8666-666666666666'
+  const userId = '22222222-2222-4222-8222-222222222222'
+  function request(body: Record<string, unknown>) {
+    return new Request('http://localhost/api/agent-tasks/contacts', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        phone: '+967700000001', name: 'New TEST Prospect',
+        coverageRequestId: requestId,
+        whatsappConnectionId: connectionId,
+        consent_method: 'phone_call',
+        whatsapp_opt_in_confirmed: true,
+        ...body,
+      }),
+    })
+  }
+
+  it('rejects adding numbers without a specific WhatsApp opt-in, before database access', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://pqirsnfupofhulmewakq.supabase.co')
+    try {
+      const result = await POST(request({ whatsapp_opt_in_confirmed: false }))
+      expect(result.status).toBe(400)
+      expect(stubs.from).not.toHaveBeenCalled()
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it('never registers prospects outside pinned TEST', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://other-project.supabase.co')
+    try {
+      const result = await POST(request({}))
+      expect(result.status).toBe(403)
+      expect(stubs.from).not.toHaveBeenCalled()
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it('creates a tenant-owned CRM contact but does not send WhatsApp or authorize Pilot', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://pqirsnfupofhulmewakq.supabase.co')
+    stubs.requireAgentCapability.mockResolvedValue({ accountId: acct, userId })
+    let inserted: Record<string, unknown> | null = null
+    stubs.from.mockImplementation((table: string) => {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        in: () => query,
+        is: () => query,
+        maybeSingle: async () => ({
+          data: table === 'whatsapp_connections' ? { id: connectionId }
+            : table === 'coverage_requests' ? { id: requestId, requester_contact_id: null }
+              : null,
+          error: null,
+        }),
+        limit: async () => ({ data: [], error: null }),
+        insert: (value: Record<string, unknown>) => {
+          inserted = value
+          return { select: () => ({ single: async () => ({
+            data: { id: contactId, name: value.name, phone: value.phone },
+            error: null,
+          }) }) }
+        },
+      }
+      return query
+    })
+    try {
+      const response = await POST(request({}))
+      const data = await response.json()
+      expect(response.status).toBe(200)
+      expect(data.contact.id).toBe(contactId)
+      expect(inserted).toMatchObject({
+        account_id: acct, user_id: userId,
+        phone: '+967700000001', phone_normalized: '967700000001',
+      })
+      expect(stubs.from).not.toHaveBeenCalledWith('whatsapp_openwa_pilot_allowlist')
+      expect(stubs.from).not.toHaveBeenCalledWith('messages')
+    } finally { vi.unstubAllEnvs() }
+  })
 })
