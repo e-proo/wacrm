@@ -51,6 +51,7 @@ interface ResponseData {
   coverageRequests: CoverageRequest[]
   tasks: Task[]
   outboundDeliveryEnabled: boolean
+  devTaskWorkerActive?: boolean
 }
 interface TaskRecipientProgress {
   contactId: string
@@ -458,6 +459,15 @@ export function AgentTasksPanel() {
                 {tasksRefreshedAt ? ` · آخر تحديث: ${tasksRefreshedAt}` : ''}
                 {hasPendingTasks ? ' · تحديث تلقائي كل 15 ثانية' : ''}
               </p>
+              {data?.devTaskWorkerActive ? (
+                <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                  تشغيل المهام المحلي مهيأ على TEST؛ تتقدم المهام المؤهلة تلقائيًا.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  التشغيل التلقائي المحلي غير مفعّل في هذه النسخة؛ راجع إعداد TEST وتشغيل npm run dev.
+                </p>
+              )}
             </div>
             <Button type="button" size="sm" variant="outline" disabled={loading || busy}
               onClick={() => void refreshCurrentTasks()} aria-label="تحديث المهام الحالية">
@@ -480,6 +490,11 @@ export function AgentTasksPanel() {
                     <span className="font-semibold">{task.taskType}@{task.version}</span>
                     <span className="mx-2 text-muted-foreground">·</span>
                     <span>{task.status}</span>
+                    {task.status === 'queued' && conn?.provider === 'openwa' ? (
+                      <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                        يبدأ التنفيذ تلقائيًا بعد تفعيل جلسة OpenWA واعتماد جميع أرقام الوكيل في Pilot.
+                      </p>
+                    ) : null}
                     <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
                       {task.id.slice(0, 8)} · {conn ? connectionLabel(conn) : (task.connectionId ? 'اتصال غير متاح' : 'اتصال أحدث وارد')}
                       {task.selectedContactIds.length > 0

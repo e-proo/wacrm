@@ -148,6 +148,8 @@ export async function GET() {
         createdAt: row.created_at,
       })),
       outboundDeliveryEnabled: runtime?.outbound_task_delivery_enabled === true,
+      devTaskWorkerActive: process.env.NODE_ENV === 'development' &&
+        process.env.WACRM_DEV_AGENT_TASK_WORKER_ACTIVE === '1',
     }, { headers: noStore })
   } catch (error) {
     return toErrorResponse(error)

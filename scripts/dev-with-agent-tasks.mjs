@@ -17,13 +17,21 @@ const enabled = shouldRunDevTaskWorker({
 const cronSecret = enabled
   ? (process.env.CRON_SECRET || randomBytes(32).toString('hex'))
   : process.env.CRON_SECRET
-const nextArgs = ['dev', ...(args.length ? args : ['-p', String(port)])]
+// Always pass an explicit port. Otherwise Next can silently pick 3001
+// when 3000 is occupied, leaving the private worker polling the wrong site.
+const hasPortArg = args.some(value => value === '-p' || value === '--port' ||
+  value.startsWith('--port='))
+const nextArgs = ['dev', ...args, ...(hasPortArg ? [] : ['-p', String(port)])]
 const next = spawn(
   process.execPath,
   ['node_modules/next/dist/bin/next', ...nextArgs],
   {
     stdio: 'inherit',
-    env: { ...process.env, ...(cronSecret ? { CRON_SECRET: cronSecret } : {}) },
+    env: {
+      ...process.env,
+      WACRM_DEV_AGENT_TASK_WORKER_ACTIVE: enabled ? '1' : '0',
+      ...(cronSecret ? { CRON_SECRET: cronSecret } : {}),
+    },
     windowsHide: true,
   },
 )
