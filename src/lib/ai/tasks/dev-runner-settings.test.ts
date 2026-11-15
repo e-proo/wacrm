@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEV_TASK_TEST_URL, developmentPort, shouldRunDevTaskWorker,
-} from '../../../scripts/dev-agent-task-config.mjs'
+} from '../../../../scripts/dev-agent-task-config.mjs'
 
 describe('local TEST dev runner safety gate and port', () => {
   it('starts by default only on pinned TEST and fails closed elsewhere', () => {
