@@ -119,6 +119,7 @@ function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
     active: s.active, paused: s.guard.manual_paused, guardrails: {
       hourly_cap: s.guard.hourly_cap, daily_cap: s.guard.daily_cap,
       first_touch_daily_cap: s.guard.first_touch_daily_cap,
+      warmup_hourly_cap: s.guard.warmup_hourly_cap, warmup_daily_cap: s.guard.warmup_daily_cap,
       minimum_interval_ms: s.guard.minimum_interval_ms, jitter_ms: s.guard.jitter_ms,
       warmup_hourly_cap: s.guard.warmup_hourly_cap, warmup_daily_cap: s.guard.warmup_daily_cap,
       pilot_agent_hourly_cap: s.guard.pilot_agent_hourly_cap,
