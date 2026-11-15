@@ -390,6 +390,39 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect((await activated.json()).active).toBe(true)
   })
 
+  it('accepts explicit phone-call opt-in for a new Agent number without an inbound chat or CRM contact', async () => {
+    Object.assign(h.guard, {first_touch_daily_cap: 2})
+    h.recentInbound = false
+    h.resolveRecipient.mockImplementation(async (_db: unknown, _a: string, _c: string, raw: string) => ({
+      recipient: raw + '@c.us', source: 'phone_without_inbound',
+    }))
+    h.recipientHash.mockImplementation((_a: string, _c: string, raw: string) =>
+      raw.startsWith('123') ? '1'.repeat(64) : '2'.repeat(64))
+    const missingEvidence = await POST(request({
+      action: 'grant_batch', workload: 'agent',
+      recipients: ['12345678901', '23456789012'],
+      consent_confirmed: true, confirm_agent_task_test: true,
+      consent_basis: 'phone_call',
+    }), context())
+    expect(missingEvidence.status).toBe(400)
+    expect(h.calls).toEqual([])
+
+    const approved = await POST(request({
+      action: 'grant_batch', workload: 'agent',
+      recipients: ['12345678901', '23456789012'],
+      consent_confirmed: true, confirm_agent_task_test: true,
+      consent_basis: 'phone_call', phone_call_opt_in_confirmed: true,
+    }), context())
+    expect(approved.status).toBe(200)
+    const approvals = h.calls.filter(call => call.table === 'whatsapp_openwa_pilot_allowlist')
+    expect(approvals).toHaveLength(1)
+    expect(approvals[0].payload).toEqual(expect.arrayContaining([
+      expect.objectContaining({ consent_basis: 'phone_call', consent_attested_at: expect.any(String) }),
+    ]))
+    expect(JSON.stringify(approvals)).not.toContain('12345678901')
+    expect(h.calls.some(call => call.table === 'contacts')).toBe(false)
+  })
+
   it('denies an entire Agent cohort when any chosen chat lacks a verified recent inbound', async () => {
     Object.assign(h.guard, { first_touch_daily_cap: 2 })
     h.resolveRecipient.mockResolvedValueOnce({
