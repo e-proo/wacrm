@@ -281,6 +281,15 @@ export async function POST(request: Request, context: Context) {
           !recipients.every(x => typeof x === 'string' && canonicalOpenWAPilotRecipient(x))) {
         return deny('Provide 1–10 valid explicit recipients', 400)
       }
+      const consentBasis = body.consent_basis === 'phone_call' ? 'phone_call' : 'verified_inbound'
+      if (workload === 'agent' && body.consent_basis != null &&
+          !['phone_call', 'verified_inbound'].includes(String(body.consent_basis))) {
+        return deny('Invalid Agent consent basis', 400)
+      }
+      if (workload === 'agent' && consentBasis === 'phone_call' &&
+          body.phone_call_opt_in_confirmed !== true) {
+        return deny('Confirm each person explicitly agreed by telephone to receive WhatsApp messages', 400)
+      }
       if (body.consent_confirmed !== true ||
           (workload === 'agent' && body.confirm_agent_task_test !== true)) {
         return deny('Explicit consent and Agent Task approval are required', 400)
@@ -308,8 +317,8 @@ export async function POST(request: Request, context: Context) {
 
       const resolved = await Promise.all(recipients.map(input =>
         resolveOpenWAPilotRecipientForGrant(adminDb, accountId, connectionId, input)))
-      if (workload === 'agent') {
-        // Every Agent recipient must have a session-scoped, verified inbound
+      if (workload === 'agent' && consentBasis === 'verified_inbound') {
+        // Inbound-based approval still verifies the exact recent native chat.
         // within the 24h reply window. Typed first-touch numbers are denied.
         for (const item of resolved) {
           if (item.source === 'phone_without_inbound') {
@@ -341,6 +350,8 @@ export async function POST(request: Request, context: Context) {
         hashes.map(recipient_hash => ({
           account_id: accountId, connection_id: connectionId,
           recipient_hash, workload, active: true, approved_by: user.id,
+          consent_basis: workload === 'agent' ? consentBasis : 'verified_inbound',
+          consent_attested_at: workload === 'agent' && consentBasis === 'phone_call' ? now.toISOString() : null,
           approved_at: now.toISOString(),
           expires_at: new Date(now.getTime() + hours * 3600000).toISOString(),
         })),
@@ -355,6 +366,15 @@ export async function POST(request: Request, context: Context) {
 
     if (action === 'grant' || action === 'grant_agent') {
       const workload = action === 'grant_agent' ? 'agent' : 'manual'
+      const consentBasis = body.consent_basis === 'phone_call' ? 'phone_call' : 'verified_inbound'
+      if (workload === 'agent' && body.consent_basis != null &&
+          !['phone_call', 'verified_inbound'].includes(String(body.consent_basis))) {
+        return deny('Invalid Agent consent basis', 400)
+      }
+      if (workload === 'agent' && consentBasis === 'phone_call' &&
+          body.phone_call_opt_in_confirmed !== true) {
+        return deny('Confirm explicit telephone opt-in to WhatsApp messages', 400)
+      }
       if (workload === 'agent' && body.confirm_agent_task_test !== true) {
         return deny('Explicit Agent Task TEST approval is required', 400)
       }
@@ -378,11 +398,11 @@ export async function POST(request: Request, context: Context) {
       const resolvedRecipient = await resolveOpenWAPilotRecipientForGrant(
         adminDb, accountId, connectionId, rawRecipient,
       )
-      if (workload === 'agent' && resolvedRecipient.source === 'phone_without_inbound') {
+      if (workload === 'agent' && consentBasis === 'verified_inbound' && resolvedRecipient.source === 'phone_without_inbound') {
         return deny('Agent Task TEST recipient must be linked to a verified inbound chat', 409)
       }
-      if (workload === 'agent') {
-        // Cold outreach is not permitted for this TEST cohort. The inbound
+      if (workload === 'agent' && consentBasis === 'verified_inbound') {
+        // The inbound-based approval route still requires its native session identity. The inbound
         // identity must match the exact OpenWA chat, connection and tenant.
         const { data: inbound, error: inboundError } = await adminDb.from('messages')
           .select('conversation_id')
@@ -408,6 +428,8 @@ export async function POST(request: Request, context: Context) {
       const { error } = await adminDb.from('whatsapp_openwa_pilot_allowlist')
         .upsert({ account_id: accountId, connection_id: connectionId,
           recipient_hash: hash, workload, active: true, approved_by: user.id,
+          consent_basis: workload === 'agent' ? consentBasis : 'verified_inbound',
+          consent_attested_at: workload === 'agent' && consentBasis === 'phone_call' ? now.toISOString() : null,
           approved_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3600000).toISOString() },
         { onConflict: 'account_id,connection_id,recipient_hash,workload' })
       checkDb(error, 'grant')
