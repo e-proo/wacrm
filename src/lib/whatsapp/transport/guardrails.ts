@@ -99,7 +99,9 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
     // cohort. The RPC joins both tenant and connection with the allowlist.
     if (pilotEnforced) await this.assertPilotAdmission(request, workload)
 
-    const { data, error } = await this.db.rpc('reserve_openwa_guardrail_send', {
+    const { data, error } = await this.db.rpc(isOpenWATestProject() && pilotEnforced
+      ? 'reserve_openwa_pilot_workload_send'
+      : 'reserve_openwa_guardrail_send', {
       p_account_id: request.accountId,
       p_connection_id: request.connectionId,
       p_recipient_hash: hash,
