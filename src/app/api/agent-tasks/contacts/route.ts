@@ -3,6 +3,8 @@ import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { checkCoverageSelectedContactEligibility } from '@/lib/services/coverage/selected-contact'
 import { MAX_EXPLICIT_COVERAGE_CONTACTS } from '@/lib/services/coverage/selected-targets'
+import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
+import { normalizeTestRecipient } from '@/lib/whatsapp/transport/openwa/pilot-recipient-input'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -79,6 +81,102 @@ export async function GET(request: Request) {
       eligibility,
       eligibilityById,
     })
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+}
+
+/**
+ * Explicitly register a telephone-consented recipient as an ordinary
+ * tenant-owned CRM contact, so the EXISTING Task pipeline (RLS, suppression,
+ * idempotency, provider binding) remains the only execution path.
+ * No WhatsApp message is sent by this endpoint.
+ */
+export async function POST(request: Request) {
+  try {
+    const ctx = await requireAgentCapability('agents.manage_tasks')
+    if (!isOpenWATestProject()) {
+      return NextResponse.json({ error: 'TEST only' }, { status: 403 })
+    }
+    const body: unknown = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'بيانات غير صالحة.' }, { status: 400 })
+    }
+    const data = body as Record<string, unknown>
+    const phone = typeof data.phone === 'string' ? normalizeTestRecipient(data.phone) : null
+    const name = typeof data.name === 'string' ? data.name.trim() : ''
+    if (!phone || !/^[1-9][0-9]{7,14}$/.test(phone) ||
+        name.length > 80 || typeof data.coverageRequestId !== 'string' ||
+        !UUID_RE.test(data.coverageRequestId) ||
+        typeof data.whatsappConnectionId !== 'string' ||
+        !UUID_RE.test(data.whatsappConnectionId) ||
+        data.consent_method !== 'phone_call' ||
+        data.whatsapp_opt_in_confirmed !== true) {
+      return NextResponse.json({
+        error: 'أدخل رقمًا دوليًا صحيحًا وأكد موافقة صاحبه صراحةً على التواصل عبر واتساب.',
+        code: 'PHONE_CALL_CONSENT_REQUIRED',
+      }, { status: 400 })
+    }
+    const db = supabaseAdmin()
+    const [{ data: connection, error: connectionError },
+      { data: source, error: sourceError }] = await Promise.all([
+      db.from('whatsapp_connections')
+        .select('id').eq('account_id', ctx.accountId)
+        .eq('id', data.whatsappConnectionId).eq('provider', 'openwa')
+        .in('status', ['ready','connected']).is('archived_at', null)
+        .maybeSingle(),
+      db.from('coverage_requests').select('id,requester_contact_id,status')
+        .eq('account_id', ctx.accountId).eq('id', data.coverageRequestId)
+        .in('status', ['active','partially_reserved']).maybeSingle(),
+    ])
+    if (connectionError || sourceError) throw connectionError ?? sourceError
+    if (!connection || !source) {
+      return NextResponse.json({
+        error: 'اختر جلسة OpenWA وطلب تغطية نشطين في الحساب نفسه.',
+      }, { status: 409 })
+    }
+    const { data: normalized, error: lookupError } = await db.from('contacts')
+      .select('id,name,phone').eq('account_id', ctx.accountId)
+      .eq('phone_normalized', phone).limit(2)
+    if (lookupError) throw lookupError
+    if ((normalized?.length ?? 0) > 1) {
+      return NextResponse.json({
+        error: 'يوجد أكثر من جهة اتصال بنفس الرقم؛ راجع التكرارات أولًا.',
+      }, { status: 409 })
+    }
+    let contact = normalized?.[0] ?? null
+    if (!contact) {
+      const { data: legacy, error: legacyError } = await db.from('contacts')
+        .select('id,name,phone').eq('account_id', ctx.accountId)
+        .in('phone', [phone, '+' + phone]).limit(2)
+      if (legacyError) throw legacyError
+      if ((legacy?.length ?? 0) > 1) {
+        return NextResponse.json({
+          error: 'رقم مكرر في CRM؛ راجع جهات الاتصال أولًا.',
+        }, { status: 409 })
+      }
+      contact = legacy?.[0] ?? null
+    }
+    if (contact?.id === source.requester_contact_id) {
+      return NextResponse.json({
+        error: 'لا يمكن استهداف صاحب طلب التغطية نفسه.',
+      }, { status: 409 })
+    }
+    if (!contact) {
+      const { data: created, error: insertError } = await db.from('contacts')
+        .insert({
+          account_id: ctx.accountId, user_id: ctx.userId,
+          phone: '+' + phone, phone_normalized: phone,
+          name: name || null,
+        })
+        .select('id,name,phone').single()
+      if (insertError) throw insertError
+      contact = created
+    }
+    return NextResponse.json({
+      contact, registered: true,
+      message: 'تم إتاحة الرقم للاختيار داخل المهمة؛ لم تُرسل رسالة.',
+    }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (error) {
     return toErrorResponse(error)
   }
