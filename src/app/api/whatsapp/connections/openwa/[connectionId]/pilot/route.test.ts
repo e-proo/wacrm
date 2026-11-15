@@ -471,7 +471,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     }), context())
     expect(saved.status).toBe(200)
     expect(h.guard.first_touch_daily_cap).toBe(3)
-    expect(h.guard.pilot_agent_hourly_cap).toBe(3)
+    expect(h.guard).toMatchObject({ pilot_agent_hourly_cap: 3 })
     expect(h.guard.warmup_hourly_cap).toBe(3)
     h.resolveRecipient.mockImplementation(async (_db: unknown, _a: string, _c: string, raw: string) => ({
       recipient: raw + '@c.us', source: 'phone_without_inbound',
