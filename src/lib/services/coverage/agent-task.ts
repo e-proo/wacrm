@@ -497,8 +497,9 @@ export const COVERAGE_SOURCING_MESSAGE_POLICY: AgentTaskOutboundMessagePolicy = 
 /**
  * SOF-60: OpenWA has no Meta approved-template transport.
  * We never fabricate Meta approval or allow free-form LLM outreach here.
- * SQL independently requires a fresh inbound on the exact bound session,
- * opt-out checks and all account/task/channel budgets.
+ * SQL requires either a fresh inbound on the exact bound session OR an
+ * explicitly attested, scoped, expiring OpenWA phone-call WhatsApp opt-in on
+ * pinned TEST. Meta template/session rules, opt-out and all budgets remain.
  */
 export const COVERAGE_SOURCING_MESSAGE_POLICY_V2: AgentTaskOutboundMessagePolicy = {
   key: 'coverage.sourcing_message',
