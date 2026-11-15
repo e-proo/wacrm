@@ -10,6 +10,9 @@ const mocked = vi.hoisted(() => ({
   reserve: vi.fn(),
   delivery: vi.fn(),
   rpc: vi.fn(),
+  isTest: vi.fn(),
+  transport: vi.fn(),
+  preflight: vi.fn(),
   version: 2,
   taskType: 'coverage.sourcing',
 }))
@@ -42,7 +45,10 @@ vi.mock('../admin-client', () => ({
             }, error: null }
           }
           if (table === 'ai_agent_tasks') {
-            return { data: { task_type: mocked.taskType, task_type_version: mocked.version }, error: null }
+            return { data: {
+              task_type: mocked.taskType, task_type_version: mocked.version,
+              target_policy: { whatsappConnectionId: 'whatsapp-connection' },
+            }, error: null }
           }
           throw Error('unexpected row ' + table)
         },
@@ -54,6 +60,15 @@ vi.mock('../admin-client', () => ({
 }))
 vi.mock('../runtime/runtime-policy', () => ({
   loadAccountRuntimePolicy: mocked.loadPolicy,
+}))
+vi.mock('@/lib/whatsapp/transport/guardrails', () => ({
+  isOpenWATestProject: mocked.isTest,
+}))
+vi.mock('./outbound-message-connection', () => ({
+  resolveTaskMessageConnection: mocked.transport,
+}))
+vi.mock('./test-openwa-task-admission', () => ({
+  deferredTestOpenWATaskReason: mocked.preflight,
 }))
 vi.mock('../runtime/circuit-breaker', () => ({
   assertRuntimeCircuitClosed: mocked.assertCircuit,
@@ -103,6 +118,11 @@ beforeEach(() => {
     recoveryWorkerEnabled: true, outboundTaskDeliveryEnabled: true,
   })
   mocked.assertCircuit.mockResolvedValue(undefined)
+  mocked.isTest.mockReturnValue(false)
+  mocked.transport.mockResolvedValue({
+    connectionId: 'whatsapp-connection', provider: 'openwa',
+  })
+  mocked.preflight.mockResolvedValue(null)
   mocked.claim.mockResolvedValue('claimed')
   mocked.loadRevision.mockResolvedValue({ ok: true, revision: { id: 'revision' } })
   mocked.model.mockResolvedValue({
@@ -123,6 +143,59 @@ beforeEach(() => {
   })
   mocked.delivery.mockResolvedValue({ status: 'sent' })
   mocked.rpc.mockResolvedValue({ data: 'failed', error: null })
+})
+
+describe('TEST outbound transport binding, separate from AI model provider', () => {
+  it('uses the frozen WhatsApp Task connection for preclaim Pilot, retaining AI provider for model revision', async () => {
+    mocked.isTest.mockReturnValue(true)
+    const result = await processAgentTaskOutboundRunQueue({
+      workerId: 'test-agent-task', limit: 1,
+    })
+    expect(result).toMatchObject({ attempted: 1, gated: 0, sent: 1 })
+    expect(mocked.transport).toHaveBeenCalledWith(
+      expect.anything(), {
+        accountId: 'account', conversationId: 'conversation',
+        targetPolicy: { whatsappConnectionId: 'whatsapp-connection' },
+      },
+    )
+    expect(mocked.preflight).toHaveBeenCalledWith({
+      db: expect.anything(), accountId: 'account',
+      connectionId: 'whatsapp-connection', contactIds: ['contact'],
+    })
+    expect(mocked.loadRevision).toHaveBeenCalledWith({
+      accountId: 'account', agentId: 'agent', revisionId: 'revision',
+      providerConnectionId: 'ai-provider',
+    })
+    expect(mocked.preflight).not.toHaveBeenCalledWith(
+      expect.objectContaining({ connectionId: 'ai-provider' }),
+    )
+  })
+
+  it('leaves outbound Run queued without claiming or reserving when exact WhatsApp grant is missing', async () => {
+    mocked.isTest.mockReturnValue(true)
+    mocked.preflight.mockResolvedValue('pilot_recipient_not_approved')
+    const result = await processAgentTaskOutboundRunQueue({
+      workerId: 'test-agent-task', limit: 1,
+    })
+    expect(result).toMatchObject({ attempted: 0, gated: 1, sent: 0 })
+    expect(mocked.claim).not.toHaveBeenCalled()
+    expect(mocked.reserve).not.toHaveBeenCalled()
+    expect(mocked.delivery).not.toHaveBeenCalled()
+  })
+
+  it('does not claim or send when the pinned WhatsApp session is absent or unavailable', async () => {
+    mocked.isTest.mockReturnValue(true)
+    mocked.transport.mockRejectedValue(new Error('connection_not_ready'))
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const result = await processAgentTaskOutboundRunQueue({
+        workerId: 'test-agent-task', limit: 1,
+      })
+      expect(result).toMatchObject({ attempted: 0, gated: 1, sent: 0 })
+      expect(mocked.claim).not.toHaveBeenCalled()
+      expect(mocked.reserve).not.toHaveBeenCalled()
+    } finally { spy.mockRestore() }
+  })
 })
 
 describe('SOF-63 deterministic domain outbound policy', () => {
