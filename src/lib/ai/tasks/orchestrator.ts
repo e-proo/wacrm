@@ -8,6 +8,8 @@ import {
 import { authorizeStoredAgentTask } from './capability-policy'
 import type { TargetMaterializationResult } from './target-resolution'
 import { sweepAgentTaskOutboundReservations } from './outbound-runtime'
+import { parseExplicitCoverageContactIds } from '@/lib/services/coverage/selected-targets'
+import { deferredTestOpenWATaskReason } from './test-openwa-task-admission'
 
 export interface AgentTaskSweepResult {
   tasksRecovered: number
@@ -164,7 +166,7 @@ export async function processAgentTaskQueue(input: {
 
     const { data: task, error: taskError } = await db
       .from('ai_agent_tasks')
-      .select('id, account_id, status')
+      .select('id, account_id, status, target_policy')
       .eq('id', taskId)
       .maybeSingle()
 
@@ -178,6 +180,7 @@ export async function processAgentTaskQueue(input: {
       id: string
       account_id: string
       status: string
+      target_policy: Record<string, unknown> | null
     }
 
     const policy = await loadAccountRuntimePolicy(db, row.account_id)
@@ -187,6 +190,34 @@ export async function processAgentTaskQueue(input: {
       !policy.multiAgentEnabled
     ) {
       skippedByPolicy += 1
+      await releaseTaskClaim(db, taskId, input.workerId, 60)
+      continue
+    }
+
+    // In TEST, do not consume an Agent Task/Target attempt before the
+    // explicitly chosen OpenWA session is started and EVERY intended
+    // recipient is approved for the Agent workload. A paused/missing grant
+    // is a *deferred* Task, not an unsent terminal failure.
+    try {
+      const source = row.target_policy ?? {}
+      const selected = parseExplicitCoverageContactIds(source)
+      const connectionId = typeof source.whatsappConnectionId === 'string'
+        ? source.whatsappConnectionId : null
+      const hold = await deferredTestOpenWATaskReason({
+        db,
+        accountId: row.account_id,
+        connectionId,
+        contactIds: selected ?? [],
+      })
+      if (hold) {
+        deferredTasks += 1
+        await releaseTaskClaim(db, taskId, input.workerId, 30)
+        continue
+      }
+    } catch (preflightError) {
+      failed += 1
+      console.error('[task orchestrator] TEST OpenWA preflight unavailable',
+        taskId.slice(0, 8), preflightError)
       await releaseTaskClaim(db, taskId, input.workerId, 60)
       continue
     }

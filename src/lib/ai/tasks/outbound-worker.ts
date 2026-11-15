@@ -14,6 +14,7 @@ import { deliverAgentTaskOutboundReservation } from './outbound-delivery'
 import { prepareAndReserveCurrentTaskOutboundMessage } from './outbound-runtime'
 import { CURRENT_AGENT_TASK_PLATFORM } from './current-platform'
 import { authorizeStoredAgentTask } from './capability-policy'
+import { deferredTestOpenWATaskReason } from './test-openwa-task-admission'
 
 export interface AgentTaskOutboundWorkerResult {
   scanned: number
@@ -132,6 +133,36 @@ export async function processAgentTaskOutboundRunQueue(input: {
         continue
       }
       throw error
+    }
+
+    // Re-evaluate the specific recipient before claiming its one-attempt Run.
+    // Pause/revoked grant must leave it QUEUED, not terminalize as a denied
+    // provider attempt. The transport still revalidates after this precheck.
+    try {
+      const { data: taskTarget, error: targetLookupError } = await db
+        .from('ai_agent_task_targets')
+        .select('contact_id')
+        .eq('account_id', run.account_id)
+        .eq('task_id', run.task_id)
+        .eq('id', run.task_target_id)
+        .maybeSingle()
+      if (targetLookupError) throw targetLookupError
+      if (taskTarget?.contact_id) {
+        const hold = await deferredTestOpenWATaskReason({
+          db, accountId: run.account_id,
+          connectionId: run.provider_connection_id,
+          contactIds: [taskTarget.contact_id],
+        })
+        if (hold) {
+          result.gated += 1
+          continue
+        }
+      }
+    } catch (preflightError) {
+      result.gated += 1
+      console.error('[agent outbound worker] TEST OpenWA preflight unavailable',
+        run.id.slice(0, 8), preflightError)
+      continue
     }
 
     result.attempted += 1

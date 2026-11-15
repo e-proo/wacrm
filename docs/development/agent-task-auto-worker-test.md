@@ -68,3 +68,16 @@ Do not assume a serverless Next.js instance runs background timers.
    blocks **new** deliveries even while the dev worker is running.
 5. Capture HEAD, CI run and TEST event/Target/Run/transport evidence before
    closing SOF-66 or Phase 18/19. NOTE-001 security debt is separate.
+
+### TEST Pilot anti-premature-failure protection
+
+Before a Task creates targets/runs, the orchestrator checks the exact pinned
+OpenWA session for pause, circuit, each explicitly selected CRM contact's unique
+provider-native recent inbound and active hashed `agent` Pilot grant. If any
+are missing, it **releases the Task claim as deferred** and re-evaluates later,
+rather than consuming the only send attempt. Before an already queued outbound
+Run is claimed, the outbound worker independently rechecks the exact target
+contact and session. The final transport performs its normal durable
+authorization again; a race between checks can still cause a safely recorded
+pre-dispatch denial, without a provider send. This gate does not change Meta,
+non-TEST or production behavior.
