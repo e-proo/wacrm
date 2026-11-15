@@ -25,6 +25,7 @@ function fakeDb(options: {
   pilot?: boolean
   granted?: boolean
   inbound?: boolean
+  consentBasis?: 'verified_inbound' | 'phone_call'
   provider?: string
   phone?: string
   connectionStatus?: string
@@ -40,7 +41,12 @@ function fakeDb(options: {
           case 'contacts': return {data:[{id:contactId,phone:options.phone ?? '967700000001'}],error:null}
           case 'messages': return {data:options.inbound === false ? [] : [{id:'inbound'}],error:null}
           case 'whatsapp_openwa_pilot_allowlist':
-            return {data: options.granted === false ? [] : [{recipient_hash:'hash:' + rec}],error:null}
+            return {data: options.granted === false ? [] : [{
+              recipient_hash:'hash:' + rec,
+              consent_basis: options.consentBasis ?? 'verified_inbound',
+              consent_attested_at: options.consentBasis === 'phone_call'
+                ? '2026-11-15T12:00:00Z' : null,
+            }],error:null}
           default: throw Error('unexpected limit table '+table)
         }
       },
@@ -97,7 +103,7 @@ describe('TEST Agent Task preclaim OpenWA pilot readiness', () => {
     const missingInbound = fakeDb({inbound:false})
     expect(await deferredTestOpenWATaskReason({
       db:missingInbound.db,accountId,connectionId,contactIds:[contactId],
-    })).toBe('pilot_recipient_not_verified')
+    })).toBe('pilot_recipient_not_approved')
     expect(t.rpc).not.toHaveBeenCalled()
   })
 
@@ -109,6 +115,23 @@ describe('TEST Agent Task preclaim OpenWA pilot readiness', () => {
     expect(stubs.hash).toHaveBeenCalledWith(accountId,connectionId,rec)
     expect(t.tables).toContain('whatsapp_openwa_pilot_allowlist')
     expect(t.rpc).not.toHaveBeenCalled()
+  })
+
+  it('allows an explicitly approved telephone opt-in without any recent WhatsApp inbound', async () => {
+    stubs.resolve.mockResolvedValue({recipient:rec,source:'phone_without_inbound'})
+    const approved = fakeDb({inbound:false,consentBasis:'phone_call'})
+    expect(await deferredTestOpenWATaskReason({
+      db:approved.db,accountId,connectionId,contactIds:[contactId],
+    })).toBeNull()
+    expect(approved.tables).not.toContain('messages')
+    const noApproval = fakeDb({inbound:false,granted:false})
+    expect(await deferredTestOpenWATaskReason({
+      db:noApproval.db,accountId,connectionId,contactIds:[contactId],
+    })).toBe('pilot_recipient_not_approved')
+    const inboundBasisOnly = fakeDb({inbound:false,consentBasis:'verified_inbound'})
+    expect(await deferredTestOpenWATaskReason({
+      db:inboundBasisOnly.db,accountId,connectionId,contactIds:[contactId],
+    })).toBe('pilot_recipient_not_approved')
   })
 
   it('lets explicit TEST normal mode proceed, still subject to transport gates', async () => {
