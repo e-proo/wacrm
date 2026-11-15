@@ -68,6 +68,7 @@ export function OpenWAPilotControls({
   const [selectedRecipients, setSelectedRecipients] = useState<string[]>([])
   const [contactError, setContactError] = useState<string | null>(null)
   const [consent, setConsent] = useState(false)
+  const [phoneCallConsent, setPhoneCallConsent] = useState(false)
   const [duplicateAck, setDuplicateAck] = useState(false)
   const [verified, setVerified] = useState(false)
   const [verifiedStatus, setVerifiedStatus] = useState<string | null>(null)
@@ -170,6 +171,8 @@ export function OpenWAPilotControls({
       if (action === 'limits') Object.assign(body, limits)
       if (action === 'grant_batch') Object.assign(body, {
         workload, recipients: selectedRecipients, consent_confirmed: consent,
+        consent_basis: workload === 'agent' && phoneCallConsent ? 'phone_call' : 'verified_inbound',
+        phone_call_opt_in_confirmed: workload === 'agent' && phoneCallConsent,
         ack_duplicate_sessions: duplicateAck, hours: 4,
         confirm_agent_task_test: workload === 'agent',
       })
@@ -182,7 +185,7 @@ export function OpenWAPilotControls({
       const data = await parseOpenWAApiResponse<PilotState>(res)
       if (!res.ok) throw new Error(data.error || w('devPilotActionRejected'))
       setState(data)
-      if (action === 'grant_batch') { setSelectedRecipients([]); setRecipient(''); setConsent(false) }
+      if (action === 'grant_batch') { setSelectedRecipients([]); setRecipient(''); setConsent(false); setPhoneCallConsent(false) }
       if (['stop', 'disable', 'enable'].includes(action)) { setVerified(false); setDuplicateAck(false); setVerifiedStatus(null) }
       if (action === 'stop' || action === 'disable' || action === 'enable') onPilotChange?.()
       setNotice(action === 'grant_batch'
@@ -335,8 +338,9 @@ export function OpenWAPilotControls({
           <p className="font-semibold">اعتماد عدة أرقام لهذه الجلسة على TEST</p>
           <p className="text-xs text-muted-foreground">
             ابحث في جهات اتصال CRM وأضف ما يصل إلى 10 أرقام، أو أدخل رقمًا جديدًا.
-            الأرقام الجديدة لا تُنشئ جهة اتصال CRM تلقائيًا. أرقام الوكيل
-            تحتاج رسالة واردة موثقة خلال 24 ساعة على الجلسة نفسها.
+            لا يشترط وجود رقم في CRM لاعتماد Pilot، لكن إنشاء مهمة Coverage
+            يسجّل الأرقام الجديدة في CRM داخليًا. لمهام الوكلاء يمكنك اعتماد
+            موافقة واتساب الصريحة التي حصلت عليها عبر مكالمة هاتفية، دون رسالة واردة.
           </p>
           <Input value={search} disabled={running}
             onChange={e => setSearch(e.target.value)}
@@ -380,6 +384,14 @@ export function OpenWAPilotControls({
               أؤكد موافقة كل جهة محددة على التواصل والتقيد بحدود TEST.
             </Label>
           </div>
+          <div className="flex items-start gap-2 rounded-md border p-3">
+            <Checkbox id={`pilot-call-consent-${connectionId}`} checked={phoneCallConsent} disabled={running}
+              onCheckedChange={v => setPhoneCallConsent(v === true)} />
+            <Label htmlFor={`pilot-call-consent-${connectionId}`} className="text-sm leading-relaxed">
+              حصلتُ على موافقة صريحة من كل رقم عبر مكالمة هاتفية لتلقي رسائل واتساب المتعلقة بهذه المهمة.
+              سجّل هذه الموافقة بوصفها أساس الاعتماد بدل اشتراط محادثة واردة خلال 24 ساعة.
+            </Label>
+          </div>
           {needsDuplicateReview && !duplicateAck &&
             <p className="text-xs text-amber-600">{w('devPilotMustReviewDuplicates')}</p>}
           <div className="flex flex-wrap gap-2">
@@ -389,7 +401,9 @@ export function OpenWAPilotControls({
             </Button>
             <Button variant="outline" disabled={running || !canApprove}
               onClick={() => {
-                if (window.confirm('اعتماد هذه الأرقام لمهام الوكلاء على TEST؟ يجب أن تكون لكل رقم محادثة واردة حديثة وموافقة. لن يتم الإرسال بمجرد الاعتماد.'))
+                if (window.confirm(phoneCallConsent
+                  ? 'اعتماد أرقام الوكلاء وفق الموافقة الهاتفية التي أكّدت توثيقها؟ لا يشترط وصول رسالة واردة، وقد يبدأ الإرسال بعد تشغيل Pilot.'
+                  : 'اعتماد هذه الأرقام بمسار المحادثة الواردة الحديثة؟ سيظل التحقق من نافذة 24 ساعة مطلوبًا لهذا المسار.'))
                   void submit('grant_batch','agent')
               }}>
               اعتماد الأرقام لمهام الوكلاء
