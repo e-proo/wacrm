@@ -52,10 +52,15 @@ export function suggestedPilotCohortCaps(
   caps: PilotCohortCapSnapshot,
   count: number,
   workload: PilotCohortWorkload,
-): Pick<PilotCohortCapSnapshot,
-  'hourly_cap' | 'daily_cap' | 'first_touch_daily_cap' |
-  'pilot_agent_hourly_cap' | 'pilot_agent_daily_cap' |
-  'pilot_manual_hourly_cap' | 'pilot_manual_daily_cap'> {
+): {
+  hourly_cap: number
+  daily_cap: number
+  first_touch_daily_cap: number
+  pilot_agent_hourly_cap: number
+  pilot_agent_daily_cap: number
+  pilot_manual_hourly_cap: number
+  pilot_manual_daily_cap: number
+} {
   if (!Number.isInteger(count) || count < 1 || count > 10) {
     throw new Error('PILOT_COHORT_SIZE_INVALID')
   }
