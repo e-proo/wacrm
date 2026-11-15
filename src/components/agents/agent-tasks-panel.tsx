@@ -55,6 +55,7 @@ interface ResponseData {
 }
 interface TaskRecipientProgress {
   contactId: string
+  pilotApproval?: 'approved' | 'missing' | 'unverified' | null
   name: string | null
   phone: string | null
   targetStatus: string | null
@@ -540,6 +541,17 @@ export function AgentTasksPanel() {
                     {progress?.recipients.map((recipient, index) => (
                       <div key={recipient.contactId} className="space-y-1 rounded-md border bg-background p-2 text-xs">
                         <p className="font-medium">{index + 1}. {recipient.name || 'جهة اتصال'} · <bdi>{recipient.phone || recipient.contactId.slice(0, 8)}</bdi></p>
+                        {recipient.pilotApproval && (
+                          <p role="status" className={recipient.pilotApproval === 'approved'
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : 'text-amber-700 dark:text-amber-400'}>
+                            اعتماد OpenWA Agent Pilot: {recipient.pilotApproval === 'approved'
+                              ? 'معتمد لهذا الرقم'
+                              : recipient.pilotApproval === 'missing'
+                                ? 'غير معتمد — هذا الرقم يمنع تنفيذ المجموعة'
+                                : 'تعذّر التحقق من هوية الرقم أو اعتماده'}
+                          </p>
+                        )}
                         <p>حالة المستهدف: {recipient.targetStatus
                           ? targetStatusLabel[recipient.targetStatus] || recipient.targetStatus
                           : 'لم يبدأ التنفيذ'}</p>
