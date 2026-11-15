@@ -154,6 +154,7 @@ export function AgentTaskContactPicker({
 export function AgentTaskMultiContactPicker({
   selectedContactIds, onChange, coverageRequestId, maxSelected = 20,
   disabled = false, onEligibilityChange,
+  allowPhoneRegistration = false, whatsappConnectionId = null,
 }: {
   selectedContactIds: readonly string[]
   onChange: (ids: string[]) => void
@@ -161,7 +162,13 @@ export function AgentTaskMultiContactPicker({
   maxSelected?: number
   disabled?: boolean
   onEligibilityChange?: (eligible: boolean | null) => void
+  allowPhoneRegistration?: boolean
+  whatsappConnectionId?: string | null
 }) {
+  const [newPhone, setNewPhone] = useState('')
+  const [newName, setNewName] = useState('')
+  const [phoneCallOptIn, setPhoneCallOptIn] = useState(false)
+  const [registering, setRegistering] = useState(false)
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<Contact[]>([])
   const [chosen, setChosen] = useState<Contact[]>([])
@@ -245,6 +252,32 @@ export function AgentTaskMultiContactPicker({
   }, [chosen, results])
   const max = Math.max(1, Math.min(20, maxSelected))
 
+  async function addPhoneContact() {
+    if (disabled || registering || !allowPhoneRegistration ||
+        !whatsappConnectionId || !coverageRequestId || !phoneCallOptIn ||
+        selectedContactIds.length >= max) return
+    setRegistering(true)
+    setError(null)
+    try {
+      const response = await fetch('/api/agent-tasks/contacts', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ phone: newPhone, name: newName,
+          whatsappConnectionId, coverageRequestId,
+          consent_method: 'phone_call', whatsapp_opt_in_confirmed: true }),
+      })
+      const result: { contact?: Contact; error?: string } = await response.json()
+      if (!response.ok || !result.contact?.id) {
+        throw new Error(result.error || 'تعذّر تسجيل الرقم في CRM')
+      }
+      if (!selectedContactIds.includes(result.contact.id)) {
+        onChange([...selectedContactIds, result.contact.id])
+      }
+      setNewPhone(''); setNewName(''); setPhoneCallOptIn(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'تعذّر إضافة الرقم.')
+    } finally { setRegistering(false) }
+  }
+
   return (
     <div className="space-y-3 rounded-md border p-3">
       <div>
@@ -292,6 +325,24 @@ export function AgentTaskMultiContactPicker({
           </button>
         ))}
       </div>
+      {allowPhoneRegistration && <section className="space-y-2 rounded-md border p-3">
+        <p className="text-sm font-medium">إضافة رقم جديد للمهمة بعد موافقته هاتفيًا</p>
+        <p className="text-xs text-muted-foreground">لا تحتاج إلى إدخال الرقم في جهات الاتصال مسبقًا؛ سيُسجَّل تلقائيًا في CRM عند إضافته. هذا لا يرسل رسالة ولا يعتمد الرقم في OpenWA Pilot تلقائيًا.</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Input value={newName} disabled={disabled || registering} onChange={e => setNewName(e.target.value)} placeholder="اسم العميل (اختياري)" maxLength={80} />
+          <Input value={newPhone} disabled={disabled || registering} onChange={e => setNewPhone(e.target.value)} placeholder="+9677XXXXXXXX" dir="ltr" />
+        </div>
+        <label className="flex items-start gap-2 text-xs">
+          <input type="checkbox" checked={phoneCallOptIn} disabled={disabled || registering}
+            onChange={e => setPhoneCallOptIn(e.target.checked)} />
+          <span>أؤكد أن صاحب الرقم وافق صراحةً خلال المكالمة الهاتفية على تلقي رسائل واتساب لهذه المهمة.</span>
+        </label>
+        <button type="button" className="rounded-md border px-3 py-2 text-sm disabled:opacity-50"
+          disabled={disabled || registering || !newPhone.trim() || !phoneCallOptIn || selectedContactIds.length >= max}
+          onClick={() => void addPhoneContact()}>
+          {registering ? 'جارٍ تسجيل الرقم...' : 'إضافة الرقم إلى المستهدفين'}
+        </button>
+      </section>}
       {loading ? <p className="text-xs text-muted-foreground">جارٍ تحميل النتائج...</p> : null}
       {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
       {selectedContactIds.length > 0 && !checking &&
