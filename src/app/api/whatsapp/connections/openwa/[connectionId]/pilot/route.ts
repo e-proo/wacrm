@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { canonicalOpenWAPilotRecipient, isOpenWATestProject, openWAPilotEnforcementEnabled, openWAPilotRecipientHash } from '@/lib/whatsapp/transport/guardrails'
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
 import { resolveOpenWAPilotRecipientForGrant } from '@/lib/whatsapp/transport/openwa/pilot-recipient'
+import { missingPilotCohortCaps } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
 import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
@@ -302,17 +303,14 @@ export async function POST(request: Request, context: Context) {
       }
       requireLimits(s)
       const count = recipients.length
-      const workloadHourly = workload === 'agent'
-        ? s.guard.pilot_agent_hourly_cap ?? s.guard.hourly_cap
-        : s.guard.pilot_manual_hourly_cap ?? s.guard.hourly_cap
-      const workloadDaily = workload === 'agent'
-        ? s.guard.pilot_agent_daily_cap ?? s.guard.daily_cap
-        : s.guard.pilot_manual_daily_cap ?? s.guard.daily_cap
-      if (s.guard.hourly_cap < count || s.guard.daily_cap < count ||
-          s.guard.first_touch_daily_cap < count ||
-          s.guard.warmup_hourly_cap < count || s.guard.warmup_daily_cap < count ||
-          workloadHourly < count || workloadDaily < count) {
-        return deny('Raise bounded TEST session/workload/first-touch caps to the approved recipient count', 409)
+      const missingCaps = missingPilotCohortCaps(s.guard, count, workload)
+      if (missingCaps.length > 0) {
+        return NextResponse.json({
+          error: `لا تكفي حدود Pilot الحالية لاعتماد ${count} أرقام. عدّل الحد الساعي واليومي وحد أول تواصل، ثم احفظ الحدود قبل إعادة الاعتماد.`,
+          code: 'pilot_cohort_caps_insufficient',
+          required_count: count,
+          missing_caps: missingCaps,
+        }, { status: 409, headers: noStore })
       }
 
       const resolved = await Promise.all(recipients.map(input =>
