@@ -322,7 +322,7 @@ export async function POST(request: Request, context: Context) {
         // within the 24h reply window. Typed first-touch numbers are denied.
         for (const item of resolved) {
           if (item.source === 'phone_without_inbound') {
-            return deny('Agent recipients require a verified inbound chat', 409)
+            return deny('لا توجد محادثة واردة موثقة. إذا حصلت على موافقة صريحة على رسائل واتساب عبر الهاتف، فعّل خيار الموافقة الهاتفية قبل اعتماد الوكيل.', 409)
           }
           const { data: inbound, error: inboundError } = await adminDb.from('messages')
             .select('conversation_id').eq('connection_id', connectionId)
@@ -331,7 +331,7 @@ export async function POST(request: Request, context: Context) {
             .gte('created_at', new Date(Date.now() - 24 * 3600_000).toISOString())
             .order('created_at', { ascending: false }).limit(1).maybeSingle()
           checkDb(inboundError, 'agent-batch-recent-inbound')
-          if (!inbound?.conversation_id) return deny('Missing recent verified Agent chat', 409)
+          if (!inbound?.conversation_id) return deny('لا توجد رسالة واتساب واردة خلال 24 ساعة. يمكنك بدلًا من ذلك اعتماد موافقة واتساب الصريحة التي حصلت عليها عبر مكالمة هاتفية.', 409)
           const { data: scoped, error: scopedError } = await adminDb.from('conversations')
             .select('id').eq('id', inbound.conversation_id)
             .eq('account_id', accountId).maybeSingle()
@@ -399,7 +399,7 @@ export async function POST(request: Request, context: Context) {
         adminDb, accountId, connectionId, rawRecipient,
       )
       if (workload === 'agent' && consentBasis === 'verified_inbound' && resolvedRecipient.source === 'phone_without_inbound') {
-        return deny('Agent Task TEST recipient must be linked to a verified inbound chat', 409)
+        return deny('اعتماد المحادثة الواردة يتطلب رسالة واتساب؛ استخدم خيار الموافقة الهاتفية إذا وافق صاحب الرقم صراحةً على تلقي رسائل واتساب.', 409)
       }
       if (workload === 'agent' && consentBasis === 'verified_inbound') {
         // The inbound-based approval route still requires its native session identity. The inbound
@@ -413,7 +413,7 @@ export async function POST(request: Request, context: Context) {
           .order('created_at', { ascending: false }).limit(1).maybeSingle()
         checkDb(inboundError, 'agent-recent-inbound')
         if (!inbound?.conversation_id) {
-          return deny('Agent Task TEST requires a verified inbound chat within 24 hours', 409)
+          return deny('لم تُرصد رسالة واتساب واردة خلال 24 ساعة. اختر الموافقة الهاتفية إذا كان العميل قد وافق صراحةً على التواصل عبر واتساب.', 409)
         }
         const { data: scoped, error: scopedError } = await adminDb.from('conversations')
           .select('id').eq('id', inbound.conversation_id)
