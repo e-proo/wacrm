@@ -327,6 +327,35 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(h.calls).toEqual([])
   })
 
+  it('grants single Agent TEST first-touch only after explicit phone-call WhatsApp opt-in', async () => {
+    Object.assign(h.guard, {
+      hourly_cap: 1, daily_cap: 1, first_touch_daily_cap: 1,
+      warmup_hourly_cap: 1, warmup_daily_cap: 1,
+    })
+    h.recentInbound = false
+    h.resolveRecipient.mockResolvedValue({
+      recipient: '12345678901@c.us', source: 'phone_without_inbound',
+    })
+    const result = await POST(request({
+      action: 'grant_agent', recipient: '12345678901',
+      consent_confirmed: true, confirm_agent_task_test: true,
+      consent_basis: 'phone_call', phone_call_opt_in_confirmed: true,
+      hours: 1,
+    }), context())
+    expect(result.status).toBe(200)
+    expect(h.calls).toContainEqual(expect.objectContaining({
+      table: 'whatsapp_openwa_pilot_allowlist',
+      type: 'upsert',
+      payload: expect.objectContaining({
+        workload: 'agent',
+        consent_basis: 'phone_call',
+        consent_attested_at: expect.any(String),
+      }),
+    }))
+    expect(h.calls.some(call => call.table === 'contacts')).toBe(false)
+    expect(h.calls.some(call => call.table === 'messages')).toBe(false)
+  })
+
   it('grants only Agent Task workload for verified TEST inbound and activates with strict caps', async () => {
     Object.assign(h.guard, { hourly_cap: 1, daily_cap: 1,
       warmup_hourly_cap: 1, warmup_daily_cap: 1 })
