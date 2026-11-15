@@ -73,6 +73,15 @@ there is a queued/scheduled/running task; this is read-only.
 - If any prior recipient grants remain active, the existing limits action rejects changes until the admin explicitly stops Pilot (which revokes all existing grants). Review the exact group and reapprove; never silently revoke or auto-start.
 
 
+## 2026-11-15 — Queued outbound Runs despite successful 200 worker ticks
+
+- The local endpoint returning `200` means the worker tick completed; it **does not** mean it reserved or delivered a WhatsApp message. Its `triggers/tasks/outbound` counts determine progress.
+- TEST Task `f54c1176-1dbd-4472-ba57-e405043eb51c` progressed to **3 Targets + 3 queued outbound Runs**, with **zero durable outbound messages**. The three Runs were due, unused (`attempt_count=0`), and correct for the **AI model** provider; all three chosen contacts had valid scoped phone-call consent on the selected OpenWA connection.
+- **Root cause:** `ai_agent_runs.provider_connection_id` references `ai_provider_connections`, whereas the pinned **WhatsApp transport** is stored in `ai_agent_tasks.target_policy.whatsappConnectionId`. The TEST-only preclaim in `src/lib/ai/tasks/outbound-worker.ts` previously used the model-provider UUID as the WhatsApp connection, which caused `connection_not_ready` and deferred every Run, even though the already-correct SQL reservation resolves the Task transport separately.
+- **Fix:** use the existing `resolveTaskMessageConnection` with the frozen account-scoped Task policy and target conversation for the **TEST-only preclaim**. Keep the Run's AI provider untouched for `loadAgentExecutionRevision`, preserve Meta / non-TEST behavior, and keep the SQL reservation and transport check authoritative. On unavailable transport or lost approvals, leave the Run `queued`, without consuming an attempt or blind resending.
+- **Observability:** the dev timer now logs a non-zero `outbound.gated` status on changes and periodically (not at every poll), including `queuedOutbound`, `attempted` and `sent`. Never infer delivery from HTTP status alone.
+- No migration, provider/connection edit, task reset, grant change, or actual WhatsApp send is part of this patch. **Operator should verify the exact three opt-ins before updating and restarting:** with the Pilot and worker active, the corrected code may now attempt those already-approved queued Runs automatically.
+
 ## Deployment boundary
 
 The local runner is not a production service. `npm run start`,
