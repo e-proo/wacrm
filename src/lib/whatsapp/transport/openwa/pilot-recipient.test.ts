@@ -46,6 +46,7 @@ describe('OpenWA Pilot resolves consent to the same native chat as inbox send', 
     const result = await resolveOpenWAPilotRecipientForGrant(db, ACCOUNT, CONNECTION, PHONE)
     expect(result).toEqual({ recipient: LID, source: 'verified_inbound_chat' })
     expect(reads).toEqual([
+      { table: 'contacts', filters: { account_id: ACCOUNT, phone_normalized: PHONE } },
       { table: 'contacts', filters: { account_id: ACCOUNT, phone: [PHONE, `+${PHONE}`] } },
       { table: 'conversations', filters: { account_id: ACCOUNT, contact_id: 'contact-1' } },
       { table: 'messages', filters: { conversation_id: [CHAT], connection_id: CONNECTION, provider: 'openwa', sender_type: 'customer' } },
