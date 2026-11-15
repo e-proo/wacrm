@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { loadEnvConfig } from '@next/env'
+import nextEnv from '@next/env'
 import { developmentPort, shouldRunDevTaskWorker } from './dev-agent-task-config.mjs'
+
+const { loadEnvConfig } = nextEnv
 
 // This file is executed by Node, NOT bundled into Next.js instrumentation.
 // The actual Task handlers live inside the existing server API and reuse all
