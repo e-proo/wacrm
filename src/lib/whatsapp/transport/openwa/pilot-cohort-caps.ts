@@ -3,6 +3,13 @@
  * The server and SQL remain authoritative; suggestions never change a guardrail
  * or activate a session until the administrator saves explicitly.
  */
+// Editable ceilings apply ONLY to the explicitly controlled, pinned TEST Pilot.
+// Production retains its independent guardrail settings and transport policy.
+export const OPENWA_TEST_PILOT_MAX_HOURLY = 100
+export const OPENWA_TEST_PILOT_MAX_DAILY = 1000
+export const OPENWA_TEST_PILOT_MAX_FIRST_TOUCH = 10
+export const OPENWA_TEST_PILOT_MIN_INTERVAL_MS = 15_000
+
 export interface PilotCohortCapSnapshot {
   hourly_cap: number
   daily_cap: number
