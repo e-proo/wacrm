@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { AgentTaskMultiContactPicker } from './agent-task-contact-picker'
+import { AgentTaskCutoverControls } from './agent-task-cutover-controls'
 
 interface Connection {
   id: string
@@ -290,6 +291,8 @@ export function AgentTasksPanel() {
 
       {error ? <p role="alert" className="rounded-md border border-destructive/50 p-3 text-sm text-destructive">{error}</p> : null}
       {success ? <p role="status" className="rounded-md border p-3 text-sm">{success}</p> : null}
+
+      <AgentTaskCutoverControls onChanged={reload} />
 
       <Card>
         <CardHeader><CardTitle className="text-base">إنشاء مهمة Coverage</CardTitle></CardHeader>
