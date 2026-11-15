@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-api-response'
 import { normalizeTestRecipient } from '@/lib/whatsapp/transport/openwa/pilot-recipient-input'
-import { missingPilotCohortCaps, suggestedPilotCohortCaps, type PilotCohortWorkload } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
+import { missingPilotCohortCaps, suggestedPilotCohortCaps, OPENWA_TEST_PILOT_MAX_HOURLY, OPENWA_TEST_PILOT_MAX_DAILY, OPENWA_TEST_PILOT_MAX_FIRST_TOUCH, OPENWA_TEST_PILOT_MIN_INTERVAL_MS, type PilotCohortWorkload } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
 import { useWhatsAppLabels } from './whatsapp-labels'
 
 interface PilotState extends Record<string, unknown> {
@@ -493,10 +493,10 @@ export function OpenWAPilotControls({
           <p className="mt-2 text-xs text-muted-foreground">{w('devPilotLimitsHelp')}</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {([
-              ['hourly_cap', 'devPilotHourly', 1, 10],
-              ['daily_cap', 'devPilotDaily', 1, 30],
-              ['first_touch_daily_cap', 'devPilotFirstTouch', 0, 10],
-              ['minimum_interval_ms', 'devPilotInterval', 15000, 600000],
+              ['hourly_cap', 'devPilotHourly', 1, OPENWA_TEST_PILOT_MAX_HOURLY],
+              ['daily_cap', 'devPilotDaily', 1, OPENWA_TEST_PILOT_MAX_DAILY],
+              ['first_touch_daily_cap', 'devPilotFirstTouch', 0, OPENWA_TEST_PILOT_MAX_FIRST_TOUCH],
+              ['minimum_interval_ms', 'devPilotInterval', OPENWA_TEST_PILOT_MIN_INTERVAL_MS, 600000],
               ['jitter_ms', 'devPilotJitter', 0, 600000],
             ] as const).map(([key, label, min, max]) =>
               <div key={key} className="space-y-1">
@@ -509,10 +509,10 @@ export function OpenWAPilotControls({
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {([
-              ['pilot_agent_hourly_cap','الوكيل — الحد الساعي',10],
-              ['pilot_agent_daily_cap','الوكيل — الحد اليومي',30],
-              ['pilot_manual_hourly_cap','العادي — الحد الساعي',10],
-              ['pilot_manual_daily_cap','العادي — الحد اليومي',30],
+              ['pilot_agent_hourly_cap','الوكيل — الحد الساعي',OPENWA_TEST_PILOT_MAX_HOURLY],
+              ['pilot_agent_daily_cap','الوكيل — الحد اليومي',OPENWA_TEST_PILOT_MAX_DAILY],
+              ['pilot_manual_hourly_cap','العادي — الحد الساعي',OPENWA_TEST_PILOT_MAX_HOURLY],
+              ['pilot_manual_daily_cap','العادي — الحد اليومي',OPENWA_TEST_PILOT_MAX_DAILY],
             ] as const).map(([key,label,max]) => (
               <label key={key} className="space-y-1 text-sm">
                 <span>{label}</span>
@@ -523,7 +523,7 @@ export function OpenWAPilotControls({
             ))}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            الحد الأقصى للجلسة 10 رسائل/ساعة و30 رسالة/يوم، مع حدود مستقلة إضافية لكل نوع. لا يوجد وضع غير محدود؛ أوقف الجلسة وعدّل الحدود قبل اعتماد دفعة جديدة.
+            السقف القابل للضبط في TEST هو 100 رسالة/ساعة و1000 رسالة/يوم للجلسة، وتُقيَّد رسائل الوكيل والرسائل العادية بالحد المشترك. يبقى سقف أول تواصل 10 أرقام جديدة/يوم والتباعد 15 ثانية على الأقل؛ لا تعني سعة 1000 رسالة موافقةً على مراسلة 1000 عميل جديد. يجب إيقاف الجلسة وحفظ الحدود بموافقة المسؤول قبل التفعيل.
           </p>
           <Button className="mt-3" size="sm" variant="outline" disabled={running || !state.paused || state.active_admissions > 0}
             onClick={() => void submit('limits')}>{w('devPilotSaveLimits')}</Button>
