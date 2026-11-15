@@ -80,46 +80,50 @@ export async function deferredTestOpenWATaskReason(input: {
   const phones = new Map((scoped ?? []).map(row => [row.id, row.phone]))
   if (phones.size !== contactIds.length) return 'pilot_recipient_not_verified'
 
-  const hashes: string[] = []
+  const recipients: Array<{ hash: string; recentInbound: boolean }> = []
   for (const contactId of contactIds) {
     const phone = phones.get(contactId)
     const normalized = typeof phone === 'string'
       ? normalizeTestRecipient(phone) : null
     if (!normalized) return 'pilot_recipient_not_verified'
 
-    // Resolve the same native chat identity used by the session pilot grant.
-    // An unknown or ambiguous native chat is not a valid Agent first touch.
+    // A phone-call opt-in may legitimately have no prior WhatsApp chat.
+    // Still resolve the exact native session identity and reject ambiguity.
     let recipient: string
+    let source: string
     try {
       const resolved = await resolveOpenWAPilotRecipientForGrant(
         db, accountId, connectionId, normalized,
       )
-      if (resolved.source !== 'verified_inbound_chat') {
-        return 'pilot_recipient_not_verified'
-      }
       recipient = resolved.recipient
+      source = resolved.source
     } catch {
       return 'pilot_recipient_not_verified'
     }
+    if (source === 'direct_recipient') return 'pilot_recipient_not_verified'
 
-    const { data: recent, error: recentError } = await db.from('messages')
-      .select('id')
-      .eq('connection_id', connectionId)
-      .eq('provider', 'openwa')
-      .eq('sender_type', 'customer')
-      .eq('provider_chat_id', recipient)
-      .gte('created_at', new Date(Date.now() - 24 * 3600_000).toISOString())
-      .limit(1)
-    if (recentError) throw recentError
-    if (!recent?.length) return 'pilot_recipient_not_verified'
+    let recentInbound = false
+    if (source === 'verified_inbound_chat') {
+      const { data: recent, error: recentError } = await db.from('messages')
+        .select('id')
+        .eq('connection_id', connectionId)
+        .eq('provider', 'openwa')
+        .eq('sender_type', 'customer')
+        .eq('provider_chat_id', recipient)
+        .gte('created_at', new Date(Date.now() - 24 * 3600_000).toISOString())
+        .limit(1)
+      if (recentError) throw recentError
+      recentInbound = Boolean(recent?.length)
+    }
 
     const hash = openWAPilotRecipientHash(accountId, connectionId, recipient)
     if (!hash) return 'pilot_recipient_not_verified'
-    hashes.push(hash)
+    recipients.push({ hash, recentInbound })
   }
+  const hashes = recipients.map(recipient => recipient.hash)
   const { data: granted, error: grantsError } = await db
     .from('whatsapp_openwa_pilot_allowlist')
-    .select('recipient_hash')
+    .select('recipient_hash,consent_basis,consent_attested_at')
     .eq('account_id', accountId)
     .eq('connection_id', connectionId)
     .eq('workload', 'agent')
@@ -128,6 +132,12 @@ export async function deferredTestOpenWATaskReason(input: {
     .in('recipient_hash', hashes)
     .limit(hashes.length)
   if (grantsError) throw grantsError
-  return new Set((granted ?? []).map(g => g.recipient_hash)).size === hashes.length
-    ? null : 'pilot_recipient_not_approved'
+  const byHash = new Map((granted ?? []).map(row => [row.recipient_hash, row]))
+  return recipients.every(recipient => {
+    const grant = byHash.get(recipient.hash)
+    return grant && (
+      (grant.consent_basis === 'phone_call' && Boolean(grant.consent_attested_at)) ||
+      (grant.consent_basis === 'verified_inbound' && recipient.recentInbound)
+    )
+  }) ? null : 'pilot_recipient_not_approved'
 }
