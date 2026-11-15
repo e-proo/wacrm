@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildAgentTaskPlatform } from '@/lib/ai/tasks/target-resolution'
 import {
   COVERAGE_SOURCING_MESSAGE_POLICY,
   COVERAGE_SOURCING_TASK_MODULE,
+  COVERAGE_SUPPLIER_CANDIDATE_RESOLVER,
   COVERAGE_SOURCING_TASK_TYPE,
   COVERAGE_SOURCING_TASK_TYPE_V2,
   COVERAGE_SOURCING_MESSAGE_POLICY_V2,
@@ -64,6 +65,57 @@ describe('Coverage sourcing Agent Task', () => {
       )?.domain,
     ).toBe('coverage')
     expect(COVERAGE_DOMAIN.capabilities).toContain('coverage.sourcing')
+  })
+
+  it('materializes exact tenant CRM contacts without supplier history, but never invents other recipients', async () => {
+    const accountId = '00000000-0000-4000-8000-000000000999'
+    const requestId = '00000000-0000-4000-8000-000000000666'
+    const from = vi.fn((table: string) => ({
+      select() { return this }, eq() { return this }, in() { return this },
+      neq() { return this }, order() { return this },
+      maybeSingle: async () => ({
+        data: { id: requestId, service_id: '00000000-0000-4000-8000-000000000777',
+          requester_contact_id: REQUESTER, requested_amount:'100',
+          reserved_amount:'0', fulfilled_amount:'0',currency:'SAR',
+          attributes:requestAttributes(),status:'active' }, error:null,
+      }),
+      limit: async () => ({
+        data: table === 'contacts' ? [{id:SUPPLIER_A},{id:SUPPLIER_B}] : [],
+        error:null,
+      }),
+    }))
+    const candidates = await COVERAGE_SUPPLIER_CANDIDATE_RESOLVER.resolve(
+      {from} as never, {
+        accountId,taskId:'task-advisory',taskType:'coverage.sourcing',
+        taskTypeVersion:2,taskContext:{coverageRequestId:requestId},
+        targetPolicy:{selectedContactIds:[SUPPLIER_B,SUPPLIER_A]},
+        maxCandidates:2,
+      } as never,
+    )
+    expect(candidates.map(item=>item.contactId)).toEqual([SUPPLIER_B,SUPPLIER_A])
+    expect(from).toHaveBeenCalledWith('contacts')
+    expect(from).not.toHaveBeenCalledWith('coverage_offers')
+  })
+
+  it('fails closed if any manually selected CRM identity is missing from the current account', async () => {
+    const from = vi.fn((table: string) => ({
+      select() { return this }, eq() { return this }, in() { return this },
+      maybeSingle: async () => ({data:{
+        id:'00000000-0000-4000-8000-000000000666',
+        requester_contact_id:REQUESTER,
+        requested_amount:'100',reserved_amount:'0',fulfilled_amount:'0',
+        status:'active',
+      },error:null}),
+      limit: async () => ({data:table==='contacts'?[{id:SUPPLIER_A}]:[],error:null}),
+    }))
+    await expect(COVERAGE_SUPPLIER_CANDIDATE_RESOLVER.resolve(
+      {from} as never,{
+        accountId:'00000000-0000-4000-8000-000000000999',
+        taskId:'task',taskType:'coverage.sourcing',taskTypeVersion:2,
+        taskContext:{coverageRequestId:'00000000-0000-4000-8000-000000000666'},
+        targetPolicy:{selectedContactIds:[SUPPLIER_A,SUPPLIER_B]},maxCandidates:2,
+      } as never,
+    )).rejects.toThrow('COVERAGE_SOURCING_SELECTED_CONTACT_OUTSIDE_ACCOUNT')
   })
 
   it('matches supplier history anti-parallel to the requester legs', () => {
