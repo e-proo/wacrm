@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { parseExplicitCoverageContactIds } from '@/lib/services/coverage/selected-targets'
+import { deferredTestOpenWATaskReason } from '@/lib/ai/tasks/test-openwa-task-admission'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -38,7 +39,25 @@ export async function GET(
     } catch {
       return NextResponse.json({ error: 'قائمة الأرقام المحفوظة غير صالحة.', code: 'TASK_CONTACT_POLICY_INVALID' }, { status: 409 })
     }
-    if (!selected) return NextResponse.json({ taskStatus: task.status, recipients: [] })
+    if (!selected) return NextResponse.json({ taskStatus: task.status, recipients: [], holdReason: null })
+
+    // Display the same TEST preclaim reason used by the Worker, without
+    // changing the Task, approving recipients or attempting a WhatsApp send.
+    let holdReason: string | null = null
+    const connectionId = policy.whatsappConnectionId
+    if (typeof connectionId === 'string' && UUID_RE.test(connectionId) &&
+        ['queued', 'scheduled', 'running'].includes(task.status)) {
+      try {
+        holdReason = await deferredTestOpenWATaskReason({
+          db, accountId: ctx.accountId, connectionId, contactIds: [...selected],
+        })
+      } catch (error) {
+        // A temporary Pilot status lookup failure must not hide durable
+        // per-recipient delivery outcomes from the operator.
+        console.warn('[agent-task-progress] TEST preclaim check unavailable',
+          { taskId: taskId.slice(0, 8), error })
+      }
+    }
 
     const [contactResult, targetResult] = await Promise.all([
       db.from('contacts').select('id,name,phone')
@@ -75,6 +94,7 @@ export async function GET(
 
     return NextResponse.json({
       taskStatus: task.status,
+      holdReason,
       recipients: selected.map(contactId => {
         const contact = contacts.get(contactId)
         const target = targets.get(contactId)
