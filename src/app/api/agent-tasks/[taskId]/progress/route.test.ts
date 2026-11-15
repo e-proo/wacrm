@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const stubs = vi.hoisted(() => ({
   requireAgentCapability: vi.fn(),
   from: vi.fn(),
+  preflight: vi.fn(),
 }))
 vi.mock('@/lib/auth/account', () => ({
   requireAgentCapability: stubs.requireAgentCapability,
@@ -10,6 +11,9 @@ vi.mock('@/lib/auth/account', () => ({
 }))
 vi.mock('@/lib/ai/admin-client', () => ({
   supabaseAdmin: () => ({ from: stubs.from }),
+}))
+vi.mock('@/lib/ai/tasks/test-openwa-task-admission', () => ({
+  deferredTestOpenWATaskReason: stubs.preflight,
 }))
 import { GET } from './route'
 
@@ -19,13 +23,14 @@ const first = '33333333-3333-4333-8333-333333333333'
 const second = '44444444-4444-4444-8444-444444444444'
 const targetId = '55555555-5555-4555-8555-555555555555'
 const messageId = '66666666-6666-4666-8666-666666666666'
+const connectionId = '77777777-7777-4777-8777-777777777777'
 const ctx = { params: Promise.resolve({ taskId }) }
 
 function query(name: string) {
   const data: Record<string, unknown[]> = {
     ai_agent_tasks: [{
       id: taskId, task_type: 'coverage.sourcing', status: 'running',
-      target_policy: { selectedContactIds: [second, first] },
+      target_policy: { selectedContactIds: [second, first], whatsappConnectionId: connectionId },
     }],
     contacts: [{ id: first, name: 'Test contact', phone: '+123456' }, { id: second, name: 'Test 2', phone: '+456789' }],
     ai_agent_task_targets: [{
@@ -49,6 +54,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   stubs.requireAgentCapability.mockResolvedValue({ accountId: acct })
   stubs.from.mockImplementation(query)
+  stubs.preflight.mockResolvedValue(null)
 })
 
 describe('SOF-66 per-recipient progress, read-only and tenant-scoped', () => {
@@ -68,6 +74,17 @@ describe('SOF-66 per-recipient progress, read-only and tenant-scoped', () => {
     expect(queries[3].in).toHaveBeenCalledWith('task_target_id', [targetId])
     for (const q of queries) expect(q.eq).toHaveBeenCalledWith('account_id', acct)
     expect(stubs.requireAgentCapability).toHaveBeenCalledWith('agents.manage_tasks')
+  })
+
+  it('reports a TEST worker hold without sending, claiming or editing Task state', async () => {
+    stubs.preflight.mockResolvedValue('pilot_recipient_not_approved')
+    const response = await GET(new Request('http://localhost'), ctx)
+    expect(response.status).toBe(200)
+    expect((await response.json()).holdReason).toBe('pilot_recipient_not_approved')
+    expect(stubs.preflight).toHaveBeenCalledWith({
+      db: expect.anything(), accountId: acct, connectionId, contactIds: [second, first],
+    })
+    expect(stubs.from).not.toHaveBeenCalledWith('whatsapp_openwa_pilot_allowlist')
   })
 
   it('rejects malformed Task IDs before accessing CRM data', async () => {
