@@ -417,6 +417,8 @@ export function AgentTasksPanel() {
             onChange={setSelectedContactIds}
             maxSelected={maxManualContacts}
             coverageRequestId={requestId}
+            allowPhoneRegistration={selectedProvider === 'openwa' && selectedConnection !== 'latest'}
+            whatsappConnectionId={selectedConnection === 'latest' ? null : selectedConnection}
             disabled={loading || busy}
             onEligibilityChange={setContactEligible}
           />
