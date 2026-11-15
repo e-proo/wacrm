@@ -22,6 +22,8 @@ interface PilotState extends Record<string, unknown> {
   active: boolean
   paused: boolean
   active_admissions: number
+  agent_admissions?: number
+  manual_admissions?: number
   approved_workload?: 'manual' | 'agent' | null
   unsettled_outbound: number
   same_identity_ready_connections: number
@@ -32,15 +34,21 @@ interface PilotState extends Record<string, unknown> {
     first_touch_daily_cap: number
     minimum_interval_ms: number
     jitter_ms: number
+    pilot_agent_hourly_cap?: number | null
+    pilot_agent_daily_cap?: number | null
+    pilot_manual_hourly_cap?: number | null
+    pilot_manual_daily_cap?: number | null
   }
 }
 
 type RelatedConnection = { id: string; status: string; sessionId: string | null }
-type PilotAction = 'prepare' | 'limits' | 'grant' | 'grant_agent' | 'activate' | 'stop' | 'disable' | 'enable'
+type PilotAction = 'prepare' | 'limits' | 'grant_batch' | 'activate' | 'stop' | 'disable' | 'enable'
 type PilotStep = 'protected' | 'pending' | 'needsStop' | 'verify' | 'prepare' | 'approve' | 'start' | 'active' | 'multiple' | 'normal'
 
 const defaultLimits = { hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
-  minimum_interval_ms: 15000, jitter_ms: 3000 }
+  minimum_interval_ms: 15000, jitter_ms: 3000,
+  pilot_agent_hourly_cap: 3, pilot_agent_daily_cap: 10,
+  pilot_manual_hourly_cap: 3, pilot_manual_daily_cap: 10 }
 
 export function OpenWAPilotControls({
   connectionId,
@@ -55,6 +63,10 @@ export function OpenWAPilotControls({
   const [state, setState] = useState<PilotState | null>(null)
   const [limits, setLimits] = useState(defaultLimits)
   const [recipient, setRecipient] = useState('')
+  const [search, setSearch] = useState('')
+  const [contactResults, setContactResults] = useState<Array<{ id: string; name: string | null; phone: string }>>([])
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([])
+  const [contactError, setContactError] = useState<string | null>(null)
   const [consent, setConsent] = useState(false)
   const [duplicateAck, setDuplicateAck] = useState(false)
   const [verified, setVerified] = useState(false)
@@ -66,6 +78,37 @@ export function OpenWAPilotControls({
   const [notice, setNotice] = useState<string | null>(null)
   const endpoint = `/api/whatsapp/connections/openwa/${connectionId}/pilot`
   const normalizedRecipient = useMemo(() => normalizeTestRecipient(recipient), [recipient])
+
+  useEffect(() => {
+    const ctrl = new AbortController()
+    const timer = setTimeout(async () => {
+      try {
+        // The existing admin-scoped CRM picker is the only contact source.
+        const safe = search.replace(/[^\p{L}\p{N} +@_-]/gu, '').slice(0, 70)
+        const response = await fetch('/api/contacts-lite?limit=50&q=' +
+          encodeURIComponent(safe), { cache: 'no-store', signal: ctrl.signal })
+        const payload = await parseOpenWAApiResponse<{ contacts: Array<{ id: string; name: string | null; phone: string }> }>(response)
+        if (!response.ok) throw new Error('فشل البحث في جهات الاتصال')
+        if (!ctrl.signal.aborted) {
+          setContactResults(payload.contacts ?? [])
+          setContactError(null)
+        }
+      } catch {
+        if (!ctrl.signal.aborted) {
+          setContactResults([])
+          setContactError('تعذّر تحميل جهات الاتصال من CRM.')
+        }
+      }
+    }, 300)
+    return () => { clearTimeout(timer); ctrl.abort() }
+  }, [search])
+
+  function addRecipient(raw: string) {
+    const normalized = normalizeTestRecipient(raw)
+    if (!normalized || selectedRecipients.includes(normalized) || selectedRecipients.length >= 10) return
+    setSelectedRecipients(current => [...current, normalized])
+    setRecipient('')
+  }
 
   const load = useCallback(async () => {
     try {
@@ -79,6 +122,10 @@ export function OpenWAPilotControls({
         first_touch_daily_cap: data.guardrails.first_touch_daily_cap,
         minimum_interval_ms: data.guardrails.minimum_interval_ms,
         jitter_ms: data.guardrails.jitter_ms,
+        pilot_agent_hourly_cap: data.guardrails.pilot_agent_hourly_cap ?? data.guardrails.hourly_cap,
+        pilot_agent_daily_cap: data.guardrails.pilot_agent_daily_cap ?? data.guardrails.daily_cap,
+        pilot_manual_hourly_cap: data.guardrails.pilot_manual_hourly_cap ?? data.guardrails.hourly_cap,
+        pilot_manual_daily_cap: data.guardrails.pilot_manual_daily_cap ?? data.guardrails.daily_cap,
       })
       setError(null)
     } catch (e) {
@@ -112,7 +159,7 @@ export function OpenWAPilotControls({
     } finally { setVerifying(false) }
   }
 
-  async function submit(action: PilotAction) {
+  async function submit(action: PilotAction, workload?: 'manual' | 'agent') {
     if (busy || verifying) return
     setBusy(true)
     setError(null)
@@ -121,10 +168,10 @@ export function OpenWAPilotControls({
       const body: Record<string, unknown> = { action }
       if (action === 'prepare') body.confirm_prepare = true
       if (action === 'limits') Object.assign(body, limits)
-      if (action === 'grant' || action === 'grant_agent') Object.assign(body, {
-        recipient: normalizedRecipient, consent_confirmed: consent,
+      if (action === 'grant_batch') Object.assign(body, {
+        workload, recipients: selectedRecipients, consent_confirmed: consent,
         ack_duplicate_sessions: duplicateAck, hours: 4,
-        ...(action === 'grant_agent' ? { confirm_agent_task_test: true } : {}),
+        confirm_agent_task_test: workload === 'agent',
       })
       if (action === 'activate' || action === 'disable') body.ack_duplicate_sessions = duplicateAck
       if (action === 'disable') body.confirm_normal_sending = true
@@ -135,16 +182,15 @@ export function OpenWAPilotControls({
       const data = await parseOpenWAApiResponse<PilotState>(res)
       if (!res.ok) throw new Error(data.error || w('devPilotActionRejected'))
       setState(data)
-      if (action === 'grant' || action === 'grant_agent') { setRecipient(''); setConsent(false) }
+      if (action === 'grant_batch') { setSelectedRecipients([]); setRecipient(''); setConsent(false) }
       if (['stop', 'disable', 'enable'].includes(action)) { setVerified(false); setDuplicateAck(false); setVerifiedStatus(null) }
       if (action === 'stop' || action === 'disable' || action === 'enable') onPilotChange?.()
-      setNotice(w(action === 'prepare' ? 'devPilotPrepared'
-        : action === 'disable' ? 'devPilotDisabled' : action === 'enable' ? 'devPilotEnabled'
-        : action === 'stop' ? 'devPilotStopped'
-        : action === 'activate' ? 'devPilotStarted'
-        : (action === 'grant' || action === 'grant_agent') && data.recipient_identity_source === 'verified_inbound_chat'
-          ? 'devPilotGrantedNativeChat'
-          : (action === 'grant' || action === 'grant_agent') ? 'devPilotGranted' : 'devPilotLimitsSaved'))
+      setNotice(action === 'grant_batch'
+        ? `تم اعتماد ${selectedRecipients.length} أرقام فقط لنوع ${workload} لمدة أربع ساعات دون إرسال.`
+        : w(action === 'prepare' ? 'devPilotPrepared'
+          : action === 'disable' ? 'devPilotDisabled' : action === 'enable' ? 'devPilotEnabled'
+          : action === 'stop' ? 'devPilotStopped'
+          : action === 'activate' ? 'devPilotStarted' : 'devPilotLimitsSaved'))
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : w('devPilotActionRejected'))
@@ -160,14 +206,15 @@ export function OpenWAPilotControls({
     : !verified ? 'verify'
     : !state.configured ? 'prepare'
     : state.active_admissions === 0 ? 'approve'
-    : state.active_admissions === 1 ? 'start'
+    : state.active_admissions <= 10 ? 'start'
     : 'multiple'
   const running = busy || verifying
   const needsDuplicateReview = (state?.same_identity_ready_connections ?? 0) > 1
-  const canApprove = Boolean(state?.configured && state.enforced && state.paused && normalizedRecipient
-    && consent && verified && state.unsettled_outbound === 0 && (!needsDuplicateReview || duplicateAck))
+  const canApprove = Boolean(state?.configured && state.enforced && state.paused &&
+    selectedRecipients.length > 0 && selectedRecipients.length <= 10 &&
+    consent && verified && state.unsettled_outbound === 0 && (!needsDuplicateReview || duplicateAck))
   const canStart = Boolean(state?.configured && state.enforced && state.paused && verified
-    && state.active_admissions === 1 && state.unsettled_outbound === 0
+    && state.active_admissions > 0 && state.active_admissions <= 10 && state.unsettled_outbound === 0
     && (!needsDuplicateReview || duplicateAck))
 
   return <Card className="border-border/70">
@@ -229,7 +276,7 @@ export function OpenWAPilotControls({
           {([
             [w('devPilotStepVerify'), verified || step === 'active'],
             [w('devPilotStepPrepare'), state.configured],
-            [w('devPilotStepApprove'), state.active_admissions === 1 || step === 'active'],
+            [w('devPilotStepApprove'), state.active_admissions > 0 || step === 'active'],
             [w('devPilotStepStart'), step === 'active'],
           ] as const).map(([label, complete], index) =>
             <div key={label} className={`rounded-md px-1 py-2 ${complete ? 'bg-primary/10 text-foreground' : 'bg-muted/50 text-muted-foreground'}`}>
@@ -285,48 +332,78 @@ export function OpenWAPilotControls({
         </section>}
 
         {step === 'approve' && <section className="space-y-3 rounded-lg border p-4">
-          <div>
-            <p className="font-semibold">{w('devPilotApproveTitle')}</p>
-            <p className="text-sm text-muted-foreground">{w('devPilotApproveDescription')}</p>
+          <p className="font-semibold">اعتماد عدة أرقام لهذه الجلسة على TEST</p>
+          <p className="text-xs text-muted-foreground">
+            ابحث في جهات اتصال CRM وأضف ما يصل إلى 10 أرقام، أو أدخل رقمًا جديدًا.
+            الأرقام الجديدة لا تُنشئ جهة اتصال CRM تلقائيًا. أرقام الوكيل
+            تحتاج رسالة واردة موثقة خلال 24 ساعة على الجلسة نفسها.
+          </p>
+          <Input value={search} disabled={running}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="بحث بالاسم أو الرقم من جهات اتصال CRM" />
+          {contactError ? <p role="alert" className="text-xs text-destructive">{contactError}</p> : null}
+          <div className="max-h-36 space-y-1 overflow-y-auto">
+            {contactResults.filter(item => normalizeTestRecipient(item.phone) &&
+                !selectedRecipients.includes(normalizeTestRecipient(item.phone)!)).map(contact => (
+              <Button key={contact.id} type="button" variant="outline" size="sm"
+                className="w-full justify-start" disabled={running || selectedRecipients.length >= 10}
+                onClick={() => addRecipient(contact.phone)}>
+                + {contact.name?.trim() || 'بدون اسم'} · {contact.phone}
+              </Button>
+            ))}
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={`pilot-recipient-${connectionId}`}>{w('devPilotRecipient')}</Label>
-            <Input id={`pilot-recipient-${connectionId}`} value={recipient} autoComplete="off"
-              dir="ltr" placeholder="+9677XXXXXXXX" disabled={running}
-              onChange={(e) => setRecipient(e.target.value)} />
-            <p className="text-xs text-muted-foreground">{w('devPilotRecipientFormat')}</p>
-            {recipient.trim() && !normalizedRecipient && <p className="text-xs text-destructive">{w('devPilotInvalidRecipient')}</p>}
+          <div className="flex flex-wrap gap-2">
+            <div className="min-w-44 flex-1">
+              <Input id={`pilot-recipient-${connectionId}`} value={recipient} autoComplete="off"
+                dir="ltr" placeholder="+9677XXXXXXXX" disabled={running}
+                onChange={e => setRecipient(e.target.value)} />
+            </div>
+            <Button type="button" variant="outline" disabled={running || !normalizedRecipient ||
+              selectedRecipients.includes(normalizedRecipient) || selectedRecipients.length >= 10}
+              onClick={() => addRecipient(recipient)}>إضافة الرقم</Button>
+          </div>
+          {recipient.trim() && !normalizedRecipient &&
+            <p className="text-xs text-destructive">أدخل رقمًا دوليًا صحيحًا أو معرف OpenWA موثقًا.</p>}
+          <div className="space-y-1" aria-label="أرقام اختبار OpenWA المختارة">
+            {selectedRecipients.map((value,index) => <div key={value}
+              className="flex items-center justify-between gap-2 rounded border p-2 text-xs">
+              <span dir="ltr">{index + 1}. {value}</span>
+              <Button type="button" variant="ghost" size="sm" disabled={running}
+                onClick={() => setSelectedRecipients(old => old.filter(item => item !== value))}>إزالة</Button>
+            </div>)}
+            <p className="text-xs">المختارة: {selectedRecipients.length} من 10</p>
           </div>
           <div className="flex items-start gap-2">
             <Checkbox id={`pilot-consent-${connectionId}`} checked={consent} disabled={running}
-              onCheckedChange={(v) => setConsent(v === true)} />
-            <Label htmlFor={`pilot-consent-${connectionId}`} className="text-sm leading-relaxed">{w('devPilotConsent')}</Label>
+              onCheckedChange={v => setConsent(v === true)} />
+            <Label htmlFor={`pilot-consent-${connectionId}`} className="text-sm leading-relaxed">
+              أؤكد موافقة كل جهة محددة على التواصل والتقيد بحدود TEST.
+            </Label>
           </div>
           {needsDuplicateReview && !duplicateAck &&
-            <p className="text-xs text-amber-600 dark:text-amber-400">{w('devPilotMustReviewDuplicates')}</p>}
+            <p className="text-xs text-amber-600">{w('devPilotMustReviewDuplicates')}</p>}
           <div className="flex flex-wrap gap-2">
-            <Button disabled={running || !canApprove} onClick={() => void submit('grant')}>
-              {w('devPilotGrant')} — manual
+            <Button disabled={running || !canApprove}
+              onClick={() => void submit('grant_batch','manual')}>
+              اعتماد الأرقام للرسائل العادية
             </Button>
-            <Button variant="outline" disabled={running || !canApprove ||
-              limits.hourly_cap !== 1 || limits.daily_cap !== 1 ||
-              limits.first_touch_daily_cap > 1}
+            <Button variant="outline" disabled={running || !canApprove}
               onClick={() => {
-                if (window.confirm('اعتماد هذا الرقم فقط لتجربة مهمة الوكيل (agent)؟ يلزم وجود رسالة واردة خلال 24 ساعة على جلسة OpenWA نفسها. لن يحدث إرسال الآن.'))
-                  void submit('grant_agent')
+                if (window.confirm('اعتماد هذه الأرقام لمهام الوكلاء على TEST؟ يجب أن تكون لكل رقم محادثة واردة حديثة وموافقة. لن يتم الإرسال بمجرد الاعتماد.'))
+                  void submit('grant_batch','agent')
               }}>
-              اعتماد رقم اختبار الوكيل (agent)
+              اعتماد الأرقام لمهام الوكلاء
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            تجربة مهام الوكلاء تتطلب ضبط الحد الساعي واليومي إلى 1 في الإعدادات المتقدمة.
-            إذن manual لا يسمح برسالة Agent Task.
+            اضبط حد الساعة واليوم وأول تواصل، وحد نوع الرسائل المختار، بحيث تستوعب
+            الأرقام المعتمدة. تبقى الحدود العامة وإيقاف الجلسة وسلامة OpenWA سارية.
           </p>
         </section>}
 
         {step === 'start' && <section className="space-y-3 rounded-lg border p-4">
           <p className="font-semibold">{w('devPilotReadyToStart')}</p>
-          <p className="text-sm">نوع السماح: {state.approved_workload === 'agent' ? 'مهام الوكلاء (agent)' : 'الرسائل اليدوية (manual)'}</p>
+          <p className="text-sm">نوع السماح: {state.approved_workload === 'agent' ? 'مهام الوكلاء (agent)' : 'الرسائل اليدوية (manual)'} · عدد الأرقام: {state.active_admissions}</p>
           <p className="text-sm text-muted-foreground">{w('devPilotStartDescription')}</p>
           {needsDuplicateReview && !duplicateAck &&
             <p className="text-xs text-amber-600 dark:text-amber-400">{w('devPilotMustReviewDuplicates')}</p>}
@@ -337,9 +414,7 @@ export function OpenWAPilotControls({
 
         {step === 'active' && <section className="space-y-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4">
           <p className="flex items-center gap-2 font-semibold"><CheckCircle2 className="size-5" />{w('devPilotNowActive')}</p>
-          <p className="text-sm text-muted-foreground">{w('devPilotSendOneMessage')}
-            {state.approved_workload === 'agent' ? ' — السماح محصور بمهمة الوكيل والرقم المختبر.' : ''}
-          </p>
+          <p className="text-sm text-muted-foreground">اعتمدت الجلسة {state.active_admissions} أرقام لنوع {state.approved_workload}. الإرسال محدود بالضوابط المحفوظة ويتوقف تلقائيًا عند تجاوزها.</p>
           <Button variant="destructive" disabled={running} onClick={() => void submit('stop')}>
             <Square className="me-2 size-4" />{w('devPilotStop')}
           </Button>
@@ -362,9 +437,9 @@ export function OpenWAPilotControls({
           <p className="mt-2 text-xs text-muted-foreground">{w('devPilotLimitsHelp')}</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {([
-              ['hourly_cap', 'devPilotHourly', 1, 3],
-              ['daily_cap', 'devPilotDaily', 1, 10],
-              ['first_touch_daily_cap', 'devPilotFirstTouch', 0, 1],
+              ['hourly_cap', 'devPilotHourly', 1, 10],
+              ['daily_cap', 'devPilotDaily', 1, 30],
+              ['first_touch_daily_cap', 'devPilotFirstTouch', 0, 10],
               ['minimum_interval_ms', 'devPilotInterval', 15000, 600000],
               ['jitter_ms', 'devPilotJitter', 0, 600000],
             ] as const).map(([key, label, min, max]) =>
@@ -376,7 +451,25 @@ export function OpenWAPilotControls({
               </div>,
             )}
           </div>
-          <Button className="mt-3" size="sm" variant="outline" disabled={running || !state.paused}
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {([
+              ['pilot_agent_hourly_cap','الوكيل — الحد الساعي',10],
+              ['pilot_agent_daily_cap','الوكيل — الحد اليومي',30],
+              ['pilot_manual_hourly_cap','العادي — الحد الساعي',10],
+              ['pilot_manual_daily_cap','العادي — الحد اليومي',30],
+            ] as const).map(([key,label,max]) => (
+              <label key={key} className="space-y-1 text-sm">
+                <span>{label}</span>
+                <Input type="number" min={1} max={max} value={limits[key]}
+                  disabled={running || !state.paused || state.active_admissions > 0}
+                  onChange={e => setLimits(current => ({ ...current, [key]: Number(e.target.value) }))} />
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            الحد الأقصى للجلسة 10 رسائل/ساعة و30 رسالة/يوم، مع حدود مستقلة إضافية لكل نوع. لا يوجد وضع غير محدود؛ أوقف الجلسة وعدّل الحدود قبل اعتماد دفعة جديدة.
+          </p>
+          <Button className="mt-3" size="sm" variant="outline" disabled={running || !state.paused || state.active_admissions > 0}
             onClick={() => void submit('limits')}>{w('devPilotSaveLimits')}</Button>
         </details>}
 
