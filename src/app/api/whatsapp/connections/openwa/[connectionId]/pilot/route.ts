@@ -9,9 +9,13 @@ import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 type Context = { params: Promise<{ connectionId: string }> }
 const noStore = { 'Cache-Control': 'private, no-store, max-age=0' }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const MAX_HOURLY = 3
-const MAX_DAILY = 10
-const MAX_FIRST_TOUCH = 1
+const DEFAULT_HOURLY = 3
+const DEFAULT_DAILY = 10
+const DEFAULT_FIRST_TOUCH = 1
+const MAX_HOURLY = 10
+const MAX_DAILY = 30
+const MAX_FIRST_TOUCH = 10
+const MAX_BATCH_CONTACTS = 10
 const MIN_INTERVAL = 15000
 
 type Db = Awaited<ReturnType<typeof requireOpenWASessionAdmin>>['adminDb']
@@ -57,16 +61,18 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     throw new WhatsAppTransportError('connection_restricted', 'Pilot connection missing or unavailable')
   }
   const { data: guard, error: ge } = await db.from('whatsapp_connection_guardrails')
-    .select('manual_paused,pilot_enabled,hourly_cap,daily_cap,first_touch_daily_cap,minimum_interval_ms,jitter_ms,warmup_hourly_cap,warmup_daily_cap')
+    .select('manual_paused,pilot_enabled,hourly_cap,daily_cap,first_touch_daily_cap,minimum_interval_ms,jitter_ms,warmup_hourly_cap,warmup_daily_cap,pilot_agent_hourly_cap,pilot_agent_daily_cap,pilot_manual_hourly_cap,pilot_manual_daily_cap')
     .eq('connection_id', connectionId).eq('account_id', accountId).maybeSingle()
   checkDb(ge, 'guardrail')
   // Newly created sessions have no guardrails until an admin prepares them.
   // A missing row must not silently inherit permissive schema defaults.
   const configured = Boolean(guard)
   const safeGuard = guard ?? {
-    manual_paused: true, pilot_enabled: true, hourly_cap: MAX_HOURLY, daily_cap: MAX_DAILY,
-    first_touch_daily_cap: MAX_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
-    jitter_ms: 3000, warmup_hourly_cap: MAX_HOURLY, warmup_daily_cap: MAX_DAILY,
+    manual_paused: true, pilot_enabled: true, hourly_cap: DEFAULT_HOURLY, daily_cap: DEFAULT_DAILY,
+    first_touch_daily_cap: DEFAULT_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
+    jitter_ms: 3000, warmup_hourly_cap: DEFAULT_HOURLY, warmup_daily_cap: DEFAULT_DAILY,
+    pilot_agent_hourly_cap: null, pilot_agent_daily_cap: null,
+    pilot_manual_hourly_cap: null, pilot_manual_daily_cap: null,
   }
 
   const { count: grants, error: ae } = await db.from('whatsapp_openwa_pilot_allowlist')
@@ -114,10 +120,16 @@ function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
       first_touch_daily_cap: s.guard.first_touch_daily_cap,
       minimum_interval_ms: s.guard.minimum_interval_ms, jitter_ms: s.guard.jitter_ms,
       warmup_hourly_cap: s.guard.warmup_hourly_cap, warmup_daily_cap: s.guard.warmup_daily_cap,
+      pilot_agent_hourly_cap: s.guard.pilot_agent_hourly_cap,
+      pilot_agent_daily_cap: s.guard.pilot_agent_daily_cap,
+      pilot_manual_hourly_cap: s.guard.pilot_manual_hourly_cap,
+      pilot_manual_daily_cap: s.guard.pilot_manual_daily_cap,
     },
     active_admissions: s.grants,
-    approved_workload: s.grants === 1
-      ? (s.agentGrants === 1 ? 'agent' : s.manualGrants === 1 ? 'manual' : null)
+    agent_admissions: s.agentGrants,
+    manual_admissions: s.manualGrants,
+    approved_workload: s.grants > 0
+      ? (s.agentGrants === s.grants ? 'agent' : s.manualGrants === s.grants ? 'manual' : null)
       : null,
     unsettled_outbound: s.pending, same_identity_ready_connections: s.duplicates }
 }
@@ -154,7 +166,7 @@ export async function POST(request: Request, context: Context) {
     assertTestConnectionId(connectionId)
     const body = await request.json() as Record<string, unknown>
     const action = body.action
-    if (!['prepare', 'limits', 'grant', 'grant_agent', 'activate', 'stop', 'disable', 'enable'].includes(String(action))) return deny('Unknown pilot action', 400)
+    if (!['prepare', 'limits', 'grant', 'grant_agent', 'grant_batch', 'activate', 'stop', 'disable', 'enable'].includes(String(action))) return deny('Unknown pilot action', 400)
     const s = await snapshot(adminDb, accountId, connectionId)
 
     if (action === 'disable' || action === 'enable') {
@@ -195,10 +207,10 @@ export async function POST(request: Request, context: Context) {
       }
       const { error } = await adminDb.from('whatsapp_connection_guardrails')
         .upsert({ connection_id: connectionId, account_id: accountId,
-          manual_paused: true, hourly_cap: MAX_HOURLY, daily_cap: MAX_DAILY,
-          first_touch_daily_cap: MAX_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
+          manual_paused: true, hourly_cap: DEFAULT_HOURLY, daily_cap: DEFAULT_DAILY,
+          first_touch_daily_cap: DEFAULT_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
           jitter_ms: 3000, warmup_until: new Date(Date.now() + 7 * 86400000).toISOString(),
-          warmup_hourly_cap: MAX_HOURLY, warmup_daily_cap: MAX_DAILY,
+          warmup_hourly_cap: DEFAULT_HOURLY, warmup_daily_cap: DEFAULT_DAILY,
           failure_window_minutes: 15, failure_min_attempts: 2,
           failure_rate_threshold: 0.5, updated_at: new Date().toISOString() },
         { onConflict: 'connection_id' })
@@ -215,9 +227,9 @@ export async function POST(request: Request, context: Context) {
       const { error: pe } = await adminDb.from('whatsapp_connection_guardrails')
         .upsert({ connection_id: connectionId, account_id: accountId,
           manual_paused: true,
-          ...(!s.configured ? { hourly_cap: MAX_HOURLY, daily_cap: MAX_DAILY,
-            first_touch_daily_cap: MAX_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
-            jitter_ms: 3000, warmup_hourly_cap: MAX_HOURLY, warmup_daily_cap: MAX_DAILY } : {}),
+          ...(!s.configured ? { hourly_cap: DEFAULT_HOURLY, daily_cap: DEFAULT_DAILY,
+            first_touch_daily_cap: DEFAULT_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
+            jitter_ms: 3000, warmup_hourly_cap: DEFAULT_HOURLY, warmup_daily_cap: DEFAULT_DAILY } : {}),
           updated_at: new Date().toISOString() }, { onConflict: 'connection_id' })
       checkDb(pe, 'stop-pause')
       const { error: re } = await adminDb.from('whatsapp_openwa_pilot_allowlist')
@@ -237,15 +249,108 @@ export async function POST(request: Request, context: Context) {
       const firstTouch = int(body.first_touch_daily_cap, 0, MAX_FIRST_TOUCH, 'first touch')
       const interval = int(body.minimum_interval_ms, MIN_INTERVAL, 600000, 'pacing')
       const jitter = int(body.jitter_ms, 0, 600000, 'jitter')
+      const agentHourly = int(body.pilot_agent_hourly_cap ?? hourly, 1, MAX_HOURLY, 'agent hourly')
+      const agentDaily = int(body.pilot_agent_daily_cap ?? daily, 1, MAX_DAILY, 'agent daily')
+      const manualHourly = int(body.pilot_manual_hourly_cap ?? hourly, 1, MAX_HOURLY, 'manual hourly')
+      const manualDaily = int(body.pilot_manual_daily_cap ?? daily, 1, MAX_DAILY, 'manual daily')
+      if (agentHourly > hourly || agentDaily > daily ||
+          manualHourly > hourly || manualDaily > daily) {
+        return deny('Workload limits must not exceed the shared session cap', 400)
+      }
+      if (s.grants > 0) return deny('Stop and clear pilot grants before editing workload caps', 409)
       const { data: updated, error } = await adminDb.from('whatsapp_connection_guardrails')
         .update({ hourly_cap: hourly, daily_cap: daily, first_touch_daily_cap: firstTouch,
           minimum_interval_ms: interval, jitter_ms: jitter,
-          warmup_hourly_cap: hourly, warmup_daily_cap: daily, updated_at: new Date().toISOString() })
+          warmup_hourly_cap: hourly, warmup_daily_cap: daily,
+          pilot_agent_hourly_cap: agentHourly, pilot_agent_daily_cap: agentDaily,
+          pilot_manual_hourly_cap: manualHourly, pilot_manual_daily_cap: manualDaily,
+          updated_at: new Date().toISOString() })
         .eq('account_id', accountId).eq('connection_id', connectionId)
         .eq('manual_paused', true).select('connection_id').maybeSingle()
       checkDb(error, 'limits')
       if (!updated) return deny('Pilot state changed; retry after refresh', 409)
       return NextResponse.json(safeStatus(await snapshot(adminDb, accountId, connectionId)), { headers: noStore })
+    }
+
+    if (action === 'grant_batch') {
+      const workload = body.workload
+      if (workload !== 'agent' && workload !== 'manual') return deny('Invalid pilot workload', 400)
+      const recipients = body.recipients
+      if (!Array.isArray(recipients) || recipients.length < 1 ||
+          recipients.length > MAX_BATCH_CONTACTS ||
+          !recipients.every(x => typeof x === 'string' && canonicalOpenWAPilotRecipient(x))) {
+        return deny('Provide 1–10 valid explicit recipients', 400)
+      }
+      if (body.consent_confirmed !== true ||
+          (workload === 'agent' && body.confirm_agent_task_test !== true)) {
+        return deny('Explicit consent and Agent Task approval are required', 400)
+      }
+      if (!s.configured || !s.guard.pilot_enabled || !s.enforced ||
+          !s.guard.manual_paused || s.grants !== 0 || s.pending !== 0 ||
+          !s.connection.session_id || !['ready','connected'].includes(s.connection.status) ||
+          (s.duplicates > 1 && body.ack_duplicate_sessions !== true)) {
+        return deny('Pause and clear prior grants before approving a bounded cohort', 409)
+      }
+      requireLimits(s)
+      const count = recipients.length
+      const workloadHourly = workload === 'agent'
+        ? s.guard.pilot_agent_hourly_cap ?? s.guard.hourly_cap
+        : s.guard.pilot_manual_hourly_cap ?? s.guard.hourly_cap
+      const workloadDaily = workload === 'agent'
+        ? s.guard.pilot_agent_daily_cap ?? s.guard.daily_cap
+        : s.guard.pilot_manual_daily_cap ?? s.guard.daily_cap
+      if (s.guard.hourly_cap < count || s.guard.daily_cap < count ||
+          s.guard.first_touch_daily_cap < count ||
+          s.guard.warmup_hourly_cap < count || s.guard.warmup_daily_cap < count ||
+          workloadHourly < count || workloadDaily < count) {
+        return deny('Raise bounded TEST session/workload/first-touch caps to the approved recipient count', 409)
+      }
+
+      const resolved = await Promise.all(recipients.map(input =>
+        resolveOpenWAPilotRecipientForGrant(adminDb, accountId, connectionId, input)))
+      if (workload === 'agent') {
+        // Every Agent recipient must have a session-scoped, verified inbound
+        // within the 24h reply window. Typed first-touch numbers are denied.
+        for (const item of resolved) {
+          if (item.source === 'phone_without_inbound') {
+            return deny('Agent recipients require a verified inbound chat', 409)
+          }
+          const { data: inbound, error: inboundError } = await adminDb.from('messages')
+            .select('conversation_id').eq('connection_id', connectionId)
+            .eq('provider', 'openwa').eq('sender_type', 'customer')
+            .eq('provider_chat_id', item.recipient)
+            .gte('created_at', new Date(Date.now() - 24 * 3600_000).toISOString())
+            .order('created_at', { ascending: false }).limit(1).maybeSingle()
+          checkDb(inboundError, 'agent-batch-recent-inbound')
+          if (!inbound?.conversation_id) return deny('Missing recent verified Agent chat', 409)
+          const { data: scoped, error: scopedError } = await adminDb.from('conversations')
+            .select('id').eq('id', inbound.conversation_id)
+            .eq('account_id', accountId).maybeSingle()
+          checkDb(scopedError, 'agent-batch-account-scope')
+          if (!scoped) return deny('A selected chat does not belong to the account', 409)
+        }
+      }
+      const hashes = resolved.map(item =>
+        openWAPilotRecipientHash(accountId, connectionId, item.recipient))
+      if (hashes.some(hash => !hash) || new Set(hashes).size !== count) {
+        return deny('Duplicate or unresolved recipient identities', 400)
+      }
+      const hours = int(body.hours ?? 4, 1, 4, 'expiry')
+      const now = new Date()
+      const { error } = await adminDb.from('whatsapp_openwa_pilot_allowlist').upsert(
+        hashes.map(recipient_hash => ({
+          account_id: accountId, connection_id: connectionId,
+          recipient_hash, workload, active: true, approved_by: user.id,
+          approved_at: now.toISOString(),
+          expires_at: new Date(now.getTime() + hours * 3600000).toISOString(),
+        })),
+        { onConflict: 'account_id,connection_id,recipient_hash,workload' },
+      )
+      checkDb(error, 'batch-grant')
+      return NextResponse.json({
+        ...safeStatus(await snapshot(adminDb, accountId, connectionId)),
+        approved_workload: workload, approved_count: count,
+      }, { headers: noStore })
     }
 
     if (action === 'grant' || action === 'grant_agent') {
@@ -314,17 +419,23 @@ export async function POST(request: Request, context: Context) {
     }
 
     if (action === 'activate') {
-      if (!s.configured || !s.guard.pilot_enabled || !s.enforced || !s.guard.manual_paused || s.grants !== 1 || (s.manualGrants !== 1 && s.agentGrants !== 1) || s.pending !== 0 ||
+      if (!s.configured || !s.guard.pilot_enabled || !s.enforced || !s.guard.manual_paused ||
+          s.grants < 1 || s.grants > MAX_BATCH_CONTACTS ||
+          (s.manualGrants !== s.grants && s.agentGrants !== s.grants) || s.pending !== 0 ||
           !s.connection.session_id || !['ready','connected'].includes(s.connection.status)) {
         return deny('Pilot activation requires enforce mode, one approval, paused/ready connection and zero unsettled sends', 409)
       }
       if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) return deny('Duplicate sessions need explicit review', 409)
       requireLimits(s)
-      if (s.agentGrants === 1 &&
-          (s.guard.hourly_cap !== 1 || s.guard.daily_cap !== 1 ||
-           s.guard.warmup_hourly_cap !== 1 || s.guard.warmup_daily_cap !== 1 ||
-           s.guard.first_touch_daily_cap > 1)) {
-        return deny('Agent Task TEST requires one-message caps before activation', 409)
+      if (s.agentGrants > 0 &&
+          (s.guard.hourly_cap < s.agentGrants ||
+           s.guard.daily_cap < s.agentGrants ||
+           s.guard.first_touch_daily_cap < s.agentGrants ||
+           s.guard.warmup_hourly_cap < s.agentGrants ||
+           s.guard.warmup_daily_cap < s.agentGrants ||
+           (s.guard.pilot_agent_hourly_cap ?? s.guard.hourly_cap) < s.agentGrants ||
+           (s.guard.pilot_agent_daily_cap ?? s.guard.daily_cap) < s.agentGrants)) {
+        return deny('Agent Task TEST requires bounded caps for every approved chat', 409)
       }
       // WACRM DB readiness can be stale after a Cloudflare URL rotation.
       // Make a read-only provider-native status check immediately before
@@ -337,15 +448,19 @@ export async function POST(request: Request, context: Context) {
       // have revoked the approval or stopped the pilot while it was pending.
       const latest = await snapshot(adminDb, accountId, connectionId)
       if (!latest.configured || !latest.guard.pilot_enabled || !latest.enforced || !latest.guard.manual_paused ||
-        latest.grants !== 1 || latest.manualGrants !== s.manualGrants ||
+        latest.grants !== s.grants || latest.manualGrants !== s.manualGrants ||
         latest.agentGrants !== s.agentGrants || latest.pending !== 0) {
         return deny('Pilot state changed during verification; refresh and review', 409, 'pilot_state_changed')
       }
       requireLimits(latest)
-      if (latest.agentGrants === 1 &&
-          (latest.guard.hourly_cap !== 1 || latest.guard.daily_cap !== 1 ||
-           latest.guard.warmup_hourly_cap !== 1 || latest.guard.warmup_daily_cap !== 1 ||
-           latest.guard.first_touch_daily_cap > 1)) {
+      if (latest.agentGrants > 0 &&
+          (latest.guard.hourly_cap < latest.agentGrants ||
+           latest.guard.daily_cap < latest.agentGrants ||
+           latest.guard.warmup_hourly_cap < latest.agentGrants ||
+           latest.guard.warmup_daily_cap < latest.agentGrants ||
+           latest.guard.first_touch_daily_cap < latest.agentGrants ||
+           (latest.guard.pilot_agent_hourly_cap ?? latest.guard.hourly_cap) < latest.agentGrants ||
+           (latest.guard.pilot_agent_daily_cap ?? latest.guard.daily_cap) < latest.agentGrants)) {
         return deny('Agent Task TEST caps changed while validating gateway', 409)
       }
       const { data: updated, error } = await adminDb.from('whatsapp_connection_guardrails')
