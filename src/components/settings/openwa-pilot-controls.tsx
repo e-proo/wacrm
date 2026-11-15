@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-api-response'
 import { normalizeTestRecipient } from '@/lib/whatsapp/transport/openwa/pilot-recipient-input'
+import { missingPilotCohortCaps, suggestedPilotCohortCaps, type PilotCohortWorkload } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
 import { useWhatsAppLabels } from './whatsapp-labels'
 
 interface PilotState extends Record<string, unknown> {
@@ -32,6 +33,8 @@ interface PilotState extends Record<string, unknown> {
     hourly_cap: number
     daily_cap: number
     first_touch_daily_cap: number
+    warmup_hourly_cap: number
+    warmup_daily_cap: number
     minimum_interval_ms: number
     jitter_ms: number
     pilot_agent_hourly_cap?: number | null
@@ -44,6 +47,18 @@ interface PilotState extends Record<string, unknown> {
 type RelatedConnection = { id: string; status: string; sessionId: string | null }
 type PilotAction = 'prepare' | 'limits' | 'grant_batch' | 'activate' | 'stop' | 'disable' | 'enable'
 type PilotStep = 'protected' | 'pending' | 'needsStop' | 'verify' | 'prepare' | 'approve' | 'start' | 'active' | 'multiple' | 'normal'
+
+const capName: Record<string, string> = {
+  hourly_cap: 'الحد الساعي للجلسة',
+  daily_cap: 'الحد اليومي للجلسة',
+  first_touch_daily_cap: 'حد أول تواصل يومي',
+  warmup_hourly_cap: 'حد الإحماء الساعي',
+  warmup_daily_cap: 'حد الإحماء اليومي',
+  pilot_agent_hourly_cap: 'حد الوكيل الساعي',
+  pilot_agent_daily_cap: 'حد الوكيل اليومي',
+  pilot_manual_hourly_cap: 'حد الرسائل العادية الساعي',
+  pilot_manual_daily_cap: 'حد الرسائل العادية اليومي',
+}
 
 const defaultLimits = { hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
   minimum_interval_ms: 15000, jitter_ms: 3000,
@@ -62,6 +77,7 @@ export function OpenWAPilotControls({
   const w = useWhatsAppLabels()
   const [state, setState] = useState<PilotState | null>(null)
   const [limits, setLimits] = useState(defaultLimits)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [recipient, setRecipient] = useState('')
   const [search, setSearch] = useState('')
   const [contactResults, setContactResults] = useState<Array<{ id: string; name: string | null; phone: string }>>([])
@@ -212,6 +228,18 @@ export function OpenWAPilotControls({
     : state.active_admissions <= 10 ? 'start'
     : 'multiple'
   const running = busy || verifying
+  const agentMissingCaps = state && selectedRecipients.length > 0
+    ? missingPilotCohortCaps(state.guardrails, selectedRecipients.length, 'agent') : []
+  const manualMissingCaps = state && selectedRecipients.length > 0
+    ? missingPilotCohortCaps(state.guardrails, selectedRecipients.length, 'manual') : []
+  function recommendCaps(workload: PilotCohortWorkload) {
+    if (!state || !state.paused || state.active_admissions > 0 || selectedRecipients.length < 1) return
+    const suggested = suggestedPilotCohortCaps(state.guardrails, selectedRecipients.length, workload)
+    setLimits(previous => ({ ...previous, ...suggested }))
+    setAdvancedOpen(true)
+    setNotice(`تمت تعبئة حدود مناسبة لـ ${selectedRecipients.length} أرقام دون حفظها. راجع القيم في الإعدادات المتقدمة واضغط «حفظ الحدود» قبل الاعتماد.`)
+    setError(null)
+  }
   const needsDuplicateReview = (state?.same_identity_ready_connections ?? 0) > 1
   const canApprove = Boolean(state?.configured && state.enforced && state.paused &&
     selectedRecipients.length > 0 && selectedRecipients.length <= 10 &&
@@ -394,12 +422,25 @@ export function OpenWAPilotControls({
           </div>
           {needsDuplicateReview && !duplicateAck &&
             <p className="text-xs text-amber-600">{w('devPilotMustReviewDuplicates')}</p>}
+          {selectedRecipients.length > 0 && (agentMissingCaps.length > 0 || manualMissingCaps.length > 0) &&
+            <div role="status" className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+              <p className="font-medium">حدود الإرسال المحفوظة لا تكفي لاعتماد {selectedRecipients.length} أرقام.</p>
+              {agentMissingCaps.length > 0 && <p className="text-xs">قيود مهام الوكيل: {agentMissingCaps.map(key => capName[key] ?? key).join('، ')}.</p>}
+              {manualMissingCaps.length > 0 && <p className="text-xs">قيود الرسائل العادية: {manualMissingCaps.map(key => capName[key] ?? key).join('، ')}.</p>}
+              <div className="flex flex-wrap gap-2">
+                {agentMissingCaps.length > 0 && <Button type="button" size="sm" variant="outline" disabled={running}
+                  onClick={() => recommendCaps('agent')}>تجهيز حدود الوكيل لـ {selectedRecipients.length} أرقام</Button>}
+                {manualMissingCaps.length > 0 && <Button type="button" size="sm" variant="outline" disabled={running}
+                  onClick={() => recommendCaps('manual')}>تجهيز الحدود العادية لـ {selectedRecipients.length} أرقام</Button>}
+              </div>
+              <p className="text-xs text-muted-foreground">سيتم تعبئة الإعدادات المتقدمة فقط. يجب مراجعتها وحفظها قبل الاعتماد، ولن يبدأ الإرسال أو تتغيّر الحدود تلقائيًا.</p>
+            </div>}
           <div className="flex flex-wrap gap-2">
-            <Button disabled={running || !canApprove}
+            <Button disabled={running || !canApprove || manualMissingCaps.length > 0}
               onClick={() => void submit('grant_batch','manual')}>
               اعتماد الأرقام للرسائل العادية
             </Button>
-            <Button variant="outline" disabled={running || !canApprove}
+            <Button variant="outline" disabled={running || !canApprove || agentMissingCaps.length > 0}
               onClick={() => {
                 if (window.confirm(phoneCallConsent
                   ? 'اعتماد أرقام الوكلاء وفق الموافقة الهاتفية التي أكّدت توثيقها؟ لا يشترط وصول رسالة واردة، وقد يبدأ الإرسال بعد تشغيل Pilot.'
@@ -443,7 +484,8 @@ export function OpenWAPilotControls({
               onClick={() => void verifyGateway()}><RefreshCw className="me-2 size-4" />{w('devPilotReverify')}</Button>}
           </div>}
 
-        {state.pilot_enabled && state.configured && <details className="rounded-lg border px-4 py-3">
+        {state.pilot_enabled && state.configured && <details className="rounded-lg border px-4 py-3"
+          open={advancedOpen} onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium">
             <span className="flex items-center gap-2"><SlidersHorizontal className="size-4" />{w('devPilotAdvanced')}</span>
             <ChevronDown className="size-4 text-muted-foreground" />
