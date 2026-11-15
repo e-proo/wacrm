@@ -68,6 +68,10 @@ there is a queued/scheduled/running task; this is read-only.
 - The new additive migration `166_openwa_agent_phone_call_consent.sql` adds a short-lived consent basis and limits the exception to account + exact OpenWA connection + canonical recipient. Existing Meta Cloud template/session policies, STOP, suppression, budgets, anti-abuse limits, reconciliation and no-blind-resend remain in place.
 - Verified-inbound Pilot approval still requires the existing 24-hour chat evidence. Telephone consent is a separate explicit route, not a broad override.
 - **Do not start the paused session** or consider SOF-66 live accepted until the operator has reviewed all 2–3 recipient approvals and run the bounded acceptance checks.
+- **TEST group caps before approval:** the default `first_touch_daily_cap=1` does not permit a batch of 2–3 new numbers. The session hourly/daily, warmup, selected workload and first-touch caps must all cover the exact cohort count. In OpenWA Agent Pilot, select the recipients first, use **تجهيز حدود الوكيل لـ N أرقام**, explicitly review the suggested values in **الإعدادات المتقدمة**, then press **حفظ الحدود** while paused with no active grants. The suggestion only fills fields; it does not save, grant or start the Pilot. The server gives `pilot_cohort_caps_insufficient` and identifies missing cap fields instead of a generic English warning.
+- Example for a three-number TEST cohort on a session with saved limits hourly 3 / daily 10 / first-touch 1 and legacy agent/manual caps 10/30: suggested shared hourly 3, daily 10, first-touch 3, agent hourly 3/daily 10, manual hourly 3/daily 10. Warmup follows the shared caps on save. **Do not set uncapped limits**; session max 10/hour, 30/day, first-touch max 10/day and minimum 15-second pacing remain.
+- If any prior recipient grants remain active, the existing limits action rejects changes until the admin explicitly stops Pilot (which revokes all existing grants). Review the exact group and reapprove; never silently revoke or auto-start.
+
 
 ## Deployment boundary
 
