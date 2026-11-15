@@ -153,6 +153,32 @@ export function AgentTasksPanel() {
 
   useEffect(() => { void reload() }, [reload])
 
+  // Task status changes asynchronously through the TEST worker. Keep the
+  // existing list current without disabling the form or reloading the page.
+  const hasPendingTasks = Boolean(data?.tasks.some((task) =>
+    ['queued', 'scheduled', 'running', 'validating'].includes(task.status)))
+  useEffect(() => {
+    if (!hasPendingTasks) return
+    let refreshing = false
+    const interval = setInterval(async () => {
+      if (refreshing || busy || document.visibilityState !== 'visible') return
+      refreshing = true
+      try {
+        const next = await loadResponse<ResponseData>(
+          await fetch('/api/agent-tasks', { cache: 'no-store' }),
+        )
+        setData(next)
+      } catch (error) {
+        // Manual refresh continues to display detailed errors. Avoid
+        // clearing form input or spamming toasts during background polling.
+        console.warn('[Agent Tasks] background status refresh failed', error)
+      } finally {
+        refreshing = false
+      }
+    }, 15_000)
+    return () => clearInterval(interval)
+  }, [hasPendingTasks, busy])
+
   const connections = data?.connections ?? []
   const available = connections.filter((c) => c.ready && !c.archived)
   const currentReady = selectedConnection === 'latest' ||
@@ -430,6 +456,7 @@ export function AgentTasksPanel() {
               <p className="text-xs text-muted-foreground">
                 المعروضة: {data?.tasks.length ?? 0} مهمة
                 {tasksRefreshedAt ? ` · آخر تحديث: ${tasksRefreshedAt}` : ''}
+                {hasPendingTasks ? ' · تحديث تلقائي كل 15 ثانية' : ''}
               </p>
             </div>
             <Button type="button" size="sm" variant="outline" disabled={loading || busy}
