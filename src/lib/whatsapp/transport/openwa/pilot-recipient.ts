@@ -35,17 +35,31 @@ export async function resolveOpenWAPilotRecipientForGrant(
   if (input.includes('@lid')) return { recipient: canonical, source: 'direct_recipient' }
 
   const phone = canonical.slice(0, -'@c.us'.length)
-  const { data: contacts, error: contactsError } = await db.from('contacts')
-    .select('id').eq('account_id', accountId)
-    .in('phone', [phone, `+${phone}`]).limit(3)
-  if (contactsError) failedLookup('resolve contact identity', contactsError)
-  if ((contacts?.length ?? 0) > 1) {
+  // A CRM contact can store a formatted display phone while keeping its
+  // account-scoped E.164 identity in phone_normalized. Inspect BOTH forms
+  // before picking a native @lid; duplicates across forms must fail closed.
+  const [
+    { data: normalizedContacts, error: normalizedError },
+    { data: legacyContacts, error: legacyError },
+  ] = await Promise.all([
+    db.from('contacts').select('id').eq('account_id', accountId)
+      .eq('phone_normalized', phone).limit(3),
+    db.from('contacts').select('id').eq('account_id', accountId)
+      .in('phone', [phone, `+${phone}`]).limit(3),
+  ])
+  if (normalizedError || legacyError) {
+    failedLookup('resolve contact identity', normalizedError ?? legacyError)
+  }
+  const contactIds = [...new Set([
+    ...(normalizedContacts ?? []), ...(legacyContacts ?? []),
+  ].map(contact => contact.id))]
+  if (contactIds.length > 1) {
     throw new WhatsAppTransportError('connection_restricted', 'Multiple contacts match this recipient; choose a verified OpenWA chat identity explicitly')
   }
-  if (!contacts?.length) return { recipient: canonical, source: 'phone_without_inbound' }
+  if (!contactIds.length) return { recipient: canonical, source: 'phone_without_inbound' }
 
   const { data: threads, error: threadsError } = await db.from('conversations')
-    .select('id').eq('account_id', accountId).eq('contact_id', contacts[0].id)
+    .select('id').eq('account_id', accountId).eq('contact_id', contactIds[0])
     .order('created_at', { ascending: false }).limit(25)
   if (threadsError) failedLookup('resolve recipient conversation', threadsError)
   if (!threads?.length) return { recipient: canonical, source: 'phone_without_inbound' }
