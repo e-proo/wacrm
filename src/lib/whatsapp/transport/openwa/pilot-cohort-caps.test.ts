@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { missingPilotCohortCaps, suggestedPilotCohortCaps } from './pilot-cohort-caps'
+import { missingPilotCohortCaps, suggestedPilotCohortCaps, OPENWA_TEST_PILOT_MAX_HOURLY, OPENWA_TEST_PILOT_MAX_DAILY, OPENWA_TEST_PILOT_MAX_FIRST_TOUCH, OPENWA_TEST_PILOT_MIN_INTERVAL_MS } from './pilot-cohort-caps'
 
 describe('OpenWA TEST bounded cohort capacity guidance', () => {
   const saved = {
@@ -8,6 +8,13 @@ describe('OpenWA TEST bounded cohort capacity guidance', () => {
     pilot_agent_hourly_cap: 10, pilot_agent_daily_cap: 30,
     pilot_manual_hourly_cap: 10, pilot_manual_daily_cap: 30,
   }
+
+  it('exports TEST-only 100/hour and 1000/day ceilings without increasing first-touch or reducing pacing', () => {
+    expect(OPENWA_TEST_PILOT_MAX_HOURLY).toBe(100)
+    expect(OPENWA_TEST_PILOT_MAX_DAILY).toBe(1000)
+    expect(OPENWA_TEST_PILOT_MAX_FIRST_TOUCH).toBe(10)
+    expect(OPENWA_TEST_PILOT_MIN_INTERVAL_MS).toBeGreaterThanOrEqual(15000)
+  })
 
   it('pinpoints first-touch as the real 3-recipient admission shortage', () => {
     expect(missingPilotCohortCaps(saved, 3, 'agent')).toEqual(['first_touch_daily_cap'])
