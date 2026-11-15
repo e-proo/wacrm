@@ -241,7 +241,7 @@ describe('per-Task WhatsApp configuration API (SOF-64)', () => {
     })
   })
 
-  it('refuses the entire selection if even the second supplier is ineligible', async () => {
+  it('permits manually chosen tenant CRM contacts with no matching Coverage offer history', async () => {
     const otherContact = '88888888-8888-4888-8888-888888888888'
     stubs.eligibility.mockResolvedValueOnce({eligible:true})
       .mockResolvedValueOnce({eligible:false,reason:'not_eligible_supplier'})
@@ -250,8 +250,21 @@ describe('per-Task WhatsApp configuration API (SOF-64)', () => {
       selectedContactIds:[contactId,otherContact],
       maxTargets:2,maxAttemptsPerTarget:1,
     }))
+    expect(response.status).toBe(200)
+    expect(stubs.rpc).toHaveBeenCalledWith('update_pending_agent_task_targets',
+      expect.objectContaining({p_selected_contact_ids:[contactId,otherContact]}))
+  })
+
+  it('blocks a foreign CRM contact even if the other recipient was eligible', async () => {
+    const otherContact = '88888888-8888-4888-8888-888888888888'
+    stubs.eligibility.mockResolvedValueOnce({eligible:true})
+      .mockResolvedValueOnce({eligible:false,reason:'contact_not_found'})
+    const response = await PATCH(jsonRequest('PATCH', {
+      taskId, whatsappConnectionId:connectionId,
+      selectedContactIds:[contactId,otherContact],
+      maxTargets:2,maxAttemptsPerTarget:1,
+    }))
     expect(response.status).toBe(409)
-    expect((await response.json()).code).toBe('COVERAGE_CONTACT_NOT_ELIGIBLE')
     expect(stubs.rpc).not.toHaveBeenCalled()
   })
 
