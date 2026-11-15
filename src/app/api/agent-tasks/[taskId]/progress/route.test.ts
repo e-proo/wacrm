@@ -87,6 +87,28 @@ describe('SOF-66 per-recipient progress, read-only and tenant-scoped', () => {
     expect(stubs.from).not.toHaveBeenCalledWith('whatsapp_openwa_pilot_allowlist')
   })
 
+  it('identifies the exact missing Pilot recipient without exposing grant hashes or mutating delivery', async () => {
+    stubs.preflight.mockImplementation(async (
+      input: { contactIds: string[] },
+    ) => input.contactIds.length > 1 ? 'pilot_recipient_not_approved'
+      : input.contactIds[0] === second ? 'pilot_recipient_not_approved' : null)
+    const response = await GET(new Request('http://localhost'), ctx)
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.holdReason).toBe('pilot_recipient_not_approved')
+    expect(body.recipients.map((r: { pilotApproval: string }) => r.pilotApproval))
+      .toEqual(['missing', 'approved'])
+    expect(stubs.preflight).toHaveBeenCalledTimes(3)
+    expect(stubs.preflight).toHaveBeenCalledWith({
+      db: expect.anything(), accountId: acct, connectionId, contactIds: [second],
+    })
+    expect(stubs.preflight).toHaveBeenCalledWith({
+      db: expect.anything(), accountId: acct, connectionId, contactIds: [first],
+    })
+    expect(JSON.stringify(body)).not.toContain('recipient_hash')
+    expect(stubs.from).not.toHaveBeenCalledWith('whatsapp_openwa_pilot_allowlist')
+  })
+
   it('rejects malformed Task IDs before accessing CRM data', async () => {
     const response = await GET(new Request('http://localhost'), {
       params: Promise.resolve({ taskId: 'untrusted' }),
