@@ -18,7 +18,7 @@ function setup(reservation: Record<string, unknown>, sendImpl?: () => Promise<Wh
 function pilotSetup(options: { admitted?: boolean; paused?: boolean; pilotEnabled?: boolean; circuitUntil?: string | null; rpcError?: boolean; fenceError?: boolean; waitMs?: number } = {}) {
   const rpc = vi.fn(async (name: string) => {
     if (name === 'check_openwa_pilot_admission') return { data: { allowed: options.admitted ?? false }, error: options.rpcError ? { code: 'PGRST202' } : null }
-    if (name === 'reserve_openwa_guardrail_send') return { data: { allowed: true, wait_ms: options.waitMs ?? 0 }, error: null }
+    if (name === 'reserve_openwa_guardrail_send' || name === 'reserve_openwa_pilot_workload_send') return { data: { allowed: true, wait_ms: options.waitMs ?? 0 }, error: null }
     if (name === 'record_openwa_guardrail_outcome') return { data: null, error: null }
     throw Error('Unexpected RPC in pilot simulation')
   })
@@ -96,6 +96,19 @@ describe('OW-13 server-enforced pilot admission (no real provider calls)', () =>
     await expect(t.guarded.send(request)).rejects.toMatchObject({ code: 'connection_restricted' })
     expect(t.rpc.mock.calls.map(([name]) => name)).toEqual(['check_openwa_pilot_admission'])
     expect(t.send).not.toHaveBeenCalled()
+  })
+
+  it('uses workload-specific atomic reservation only on pinned TEST with active Pilot admission', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://pqirsnfupofhulmewakq.supabase.co')
+    vi.stubEnv('OPENWA_PILOT_MODE', 'off')
+    const t = pilotSetup({ admitted: true })
+    const result = await t.guarded.send({ ...request, workload: 'agent' })
+    expect(result.providerMessageId).toBe('provider-mock-1')
+    expect(t.rpc.mock.calls.map(([name]) => name)).toEqual([
+      'check_openwa_pilot_admission', 'reserve_openwa_pilot_workload_send',
+      'record_openwa_guardrail_outcome',
+    ])
+    expect(JSON.stringify(t.rpc.mock.calls)).not.toContain(request.recipient)
   })
 
   it('normalizes exact phone and provider-native JID identities but never converts LIDs', () => {

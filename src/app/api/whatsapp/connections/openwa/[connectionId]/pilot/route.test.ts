@@ -5,7 +5,7 @@ const h = vi.hoisted(() => ({
   auth: vi.fn(),
   refresh: vi.fn(),
   resolveRecipient: vi.fn(),
-  recipientHash: vi.fn(() => 'a'.repeat(64)),
+  recipientHash: vi.fn((_account: string, _connection: string, _recipient: string) => 'a'.repeat(64)),
   envMode: { enabled: true, invalid: false },
   connection: { id: '2dacee52-3486-4b47-96a0-fa4399ac0fb2', status: 'ready',
     session_id: 'session-1' as string | null, phone_identity: '123456789', archived_at: null as string | null },
@@ -125,7 +125,9 @@ describe('OW-13 DEV pilot protected UI API', () => {
     h.connection.archived_at = null
     Object.assign(h.guard, { pilot_enabled: true, manual_paused: true, hourly_cap: 3, daily_cap: 10,
       first_touch_daily_cap: 1, minimum_interval_ms: 15000, jitter_ms: 3000,
-      warmup_hourly_cap: 3, warmup_daily_cap: 10 })
+      warmup_hourly_cap: 3, warmup_daily_cap: 10,
+      pilot_agent_hourly_cap: undefined, pilot_agent_daily_cap: undefined,
+      pilot_manual_hourly_cap: undefined, pilot_manual_daily_cap: undefined })
     h.active = 0
     h.grantWorkload = 'manual'
     h.recentInbound = true
