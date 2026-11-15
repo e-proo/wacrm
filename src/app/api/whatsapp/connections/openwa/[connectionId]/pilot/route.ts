@@ -317,6 +317,10 @@ export async function POST(request: Request, context: Context) {
 
       const resolved = await Promise.all(recipients.map(input =>
         resolveOpenWAPilotRecipientForGrant(adminDb, accountId, connectionId, input)))
+      if (workload === 'agent' && consentBasis === 'phone_call' &&
+          resolved.some(item => item.source === 'direct_recipient')) {
+        return deny('Phone-call opt-in requires a real international phone number, not an unbound native chat ID', 400)
+      }
       if (workload === 'agent' && consentBasis === 'verified_inbound') {
         // Inbound-based approval still verifies the exact recent native chat.
         // within the 24h reply window. Typed first-touch numbers are denied.
@@ -398,6 +402,10 @@ export async function POST(request: Request, context: Context) {
       const resolvedRecipient = await resolveOpenWAPilotRecipientForGrant(
         adminDb, accountId, connectionId, rawRecipient,
       )
+      if (workload === 'agent' && consentBasis === 'phone_call' &&
+          resolvedRecipient.source === 'direct_recipient') {
+        return deny('Phone-call opt-in requires a real international phone number, not an unbound native chat ID', 400)
+      }
       if (workload === 'agent' && consentBasis === 'verified_inbound' && resolvedRecipient.source === 'phone_without_inbound') {
         return deny('اعتماد المحادثة الواردة يتطلب رسالة واتساب؛ استخدم خيار الموافقة الهاتفية إذا وافق صاحب الرقم صراحةً على تلقي رسائل واتساب.', 409)
       }
