@@ -13,6 +13,7 @@ const mocked = vi.hoisted(() => ({
   isTest: vi.fn(),
   transport: vi.fn(),
   preflight: vi.fn(),
+  workerEnabled: vi.fn(),
   version: 2,
   taskType: 'coverage.sourcing',
 }))
@@ -70,6 +71,9 @@ vi.mock('./outbound-message-connection', () => ({
 vi.mock('./test-openwa-task-admission', () => ({
   deferredTestOpenWATaskReason: mocked.preflight,
 }))
+vi.mock('./operator-controls', () => ({
+  isTestAgentTaskWorkerEnabled: mocked.workerEnabled,
+}))
 vi.mock('../runtime/circuit-breaker', () => ({
   assertRuntimeCircuitClosed: mocked.assertCircuit,
   RuntimeCircuitOpenError: class RuntimeCircuitOpenError extends Error {},
@@ -123,6 +127,7 @@ beforeEach(() => {
     connectionId: 'whatsapp-connection', provider: 'openwa',
   })
   mocked.preflight.mockResolvedValue(null)
+  mocked.workerEnabled.mockResolvedValue(true)
   mocked.claim.mockResolvedValue('claimed')
   mocked.loadRevision.mockResolvedValue({ ok: true, revision: { id: 'revision' } })
   mocked.model.mockResolvedValue({
@@ -146,6 +151,18 @@ beforeEach(() => {
 })
 
 describe('TEST outbound transport binding, separate from AI model provider', () => {
+  it('never claims a queued Run while the account Task worker is disabled', async () => {
+    mocked.isTest.mockReturnValue(true)
+    mocked.workerEnabled.mockResolvedValue(false)
+    const result = await processAgentTaskOutboundRunQueue({
+      workerId: 'worker-disabled', limit: 1,
+    })
+    expect(result).toMatchObject({ scanned: 1, gated: 1, attempted: 0, sent: 0 })
+    expect(mocked.claim).not.toHaveBeenCalled()
+    expect(mocked.reserve).not.toHaveBeenCalled()
+    expect(mocked.delivery).not.toHaveBeenCalled()
+  })
+
   it('uses the frozen WhatsApp Task connection for preclaim Pilot, retaining AI provider for model revision', async () => {
     mocked.isTest.mockReturnValue(true)
     const result = await processAgentTaskOutboundRunQueue({
