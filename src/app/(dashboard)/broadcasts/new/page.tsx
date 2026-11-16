@@ -45,6 +45,8 @@ export default function NewBroadcastPage() {
   >({});
   const [headerMediaUrl, setHeaderMediaUrl] = useState('');
   const [name, setName] = useState('');
+  const [connectionId, setConnectionId] = useState('');
+  const [connectionProvider, setConnectionProvider] = useState<'meta_cloud' | 'openwa'>('meta_cloud');
 
   async function handleSend() {
     if (!template) return;
@@ -53,6 +55,8 @@ export default function NewBroadcastPage() {
       const broadcastId = await createAndSendBroadcast({
         name,
         template,
+        connectionId,
+        connectionProvider,
         audience: {
           type: audience.type,
           tagIds: audience.tagIds,
@@ -219,6 +223,8 @@ export default function NewBroadcastPage() {
             <Step4ScheduleSend
               name={name}
               onNameChange={setName}
+              connectionId={connectionId}
+              onConnectionChange={(id, provider) => { setConnectionId(id); setConnectionProvider(provider); }}
               template={template}
               audience={audience}
               onSend={handleSend}

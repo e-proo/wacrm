@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     // Resolve target message + its conversation; verify ownership.
     const { data: targetMessage, error: msgError } = await supabase
       .from('messages')
-      .select('id, message_id, conversation_id')
+      .select('id, message_id, conversation_id, provider, connection_id')
       .eq('id', message_id)
       .maybeSingle();
 
@@ -55,6 +55,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Message not found' }, { status: 404 });
     }
 
+    // Meta reactions must never target an OpenWA message through a different sender.
+    if (targetMessage.provider !== 'meta_cloud') {
+      return NextResponse.json({ error: 'Reactions are not supported for this WhatsApp provider', code: 'unsupported_capability' }, { status: 400 });
+    }
     if (!targetMessage.message_id) {
       // No Meta ID yet — usually a sending/failed agent message. We can't
       // tell Meta to react to a message it never received.

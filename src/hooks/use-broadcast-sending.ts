@@ -41,6 +41,8 @@ export type VariableMapping =
 
 interface BroadcastPayload {
   name: string;
+  connectionId: string;
+  connectionProvider: 'meta_cloud' | 'openwa';
   template: MessageTemplate;
   audience: AudienceConfig;
   variables: Record<string, VariableMapping>;
@@ -69,7 +71,7 @@ interface UseBroadcastSendingReturn {
  * send is ~100 calls over several minutes, and a bucket sized for
  * "one call per campaign" throttles most of it away (issue #472).
  */
-const SEND_BATCH_SIZE = 10;
+const SEND_BATCH_SIZE = 5;
 const SEND_BATCH_DELAY_MS = 1000;
 
 /** `broadcast_recipients` inserts are independent of the send rate. */
@@ -366,6 +368,10 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       if (!accountId) {
         throw new Error('Your profile is not linked to an account.');
       }
+      if (!payload.connectionId) throw new Error('Select a WhatsApp connection.');
+      if (payload.connectionProvider === 'openwa' && ['image', 'video', 'document'].includes(payload.template.header_type ?? '')) {
+        throw new Error('OpenWA bulk sends currently support text only. Choose Meta for media-header templates.');
+      }
 
       // ── Step 1: Resolve audience contacts ─────────────────────────
       setProgress(5);
@@ -437,6 +443,8 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         contact_id: contact.id,
         status: 'pending' as const,
         template_params: paramsByContact.get(contact.id) ?? [],
+        provider: payload.connectionProvider,
+        connection_id: payload.connectionId,
       }));
 
       for (let i = 0; i < recipientRows.length; i += INSERT_BATCH_SIZE) {
@@ -474,140 +482,42 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         throw new Error('Failed to fetch broadcast recipients');
       }
 
-      let failedCount = 0;
       const totalRecipients = recipients.length;
-
-      // Media-header templates (image/video/document) require a media
-      // URL on every send. Collected in the personalize step and applied
-      // to all recipients; falls back to the template's stored URL on the
-      // server when omitted.
-      const headerType = payload.template.header_type;
-      const isMediaHeader =
-        headerType === 'image' ||
-        headerType === 'video' ||
-        headerType === 'document';
+      // A media-header template is a Meta-only capability.
+      const isMediaHeader = ['image', 'video', 'document'].includes(payload.template.header_type ?? '');
       const headerMediaUrl = payload.headerMediaUrl?.trim();
-      const messageParams =
-        isMediaHeader && headerMediaUrl ? { headerMediaUrl } : undefined;
-
+      const messageParams = isMediaHeader && headerMediaUrl ? { headerMediaUrl } : undefined;
+      // Per-recipient state and provider dispatch are owned by the server. Never
+      // label unknown provider outcomes failed because the browser lost its HTTP response.
       for (let i = 0; i < recipients.length; i += SEND_BATCH_SIZE) {
         const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
-
-        const apiRecipients = batch
-          .filter((r) => r.contact?.phone)
-          .map((r) => ({
-            phone: r.contact!.phone as string,
-            // Read back off the row rather than re-resolved, so this
-            // pass and any later resume send identical params.
-            params: Array.isArray(r.template_params) ? r.template_params : [],
-            ...(messageParams ? { messageParams } : {}),
-          }));
-
-        if (apiRecipients.length === 0) continue;
-
-        try {
-          // Send the batch, waiting out a 429 rather than writing the
-          // whole batch off as failed. Only 429 is replayed — see
-          // batchRetryDelayMs for why nothing else can be.
-          let data: { error?: string; results?: BroadcastApiResult[] } = {};
-          for (let attempt = 1; ; attempt++) {
-            const res = await fetch('/api/whatsapp/broadcast', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                recipients: apiRecipients,
-                template_name: payload.template.name,
-                template_language: payload.template.language ?? 'en_US',
-              }),
-            });
-
-            data = await res.json();
-            if (res.ok) break;
-
-            const retryIn =
-              attempt < BATCH_SEND_ATTEMPTS
-                ? batchRetryDelayMs(res.status, res.headers.get('Retry-After'))
-                : null;
-            if (retryIn === null) {
-              throw new Error(data.error || 'Broadcast API request failed');
-            }
-            await sleep(retryIn);
-          }
-
-          const resultsByPhone = new Map<string, BroadcastApiResult>();
-          for (const r of (data.results ?? []) as BroadcastApiResult[]) {
-            resultsByPhone.set(r.phone, r);
-          }
-
-          for (const recipient of batch) {
-            const phone = recipient.contact?.phone;
-            const result = phone ? resultsByPhone.get(phone) : undefined;
-
-            if (!result) {
-              failedCount++;
-              await supabase
-                .from('broadcast_recipients')
-                .update({
-                  status: 'failed',
-                  error_message: 'No phone number on contact',
-                })
-                .eq('id', recipient.id);
-              continue;
-            }
-
-            if (result.status === 'sent') {
-              await supabase
-                .from('broadcast_recipients')
-                .update({
-                  status: 'sent',
-                  sent_at: new Date().toISOString(),
-                  whatsapp_message_id: result.whatsapp_message_id ?? null,
-                  error_message: null,
-                })
-                .eq('id', recipient.id);
-            } else {
-              failedCount++;
-              await supabase
-                .from('broadcast_recipients')
-                .update({
-                  status: 'failed',
-                  error_message: result.error ?? 'Unknown error',
-                })
-                .eq('id', recipient.id);
-            }
-          }
-        } catch (err) {
-          for (const recipient of batch) {
-            failedCount++;
-            await supabase
-              .from('broadcast_recipients')
-              .update({
-                status: 'failed',
-                error_message: err instanceof Error ? err.message : 'Unknown error',
-              })
-              .eq('id', recipient.id);
-          }
+        let response: { error?: string; results?: Array<{ recipientId: string; status: string }> } = {};
+        for (let attempt = 1; ; attempt++) {
+          const res = await fetch('/api/whatsapp/broadcast', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              broadcast_id: broadcast.id,
+              recipient_ids: batch.map((recipient) => recipient.id),
+              ...(messageParams ? { message_params: messageParams } : {}),
+            }),
+          });
+          response = await res.json().catch(() => ({}));
+          if (res.ok) break;
+          const retryIn = attempt < BATCH_SEND_ATTEMPTS
+            ? batchRetryDelayMs(res.status, res.headers.get('Retry-After')) : null;
+          if (retryIn === null) throw new Error(response.error || 'Broadcast delivery requires operator review');
+          await sleep(retryIn);
         }
-
-        const progressPct =
-          30 + Math.round(((i + batch.length) / totalRecipients) * 60);
-        setProgress(progressPct);
-
-        if (i + SEND_BATCH_SIZE < recipients.length) {
-          await sleep(SEND_BATCH_DELAY_MS);
+        // A partial/denied/ambiguous batch must stop future provider calls.
+        if ((response.results?.length ?? 0) !== batch.length ||
+          (response.results ?? []).some((r) => r.status === 'failed' || r.status === 'requires_reconciliation')) {
+          throw new Error('Broadcast paused. Review delivery statuses; only pending recipients may be resumed safely.');
         }
+        setProgress(30 + Math.round(((i + batch.length) / totalRecipients) * 65));
+        if (i + SEND_BATCH_SIZE < recipients.length) await sleep(SEND_BATCH_DELAY_MS);
       }
-
-      // ── Step 5: Finalize status ───────────────────────────────────
-      // Aggregate counts are maintained by the DB trigger (migration
-      // 003); we only flip the final status here.
-      setProgress(95);
-      const finalStatus = failedCount === totalRecipients ? 'failed' : 'sent';
-      await supabase
-        .from('broadcasts')
-        .update({ status: finalStatus })
-        .eq('id', broadcast.id);
-
+      // The server settles the parent status after each batch.
       setProgress(100);
       return broadcast.id;
     } finally {

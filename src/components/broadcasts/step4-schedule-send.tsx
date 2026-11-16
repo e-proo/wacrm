@@ -26,6 +26,8 @@ interface AudienceConfig {
 interface Step4Props {
   name: string;
   onNameChange: (name: string) => void;
+  connectionId: string;
+  onConnectionChange: (id: string, provider: 'meta_cloud' | 'openwa') => void;
   template: MessageTemplate;
   audience: AudienceConfig;
   onSend: () => void;
@@ -38,6 +40,8 @@ interface Step4Props {
 export function Step4ScheduleSend({
   name,
   onNameChange,
+  connectionId,
+  onConnectionChange,
   template,
   audience,
   onSend,
@@ -48,6 +52,27 @@ export function Step4ScheduleSend({
 }: Step4Props) {
   const t = useTranslations('Broadcasts.wizard');
   const [showConfirm, setShowConfirm] = useState(false);
+  const [connections, setConnections] = useState<Array<{ id: string; provider: 'meta_cloud' | 'openwa'; name: string }>>([]);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch('/api/whatsapp/broadcast/connections', { cache: 'no-store' })
+      .then(async (res) => { if (!res.ok) throw new Error('Cannot load WhatsApp sending connections'); return res.json(); })
+      .then((data) => {
+        if (!live) return;
+        const rows: Array<{ id: string; provider: 'meta_cloud' | 'openwa'; name: string }> =
+          Array.isArray(data.connections) ? data.connections : [];
+        setConnections(rows);
+        if (!connectionId && rows.length) {
+          const preferred = rows.find((row) => row.provider === 'meta_cloud') ?? rows[0];
+          onConnectionChange(preferred.id, preferred.provider);
+        }
+      })
+      .catch((error) => { if (live) setConnectionError(error instanceof Error ? error.message : 'Connections unavailable'); });
+    return () => { live = false; };
+    // Only load the authorized options when opening the final step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [loadingReach, setLoadingReach] = useState(true);
 
@@ -112,6 +137,23 @@ export function Step4ScheduleSend({
         />
       </div>
 
+      <div className="space-y-2">
+        <label htmlFor="broadcast-connection" className="text-sm font-medium text-foreground">WhatsApp sending connection</label>
+        <select id="broadcast-connection" value={connectionId}
+          onChange={(event) => {
+            const row = connections.find((item) => item.id === event.target.value);
+            if (row) onConnectionChange(row.id, row.provider);
+          }}
+          disabled={isProcessing || connections.length === 0}
+          className="w-full rounded-md border border-border bg-background p-2 text-sm text-foreground">
+          {connections.length === 0 && <option value="">No ready WhatsApp connections</option>}
+          {connections.map((row) => <option key={row.id} value={row.id}>{row.name} ({row.provider === 'meta_cloud' ? 'Meta Cloud API' : 'OpenWA / WhatsApp Web'})</option>)}
+        </select>
+        {connectionError && <p className="text-xs text-red-500">{connectionError}</p>}
+        {connections.find((item) => item.id === connectionId)?.provider === 'openwa' && (
+          <p className="text-xs text-amber-600">OpenWA is an unofficial linked-device integration. Text-only bulk sends follow its consent, pacing and Pilot limits.</p>
+        )}
+      </div>
       {/* Summary Card */}
       <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
         <p className="text-sm font-medium text-foreground">{t('scheduleSend.summary')}</p>
@@ -191,7 +233,7 @@ export function Step4ScheduleSend({
           <DialogTrigger
             render={
               <Button
-                disabled={!name.trim() || isProcessing}
+                disabled={!name.trim() || !connectionId || isProcessing}
                 className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               />
             }

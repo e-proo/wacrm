@@ -2,14 +2,14 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils'
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body'
 import { resolveWhatsAppTransport } from '@/lib/whatsapp/transport/router'
-import { WhatsAppTransportError, type WhatsAppProvider, type WhatsAppTransportContent } from '@/lib/whatsapp/transport/types'
+import { WhatsAppTransportError, type WhatsAppProvider, type WhatsAppTransportContent, type WhatsAppTemplateSendParams } from '@/lib/whatsapp/transport/types'
 import type { MessageTemplate } from '@/types'
 import { OpenWAPreDispatchDenied } from '@/lib/whatsapp/transport/guardrails'
 import { findOrCreateContact } from '@/lib/api/v1/contacts'
 export class BroadcastError extends Error { readonly code: string; readonly status: number; constructor(code: string, message: string, status: number) { super(message); this.name = 'BroadcastError'; this.code = code; this.status = status } }
 export interface BroadcastRecipientInput { to: string; params?: string[] }
 export interface CreateBroadcastParams { name?: string | null; templateName: string; templateLanguage?: string | null; recipients: BroadcastRecipientInput[]; connectionId?: string | null }
-interface PlannedRecipient { recipientRowId: string; phone: string; params: string[]; messageParams?: Record<string, unknown>; status?: string; errorMessage?: string | null }
+interface PlannedRecipient { recipientRowId: string; phone: string; params: string[]; messageParams?: WhatsAppTemplateSendParams; status?: string; errorMessage?: string | null }
 export interface BroadcastPlan { accountId: string; connectionId: string; provider: WhatsAppProvider; broadcastId: string; templateName: string; templateLanguage: string; templateRow: MessageTemplate | null; planned: PlannedRecipient[]; rejected: number }
 const MAX_RECIPIENTS = 1000
 function transportError(error: unknown): BroadcastError { if (error instanceof WhatsAppTransportError) return new BroadcastError(error.code, error.message, error.code === 'connection_restricted' ? 409 : 400); return new BroadcastError('whatsapp_not_configured', 'WhatsApp not configured. Please set up your WhatsApp integration first.', 400) }
