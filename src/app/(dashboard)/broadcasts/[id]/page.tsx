@@ -241,7 +241,7 @@ export default function BroadcastDetailPage() {
     ];
     const rows = recipients.map((r) => [
       r.contact?.name ?? '',
-      r.contact?.phone ?? '',
+      r.recipient_phone_snapshot ?? r.contact?.phone ?? '',
       r.status,
       r.sent_at ?? '',
       r.delivered_at ?? '',

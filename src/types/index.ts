@@ -451,6 +451,8 @@ export interface BroadcastRecipient {
    * Added in migration 038; null on rows created before it.
    */
   template_params?: string[] | null;
+  /** Immutable digits-only send destination, frozen at initial queue time. */
+  recipient_phone_snapshot?: string | null;
   created_at: string;
   contact?: Contact;
 }

@@ -34,6 +34,7 @@ interface BroadcastRecipient {
   provider: WhatsAppProvider | null
   connection_id: string | null
   template_params: unknown
+  recipient_phone_snapshot: string | null
   contact: { phone: string | null } | Array<{ phone: string | null }> | null
 }
 interface BroadcastMetadata {
@@ -116,7 +117,8 @@ export async function enqueueBroadcastDelivery(
 
 function contactPhone(row: BroadcastRecipient): string {
   const contact = Array.isArray(row.contact) ? row.contact[0] : row.contact
-  return sanitizePhoneForMeta(contact?.phone ?? '')
+  // An enqueued campaign never follows future CRM contact edits.
+  return row.recipient_phone_snapshot ?? sanitizePhoneForMeta(contact?.phone ?? '')
 }
 
 export interface BroadcastWorkerTick {
@@ -175,7 +177,7 @@ export async function processBroadcastDeliveryTick(
         reason = 'RECONCILIATION_REQUIRED'
       } else {
         const { data: row, error: rowError } = await db.from('broadcast_recipients')
-          .select('id,provider,connection_id,template_params,contact:contacts(phone)')
+          .select('id,provider,connection_id,template_params,recipient_phone_snapshot,contact:contacts(phone)')
           .eq('broadcast_id', job.broadcast_id).eq('status', 'pending')
           .order('created_at', { ascending: true }).limit(1).maybeSingle()
         if (rowError) throw rowError
@@ -188,7 +190,7 @@ export async function processBroadcastDeliveryTick(
             throw new Error('CAMPAIGN_PROVIDER_BINDING_MISMATCH')
           }
           const phone = contactPhone(recipient)
-          if (!isValidE164(phone)) {
+          if (!recipient.recipient_phone_snapshot || !isValidE164(phone)) {
             const { error: invalidError } = await db.from('broadcast_recipients')
               .update({ status: 'failed', error_message: 'INVALID_RECIPIENT_PRE_DISPATCH' })
               .eq('broadcast_id', job.broadcast_id).eq('id', recipient.id).eq('status', 'pending')

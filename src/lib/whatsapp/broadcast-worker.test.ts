@@ -24,7 +24,7 @@ const CAMPAIGN = {
 }
 const RECIPIENT = {
   id: 'recipient-1', provider: 'openwa', connection_id: 'connection-1',
-  template_params: ['Ali'], contact: { phone: '+967700000001' },
+  template_params: ['Ali'], recipient_phone_snapshot: '967700000001', contact: { phone: '+967700000002' },
 }
 interface Fixture {
   claim?: typeof CLAIM | null
