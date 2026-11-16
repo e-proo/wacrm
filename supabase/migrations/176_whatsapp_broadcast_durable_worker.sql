@@ -220,6 +220,29 @@ BEGIN
     updated_at=now()
   WHERE id=p_job_id AND lease_token=p_lease_token AND state='leased';
   GET DIAGNOSTICS v_found=ROW_COUNT;
+  IF v_found AND p_state='completed' THEN
+    -- Complete job + parent campaign in ONE SQL transaction, never as two
+    -- separate HTTP writes. If any recipient is unresolved, roll back both.
+    IF EXISTS (
+      SELECT 1 FROM public.broadcast_delivery_jobs j
+      JOIN public.broadcast_recipients r ON r.broadcast_id=j.broadcast_id
+      WHERE j.id=p_job_id AND r.status IN ('pending','sending','requires_reconciliation')
+    ) THEN
+      RAISE EXCEPTION 'Cannot complete broadcast with unsettled recipients'
+        USING ERRCODE='23514';
+    END IF;
+    UPDATE public.broadcasts b SET
+      status=CASE WHEN (
+        SELECT count(*) FROM public.broadcast_recipients r
+        WHERE r.broadcast_id=b.id AND r.status='failed'
+      )=(
+        SELECT count(*) FROM public.broadcast_recipients r
+        WHERE r.broadcast_id=b.id
+      ) THEN 'failed' ELSE 'sent' END,
+      updated_at=now()
+    FROM public.broadcast_delivery_jobs j
+    WHERE j.id=p_job_id AND b.id=j.broadcast_id AND b.account_id=j.account_id;
+  END IF;
   RETURN v_found;
 END;
 $$;

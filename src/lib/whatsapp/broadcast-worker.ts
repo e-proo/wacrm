@@ -10,7 +10,7 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body'
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils'
 import {
-  BroadcastError, deliverBroadcast, finalizeBroadcastStatus,
+  BroadcastError, deliverBroadcast,
   type BroadcastPlan,
 } from '@/lib/whatsapp/broadcast-core'
 import type { WhatsAppProvider } from '@/lib/whatsapp/transport/types'
@@ -180,7 +180,6 @@ export async function processBroadcastDeliveryTick(
           .order('created_at', { ascending: true }).limit(1).maybeSingle()
         if (rowError) throw rowError
         if (!row) {
-          await finalizeBroadcastStatus(db, job.broadcast_id)
           nextState = 'completed'
           reason = null
         } else {
@@ -229,7 +228,6 @@ export async function processBroadcastDeliveryTick(
                 delaySeconds = job.provider === 'openwa' ? 30 : 15
                 reason = null
               } else {
-                await finalizeBroadcastStatus(db, job.broadcast_id)
                 nextState = 'completed'
                 reason = null
               }
