@@ -168,8 +168,7 @@ function supplierToolContext(input: SupplierReplyInput): ToolContext {
 
 async function submitConfirmedOffer(
   db: Db, input: SupplierReplyInput, row: TaskSupplierRow,
-  request: Awaited<ReturnType<typeof verifiedSupplierContext>> extends infer V
-    ? NonNullable<V>['request'] : never,
+  request: NonNullable<Awaited<ReturnType<typeof verifiedSupplierContext>>>['request'],
 ): Promise<SupplierTaskReply> {
   // Do not bypass the frozen published agent's capability/grant revocation.
   const authorization = await authorizeStoredAgentTask(db, {
