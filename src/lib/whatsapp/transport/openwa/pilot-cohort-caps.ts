@@ -9,6 +9,8 @@ export const OPENWA_TEST_PILOT_MAX_HOURLY = 100
 export const OPENWA_TEST_PILOT_MAX_DAILY = 1000
 export const OPENWA_TEST_PILOT_MAX_FIRST_TOUCH = 10
 export const OPENWA_TEST_PILOT_MIN_INTERVAL_MS = 15_000
+export const OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT = 3
+export const OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT = 100
 
 export interface PilotCohortCapSnapshot {
   hourly_cap: number
@@ -24,28 +26,50 @@ export interface PilotCohortCapSnapshot {
 
 export type PilotCohortWorkload = 'agent' | 'manual'
 
+/** Capacity is N selected contacts × M planned messages per contact.
+ * First-touch admission remains N identities, not N×M messages.
+ * This checks reserved capacity, NOT a guarantee of delivery to each contact.
+ */
+export function requiredPilotCohortMessages(count: number, messagesPerRecipient = OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT): number {
+  if (!Number.isInteger(count) || count < 1 || count > 10) throw new Error('PILOT_COHORT_SIZE_INVALID')
+  if (!Number.isInteger(messagesPerRecipient) || messagesPerRecipient < 1 ||
+      messagesPerRecipient > OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT) {
+    throw new Error('PILOT_MESSAGES_PER_RECIPIENT_INVALID')
+  }
+  const total = count * messagesPerRecipient
+  if (total > OPENWA_TEST_PILOT_MAX_HOURLY) throw new Error('PILOT_COHORT_CAPACITY_UNSUPPORTED')
+  return total
+}
+
 export function missingPilotCohortCaps(
   caps: PilotCohortCapSnapshot,
   count: number,
   workload: PilotCohortWorkload,
+  messagesPerRecipient = OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT,
 ): string[] {
   if (!Number.isInteger(count) || count < 1 || count > 10) return ['recipient_count']
-  const required: Array<[string, number]> = [
-    ['hourly_cap', caps.hourly_cap],
-    ['daily_cap', caps.daily_cap],
-    ['first_touch_daily_cap', caps.first_touch_daily_cap],
-    ['warmup_hourly_cap', caps.warmup_hourly_cap ?? caps.hourly_cap],
-    ['warmup_daily_cap', caps.warmup_daily_cap ?? caps.daily_cap],
+  if (!Number.isInteger(messagesPerRecipient) || messagesPerRecipient < 1 ||
+      messagesPerRecipient > OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT ||
+      count * messagesPerRecipient > OPENWA_TEST_PILOT_MAX_HOURLY) {
+    return ['messages_per_recipient']
+  }
+  const requiredMessages = count * messagesPerRecipient
+  const required: Array<[string, number, number]> = [
+    ['hourly_cap', caps.hourly_cap, requiredMessages],
+    ['daily_cap', caps.daily_cap, requiredMessages],
+    ['first_touch_daily_cap', caps.first_touch_daily_cap, count],
+    ['warmup_hourly_cap', caps.warmup_hourly_cap ?? caps.hourly_cap, requiredMessages],
+    ['warmup_daily_cap', caps.warmup_daily_cap ?? caps.daily_cap, requiredMessages],
     ['pilot_' + workload + '_hourly_cap',
       workload === 'agent'
         ? caps.pilot_agent_hourly_cap ?? caps.hourly_cap
-        : caps.pilot_manual_hourly_cap ?? caps.hourly_cap],
+        : caps.pilot_manual_hourly_cap ?? caps.hourly_cap, requiredMessages],
     ['pilot_' + workload + '_daily_cap',
       workload === 'agent'
         ? caps.pilot_agent_daily_cap ?? caps.daily_cap
-        : caps.pilot_manual_daily_cap ?? caps.daily_cap],
+        : caps.pilot_manual_daily_cap ?? caps.daily_cap, requiredMessages],
   ]
-  return required.filter(([, value]) => !Number.isFinite(value) || value < count)
+  return required.filter(([, value, min]) => !Number.isFinite(value) || value < min)
     .map(([key]) => key)
 }
 
@@ -59,6 +83,7 @@ export function suggestedPilotCohortCaps(
   caps: PilotCohortCapSnapshot,
   count: number,
   workload: PilotCohortWorkload,
+  messagesPerRecipient = OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT,
 ): {
   hourly_cap: number
   daily_cap: number
@@ -68,13 +93,11 @@ export function suggestedPilotCohortCaps(
   pilot_manual_hourly_cap: number
   pilot_manual_daily_cap: number
 } {
-  if (!Number.isInteger(count) || count < 1 || count > 10) {
-    throw new Error('PILOT_COHORT_SIZE_INVALID')
-  }
-  const hourly = Math.max(caps.hourly_cap, count)
-  const daily = Math.max(caps.daily_cap, count)
-  const agentRequired = workload === 'agent' ? count : 1
-  const manualRequired = workload === 'manual' ? count : 1
+  const requiredMessages = requiredPilotCohortMessages(count, messagesPerRecipient)
+  const hourly = Math.max(caps.hourly_cap, requiredMessages)
+  const daily = Math.max(caps.daily_cap, requiredMessages)
+  const agentRequired = workload === 'agent' ? requiredMessages : 1
+  const manualRequired = workload === 'manual' ? requiredMessages : 1
   return {
     hourly_cap: hourly,
     daily_cap: daily,
