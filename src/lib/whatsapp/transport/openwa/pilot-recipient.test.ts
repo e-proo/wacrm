@@ -49,9 +49,9 @@ function fakeDb(input: {
               )
               : table === 'messages' ? (
                 input.inbound?.length === 0 && input.historicalInbound
-                  ? 'provider_chat_id' in filters
+                  ? Array.isArray(filters.provider_chat_id)
                     ? input.selectedInbound ?? []
-                    : 'conversation_id' in filters && 'connection_id' in filters
+                    : Array.isArray(filters.connection_id)
                       ? input.historicalInbound
                       : []
                   : input.inbound ?? [{ conversation_id: CHAT, provider_chat_id: LID }]
