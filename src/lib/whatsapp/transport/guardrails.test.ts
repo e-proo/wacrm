@@ -123,6 +123,28 @@ describe('OW-13 server-enforced pilot admission (no real provider calls)', () =>
     expect(openWAPilotRecipientHash('other-acct', 'conn', '967700000001')).not.toBe(openWAPilotRecipientHash('acct', 'conn', '967700000001'))
   })
 
+  it('explains exact missing Agent grant for a native LID and records a safe reason without dispatch', async () => {
+    vi.stubEnv('OPENWA_PILOT_MODE', 'enforce')
+    const t = pilotSetup({ admitted: false })
+    t.rpc.mockImplementation(async (name: string) => {
+      if (name === 'check_openwa_pilot_admission') {
+        return { data: { allowed: false, reason: 'not_allowlisted' }, error: null }
+      }
+      throw new Error('Unexpected call after admission denial')
+    })
+    const failure = await t.guarded.send({
+      ...request, recipient: '1234567890123@lid', workload: 'agent',
+    }).then(() => null, (error: unknown) => error)
+    expect(failure).toMatchObject({
+      code: 'connection_restricted', denialReason: 'pilot_recipient_not_allowlisted',
+      providerDispatchAttempted: false,
+    })
+    expect((failure as Error).message).toContain('@lid')
+    expect((failure as Error).message).toContain('لم تُرسل')
+    expect(t.send).not.toHaveBeenCalled()
+    expect(t.rpc).toHaveBeenCalledTimes(1)
+  })
+
   it('blocks absent or wrong-scope cohort before guardrail reservation and provider', async () => {
     vi.stubEnv('OPENWA_PILOT_MODE', 'enforce')
     const t = pilotSetup({ admitted: false })

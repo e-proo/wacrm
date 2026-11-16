@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../admin-client'
 import { loadConversationAiState, loadRoutingSnapshotAdmin } from './repositories'
 import { routeInboundMessage } from './router'
 import { engineSendText } from '@/lib/automations/meta-send'
+import { OpenWAPreDispatchDenied } from '@/lib/whatsapp/transport/guardrails'
 import { deliverActiveBusinessEventNotifications } from '@/lib/services/platform/business-event-delivery'
 import { loadAccountRuntimePolicy } from './runtime-policy'
 import { canonicalizeE164 } from './phone-e164'
@@ -663,8 +664,22 @@ async function executeAgentRun(
       aiAgentRunId: runId,
     })
   } catch (sendErr) {
-    console.error('[ai dispatch] WhatsApp send failed:', sendErr)
-    await markRun(db, args.accountId, runId, 'failed', 'SEND_FAILED')
+    if (sendErr instanceof OpenWAPreDispatchDenied) {
+      // Policy denial is before provider dispatch. Persist a useful, stable
+      // failure code instead of losing the diagnosis as generic SEND_FAILED.
+      console.warn('[ai dispatch] WhatsApp pre-dispatch denied', {
+        run: runId.slice(0, 8), code: sendErr.denialReason ?? sendErr.code,
+        message: sendErr.message,
+        providerDispatchAttempted: false,
+      })
+      const code = sendErr.denialReason === 'pilot_recipient_not_allowlisted'
+        ? 'PILOT_RECIPIENT_NOT_APPROVED'
+        : 'OPENWA_PRE_DISPATCH_DENIED'
+      await markRun(db, args.accountId, runId, 'failed', code)
+    } else {
+      console.error('[ai dispatch] WhatsApp send failed:', sendErr)
+      await markRun(db, args.accountId, runId, 'failed', 'SEND_FAILED')
+    }
     return 'failed'
   }
 

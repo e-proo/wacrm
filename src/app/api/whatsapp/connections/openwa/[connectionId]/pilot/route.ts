@@ -90,6 +90,16 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     .eq('connection_id', connectionId).eq('active', true).eq('workload', 'agent')
     .gt('expires_at', new Date().toISOString())
   checkDb(agentError, 'agent-grants')
+  // Display the latest denied attempt to the authenticated session admin.
+  // No recipient hash, phone, chat ID, credential or message body reaches UI.
+  const { data: lastDenial, error: denialError } = await db
+    .from('whatsapp_openwa_pilot_admission_events')
+    .select('workload,reason,created_at')
+    .eq('account_id', accountId).eq('connection_id', connectionId)
+    .eq('allowed', false)
+    .gte('created_at', new Date(Date.now() - 24 * 3600_000).toISOString())
+    .order('created_at', { ascending: false }).limit(1).maybeSingle()
+  checkDb(denialError, 'last-admission-denial')
   let approvedMessagesPerRecipient = 1
   if ((grants ?? 0) > 0) {
     const { data: grantCapacity, error: capError } = await db.from('whatsapp_openwa_pilot_allowlist')
@@ -126,6 +136,9 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
   return { connection, guard: safeGuard, configured, grants: grants ?? 0,
     manualGrants: manualGrants ?? 0, agentGrants: agentGrants ?? 0,
     pending: pending ?? 0, duplicates, enforced, approvedMessagesPerRecipient,
+    lastDenial: lastDenial && ['not_allowlisted','invalid_identity','connection_scope_mismatch','invalid_request'].includes(lastDenial.reason)
+      ? { workload: lastDenial.workload, reason: lastDenial.reason, created_at: lastDenial.created_at }
+      : lastDenial ? { workload: lastDenial.workload, reason: 'policy', created_at: lastDenial.created_at } : null,
     active: configured && safeGuard.pilot_enabled && enforced && !safeGuard.manual_paused && (grants ?? 0) > 0 }
 }
 
@@ -150,7 +163,8 @@ function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
     approved_workload: s.grants > 0
       ? (s.agentGrants === s.grants ? 'agent' : s.manualGrants === s.grants ? 'manual' : null)
       : null,
-    unsettled_outbound: s.pending, same_identity_ready_connections: s.duplicates }
+    unsettled_outbound: s.pending, same_identity_ready_connections: s.duplicates,
+    last_denial: s.lastDenial }
 }
 
 function requireLimits(s: Awaited<ReturnType<typeof snapshot>>) {

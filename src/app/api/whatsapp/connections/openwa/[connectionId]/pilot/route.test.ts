@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   guardConfigured: true,
   pending: 0,
   duplicates: 1,
+  lastDenied: null as null | { workload: string; reason: string; created_at: string },
   calls: [] as { table: string; type: string; payload: unknown }[],
 }))
 
@@ -74,6 +75,7 @@ function dbFrom(table: string) {
         filters.id === h.connection.id && filters.account_id === ACCOUNT && filters.provider === 'openwa'
           ? h.connection : null, error: null }
       if (table === 'whatsapp_connection_guardrails') return { data: h.guardConfigured ? h.guard : null, error: null }
+      if (table === 'whatsapp_openwa_pilot_admission_events') return { data: h.lastDenied, error: null }
       if (table === 'messages') return {
         data: h.recentInbound ? { conversation_id: 'verified-test-conversation' } : null, error: null,
       }
@@ -144,6 +146,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     h.guardConfigured = true
     h.pending = 0
     h.duplicates = 1
+    h.lastDenied = null
     h.envMode.enabled = true
     h.envMode.invalid = false
     h.refresh.mockResolvedValue({ status: 'ready', phoneIdentity: '123456789' })
@@ -188,6 +191,16 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(JSON.stringify(payload)).not.toContain('recipient_hash')
     expect(JSON.stringify(payload)).not.toContain('api_key')
   })
+  it('shows a safe, session-scoped Pilot denial diagnosis without exposing hashes or contacts', async () => {
+    h.lastDenied = { workload: 'agent', reason: 'not_allowlisted', created_at: '2026-11-16T17:09:04Z' }
+    const response = await GET(new Request('http://localhost'), context())
+    expect(response.status).toBe(200)
+    const payload = await response.json()
+    expect(payload.last_denial).toEqual(h.lastDenied)
+    expect(JSON.stringify(payload)).not.toContain('recipient_hash')
+    expect(JSON.stringify(payload)).not.toContain('provider_chat_id')
+  })
+
   it('shows unconfigured fresh sessions without writing permissive limits', async () => {
     h.connection.id = '02527740-9806-45ae-b9b1-1354c25f1d3f'
     h.guardConfigured = false

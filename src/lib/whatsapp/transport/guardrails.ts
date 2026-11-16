@@ -10,7 +10,12 @@ import { WhatsAppTransportError, type WhatsAppTransport, type WhatsAppTransportS
  */
 export class OpenWAPreDispatchDenied extends WhatsAppTransportError {
   readonly providerDispatchAttempted = false
-  constructor(message: string) { super('connection_restricted', message) }
+  /** A safe internal policy reason, not a provider error or a recipient ID. */
+  readonly denialReason: string | null
+  constructor(message: string, denialReason: string | null = null) {
+    super('connection_restricted', message)
+    this.denialReason = denialReason
+  }
 }
 
 interface Reservation { allowed?: boolean; reason?: string; wait_ms?: number }
@@ -146,7 +151,34 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
       p_workload: workload,
     })
     if (error) throw new WhatsAppTransportError('retryable_provider_failure', 'OpenWA pilot admission could not be verified', error)
-    if (!(data as Admission | null)?.allowed) throw new OpenWAPreDispatchDenied('OpenWA pilot cohort does not authorize this send')
+    if (!(data as Admission | null)?.allowed) {
+      const reason = (data as Admission | null)?.reason
+      if (reason === 'not_allowlisted') {
+        const nativeHint = request.recipient.endsWith('@lid')
+          ? ' هوية المحادثة الواردة من نوع @lid وقد تختلف عن اعتماد الرقم الهاتفي.'
+          : ''
+        throw new OpenWAPreDispatchDenied(
+          `رفض Pilot الإرسال: مستلم هذه المحادثة غير معتمد لنوع الإرسال ${workload} على جلسة OpenWA الحالية.${nativeHint} راجع الجهات المعتمدة لهذه الجلسة، وأعِد اعتماد المستلم الصحيح بموافقته الصريحة. لم تُرسل الرسالة إلى OpenWA.`,
+          'pilot_recipient_not_allowlisted',
+        )
+      }
+      if (reason === 'connection_scope_mismatch') {
+        throw new OpenWAPreDispatchDenied(
+          'رفض Pilot الإرسال: جلسة OpenWA المحددة غير جاهزة أو لا تطابق الحساب. تحقق من الجلسة والربط قبل المحاولة.',
+          'pilot_connection_scope_mismatch',
+        )
+      }
+      if (reason === 'invalid_identity') {
+        throw new OpenWAPreDispatchDenied(
+          'رفض Pilot الإرسال: تعذّر التحقق من هوية المستلم الأصلية. لا يمكن الاعتماد على رقم مشتق من @lid.',
+          'pilot_recipient_identity_invalid',
+        )
+      }
+      throw new OpenWAPreDispatchDenied(
+        'رفض Pilot الإرسال بسبب عدم اجتياز فحص الاعتماد. افحص جلسة TEST والجهات المعتمدة، ولم تُرسل الرسالة.',
+        'pilot_admission_denied',
+      )
+    }
   }
 
   private async assertNotPaused(request: WhatsAppTransportSendRequest): Promise<void> {

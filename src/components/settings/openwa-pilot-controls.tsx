@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertCircle, CheckCircle2, ChevronDown, Play, RefreshCw, ShieldCheck, Square, SlidersHorizontal } from 'lucide-react'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,6 +30,7 @@ interface PilotState extends Record<string, unknown> {
   approved_workload?: 'manual' | 'agent' | null
   unsettled_outbound: number
   same_identity_ready_connections: number
+  last_denial?: { workload: string; reason: string; created_at: string } | null
   error?: string
   guardrails: {
     hourly_cap: number
@@ -278,6 +279,25 @@ export function OpenWAPilotControls({
       {loading && <p className="text-sm text-muted-foreground">{w('devPilotLoading')}</p>}
       {error && <Alert variant="destructive"><AlertCircle className="size-4" /><AlertDescription>{error}</AlertDescription></Alert>}
       {notice && <Alert><CheckCircle2 className="size-4" /><AlertDescription>{notice}</AlertDescription></Alert>}
+      {state?.pilot_enabled && state.last_denial && <Alert variant="destructive">
+        <AlertCircle className="size-4" />
+        <AlertTitle>آخر رفض إرسال بواسطة Pilot لهذه الجلسة</AlertTitle>
+        <AlertDescription className="space-y-2">
+          <p>{state.last_denial.reason === 'not_allowlisted'
+            ? 'المستلم الفعلي غير موجود ضمن موافقات هذه الجلسة لنوع الإرسال المحدد؛ تفعيل Pilot واعتماد جهات أخرى لا يمنح هذه المحادثة تصريحًا.'
+            : state.last_denial.reason === 'connection_scope_mismatch'
+              ? 'الجلسة لم تطابق شروط الجاهزية والحساب وقت محاولة الإرسال.'
+              : state.last_denial.reason === 'invalid_identity'
+                ? 'هوية المستلم الأصلية لم تكن قابلة للتحقق.'
+                : 'لم تنجح محاولة الإرسال في اجتياز شرط الاعتماد.'}</p>
+          <p className="text-xs">النوع: {state.last_denial.workload === 'agent' ? 'ردود الوكلاء ومهامهم' : state.last_denial.workload === 'manual' ? 'الرسائل اليدوية' : state.last_denial.workload} · الوقت: {new Date(state.last_denial.created_at).toLocaleString('ar')}</p>
+          {state.last_denial.reason === 'not_allowlisted' && <p>
+            للتصحيح: راجع المحادثة والجهة المقصودة على هذه الجلسة؛ قد تكون الهوية الأصلية @lid مختلفة عن اعتماد الرقم @c.us.
+            أوقف Pilot أولًا (سيُلغي جميع الموافقات السابقة)، ثم أعد اعتماد الجهات المقصودة بعد التحقق من الموافقة على واتساب،
+            وأعد التفعيل. الرسالة التي رُفضت لم تصل إلى المزود ولن يُعاد إرسالها تلقائيًا؛ يلزم حدث/رسالة جديدة بعد التصحيح.
+          </p>}
+        </AlertDescription>
+      </Alert>
 
       {state && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
         <div className="space-y-1">
