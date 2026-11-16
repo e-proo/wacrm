@@ -3,10 +3,6 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
-import {
-  BATCH_SEND_ATTEMPTS,
-  batchRetryDelayMs,
-} from '@/lib/broadcast-retry';
 import { normalizeKey } from '@/lib/contacts/dedupe';
 import { Contact, MessageTemplate } from '@/types';
 
@@ -61,32 +57,8 @@ interface UseBroadcastSendingReturn {
   progress: number;
 }
 
-/**
- * Meta rate-limit buffer. 10 per batch + 1 s pause matches the spec
- * and keeps us comfortably under Meta's per-phone-number messaging
- * rate so a large broadcast never trips the upstream limiter.
- *
- * Note this shape when touching `RATE_LIMITS.broadcast`: a campaign is
- * many calls to `/api/whatsapp/broadcast`, not one. A 1 000-recipient
- * send is ~100 calls over several minutes, and a bucket sized for
- * "one call per campaign" throttles most of it away (issue #472).
- */
-const SEND_BATCH_SIZE = 5;
-const SEND_BATCH_DELAY_MS = 1000;
-
-/** `broadcast_recipients` inserts are independent of the send rate. */
+/** Recipients are persisted before any queue entry is created. */
 const INSERT_BATCH_SIZE = 200;
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-interface BroadcastApiResult {
-  phone: string;
-  status: 'sent' | 'failed';
-  whatsapp_message_id?: string;
-  error?: string;
-}
 
 /** contactId → (customFieldId → value). */
 type CustomValueIndex = Map<string, Map<string, string>>;
@@ -398,7 +370,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             customField: payload.audience.customField,
             excludeTagIds: payload.audience.excludeTagIds,
           },
-          status: 'sending',
+          status: 'draft',
           total_recipients: contacts.length,
           sent_count: 0,
           delivered_count: 0,
@@ -471,53 +443,23 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         }
       }
 
-      // ── Step 4: Fetch recipients back (joined contact) ────────────
-      setProgress(30);
-      const { data: recipients, error: recipientsFetchError } = await supabase
-        .from('broadcast_recipients')
-        .select('*, contact:contacts(*)')
-        .eq('broadcast_id', broadcast.id);
-
-      if (recipientsFetchError || !recipients) {
-        throw new Error('Failed to fetch broadcast recipients');
+      // ── Step 4: Commit a durable queue job ─────────────────────────
+      // No WhatsApp transport calls run inside the browser or this API request.
+      // The TEST worker consumes the immutable recipients even after tab close.
+      setProgress(90);
+      const response = await fetch('/api/whatsapp/broadcast/enqueue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          broadcast_id: broadcast.id,
+          header_media_url: payload.headerMediaUrl?.trim() || null,
+        }),
+      });
+      const queue = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        // Keep a draft with frozen recipients; no send has been authorized.
+        throw new Error(queue.error || 'Could not enqueue the campaign');
       }
-
-      const totalRecipients = recipients.length;
-      // A media-header template is a Meta-only capability.
-      const isMediaHeader = ['image', 'video', 'document'].includes(payload.template.header_type ?? '');
-      const headerMediaUrl = payload.headerMediaUrl?.trim();
-      const messageParams = isMediaHeader && headerMediaUrl ? { headerMediaUrl } : undefined;
-      // Per-recipient state and provider dispatch are owned by the server. Never
-      // label unknown provider outcomes failed because the browser lost its HTTP response.
-      for (let i = 0; i < recipients.length; i += SEND_BATCH_SIZE) {
-        const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
-        let response: { error?: string; results?: Array<{ recipientId: string; status: string }> } = {};
-        for (let attempt = 1; ; attempt++) {
-          const res = await fetch('/api/whatsapp/broadcast', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              broadcast_id: broadcast.id,
-              recipient_ids: batch.map((recipient) => recipient.id),
-              ...(messageParams ? { message_params: messageParams } : {}),
-            }),
-          });
-          response = await res.json().catch(() => ({}));
-          if (res.ok) break;
-          const retryIn = attempt < BATCH_SEND_ATTEMPTS
-            ? batchRetryDelayMs(res.status, res.headers.get('Retry-After')) : null;
-          if (retryIn === null) throw new Error(response.error || 'Broadcast delivery requires operator review');
-          await sleep(retryIn);
-        }
-        // A partial/denied/ambiguous batch must stop future provider calls.
-        if ((response.results?.length ?? 0) !== batch.length ||
-          (response.results ?? []).some((r) => r.status === 'failed' || r.status === 'requires_reconciliation')) {
-          throw new Error('Broadcast paused. Review delivery statuses; only pending recipients may be resumed safely.');
-        }
-        setProgress(30 + Math.round(((i + batch.length) / totalRecipients) * 65));
-        if (i + SEND_BATCH_SIZE < recipients.length) await sleep(SEND_BATCH_DELAY_MS);
-      }
-      // The server settles the parent status after each batch.
       setProgress(100);
       return broadcast.id;
     } finally {
