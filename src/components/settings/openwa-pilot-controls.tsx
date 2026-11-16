@@ -283,6 +283,7 @@ export function OpenWAPilotControls({
         <div className="space-y-1">
           <p className="text-sm font-semibold">{w('devPilotModeTitle')}</p>
           <p className="text-xs text-muted-foreground">{w(state.pilot_enabled ? 'devPilotModeEnabledHint' : 'devPilotModeDisabledHint')}</p>
+           <p className="text-xs text-amber-700 dark:text-amber-400">تنبيه: تبديل وضع Pilot يعيد حدود الاختبار المحافظة (3 رسائل/ساعة و10/يوم عند التفعيل) ويلغي اعتمادات الأرقام السابقة. إن كنت قد حفظت 100/1000، فستحتاج إلى إعادة حفظها صراحةً وإعادة اعتماد الجهات بعد إيقاف التجربة.</p>
         </div>
         {state.pilot_enabled
           ? <Button variant="outline" disabled={running || (needsDuplicateReview && !duplicateAck)}
@@ -497,6 +498,7 @@ export function OpenWAPilotControls({
         {step === 'active' && <section className="space-y-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4">
           <p className="flex items-center gap-2 font-semibold"><CheckCircle2 className="size-5" />{w('devPilotNowActive')}</p>
           <p className="text-sm text-muted-foreground">اعتمدت الجلسة {state.active_admissions} أرقام لنوع {state.approved_workload}؛ سعة الاعتماد المخططة {state.approved_messages_per_recipient ?? 1} رسائل لكل جهة ({state.required_cohort_messages ?? state.active_admissions} رسالة). الإرسال محدود بالضوابط المحفوظة ويتوقف تلقائيًا عند تجاوزها.</p>
+          <p className="text-xs text-muted-foreground">الحدود الفعلية الآن: {state.guardrails.hourly_cap} رسالة/ساعة و{state.guardrails.daily_cap} رسالة/يوم؛ حد الوكيل {state.guardrails.pilot_agent_hourly_cap ?? state.guardrails.hourly_cap}/ساعة و{state.guardrails.pilot_agent_daily_cap ?? state.guardrails.daily_cap}/يوم. تغييرها لا يحدث تلقائيًا من حساب الحد الأدنى.</p>
           <Button variant="destructive" disabled={running} onClick={() => void submit('stop')}>
             <Square className="me-2 size-4" />{w('devPilotStop')}
           </Button>
