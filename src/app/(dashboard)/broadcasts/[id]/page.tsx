@@ -641,7 +641,7 @@ export default function BroadcastDetailPage() {
                         {recipient.contact?.name ?? 'Unknown'}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {recipient.contact?.phone ?? '-'}
+                        {recipient.recipient_phone_snapshot ?? recipient.contact?.phone ?? '-'}
                       </TableCell>
                       <TableCell>
                         <span

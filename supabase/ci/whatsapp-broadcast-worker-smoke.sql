@@ -32,6 +32,20 @@ BEGIN
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+      AND table_name='broadcast_recipients' AND column_name='recipient_phone_snapshot'
+  ) THEN
+    RAISE EXCEPTION 'Frozen recipient identity column missing';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger t
+    WHERE t.tgrelid='public.broadcast_delivery_jobs'::regclass
+      AND t.tgname='broadcast_recipient_freeze_on_queue'
+      AND NOT t.tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'Campaign enqueue must freeze recipient identities';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns WHERE table_schema='public'
       AND table_name='broadcasts' AND column_name='broadcast_header_media_url'
   ) THEN
     RAISE EXCEPTION 'Frozen Meta media header missing';

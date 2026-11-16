@@ -30,6 +30,13 @@ describe('durable broadcast delivery boundary', () => {
     expect(worker).toContain('timingSafeEqual')
     expect(worker).toContain('processBroadcastDeliveryTick')
   })
+  it('freezes the recipient phone and rejects contact edits as routing hints', () => {
+    const worker = source('./broadcast-worker.ts')
+    const migration = source('../../../supabase/migrations/177_whatsapp_broadcast_recipient_snapshot.sql')
+    expect(worker).toContain('recipient_phone_snapshot')
+    expect(migration).toContain('r.recipient_phone_snapshot IS NULL')
+    expect(migration).toContain('BEFORE INSERT OR UPDATE OF state')
+  })
   it('reserves provider-native identity before dispatch', () => {
     const core = source('./broadcast-core.ts')
     expect(core.indexOf("status: 'sending'")).toBeGreaterThan(-1)
