@@ -83,6 +83,13 @@ function makeDb() {
           return Promise.resolve({error:null})
         },
         update(patch:Record<string,unknown>) { operation='update';values=patch;return query },
+        then<T>(resolve:(result:{error:null})=>T):Promise<T> {
+          if(operation==='update' && table==='ai_agent_coverage_supplier_negotiations') {
+            storeWrites.push({table,op:'update',changes:values})
+            Object.assign(row,values)
+          }
+          return Promise.resolve({error:null as null}).then(resolve)
+        },
         async maybeSingle() {
           if(operation==='update') {
             storeWrites.push({table,op:'update',changes:values})
