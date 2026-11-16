@@ -1,4 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
+import {
+  loadSupplierCoverageRoute, validSupplierCoverageRoute, assertSupplierRouteMatchesAttributes,
+  describeSupplierCoverageRoute, type SupplierCoverageRoute,
+} from './supplier-request-route'
 import { defineAgentTaskType } from '@/lib/ai/tasks/contracts'
 import type { AgentTaskCompletionPolicy } from '@/lib/ai/tasks/completion-policy'
 import type {
@@ -93,6 +98,12 @@ export const COVERAGE_SOURCING_TASK_TYPE_V2 = defineAgentTaskType({
   messagePolicy: {
     ...COVERAGE_SOURCING_TASK_TYPE.messagePolicy,
     version: 2,
+    config: {
+      ...COVERAGE_SOURCING_TASK_TYPE.messagePolicy.config,
+      // This six-variable Meta template must be explicitly approved by Meta.
+      // The amount-only v1 template is insufficient for supplier sourcing.
+      templateName: 'coverage_sourcing_supplier_v2',
+    },
   },
 })
 
@@ -122,6 +133,8 @@ export interface CoverageSourcingRequestSnapshot {
   remainingAmount: string
   currency: string
   attributes: CoverageAttributes
+  route?: SupplierCoverageRoute
+  serviceName?: string
 }
 
 export interface CoverageSourcingTaskContext {
@@ -242,6 +255,19 @@ export async function loadCoverageSourcingTaskContext(
     throw new Error('COVERAGE_SOURCING_REQUEST_ALREADY_SATISFIED')
   }
 
+  const attributes = (() => {
+    const normalized = normalizeCoverageAttributes(request.attributes)
+    if (!normalized.ok) throw new Error('COVERAGE_SOURCING_REQUEST_ATTRIBUTES_INVALID')
+    return normalized.normalized
+  })()
+  const route = await loadSupplierCoverageRoute(db,input.accountId,attributes)
+  const { data: service, error: serviceError } = await db.from('services')
+    .select('name').eq('account_id',input.accountId).eq('id',request.service_id).maybeSingle()
+  if (serviceError) throw serviceError
+  if (!service?.name || /[\r\n<>]/.test(service.name) || service.name.length > 80) {
+    throw new Error('COVERAGE_SOURCING_SERVICE_NOT_FOUND')
+  }
+
   return {
     coverageRequestId: request.id,
     request: {
@@ -250,13 +276,9 @@ export async function loadCoverageSourcingTaskContext(
       requestedAmount: String(request.requested_amount),
       remainingAmount: String(remaining),
       currency: request.currency,
-      attributes: (() => {
-        const normalized = normalizeCoverageAttributes(request.attributes)
-        if (!normalized.ok) {
-          throw new Error('COVERAGE_SOURCING_REQUEST_ATTRIBUTES_INVALID')
-        }
-        return normalized.normalized
-      })(),
+      attributes,
+      route,
+      serviceName: service.name.trim(),
     },
   }
 }
@@ -519,27 +541,62 @@ export const COVERAGE_SOURCING_MESSAGE_POLICY_V2: AgentTaskOutboundMessagePolicy
       throw new Error('COVERAGE_SOURCING_PROVIDER_UNRESOLVED')
     }
     const remainingAmount = contextString(context, 'remainingAmount')
+    const requestedAmount = contextString(context, 'requestedAmount')
     const currency = contextString(context, 'currency')
+    const snapshot = context.taskContext.request as Record<string, unknown> | null
+    const rawAttributes = snapshot?.attributes
+    if (!rawAttributes || typeof rawAttributes !== 'object' || Array.isArray(rawAttributes)) {
+      throw new Error('COVERAGE_SOURCING_ROUTE_SNAPSHOT_MISSING')
+    }
+    // New Tasks freeze all named route facts on creation. Historical v2 Task
+    // snapshots lack labels: resolve only from the exact account-owned region
+    // IDs; never send amount-only or infer a name from free-text supplier data.
+    const route = validSupplierCoverageRoute(snapshot.route)
+      ? snapshot.route
+      : await loadSupplierCoverageRoute(
+        supabaseAdmin(), context.accountId, rawAttributes as Record<string, unknown>,
+      )
+    assertSupplierRouteMatchesAttributes(route, rawAttributes as Record<string, unknown>)
+    const name = typeof snapshot.serviceName === 'string' &&
+      /^[^\r\n<>]{2,80}$/.test(snapshot.serviceName)
+      ? snapshot.serviceName : 'التغطية'
     // The same frozen business facts are used for either provider; validate
     // their shapes so snapshots cannot inject instructions into the text.
     if (!/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,4})?$/.test(remainingAmount) ||
+        !/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,4})?$/.test(requestedAmount) ||
         !/^[A-Z]{3}$/.test(currency)) {
       throw new Error('COVERAGE_SOURCING_MESSAGE_FACTS_INVALID')
     }
     if (context.whatsappProvider === 'meta_cloud') {
+      // Never downgrade this v2 business request to a 2-parameter template.
+      // A non-approved v2 template must block sending until Meta approval.
+      const template = policyString(context,'templateName','coverage_sourcing_supplier_v2')
+      if (template !== 'coverage_sourcing_supplier_v2' &&
+          template !== 'coverage_sourcing_supplier_v1') {
+        throw new Error('COVERAGE_SOURCING_TEMPLATE_V2_REQUIRED')
+      }
       return {
-        kind: 'template',
-        templateName: policyString(context, 'templateName', 'coverage_sourcing_supplier_v1'),
-        language: policyString(context, 'templateLanguage', 'ar'),
-        params: [remainingAmount, currency],
+        kind:'template',
+        templateName:'coverage_sourcing_supplier_v2',
+        language: policyString(context,'templateLanguage','ar'),
+        params:[
+          remainingAmount,currency,
+          route.requesterReceiveRegion,route.requesterReceiveMethod,
+          route.requesterPayRegion,route.requesterPayMethod,
+        ],
       }
     }
     return {
-      kind: 'text',
-      text:
-        `مرحبًا، لدينا استفسار عن إمكانية توفير تغطية بقيمة ${remainingAmount} ${currency}. ` +
-        'هل يمكنكم توفيرها؟ يرجى الرد على هذه المحادثة. ' +
+      kind:'text',
+      text: [
+        `مرحبًا، نتواصل معكم بخصوص طلب ${name} محدد ونرغب بمعرفة قدرتكم على توفيره.`,
+        `إجمالي الطلب: ${requestedAmount} ${currency}.`,
+        `المبلغ المطلوب تغطيته الآن: ${remainingAmount} ${currency}.`,
+        describeSupplierCoverageRoute(route),
+        'هل هذه الجهات وطرق الدفع والاستلام متوفرة لديكم؟ يرجى الرد بنعم أو لا.',
+        'عند الموافقة سنؤكد المسار معكم ثم نسألكم عن المبلغ المتاح والعمولة.',
         'إذا لم ترغب في تلقي رسائل مماثلة مستقبلًا، اكتب "إيقاف".',
+      ].join('\n'),
     }
   },
 }

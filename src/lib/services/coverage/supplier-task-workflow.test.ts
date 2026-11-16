@@ -46,6 +46,7 @@ const stageRow = () => ({
   account_id:accountId, task_id:taskId, task_target_id:targetId, contact_id:contactId,
   conversation_id:conversationId, stage:'availability', offered_amount:null as string|null,
   commission_per_thousand:null as string|null,supplier_details:null as string|null,
+  route_confirmed:false,
   version:0, last_inbound_message_id:null as string|null,
   confirmation_message_id:null as string|null,confirmation_run_id:null as string|null,
   change_request_id:null as string|null,
@@ -67,17 +68,28 @@ function makeDb() {
     from(table:string) {
       let operation:'read'|'update'='read'
       let values:Record<string,unknown>={}
+      let regionIds: string[] | null = null
       const conditions:Record<string,unknown>={}
       const query={
         select(_fields?:string) { return query },
         eq(field:string,val:unknown) { conditions[field]=val; return query },
         lt(_field:string,_val:unknown) { return query },
         order(_field:string,_opts?:unknown) { return query },
+        in(field:string, vals:unknown[]) {
+          if(table==='coverage_regions' && field==='id') regionIds=vals as string[]
+          return query
+        },
         limit(n:number) {
           if(table==='messages') {
             return Promise.resolve({data:[{ content_text:previousBotMessage }].slice(0,n),error:null})
           }
-          throw new Error('unexpected .limit')
+          if(table==='coverage_regions') {
+            return Promise.resolve({data:[
+              {id:northId,name:'إب'}, {id:southId,name:'حضرموت'},
+              {id:'11111111-2222-4333-8444-555555555555',name:'صنعاء'},
+            ].filter(r=>!regionIds || regionIds.includes(r.id)).slice(0,n),error:null})
+          }
+          throw new Error('unexpected .limit '+table)
         },
         upsert(payload:Record<string,unknown>) {
           storeWrites.push({table,op:'upsert',changes:payload})
@@ -160,26 +172,33 @@ describe('server-bound Coverage supplier lifecycle',()=>{
     return await handleCoverageSupplierTaskReply(sourceContext())
   }
 
-  it('starts collecting source-request amount and never proposes on availability alone',async()=>{
+  it('confirms source-request direction before collecting amount',async()=>{
     const r=await reply('نعم يمكنني توفير التغطية',1)
-    expect(r?.text).toContain('400 SAR')
+    expect(r?.text).toContain('حضرموت')
+    expect(r?.text).toContain('إب')
+    expect(row.stage).toBe('route')
+    expect(row.route_confirmed).toBe(false)
+    await reply('المسار مطابق',2)
     expect(row.stage).toBe('amount')
+    expect(row.route_confirmed).toBe(true)
     expect(mocked.proposed).not.toHaveBeenCalled()
   })
   it('only creates a native administrative proposal after gathering terms and explicit supplier confirmation',async()=>{
     const r1=await reply('نعم يمكنني توفير التغطية',1)
-    expect(r1?.text).toContain('المبلغ')
+    expect(r1?.text).toContain('حضرموت')
+    expect(row.stage).toBe('route')
+    await reply('المسار مطابق',2)
     expect(row.stage).toBe('amount')
-    await reply('400',2)
+    await reply('400',3)
     expect(row.stage).toBe('commission')
-    await reply('7',3)
+    await reply('7',4)
     expect(row.stage).toBe('details')
-    await reply('الدفع في حضرموت والاستلام في إب حوالة خلال اليوم بدون شروط إضافية',4)
+    await reply('متاح خلال اليوم، يمكن التسليم بالطرق المذكورة دون شروط أخرى',5)
     expect(row.stage).toBe('confirmation')
-    await reply('تمام',5)
+    await reply('تمام',6)
     expect(row.stage).toBe('confirmation')
     expect(mocked.proposed).not.toHaveBeenCalled()
-    const res=await reply('تأكيد',6)
+    const res=await reply('تأكيد',7)
     expect(row.stage).toBe('submitted')
     expect(row.change_request_id).toBe('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
     expect(res?.text).toContain('CHG-1170')
@@ -200,19 +219,31 @@ describe('server-bound Coverage supplier lifecycle',()=>{
   it('continues a pre-migration commission-confirmation question without inferring amount or details',async()=>{
     previousBotMessage='شكراً! للتأكيد، العمولة **7 لكل 1000**؟'
     const result=await reply('نعم أؤكد',9)
-    expect(row).toMatchObject({stage:'amount',commission_per_thousand:'7',offered_amount:null})
-    expect(result?.text).toContain('400 SAR')
+    expect(row).toMatchObject({stage:'route',commission_per_thousand:'7',offered_amount:null})
+    expect(result?.text).toContain('حضرموت')
     expect(mocked.proposed).not.toHaveBeenCalled()
   })
   it('fails closed when the frozen proposal permission is revoked',async()=>{
     Object.assign(row,{stage:'confirmation',offered_amount:'400',commission_per_thousand:'7',
-      supplier_details:'حوالة من حضرموت إلى إب اليوم',version:4})
+      supplier_details:'حوالة من حضرموت إلى إب اليوم',route_confirmed:true,version:4})
     mocked.authorize.mockResolvedValue({ok:false,code:'NO_GRANT'})
     const r=await reply('تأكيد',7)
     expect(r?.text).toContain('متابعة بشرية')
     expect(row.stage).toBe('needs_human')
     expect(mocked.proposed).not.toHaveBeenCalled()
   })
+  it('blocks a supplier who names a different receipt city even after route assent',async()=>{
+    await reply('نعم',1)
+    await reply('المسار مطابق',2)
+    await reply('400',3)
+    await reply('7',4)
+    const r=await reply('سأسلم في المكلاء واريد ان استلم في صنعاء. طريقة الدفع مسموح ومتوفر اي طريقه',5)
+    expect(row.stage).toBe('needs_human')
+    expect(r?.text).toContain('المراجعة')
+    expect(mocked.proposed).not.toHaveBeenCalled()
+    expect(row.change_request_id).toBe(null)
+  })
+
   it('recovers a previously committed proposal after a crash without proposing twice',async()=>{
     const details='الدفع في حضرموت والاستلام في إب حوالة خلال اليوم'
     const confirmed='bbbbbbbb-bbbb-4bbb-8bbb-000000000007'

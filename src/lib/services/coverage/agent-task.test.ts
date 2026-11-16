@@ -336,7 +336,17 @@ describe('Coverage sourcing Agent Task', () => {
       accountId: 'account', runId: 'run', taskId: 'task', taskTargetId: 'target',
       taskType: 'coverage.sourcing', taskTypeVersion: 2,
       objective: 'source', taskContext: {
-        request: { remainingAmount: '75000', currency: 'SAR', requesterName: 'PRIVATE' },
+        request: {
+          requestedAmount:'90000', remainingAmount: '75000', currency: 'SAR',
+          requesterName:'PRIVATE',
+          attributes:requestAttributes(),
+          serviceName:'التغطية',
+          route:{
+            requesterPayRegionId:NORTH,requesterPayRegion:'إب',requesterPayMethod:'نقدًا',
+            requesterReceiveRegionId:SOUTH,requesterReceiveRegion:'حضرموت',requesterReceiveMethod:'شبكات',
+            scope:'domestic' as const,country:null,
+          },
+        },
         requesterName: 'PRIVATE',
       }, targetPolicy: {}, counterpartyRole: 'coverage_supplier',
       policy: COVERAGE_SOURCING_TASK_TYPE_V2.messagePolicy,
@@ -346,21 +356,29 @@ describe('Coverage sourcing Agent Task', () => {
       ...ctx, whatsappProvider: 'meta_cloud',
     })
     expect(meta).toEqual({
-      kind: 'template', templateName: 'coverage_sourcing_supplier_v1',
-      language: 'ar', params: ['75000', 'SAR'],
+      kind: 'template', templateName: 'coverage_sourcing_supplier_v2',
+      language: 'ar',
+      params: ['75000','SAR','حضرموت','شبكات','إب','نقدًا'],
     })
     const wa = await COVERAGE_SOURCING_MESSAGE_POLICY_V2.prepare({
       ...ctx, whatsappProvider: 'openwa',
     })
     expect(wa.kind).toBe('text')
     expect(wa).toMatchObject({ text: expect.stringContaining('75000 SAR') })
+    expect(wa).toMatchObject({ text: expect.stringContaining('حضرموت') })
+    expect(wa).toMatchObject({ text: expect.stringContaining('إب') })
+    expect(wa).toMatchObject({ text: expect.stringContaining('تسلّم التغطية') })
+    expect(wa).toMatchObject({ text: expect.stringContaining('90000 SAR') })
     expect(JSON.stringify(wa)).not.toMatch(/PRIVATE|MODEL_INJECTION/)
     expect(JSON.stringify(wa)).toContain('إيقاف')
     await expect(COVERAGE_SOURCING_MESSAGE_POLICY_V2.prepare(ctx))
       .rejects.toThrow(/PROVIDER_UNRESOLVED/)
     await expect(COVERAGE_SOURCING_MESSAGE_POLICY_V2.prepare({
       ...ctx, whatsappProvider: 'openwa',
-      taskContext: { request: { remainingAmount: '1;SECRET', currency: 'SAR' } },
+      taskContext: { request: {
+        requestedAmount:'90000',remainingAmount:'1;SECRET',currency:'SAR',
+        attributes:requestAttributes(),route:ctx.taskContext.request.route,
+      } },
     })).rejects.toThrow(/MESSAGE_FACTS_INVALID/)
   })
 

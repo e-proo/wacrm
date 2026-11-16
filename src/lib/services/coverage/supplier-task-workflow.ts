@@ -7,7 +7,8 @@ import { authorizeToolInvocation } from '@/lib/ai/runtime/tool-policy'
 import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
 import { findChangeRequestByIdempotencyKey } from '@/lib/ai/runtime/change-requests-service'
 import type { ToolContext } from '@/lib/ai/tools/executors'
-import { readCoverageAttributes } from './attributes'
+import { readCoverageAttributes, normalizeCoverageAttributes } from './attributes'
+import { loadSupplierCoverageRoute, supplierNotesConflictWithRoute } from './supplier-request-route'
 import {
   advanceSupplierTurn, initialSupplierState, parseSupplierNumber, supplierAffirms,
   type SupplierStage, type SupplierTurnState,
@@ -19,6 +20,7 @@ interface TaskSupplierRow {
   contact_id: string; conversation_id: string; stage: SupplierStage
   offered_amount: string | null
   commission_per_thousand: string | null; supplier_details: string | null
+  route_confirmed: boolean
   version: number; last_inbound_message_id: string | null
   confirmation_message_id: string | null
   confirmation_run_id: string | null
@@ -80,6 +82,27 @@ async function verifiedSupplierContext(db: Db, input: SupplierReplyInput) {
   if (!request || !['active','partially_reserved'].includes(request.status)) {
     throw new Error('SUPPLIER_SOURCE_REQUEST_NOT_ACTIVE')
   }
+  // Refuse a stale Task whose original request legs were edited after its
+  // outreach was authorized. Never silently substitute new route/regions.
+  const frozen = (task.task_context as Record<string,unknown> | null)?.request
+  const snapshot = frozen && typeof frozen === 'object' && !Array.isArray(frozen)
+    ? frozen as Record<string,unknown> : null
+  const currentAttributes = normalizeCoverageAttributes(request.attributes)
+  if (!currentAttributes.ok) throw new Error('SUPPLIER_SOURCE_ROUTE_INVALID')
+  if (snapshot?.attributes) {
+    const frozenAttributes = normalizeCoverageAttributes(snapshot.attributes as Record<string,unknown>)
+    if (!frozenAttributes.ok ||
+        JSON.stringify(frozenAttributes.normalized) !== JSON.stringify(currentAttributes.normalized)) {
+      throw new Error('SUPPLIER_FROZEN_ROUTE_CHANGED')
+    }
+  }
+  const route = await loadSupplierCoverageRoute(db,input.accountId,currentAttributes.normalized)
+  const { data: regions, error: regionsError } = await db.from('coverage_regions')
+    .select('id,name').eq('account_id',input.accountId)
+    .eq('status','active').limit(100)
+  if (regionsError) throw regionsError
+  if (!regions || regions.length >= 100) throw new Error('SUPPLIER_REGIONS_UNRESOLVED')
+
   const remaining = Math.max(
     Number(request.requested_amount) -
       Number(request.reserved_amount) - Number(request.fulfilled_amount), 0,
@@ -93,6 +116,7 @@ async function verifiedSupplierContext(db: Db, input: SupplierReplyInput) {
       id: request.id, serviceId: request.service_id, currency: request.currency,
       remainingAmount: String(remaining),
       attributes: readCoverageAttributes(request.attributes),
+      route, knownRegions: regions,
     },
   }
 }
@@ -102,6 +126,7 @@ async function loadOrCreateNegotiation(db: Db, input: SupplierReplyInput): Promi
     account_id: input.accountId, task_id: input.taskId,
     task_target_id: input.taskTargetId, contact_id: input.contactId,
     conversation_id: input.conversationId, stage: 'availability' as const,
+    route_confirmed: false,
   }
   const { error: insertError } = await db.from('ai_agent_coverage_supplier_negotiations')
     .upsert(initial, { onConflict: 'account_id,task_id,task_target_id', ignoreDuplicates: true })
@@ -127,6 +152,7 @@ async function saveStep(
       offered_amount: next.offeredAmount,
       commission_per_thousand: next.commissionPerThousand,
       supplier_details: next.supplierDetails,
+      route_confirmed: next.routeConfirmed,
       version: row.version + 1,
       last_inbound_message_id: input.sourceMessageId,
       ...(next.stage === 'submitting'
@@ -267,9 +293,15 @@ async function submitConfirmedOffer(
     },
   })
   if (!scoped.ok) throw new Error(scoped.code)
-  if (!row.offered_amount || !row.commission_per_thousand || !row.supplier_details) {
-    // A zero commission is stored as string "0", which is truthy.
-    throw new Error('SUPPLIER_PROPOSAL_INCOMPLETE')
+  if (!row.route_confirmed || !row.offered_amount ||
+      !row.commission_per_thousand || !row.supplier_details) {
+    // Old in-flight negotiations with no route confirmation cannot be
+    // submitted until the actual supplier accepts the frozen direction.
+    throw new Error('SUPPLIER_PROPOSAL_ROUTE_NOT_CONFIRMED')
+  }
+  if (supplierNotesConflictWithRoute(
+      row.supplier_details, request.route, request.knownRegions)) {
+    throw new Error('SUPPLIER_PROPOSAL_ROUTE_CONTRADICTS_SOURCE')
   }
   if (Number(row.offered_amount) > Number(request.remainingAmount)) {
     throw new Error('SUPPLIER_OFFER_EXCEEDS_REQUEST_REMAINING')
@@ -375,6 +407,7 @@ export async function handleCoverageSupplierTaskReply(
     stage: row.stage, offeredAmount: row.offered_amount,
     commissionPerThousand: row.commission_per_thousand,
     supplierDetails: row.supplier_details,
+    routeConfirmed: row.route_confirmed === true,
   }
   // Backward-compatible continuation: old GPT loop may have asked the seller
   // to confirm "7 لكل 1000" before the durable protocol existed. Reuse ONLY
@@ -388,6 +421,7 @@ export async function handleCoverageSupplierTaskReply(
   }
   const step = advanceSupplierTurn(current, raw, {
     remainingAmount: verified.request.remainingAmount, currency: verified.request.currency,
+    route: verified.request.route, knownRegions: verified.request.knownRegions,
   })
   if (!(await saveStep(db, input, row, step.next))) {
     throw new Error('SUPPLIER_NEGOTIATION_CONCURRENT_UPDATE')
@@ -397,7 +431,8 @@ export async function handleCoverageSupplierTaskReply(
       return await submitConfirmedOffer(db, input,
         { ...row, stage: step.next.stage, offered_amount: step.next.offeredAmount,
           commission_per_thousand: step.next.commissionPerThousand,
-          supplier_details: step.next.supplierDetails }, verified.request)
+          supplier_details: step.next.supplierDetails,
+          route_confirmed: step.next.routeConfirmed }, verified.request)
     } catch (error) {
       console.error('[coverage supplier task] proposal failed', {
         task: input.taskId.slice(0, 8),
