@@ -2,6 +2,8 @@ import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { CURRENT_AGENT_TASK_PLATFORM } from '@/lib/ai/tasks/current-platform'
 import { authorizeStoredAgentTask } from '@/lib/ai/tasks/capability-policy'
 import { executeCoverageProposeOfferIntegrated } from '@/lib/ai/tools/business-handoff'
+import { loadAccountRuntimePolicy } from '@/lib/ai/runtime/runtime-policy'
+import { findChangeRequestByIdempotencyKey } from '@/lib/ai/runtime/change-requests-service'
 import type { ToolContext } from '@/lib/ai/tools/executors'
 import { readCoverageAttributes } from './attributes'
 import {
@@ -180,6 +182,11 @@ async function submitConfirmedOffer(
         t.key === 'coverage.propose_offer' && t.version === 2)) {
     throw new Error('SUPPLIER_PROPOSAL_GRANT_DENIED')
   }
+  const runtime = await loadAccountRuntimePolicy(db, input.accountId)
+  if (runtime.killSwitch || !runtime.nativeToolsEnabled ||
+      !runtime.proposalToolsEnabled) {
+    throw new Error('SUPPLIER_PROPOSAL_RUNTIME_DISABLED')
+  }
   if (!row.offered_amount || !row.commission_per_thousand || !row.supplier_details) {
     // A zero commission is stored as string "0", which is truthy.
     throw new Error('SUPPLIER_PROPOSAL_INCOMPLETE')
@@ -198,6 +205,23 @@ async function submitConfirmedOffer(
     receive_region_id: source.pay_region_id,
     pay_method: source.receive_method,
     receive_method: source.pay_method,
+  }
+  const proposalKey = `coverage-sourcing:${input.taskId}:${input.taskTargetId}`
+  const prior = await findChangeRequestByIdempotencyKey(input.accountId, proposalKey)
+  if (prior) {
+    const pay = prior.proposed_payload ?? {}
+    if (prior.action_key !== 'coverage.offer.create' ||
+        pay.contact_id !== input.contactId ||
+        pay.source_task_target_id !== input.taskTargetId ||
+        pay.source_task_id !== input.taskId ||
+        pay.source_coverage_request_id !== request.id) {
+      throw new Error('SUPPLIER_PROPOSAL_IDEMPOTENCY_MISMATCH')
+    }
+    await db.from('ai_agent_coverage_supplier_negotiations')
+      .update({ stage: 'submitted', change_request_id: prior.id, updated_at: new Date().toISOString() })
+      .eq('account_id', input.accountId).eq('task_id', input.taskId)
+      .eq('task_target_id', input.taskTargetId).eq('stage', 'submitting')
+    return { text: `تم تسجيل العرض سابقًا لدى الإدارة برقم CHG-${prior.code}. حالته ${prior.status}؛ لن نكرر تقديمه.` }
   }
   const outcome = await executeCoverageProposeOfferIntegrated(
     supplierToolContext(input), {
