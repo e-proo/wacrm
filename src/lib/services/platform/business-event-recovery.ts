@@ -121,13 +121,20 @@ export async function retryConfirmedAgentTaskSupplierOutcome(input: {
     correlationId:input.changeRequestId,
     subjectType:outcome.subject_type, subjectId:outcome.subject_id, limit:1,
   })
-  if (result.sent === 1) return {
+  // A concurrent authorized worker may have claimed the requeued event
+  // between the atomic RPC and this request. Follow durable state; never
+  // interpret zero claims as failed or issue a second send.
+  const { data: persisted, error: persistedError } = await db.from('business_event_outbox')
+    .select('status').eq('account_id',input.accountId).eq('id',outcome.id).maybeSingle()
+  if (persistedError) throw persistedError
+  if (result.sent === 1 || persisted?.status === 'sent') return {
     status:'provider_accepted',
     message:'قبل OpenWA إشعار اعتماد المورد. انتظر تأكيد الوصول إلى هاتفه؛ لا يعني القبول التسليم.',
   }
-  if (result.reconciliation > 0) return {
+  if (result.reconciliation > 0 || persisted?.status === 'requires_reconciliation' ||
+      persisted?.status === 'sending' || persisted?.status === 'pending') return {
     status:'reconciliation_required',
-    message:'حالة إرسال إشعار المورد غير مؤكدة؛ افحص المطابقة قبل أي محاولة أخرى.',
+    message:'حالة إرسال إشعار المورد لم تستقر بعد؛ افحص سجل الإرسال ولا تعاود الإرسال عشوائيًا.',
   }
   return { status:'blocked',
     message:'لم يقبل المزود إرسال إشعار المورد. راجع إعدادات Pilot وحالة الرسالة، ولا تعاود الإرسال عشوائيًا.' }
