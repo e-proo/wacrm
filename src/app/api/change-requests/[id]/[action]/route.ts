@@ -6,6 +6,7 @@ import {
   cancelChangeRequest,
   ChangeRequestError,
   rejectChangeRequest,
+  reissueChangeRequestAdminAlert,
 } from '@/lib/ai/runtime/change-requests-service'
 import {
   ChangeExecutionError,
@@ -78,6 +79,19 @@ export async function POST(
           }
         }
         return NextResponse.json(approved)
+      }
+
+      if (action === 'resend') {
+        const result = await reissueChangeRequestAdminAlert({
+          accountId: ctx.accountId, changeRequestId: id,
+        })
+        return NextResponse.json({
+          ...result, accepted_by_provider: result.providerAccepted > 0,
+          delivered: false,
+          message: result.providerAccepted > 0
+            ? 'قبل مزود واتساب إشعار الموافقة الجديد؛ وصوله إلى الهاتف لم يتأكد بعد.'
+            : 'أُصدر رمز جديد، لكن لم يؤكد أي مزود قبول إرساله. افحص Pilot وقناة الإرسال.',
+        }, { status: result.providerAccepted > 0 ? 200 : 202 })
       }
 
       if (action === 'reject') {

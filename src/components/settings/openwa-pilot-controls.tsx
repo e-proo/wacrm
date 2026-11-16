@@ -91,6 +91,8 @@ export function OpenWAPilotControls({
   const [consent, setConsent] = useState(false)
   const [phoneCallConsent, setPhoneCallConsent] = useState(false)
   const [duplicateAck, setDuplicateAck] = useState(false)
+  const [adminAlertConsent, setAdminAlertConsent] = useState(false)
+  const [trustedAdmins, setTrustedAdmins] = useState<Array<{ id: string; display_name: string | null; normalized_address: string; status: string; allowed_capabilities: string[] }>>([])
   const [verified, setVerified] = useState(false)
   const [verifiedStatus, setVerifiedStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -125,7 +127,46 @@ export function OpenWAPilotControls({
     return () => { clearTimeout(timer); ctrl.abort() }
   }, [search])
 
-  function addRecipient(raw: string) {
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetch('/api/trusted-admins', { cache: 'no-store', signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) return
+        const data = await response.json() as { identities?: typeof trustedAdmins }
+        if (!controller.signal.aborted) setTrustedAdmins((data.identities ?? []).filter(identity =>
+          identity.status === 'active' && identity.allowed_capabilities?.includes('change_requests.approve')))
+      }).catch(() => {})
+    return () => controller.abort()
+  // Initial read only; Pilot opt-in never mutates identities.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function approveAdminAlert(identityId: string) {
+    if (busy || verifying || !adminAlertConsent) return
+    setBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST', cache: 'no-store',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'grant_admin_alert', identity_id: identityId,
+          consent_confirmed: true, confirm_admin_alerts: true,
+          ack_duplicate_sessions: duplicateAck,
+        }),
+      })
+      const data = await parseOpenWAApiResponse<PilotState>(response)
+      if (!response.ok) throw new Error(data.error || 'تعذّر اعتماد إشعارات الإدارة')
+      setAdminAlertConsent(false)
+      setNotice('تم اعتماد الرقم الإداري الموثق لإشعارات الموافقة (api) على هذه الجلسة لمدة أربع ساعات، دون إرسال تلقائي للطلبات السابقة. يمكنك إعادة إشعار CHG المعلق من قسم طلبات التغيير.')
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'تعذّر اعتماد إشعارات الإدارة')
+    } finally { setBusy(false) }
+  }
+
+
     const normalized = normalizeTestRecipient(raw)
     if (!normalized || selectedRecipients.includes(normalized) || selectedRecipients.length >= 10) return
     setSelectedRecipients(current => [...current, normalized])
@@ -518,6 +559,24 @@ export function OpenWAPilotControls({
         {step === 'active' && <section className="space-y-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4">
           <p className="flex items-center gap-2 font-semibold"><CheckCircle2 className="size-5" />{w('devPilotNowActive')}</p>
           <p className="text-sm text-muted-foreground">اعتمدت الجلسة {state.active_admissions} أرقام لنوع {state.approved_workload}؛ سعة الاعتماد المخططة {state.approved_messages_per_recipient ?? 1} رسائل لكل جهة ({state.required_cohort_messages ?? state.active_admissions} رسالة). الإرسال محدود بالضوابط المحفوظة ويتوقف تلقائيًا عند تجاوزها.</p>
+          <div className="space-y-2 rounded-md border p-3">
+            <p className="text-sm font-semibold">إشعارات طلبات اعتماد الإدارة عبر OpenWA (api)</p>
+            <p className="text-xs text-muted-foreground">هذا النوع منفصل عن رسائل الوكلاء؛ لا يمنح اعتماد agent إذنًا تلقائيًا لإرسال رمز الموافقة إلى المسؤول. يؤكد المسؤول موافقته على تلقي هذه الإشعارات عبر الجلسة الحالية.</p>
+            <div className="flex items-start gap-2">
+              <Checkbox id={`pilot-admin-alert-consent-${connectionId}`} checked={adminAlertConsent}
+                disabled={running} onCheckedChange={value => setAdminAlertConsent(value === true)} />
+              <Label htmlFor={`pilot-admin-alert-consent-${connectionId}`} className="text-xs leading-relaxed">
+                أؤكد موافقة المسؤول الموثق على استقبال إشعارات الموافقة على واتساب من هذه الجلسة.
+              </Label>
+            </div>
+            {trustedAdmins.map(identity =>
+              <Button key={identity.id} type="button" variant="outline" size="sm"
+                disabled={running || !adminAlertConsent || (needsDuplicateReview && !duplicateAck)}
+                onClick={() => void approveAdminAlert(identity.id)}>
+                اعتماد {identity.display_name || `المسؤول ••••${identity.normalized_address.slice(-4)}`} لإشعارات الإدارة
+              </Button>)}
+            {!trustedAdmins.length && <p className="text-xs text-muted-foreground">لا توجد هوية إدارة موثقة لديها صلاحية الاعتماد في هذا الحساب.</p>}
+          </div>
           <p className="text-xs text-muted-foreground">الحدود الفعلية الآن: {state.guardrails.hourly_cap} رسالة/ساعة و{state.guardrails.daily_cap} رسالة/يوم؛ حد الوكيل {state.guardrails.pilot_agent_hourly_cap ?? state.guardrails.hourly_cap}/ساعة و{state.guardrails.pilot_agent_daily_cap ?? state.guardrails.daily_cap}/يوم. تغييرها لا يحدث تلقائيًا من حساب الحد الأدنى.</p>
           <Button variant="destructive" disabled={running} onClick={() => void submit('stop')}>
             <Square className="me-2 size-4" />{w('devPilotStop')}

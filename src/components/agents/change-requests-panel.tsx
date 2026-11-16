@@ -48,6 +48,7 @@ export function ChangeRequestsPanel() {
   const [requests, setRequests] = useState<ChangeRequestRow[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [confirmCodeById, setConfirmCodeById] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<string>('pending');
 
@@ -71,11 +72,12 @@ export function ChangeRequestsPanel() {
 
   async function act(
     id: string,
-    action: 'approve' | 'reject' | 'cancel' | 'execute',
+    action: 'approve' | 'reject' | 'cancel' | 'execute' | 'resend',
     body?: Record<string, unknown>,
   ) {
     setBusy(`${action}:${id}`);
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch(`/api/change-requests/${id}/${action}`, {
         method: 'POST',
@@ -85,9 +87,15 @@ export function ChangeRequestsPanel() {
       const json = (await res.json()) as {
         status?: string;
         error?: string;
+        message?: string;
+        accepted_by_provider?: boolean;
       };
       if (!res.ok || (!json.status && action !== 'execute')) {
         throw new Error(json.error ?? `${action} failed`);
+      }
+      if (action === 'resend') {
+        setNotice(json.message ?? (json.accepted_by_provider ? 'قَبِل المزود إشعار الموافقة. التسليم لم يُؤكد بعد.' : 'تعذّر تأكيد قبول الإشعار.'));
+        setConfirmCodeById(prev => ({ ...prev, [id]: '' }));
       }
       await load();
     } catch (e) {
@@ -127,6 +135,7 @@ export function ChangeRequestsPanel() {
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {notice ? <p className="text-sm text-amber-700 dark:text-amber-400">{notice}</p> : null}
 
       {requests.length === 0 ? (
         <p className="text-sm text-muted-foreground">{tCr('empty')}</p>
@@ -213,6 +222,17 @@ export function ChangeRequestsPanel() {
                         <XCircle className="me-1.5 h-4 w-4" />
                       )}
                       {tCr('reject')}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={busy !== null}
+                      onClick={() => {
+                        if (window.confirm('سيُلغى رمز الموافقة السابق ويُصدر رمز جديد للرقم الإداري، بشرط أن تكون قناة واتساب وPilot جاهزتين. هل تريد إعادة الإشعار؟'))
+                          void act(r.id, 'resend');
+                      }}
+                    >
+                      {busy === `resend:${r.id}` ? <Loader2 className="me-1.5 h-4 w-4 animate-spin" /> : <Send className="me-1.5 h-4 w-4" />}
+                      إعادة إشعار الإدارة برمز جديد
                     </Button>
                     <Button
                       variant="ghost"

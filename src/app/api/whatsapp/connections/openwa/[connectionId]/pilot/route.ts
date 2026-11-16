@@ -199,7 +199,7 @@ export async function POST(request: Request, context: Context) {
     assertTestConnectionId(connectionId)
     const body = await request.json() as Record<string, unknown>
     const action = body.action
-    if (!['prepare', 'limits', 'grant', 'grant_agent', 'grant_batch', 'activate', 'stop', 'disable', 'enable'].includes(String(action))) return deny('Unknown pilot action', 400)
+    if (!['prepare', 'limits', 'grant', 'grant_agent', 'grant_batch', 'grant_admin_alert', 'activate', 'stop', 'disable', 'enable'].includes(String(action))) return deny('Unknown pilot action', 400)
     const s = await snapshot(adminDb, accountId, connectionId)
 
     if (action === 'disable' || action === 'enable') {
@@ -303,6 +303,67 @@ export async function POST(request: Request, context: Context) {
       checkDb(error, 'limits')
       if (!updated) return deny('Pilot state changed; retry after refresh', 409)
       return NextResponse.json(safeStatus(await snapshot(adminDb, accountId, connectionId)), { headers: noStore })
+    }
+
+    if (action === 'grant_admin_alert') {
+      // Explicit UI opt-in, scoped to a VERIFIED trusted administrator only.
+      // This additive API grant does not revoke the already authorized
+      // Agent cohort or trigger any outbound send.
+      if (body.consent_confirmed !== true || body.confirm_admin_alerts !== true) {
+        return deny('Explicit trusted-admin WhatsApp notification consent is required', 400)
+      }
+      const identityId = typeof body.identity_id === 'string' ? body.identity_id : ''
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(identityId)) {
+        return deny('Select an existing trusted administrator', 400)
+      }
+      if (!s.configured || !s.guard.pilot_enabled || !s.enforced ||
+          !s.active || s.guard.manual_paused || s.pending !== 0 ||
+          !s.connection.session_id || !['ready','connected'].includes(s.connection.status) ||
+          (s.duplicates > 1 && body.ack_duplicate_sessions !== true)) {
+        return deny('A ready, explicitly activated TEST Pilot and zero unsettled sends are required', 409)
+      }
+      const { data: adminIdentity, error: adminError } = await adminDb.from('trusted_admin_identities')
+        .select('id,normalized_address,status,verified_at,allowed_capabilities')
+        .eq('account_id', accountId).eq('id', identityId)
+        .eq('channel', 'whatsapp').eq('status', 'active')
+        .is('revoked_at', null).maybeSingle()
+      checkDb(adminError, 'trusted-admin-alert-identity')
+      if (!adminIdentity?.verified_at ||
+          !Array.isArray(adminIdentity.allowed_capabilities) ||
+          !adminIdentity.allowed_capabilities.includes('change_requests.approve')) {
+        return deny('Trusted administrator is not verified or lacks approval capability', 409)
+      }
+      const resolved = await resolveOpenWAPilotRecipientForGrant(
+        adminDb, accountId, connectionId, adminIdentity.normalized_address,
+      )
+      const hash = openWAPilotRecipientHash(accountId, connectionId, resolved.recipient)
+      if (!hash) return deny('Trusted admin recipient could not be resolved', 409)
+      const { data: already, error: alreadyError } = await adminDb
+        .from('whatsapp_openwa_pilot_allowlist').select('id')
+        .eq('account_id', accountId).eq('connection_id', connectionId)
+        .eq('workload', 'api').eq('recipient_hash', hash)
+        .eq('active', true).gt('expires_at', new Date().toISOString()).maybeSingle()
+      checkDb(alreadyError, 'admin-alert-existing-grant')
+      if (already) return NextResponse.json({
+        ...safeStatus(await snapshot(adminDb, accountId, connectionId)),
+        admin_alert_granted: true, already_granted: true,
+      }, { headers: noStore })
+      if (s.grants >= MAX_BATCH_CONTACTS) return deny('The TEST cohort has reached its explicit approval limit', 409)
+      const now = new Date()
+      const { error: grantError } = await adminDb.from('whatsapp_openwa_pilot_allowlist')
+        .upsert({
+          account_id: accountId, connection_id: connectionId,
+          workload: 'api', recipient_hash: hash,
+          active: true, approved_by: user.id,
+          approved_at: now.toISOString(), expires_at: new Date(now.getTime() + 4 * 3600_000).toISOString(),
+          consent_basis: 'trusted_admin_verified', consent_attested_at: now.toISOString(),
+          messages_per_recipient: s.approvedMessagesPerRecipient || 1,
+        }, { onConflict: 'account_id,connection_id,recipient_hash,workload' })
+      checkDb(grantError, 'trusted-admin-api-grant')
+      return NextResponse.json({
+        ...safeStatus(await snapshot(adminDb, accountId, connectionId)),
+        admin_alert_granted: true,
+      }, { headers: noStore })
     }
 
     if (action === 'grant_batch') {

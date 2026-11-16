@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 
 import { normalizeOpenWAInboundMessage, normalizeOpenWAOwnSentMessage } from '@/lib/whatsapp/inbound-normalization'
 import { processOpenWAOwnSentEcho } from '@/lib/whatsapp/transport/openwa/outbound-echo'
+import { isSensitiveOpenWAAdminOwnSentEcho } from '@/lib/whatsapp/transport/openwa/admin-approval-echo'
 import { extractOpenWASignedInlineMedia } from '@/lib/whatsapp/transport/openwa/webhook-media'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
 import { applyOpenWAStatusWithRetry, parseOpenWAStatusEvent } from '@/lib/whatsapp/status-lifecycle'
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
         }
       } else if (event === 'message.sent') {
         const ownSent = normalizeOpenWAOwnSentMessage(envelope, connectionId)
-        if (ownSent) {
+        if (ownSent && !isSensitiveOpenWAAdminOwnSentEcho(ownSent)) {
           const { data: account, error: accountError } = await db.from('accounts')
             .select('owner_user_id').eq('id', accountId).maybeSingle()
           if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')

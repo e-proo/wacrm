@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { notifyTrustedAdminsOfChangeRequest } from './business-notifications'
+import { assertTrustedAdminAlertResendReady, notifyTrustedAdminsOfChangeRequest } from './business-notifications'
 
 export interface ChangeRequestRow {
   id: string
@@ -138,6 +138,80 @@ export async function createChangeRequest(
     status: row.status,
     contentDigest: row.content_digest,
   }
+}
+
+
+/**
+ * Explicit admin UI action. The SQL RPC atomically rotates a pending approval
+ * PIN with a five-minute cooldown; no plaintext PIN is returned to the
+ * browser, message table or logs. Never recreate or auto-retry the proposal.
+ */
+export async function reissueChangeRequestAdminAlert(input: {
+  accountId: string
+  changeRequestId: string
+}): Promise<{ status: 'pending'; eligible: number; providerAccepted: number; inAppCreated: number }> {
+  const db = supabaseAdmin()
+  const { data: request, error: lookupError } = await db.from('change_requests')
+    .select('id,code,status,expires_at,target_type,summary,proposed_payload')
+    .eq('account_id', input.accountId).eq('id', input.changeRequestId).maybeSingle()
+  if (lookupError) throw lookupError
+  if (!request) throw new ChangeRequestError('CHANGE_REQUEST_NOT_FOUND', 'طلب الموافقة غير موجود في هذا الحساب.', 404)
+  if (request.status !== 'pending' || Date.parse(request.expires_at) <= Date.now()) {
+    throw new ChangeRequestError('CHANGE_REQUEST_NOT_PENDING', 'لا يمكن إعادة الإشعار؛ الطلب لم يعد بانتظار الاعتماد أو انتهت صلاحيته.', 409)
+  }
+  const payload = request.proposed_payload && typeof request.proposed_payload === 'object'
+    ? request.proposed_payload as Record<string, unknown> : {}
+  try {
+    await assertTrustedAdminAlertResendReady(input.accountId, payload)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : ''
+    const known = ['ADMIN_ALERT_NO_VERIFIED_APPROVER','ADMIN_ALERT_INVALID_SOURCE',
+      'ADMIN_ALERT_OPENWA_CONNECTION_UNAVAILABLE','ADMIN_ALERT_PILOT_PAUSED',
+      'ADMIN_ALERT_PILOT_API_NOT_APPROVED','ADMIN_ALERT_META_CONFIGURATION_MISSING']
+    const code = known.includes(reason) ? reason : 'ADMIN_ALERT_PREFLIGHT_FAILED'
+    const message = code === 'ADMIN_ALERT_PILOT_API_NOT_APPROVED'
+      ? 'اعتمد الرقم الإداري من إعدادات Pilot للجلسة الحالية ضمن إشعارات الإدارة (api) أولًا، ثم أعد الإشعار.'
+      : code === 'ADMIN_ALERT_PILOT_PAUSED'
+        ? 'جلسة OpenWA أو Pilot موقوفة، أو حارس الإرسال قيد الحظر. لا يمكن إصدار رمز لن يصل للمسؤول.'
+        : code === 'ADMIN_ALERT_OPENWA_CONNECTION_UNAVAILABLE'
+          ? 'جلسة OpenWA الأصلية للطلب غير جاهزة؛ تحقق من الجلسة قبل إعادة الإشعار.'
+          : 'تعذّر التأكد من جاهزية قناة إرسال الإشعار الإداري.'
+    throw new ChangeRequestError(code, message, 409)
+  }
+  const { data, error: rotateError } = await db.rpc('reissue_pending_change_request_approval_pin', {
+    p_account_id: input.accountId, p_change_request_id: input.changeRequestId,
+  })
+  if (rotateError) {
+    const reason = rotateError.message ?? ''
+    const code = ['CHANGE_REQUEST_PIN_REISSUE_COOLDOWN','CHANGE_REQUEST_PIN_REISSUE_LIMIT',
+      'CHANGE_REQUEST_PIN_ATTEMPTS_LOCKED','CHANGE_REQUEST_NOT_PENDING'].find(c => reason.includes(c))
+      ?? 'CHANGE_REQUEST_PIN_REISSUE_FAILED'
+    throw new ChangeRequestError(code, code === 'CHANGE_REQUEST_PIN_REISSUE_COOLDOWN'
+      ? 'يمكن إصدار رمز جديد كل خمس دقائق فقط. لا تعاود الإرسال قبل انتهاء المدة.'
+      : 'تعذّر إصدار رمز جديد بأمان؛ تحقق من حالة الطلب.', 409)
+  }
+  const issued = (data as Array<{ request_code: number; confirmation_code: string }> | null)?.[0]
+  if (!issued?.confirmation_code || !/^\d{4}$/.test(issued.confirmation_code)) {
+    throw new ChangeRequestError('CHANGE_REQUEST_PIN_REISSUE_FAILED', 'لم يتم إصدار رمز صالح.', 500)
+  }
+  let notification: Awaited<ReturnType<typeof notifyTrustedAdminsOfChangeRequest>>
+  try {
+    notification = await notifyTrustedAdminsOfChangeRequest({
+      accountId: input.accountId, changeRequestId: input.changeRequestId,
+      requestCode: request.code, confirmationCode: issued.confirmation_code,
+      summary: request.summary, targetType: request.target_type,
+      proposedPayload: payload,
+      notificationAttemptId: `reissue-${Date.now()}`,
+    })
+  } catch {
+    // The PIN has been rotated. Never retry a potentially dispatched send
+    // with a fresh idempotency key automatically.
+    throw new ChangeRequestError('ADMIN_ALERT_OUTCOME_UNCONFIRMED',
+      'تم إصدار رمز جديد، لكن تعذّر تأكيد قبول مزود الإرسال. لا تعاود الإرسال عشوائيًا.', 502)
+  }
+  return { status: 'pending', eligible: notification.eligible,
+    providerAccepted: notification.whatsappSent,
+    inAppCreated: notification.inAppCreated }
 }
 
 /** Dashboard approval: authenticated admin + one-time PIN + digest check. */
