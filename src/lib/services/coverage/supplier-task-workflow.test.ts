@@ -53,6 +53,7 @@ const stageRow = () => ({
 type Negotiation = ReturnType<typeof stageRow>
 let row: Negotiation
 let currentMessage='نعم يمكنني توفير التغطية'
+let previousBotMessage='هل يمكنكم توفير تغطية بقيمة 400 SAR؟'
 let currentRun='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 let currentSource='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 let storeWrites: Array<{table:string,op:string,changes:Record<string,unknown>}> = []
@@ -73,7 +74,7 @@ function makeDb() {
         order(_field:string,_opts?:unknown) { return query },
         limit(n:number) {
           if(table==='messages') {
-            return Promise.resolve({data:[{ content_text:'شكراً! للتأكيد، العمولة **7 لكل 1000**؟' }].slice(0,n),error:null})
+            return Promise.resolve({data:[{ content_text:previousBotMessage }].slice(0,n),error:null})
           }
           throw new Error('unexpected .limit')
         },
@@ -124,6 +125,7 @@ beforeEach(()=>{
   storeWrites=[]
   row=stageRow()
   currentMessage='نعم يمكنني توفير التغطية'
+  previousBotMessage='هل يمكنكم توفير تغطية بقيمة 400 SAR؟'
   currentRun='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
   currentSource='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
   mocked.db=makeDb()
@@ -184,8 +186,15 @@ describe('server-bound Coverage supplier lifecycle',()=>{
       supplier_task:{task_id:taskId,task_target_id:targetId,source_request_id:requestId},
     })
     expect(mocked.policy).toHaveBeenCalledWith(expect.objectContaining({
-      constraints:{},context:expect.objectContaining({plane:'customer',proposalToolsEnabled:undefined}),
+      constraints:{},context:expect.objectContaining({plane:'customer',features:expect.objectContaining({proposalToolsEnabled:true})}),
     }))
+  })
+  it('continues a pre-migration commission-confirmation question without inferring amount or details',async()=>{
+    previousBotMessage='شكراً! للتأكيد، العمولة **7 لكل 1000**؟'
+    const result=await reply('نعم أؤكد',9)
+    expect(row).toMatchObject({stage:'amount',commission_per_thousand:'7',offered_amount:null})
+    expect(result?.text).toContain('400 SAR')
+    expect(mocked.proposed).not.toHaveBeenCalled()
   })
   it('fails closed when the frozen proposal permission is revoked',async()=>{
     Object.assign(row,{stage:'confirmation',offered_amount:'400',commission_per_thousand:'7',
