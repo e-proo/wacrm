@@ -66,6 +66,7 @@ const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (conte
       .eq('id', payload.source_task_id).maybeSingle()
     if (taskError) throw taskError
     if (!task || task.task_type !== 'coverage.sourcing' ||
+        ['cancelled','failed'].includes(task.status) ||
         (task.task_context as Record<string, unknown>)?.coverageRequestId !== payload.source_coverage_request_id) {
       throw new DomainChangeExecutionError('SUPPLIER_OFFER_TASK_BINDING_INVALID',
         'Proposed supplier offer does not match the source Task/Request.')
@@ -79,6 +80,22 @@ const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (conte
         target.conversation_id !== payload.conversation_id) {
       throw new DomainChangeExecutionError('SUPPLIER_OFFER_TARGET_BINDING_INVALID',
         'Offer supplier is not the exact Task target.')
+    }
+    const { data: boundRequest, error: requestError } = await checkDb.from('coverage_requests')
+      .select('id,service_id,requested_amount,reserved_amount,fulfilled_amount,currency,status')
+      .eq('account_id', context.accountId).eq('id', payload.source_coverage_request_id)
+      .maybeSingle()
+    if (requestError) throw requestError
+    const available = boundRequest
+      ? Number(boundRequest.requested_amount) - Number(boundRequest.reserved_amount) -
+        Number(boundRequest.fulfilled_amount)
+      : 0
+    if (!boundRequest || !['active','partially_reserved'].includes(boundRequest.status) ||
+        boundRequest.service_id !== payload.service_id ||
+        boundRequest.currency !== payload.currency ||
+        !Number.isFinite(available) || offerAmount.toNumber() > available) {
+      throw new DomainChangeExecutionError('SUPPLIER_OFFER_SOURCE_REQUEST_CHANGED',
+        'The linked Coverage Request is no longer active or has insufficient remaining capacity.')
     }
     linkedTarget = { id: target.id, status: target.status }
   }
@@ -103,6 +120,9 @@ const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (conte
           : {}),
         ...(payload.deal_date ? { deal_date: payload.deal_date } : {}),
         source_change_request_id: change.id,
+        ...(payload.source_coverage_request_id && payload.supplier_terms?.details
+          ? { notes: `من مهمة توفير تغطية للطلب ${payload.source_coverage_request_id}: ${payload.supplier_terms.details.slice(0, 800)}` }
+          : {}),
         status: 'active',
         created_by: context.actorUserId,
       },
