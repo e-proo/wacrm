@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
     minimum_interval_ms: 15000, jitter_ms: 3000, warmup_hourly_cap: 3, warmup_daily_cap: 10 },
   active: 0,
   grantWorkload: 'manual' as 'manual' | 'agent',
+  messagesPerRecipient: 1,
   recentInbound: true,
   inboundInTenant: true,
   guardConfigured: true,
@@ -56,9 +57,10 @@ function request(body: unknown) {
 
 function dbFrom(table: string) {
   let operation = 'select'
+  let selectedFields = ''
   const filters: Record<string, unknown> = {}
   const q = {
-    select: (_fields?: string, _options?: unknown) => q,
+    select: (_fields?: string, _options?: unknown) => { selectedFields = _fields ?? ''; return q },
     eq: (key: string, value: unknown) => { filters[key] = value; return q },
     is: (_key: string, _value: unknown) => q,
     gt: (_key: string, _value: unknown) => q,
@@ -94,6 +96,7 @@ function dbFrom(table: string) {
         const first = Array.isArray(payload) ? payload[0] : payload
         h.active = Array.isArray(payload) ? payload.length : 1
         h.grantWorkload = first.workload === 'agent' ? 'agent' : 'manual'
+        h.messagesPerRecipient = first.messages_per_recipient ?? 1
       }
       if (table === 'whatsapp_connection_guardrails') {
         h.guardConfigured = true
@@ -109,7 +112,11 @@ function dbFrom(table: string) {
       const count = table === 'whatsapp_openwa_pilot_allowlist'
         ? (filters.workload && filters.workload !== h.grantWorkload ? 0 : h.active)
         : table === 'whatsapp_connections' ? h.duplicates : h.pending
-      return Promise.resolve(resolve({ data: null, count, error: null }))
+      const data = table === 'whatsapp_openwa_pilot_allowlist' &&
+        selectedFields === 'messages_per_recipient'
+        ? Array.from({ length: h.active }, () => ({ messages_per_recipient: h.messagesPerRecipient }))
+        : null
+      return Promise.resolve(resolve({ data, count, error: null }))
     },
   }
   return q
@@ -131,6 +138,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
       pilot_manual_hourly_cap: undefined, pilot_manual_daily_cap: undefined })
     h.active = 0
     h.grantWorkload = 'manual'
+    h.messagesPerRecipient = 1
     h.recentInbound = true
     h.inboundInTenant = true
     h.guardConfigured = true
