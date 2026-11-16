@@ -215,7 +215,8 @@ BEGIN
     RAISE EXCEPTION 'SOF66 missing attestation accepted: %',v_result;
   END IF;
   UPDATE public.whatsapp_openwa_pilot_allowlist
-    SET consent_attested_at=now(),expires_at=now()-interval '1 second'
+    SET consent_attested_at=now(),approved_at=now()-interval '5 hours',
+        expires_at=now()-interval '1 second'
     WHERE account_id=v_account AND connection_id=v_wa AND recipient_hash=v_hash;
   v_result:=public.reserve_expected_provider_agent_task_outbound_message(
     v_run,'coverage.sourcing_message',2,'text',
@@ -227,7 +228,7 @@ BEGIN
   END IF;
 
   UPDATE public.whatsapp_openwa_pilot_allowlist
-    SET expires_at=now()+interval '4 hours'
+    SET approved_at=now(),expires_at=now()+interval '4 hours'
     WHERE account_id=v_account AND connection_id=v_wa AND recipient_hash=v_hash;
   UPDATE public.whatsapp_connection_guardrails
     SET manual_paused=true WHERE connection_id=v_wa;
