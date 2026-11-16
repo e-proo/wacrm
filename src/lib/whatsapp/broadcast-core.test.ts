@@ -22,3 +22,19 @@ describe('createBroadcast provider-neutral planning', () => {
 })
 function statusDb(counts: Record<string, number>, total: number, writes: { update?: Record<string, unknown> }) { return { from(table: string) { let status: string | null = null; const b: Record<string, unknown> = { select: () => b, eq: (col: string, val: unknown) => { if (col === 'status') status = val as string; return b }, update: (row: Record<string, unknown>) => { if (table === 'broadcasts') writes.update = row; return b }, then: (resolve: (r: { count: number; error: null }) => unknown) => resolve({ count: status === null ? total : (counts[status] ?? 0), error: null }) }; return b } } as unknown as SupabaseClient }
 describe('finalizeBroadcastStatus', () => { it('leaves sending while recipients are pending', async () => { const writes: { update?: Record<string, unknown> } = {}; await finalizeBroadcastStatus(statusDb({ pending: 25 }, 1025, writes), 'b-1'); expect(writes.update).toBeUndefined() }); it('marks a fully-failed broadcast failed', async () => { const writes: { update?: Record<string, unknown> } = {}; await finalizeBroadcastStatus(statusDb({ pending: 0, failed: 10 }, 10, writes), 'b-1'); expect(writes.update?.status).toBe('failed') }); it('marks a partially-failed broadcast sent', async () => { const writes: { update?: Record<string, unknown> } = {}; await finalizeBroadcastStatus(statusDb({ pending: 0, failed: 3 }, 10, writes), 'b-1'); expect(writes.update?.status).toBe('sent') }) })
+
+describe('personalization and unknown-outcome safety', () => {
+  it('renders distinct OpenWA recipient values', async () => {
+    const { renderOpenWABroadcastText } = await import('./broadcast-core')
+    expect(renderOpenWABroadcastText({ body_text: 'Hello {{1}}, order {{2}}' } as never, ['Ali', 'A123'])).toBe('Hello Ali, order A123')
+  })
+  it('rejects missing personalization instead of sending raw placeholders', async () => {
+    const { renderOpenWABroadcastText } = await import('./broadcast-core')
+    expect(() => renderOpenWABroadcastText({ body_text: 'Hello {{1}}' } as never, [])).toThrow(BroadcastError)
+  })
+  it('keeps an unresolved campaign pending human reconciliation', async () => {
+    const writes: { update?: Record<string, unknown> } = {}
+    await finalizeBroadcastStatus(statusDb({ pending: 0, sending: 0, requires_reconciliation: 1 }, 1, writes), 'b-1')
+    expect(writes.update).toBeUndefined()
+  })
+})
