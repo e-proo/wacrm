@@ -297,7 +297,7 @@ export function OpenWAPilotControls({
             وأعد التفعيل. الرسالة التي رُفضت لم تصل إلى المزود ولن يُعاد إرسالها تلقائيًا؛ يلزم حدث/رسالة جديدة بعد التصحيح.
           </p>}
         </AlertDescription>
-      </Alert>
+      </Alert>}
 
       {state && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
         <div className="space-y-1">
