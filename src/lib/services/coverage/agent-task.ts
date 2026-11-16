@@ -660,6 +660,24 @@ export const COVERAGE_SOURCING_COMPLETION_POLICY: AgentTaskCompletionPolicy = {
       (status) => status === 'paused_for_human',
     ).length
 
+    // Sourcing a genuine, admin-approved offer completes the SUPPLIER SEARCH,
+    // even if the buyer's source request has not yet been reserved/fulfilled.
+    // Do not label the financial coverage Request itself fulfilled: that is a
+    // separate settlement / reservation lifecycle controlled by WACRM.
+    if (completedTargets > 0) {
+      return {
+        status: 'completed',
+        reason: 'supplier_offer_executed',
+        payload: {
+          coverageRequestId,
+          remainingAmount: String(remaining),
+          requestStatus: requestRow.status,
+          completedSuppliers: completedTargets,
+          totalSuppliers: statuses.length,
+        },
+      }
+    }
+
     return {
       status: 'partially_completed',
       reason:
