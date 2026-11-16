@@ -3,6 +3,7 @@ import { getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { mirrorInboundMedia } from '@/lib/whatsapp/mirror-inbound-media'
 import { hydrateOpenWAInboundMessageMedia } from '@/lib/whatsapp/transport/openwa/inbound-media'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
+import { resolveOpenWAInboundContactIdentity } from '@/lib/whatsapp/transport/openwa/contact-identity'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { reopenClosedConversation } from '@/lib/conversations/reopen'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
@@ -172,16 +173,27 @@ export async function processNormalizedInboundMessage(
   // these bytes in NormalizedInboundMessage sent to agents/automations.
   signedInlineMedia?: string,
 ) {
-  const senderPhone = normalizePhone(message.from)
+  const openWAIdentity = message.provider === 'openwa'
+    ? await resolveOpenWAInboundContactIdentity(supabaseAdmin(), {
+        accountId, connectionId: message.connectionId,
+        sender: message.from, providerChatId: message.providerChatId,
+      })
+    : null
+  const senderPhone = openWAIdentity?.phone ?? normalizePhone(message.from)
   const contactName = contact.profile.name
 
-  // Find or create contact
-  const contactOutcome = await findOrCreateContact(
-    accountId,
-    configOwnerUserId,
-    senderPhone,
-    contactName
-  )
+  // A verified historical native LID already belongs to a real CRM contact.
+  // Reuse that exact account-scoped contact without changing its saved name.
+  // Never create a second contact using opaque LID digits as the phone.
+  const contactOutcome = openWAIdentity?.contactId
+    ? await (async () => {
+        const { data: existing, error } = await supabaseAdmin().from('contacts')
+          .select('*').eq('account_id', accountId).eq('id', openWAIdentity.contactId)
+          .eq('phone_normalized', senderPhone).maybeSingle()
+        if (error || !existing) throw new Error('Verified OpenWA contact mapping changed before processing')
+        return { contact: existing, wasCreated: false }
+      })()
+    : await findOrCreateContact(accountId, configOwnerUserId, senderPhone, contactName)
   if (!contactOutcome) return
   const contactRecord = contactOutcome.contact
 
