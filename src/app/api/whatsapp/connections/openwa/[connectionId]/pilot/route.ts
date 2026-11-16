@@ -90,6 +90,14 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     .eq('connection_id', connectionId).eq('active', true).eq('workload', 'agent')
     .gt('expires_at', new Date().toISOString())
   checkDb(agentError, 'agent-grants')
+  const { count: apiGrants, error: apiError } = await db.from('whatsapp_openwa_pilot_allowlist')
+    .select('id', { count: 'exact', head: true }).eq('account_id', accountId)
+    .eq('connection_id', connectionId).eq('active', true).eq('workload', 'api')
+    .gt('expires_at', new Date().toISOString())
+  checkDb(apiError, 'api-grants')
+  // An administrative API grant is independent of the existing Agent cohort
+  // capacity (e.g., 3×33 + one admin is NOT 4×33).
+  const cohortGrants = (manualGrants ?? 0) + (agentGrants ?? 0)
   // Display the latest denied attempt to the authenticated session admin.
   // No recipient hash, phone, chat ID, credential or message body reaches UI.
   const { data: lastDenial, error: denialError } = await db
@@ -101,14 +109,15 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     .order('created_at', { ascending: false }).limit(1).maybeSingle()
   checkDb(denialError, 'last-admission-denial')
   let approvedMessagesPerRecipient = 1
-  if ((grants ?? 0) > 0) {
+  if (cohortGrants > 0) {
     const { data: grantCapacity, error: capError } = await db.from('whatsapp_openwa_pilot_allowlist')
       .select('messages_per_recipient').eq('account_id', accountId)
       .eq('connection_id', connectionId).eq('active', true)
+      .in('workload', ['manual', 'agent'])
       .gt('expires_at', new Date().toISOString()).limit(MAX_BATCH_CONTACTS + 1)
     checkDb(capError, 'grant-capacity')
     const perContact = (grantCapacity ?? []).map(row => Number(row.messages_per_recipient))
-    if (perContact.length !== grants ||
+    if (perContact.length !== cohortGrants ||
         perContact.some(value => !Number.isInteger(value) ||
           value < 1 || value > OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT ||
           value !== perContact[0])) {
@@ -134,7 +143,7 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
   let enforced = false
   try { enforced = openWAPilotEnforcementEnabled() } catch { enforced = false }
   return { connection, guard: safeGuard, configured, grants: grants ?? 0,
-    manualGrants: manualGrants ?? 0, agentGrants: agentGrants ?? 0,
+    manualGrants: manualGrants ?? 0, agentGrants: agentGrants ?? 0, apiGrants: apiGrants ?? 0, cohortGrants,
     pending: pending ?? 0, duplicates, enforced, approvedMessagesPerRecipient,
     lastDenial: lastDenial && ['not_allowlisted','invalid_identity','connection_scope_mismatch','invalid_request'].includes(lastDenial.reason)
       ? { workload: lastDenial.workload, reason: lastDenial.reason, created_at: lastDenial.created_at }
@@ -156,10 +165,11 @@ function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
       pilot_manual_daily_cap: s.guard.pilot_manual_daily_cap,
     },
     active_admissions: s.grants,
-    approved_messages_per_recipient: s.grants > 0 ? s.approvedMessagesPerRecipient : null,
-    required_cohort_messages: s.grants * s.approvedMessagesPerRecipient,
+    approved_messages_per_recipient: s.cohortGrants > 0 ? s.approvedMessagesPerRecipient : null,
+    required_cohort_messages: s.cohortGrants * s.approvedMessagesPerRecipient,
     agent_admissions: s.agentGrants,
     manual_admissions: s.manualGrants,
+    api_admissions: s.apiGrants,
     approved_workload: s.grants > 0
       ? (s.agentGrants === s.grants ? 'agent' : s.manualGrants === s.grants ? 'manual' : null)
       : null,
@@ -357,7 +367,7 @@ export async function POST(request: Request, context: Context) {
           active: true, approved_by: user.id,
           approved_at: now.toISOString(), expires_at: new Date(now.getTime() + 4 * 3600_000).toISOString(),
           consent_basis: 'trusted_admin_verified', consent_attested_at: now.toISOString(),
-          messages_per_recipient: s.approvedMessagesPerRecipient || 1,
+          messages_per_recipient: 1,
         }, { onConflict: 'account_id,connection_id,recipient_hash,workload' })
       checkDb(grantError, 'trusted-admin-api-grant')
       return NextResponse.json({
