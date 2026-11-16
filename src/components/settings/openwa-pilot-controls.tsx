@@ -456,10 +456,10 @@ export function OpenWAPilotControls({
               {agentMissingCaps.length > 0 && <p className="text-xs">قيود مهام الوكيل: {agentMissingCaps.map(key => capName[key] ?? key).join('، ')}.</p>}
               {manualMissingCaps.length > 0 && <p className="text-xs">قيود الرسائل العادية: {manualMissingCaps.map(key => capName[key] ?? key).join('، ')}.</p>}
               <div className="flex flex-wrap gap-2">
-                {agentMissingCaps.length > 0 && <Button type="button" size="sm" variant="outline" disabled={running}
-                  disabled={running || !feasibleCapacity} onClick={() => recommendCaps('agent')}>تجهيز حدود الوكيل لـ {selectedRecipients.length} أرقام</Button>}
-                {manualMissingCaps.length > 0 && <Button type="button" size="sm" variant="outline" disabled={running}
-                  disabled={running || !feasibleCapacity} onClick={() => recommendCaps('manual')}>تجهيز الحدود العادية لـ {selectedRecipients.length} أرقام</Button>}
+                {agentMissingCaps.length > 0 && <Button type="button" size="sm" variant="outline" disabled={running || !feasibleCapacity}
+                  onClick={() => recommendCaps('agent')}>تجهيز حدود الوكيل لـ {selectedRecipients.length} أرقام</Button>}
+                {manualMissingCaps.length > 0 && <Button type="button" size="sm" variant="outline" disabled={running || !feasibleCapacity}
+                  onClick={() => recommendCaps('manual')}>تجهيز الحدود العادية لـ {selectedRecipients.length} أرقام</Button>}
               </div>
               <p className="text-xs text-muted-foreground">سيتم تعبئة الإعدادات المتقدمة فقط. يجب مراجعتها وحفظها قبل الاعتماد، ولن يبدأ الإرسال أو تتغيّر الحدود تلقائيًا.</p>
             </div>}
@@ -479,8 +479,7 @@ export function OpenWAPilotControls({
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            اضبط حد الساعة واليوم وأول تواصل، وحد نوع الرسائل المختار، بحيث تستوعب
-            الأرقام المعتمدة. تبقى الحدود العامة وإيقاف الجلسة وسلامة OpenWA سارية.
+            اضبط الحد الساعي واليومي والإحماء حسب عدد الجهات × الرسائل لكل جهة، وحد أول تواصل حسب عدد الجهات فقط. تبقى الحدود العامة وإيقاف الجلسة وسلامة OpenWA سارية.
           </p>
         </section>}
 
