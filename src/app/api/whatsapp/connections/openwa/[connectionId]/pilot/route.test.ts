@@ -499,7 +499,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(await result.json()).toMatchObject({
       code: 'pilot_cohort_caps_insufficient',
       required_count: 3, messages_per_recipient: 3, required_messages: 9,
-      missing_caps: ['hourly_cap', 'first_touch_daily_cap', 'warmup_hourly_cap'],
+      missing_caps: ['hourly_cap', 'first_touch_daily_cap', 'warmup_hourly_cap', 'pilot_agent_hourly_cap'],
     })
     expect(h.calls).toEqual([])
   })
