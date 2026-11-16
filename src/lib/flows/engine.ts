@@ -401,6 +401,7 @@ async function sendButtonsAndSuspend(
     headerText: cfg.header_text,
     footerText: cfg.footer_text,
     buttons: cfg.buttons.map((b) => ({ id: b.reply_id, title: b.title })),
+    engineIdempotencyKey: 'flow:' + run.id + ':' + node.node_key + ':' + run.reprompt_count,
   });
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_buttons",
@@ -445,6 +446,7 @@ async function sendListAndSuspend(
         description: r.description,
       })),
     })),
+    engineIdempotencyKey: 'flow:' + run.id + ':' + node.node_key + ':' + run.reprompt_count,
   });
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_list",
@@ -620,6 +622,7 @@ async function advanceFromNodeKey(
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.text, run.vars),
+          engineIdempotencyKey: 'flow:' + run.id + ':' + node.node_key,
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "send_message",
@@ -650,6 +653,7 @@ async function advanceFromNodeKey(
             ? interpolateVars(cfg.caption, run.vars)
             : undefined,
           filename: cfg.filename,
+          engineIdempotencyKey: 'flow:' + run.id + ':' + node.node_key,
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "send_media",
@@ -678,6 +682,7 @@ async function advanceFromNodeKey(
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.prompt_text, run.vars),
+          engineIdempotencyKey: 'flow:' + run.id + ':' + node.node_key + ':' + run.reprompt_count,
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "collect_input",
@@ -1058,6 +1063,7 @@ async function handleReplyForActiveRun(
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.prompt_text, run.vars),
+          engineIdempotencyKey: 'flow:' + run.id + ':' + currentNode.node_key + ':' + run.reprompt_count,
         });
       } catch (err) {
         await logEvent(db, run.id, "error", currentNode.node_key, {

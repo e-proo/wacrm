@@ -357,6 +357,8 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
 
 async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string> {
   const db = supabaseAdmin()
+  // The execution log is the durable event identity. No automated send may use an anonymous retry key.
+  const sendKey = () => { if (!args.logId) throw new Error('AUTOMATION_SEND_LOG_ID_REQUIRED'); return 'automation:' + args.logId + ':' + step.id }
 
   switch (step.step_type) {
     case 'send_message': {
@@ -371,8 +373,9 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         conversationId,
         contactId: args.contactId,
         text,
+        engineIdempotencyKey: sendKey(),
       })
-      return `sent via Meta (${whatsapp_message_id})`
+      return `message sent (${whatsapp_message_id})`
     }
 
     case 'send_buttons':
@@ -391,8 +394,9 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         conversationId,
         contactId: args.contactId,
         payload,
+        engineIdempotencyKey: sendKey(),
       })
-      return `interactive sent via Meta (${whatsapp_message_id})`
+      return `interactive sent (${whatsapp_message_id})`
     }
 
     case 'send_template': {
@@ -426,6 +430,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         templateName: cfg.template_name,
         language: cfg.language,
         params,
+        engineIdempotencyKey: sendKey(),
       })
       return `template sent via Meta (${whatsapp_message_id})`
     }

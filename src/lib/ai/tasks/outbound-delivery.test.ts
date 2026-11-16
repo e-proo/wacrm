@@ -49,8 +49,8 @@ describe('Agent Task outbound delivery boundary', () => {
 
     expect(delivery.match(/workload: 'agent',/g)).toHaveLength(2)
     expect(sendCore).toContain('input.workload ??')
-    expect(sendCore).toContain('idempotencyKey:reservationValue??undefined')
-    expect(sendCore).toContain('resolveConversationTransport(db,input.accountId,input.conversationId,input.connectionId)')
+    expect(sendCore).toContain('idempotencyKey: engineKey')
+    expect(sendCore).toContain('resolveConversationTransport(db, input.accountId, input.conversationId, input.connectionId)')
     const reservation = readFileSync(
       new URL('./outbound-runtime.ts', import.meta.url),
       'utf8',

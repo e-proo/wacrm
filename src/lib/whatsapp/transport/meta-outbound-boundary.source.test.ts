@@ -1,7 +1,20 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 function source(path: string) { return readFileSync(new URL(path, import.meta.url), 'utf8') }
-describe('OW-11 provider-neutral outbound isolation', () => {
-  it('automation text resolves the conversation transport and keeps Meta templates Meta-only', () => { const text=source('../../automations/meta-send.ts'); expect(text).toContain('resolveConversationTransport'); expect(text).not.toContain('resolveMetaTransport'); expect(text).toContain("resolved.transport.provider!=='meta_cloud'"); expect(text).toContain('OpenWA does not use Meta approved-template policy') })
-  it('Flow sends resolve the conversation transport and fail closed for OpenWA Meta-only interactive payloads', () => { const text=source('../../flows/meta-send.ts'); expect(text).toContain('resolveConversationTransport'); expect(text).not.toContain('resolveMetaTransport'); expect(text).toContain("resolved.transport.provider === 'openwa'"); expect(text).toContain("content.kind === 'interactive' || content.kind === 'template'") })
+describe('provider-neutral outbound isolation', () => {
+  it('automation/agent and Flow facades use the shared durable core', () => {
+    const automation = source('../../automations/meta-send.ts')
+    const flow = source('../../flows/meta-send.ts')
+    expect(automation).toContain('sendMessageToConversation')
+    expect(flow).toContain('sendMessageToConversation')
+    expect(automation).toContain('resolveConversationTransport')
+    expect(automation).toContain('OpenWA does not use Meta approved-template policy')
+    expect(automation).not.toContain('sendTextMessage(')
+    expect(flow).not.toContain('sendMediaMessage(')
+  })
+  it('uses stable per-step keys for automation and Flow sends', () => {
+    expect(source('../../automations/engine.ts')).toContain('AUTOMATION_SEND_LOG_ID_REQUIRED')
+    const flow = source('../../flows/engine.ts')
+    expect(flow).toContain("engineIdempotencyKey: 'flow:'")
+  })
 })
