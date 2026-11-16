@@ -5,3 +5,8 @@ export declare function shouldRunDevTaskWorker(input: {
   mode?: string
 }): boolean
 export declare function developmentPort(args: readonly string[]): number
+export declare function shouldRunDevBroadcastWorker(input: {
+  nodeEnv?: string
+  supabaseUrl?: string
+  mode?: string
+}): boolean
