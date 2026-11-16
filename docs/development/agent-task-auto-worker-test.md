@@ -73,6 +73,14 @@ there is a queued/scheduled/running task; this is read-only.
 - If any prior recipient grants remain active, the existing limits action rejects changes until the admin explicitly stops Pilot (which revokes all existing grants). Review the exact group and reapprove; never silently revoke or auto-start.
 
 
+## 2026-11-16 — Dynamic Pilot admission: recipients × messages per recipient
+
+- **Fixes the confusing 3/10 admission notice:** the selected cohort now has an explicit, admin-editable `messages_per_recipient` planning value (defaults to **3** for new batch approvals). For N chosen recipients and M messages each, the TEST Pilot admission floor is **N×M** for session hourly/daily, warmup hourly/daily and the chosen `agent` or `manual` workload hourly/daily limits; **first-touch stays N identities**, not N×M messages. Example: 3 contacts × 3 messages = 9 shared/workload/warmup, with first-touch at least 3. For 5 contacts × 4 messages, capacity floor is 20, first-touch floor is 5.
+- The UI shows the actual saved session/agent limits and the calculation, suggests minimal bounded limits, and requires an **explicit Save** while paused, then exact recipient grants, then Start. A session already at 100/hour + 1000/day remains at those caps; no fixed reset to 3/10. Press Refresh to reload current database settings rather than relying on an old browser snapshot.
+- New additive `168_openwa_pilot_cohort_message_capacity.sql` records M on each scoped, hashed approval row. **Legacy grants get M=1** to preserve existing approvals; new `grant_batch` defaults to M=3, and the old single-grant API uses M=1. Before lifting pause, the API rechecks actual active grant count, a uniform saved M, and all relevant caps, again after gateway status validation. A plan requiring more than 100 messages/hour is rejected rather than weakening limits.
+- This is **capacity planning, not a per-contact delivery guarantee**; it does not cause or authorize messages, override consent/opt-out, modify first-touch frequency, change provider reconciliation or bypass task/account policy budgets. It does not alter the active TEST session, grants or production data.
+- Validation: `pilot-cohort-caps.test.ts`, protected Pilot API tests, `openwa-pilot-cohort-message-capacity-smoke.sql` in Migrations CI, TEST migration evidence and latest-HEAD CI must pass before live acceptance. This change alone does not close SOF-66 or approve any rollout.
+
 ## 2026-11-15 — Queued outbound Runs despite successful 200 worker ticks
 
 - The local endpoint returning `200` means the worker tick completed; it **does not** mean it reserved or delivered a WhatsApp message. Its `triggers/tasks/outbound` counts determine progress.
