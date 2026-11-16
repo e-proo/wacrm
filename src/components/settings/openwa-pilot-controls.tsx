@@ -166,7 +166,7 @@ export function OpenWAPilotControls({
     } finally { setBusy(false) }
   }
 
-
+  function addRecipient(raw: string) {
     const normalized = normalizeTestRecipient(raw)
     if (!normalized || selectedRecipients.includes(normalized) || selectedRecipients.length >= 10) return
     setSelectedRecipients(current => [...current, normalized])
