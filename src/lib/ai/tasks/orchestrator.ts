@@ -9,6 +9,7 @@ import { authorizeStoredAgentTask } from './capability-policy'
 import type { TargetMaterializationResult } from './target-resolution'
 import { sweepAgentTaskOutboundReservations } from './outbound-runtime'
 import { parseExplicitCoverageContactIds } from '@/lib/services/coverage/selected-targets'
+import { isTestAgentTaskWorkerEnabled } from './operator-controls'
 import { deferredTestOpenWATaskReason } from './test-openwa-task-admission'
 
 export interface AgentTaskSweepResult {
@@ -183,6 +184,13 @@ export async function processAgentTaskQueue(input: {
       target_policy: Record<string, unknown> | null
     }
 
+    // Recheck after the SQL claim in case the operator paused this account
+    // between candidate selection and task materialization.
+    if (!(await isTestAgentTaskWorkerEnabled(db, row.account_id))) {
+      skippedByPolicy += 1
+      await releaseTaskClaim(db, taskId, input.workerId, 30)
+      continue
+    }
     const policy = await loadAccountRuntimePolicy(db, row.account_id)
     if (
       !policy.recoveryWorkerEnabled ||
