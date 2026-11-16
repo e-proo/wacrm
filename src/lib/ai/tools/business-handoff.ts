@@ -12,6 +12,14 @@ interface CoverageProposalArgs {
   commission_per_thousand?: string
   commission_currency?: string
   deal_date?: string
+  /** Internal only: supplied by the server-validated supplier Task negotiation,
+   * never exposed through the model's coverage.propose_offer@2 manifest. */
+  supplier_task?: {
+    task_id: string
+    task_target_id: string
+    source_request_id: string
+    supplier_details: string
+  }
 }
 
 export interface CoverageRequestProposalArgs {
@@ -118,10 +126,26 @@ export async function executeCoverageProposeOfferIntegrated(ctx: ToolContext, ar
       targetType: 'coverage_offer', targetId: null, intent: 'create',
       proposedPayload: { contact_id: bound.contactId, conversation_id: bound.conversationId, source_message_id: bound.sourceMessageId, intent_id: intentId,
         service_id: args.service_id, total_amount: args.total_amount, currency: args.currency, attributes: attrs,
+        ...(args.supplier_task ? {
+          source_task_id: args.supplier_task.task_id,
+          source_task_target_id: args.supplier_task.task_target_id,
+          source_coverage_request_id: args.supplier_task.source_request_id,
+          supplier_terms: {
+            details: args.supplier_task.supplier_details,
+            amount: args.total_amount,
+            currency: args.currency,
+            commission_per_thousand: args.commission_per_thousand ?? null,
+            explicitly_confirmed_in_message_id: bound.sourceMessageId,
+          },
+        } : {}),
         ...(args.commission_per_thousand !== undefined ? { commission_per_thousand: args.commission_per_thousand, commission_currency: args.commission_currency } : {}),
         ...(args.deal_date ? { deal_date: args.deal_date } : {}) },
-      idempotencyKey: `coverage-offer:${bound.sourceMessageId}:${args.service_id}`,
-      summary: `اعتماد عرض تغطية ${args.total_amount} ${args.currency}`, actorUserId: ctx.actorUserId,
+      idempotencyKey: args.supplier_task
+        ? `coverage-sourcing:${args.supplier_task.task_id}:${args.supplier_task.task_target_id}`
+        : `coverage-offer:${bound.sourceMessageId}:${args.service_id}`,
+      summary: args.supplier_task
+        ? `مراجعة عرض مورد لمهمة تغطية ${args.total_amount} ${args.currency} — عمولة ${args.commission_per_thousand ?? 'غير محددة'} لكل ألف — التفاصيل: ${args.supplier_task.supplier_details.slice(0, 220)}`
+        : `اعتماد عرض تغطية ${args.total_amount} ${args.currency}`, actorUserId: ctx.actorUserId,
       sourceRunId: ctx.runId,
     })
     await linkIntentToChangeRequest({ accountId: ctx.accountId, intentId, changeRequestId: cr.id })
