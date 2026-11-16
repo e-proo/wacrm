@@ -16,6 +16,7 @@ const mocked = vi.hoisted(() => ({
   workerEnabled: vi.fn(),
   version: 2,
   taskType: 'coverage.sourcing',
+  taskStatus: 'running',
 }))
 
 vi.mock('../admin-client', () => ({
@@ -48,6 +49,7 @@ vi.mock('../admin-client', () => ({
           if (table === 'ai_agent_tasks') {
             return { data: {
               task_type: mocked.taskType, task_type_version: mocked.version,
+              status: mocked.taskStatus,
               target_policy: { whatsappConnectionId: 'whatsapp-connection' },
             }, error: null }
           }
@@ -117,6 +119,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocked.version = 2
   mocked.taskType = 'coverage.sourcing'
+  mocked.taskStatus = 'running'
   mocked.loadPolicy.mockResolvedValue({
     killSwitch: false, multiAgentEnabled: true,
     recoveryWorkerEnabled: true, outboundTaskDeliveryEnabled: true,
@@ -186,6 +189,18 @@ describe('TEST outbound transport binding, separate from AI model provider', () 
     expect(mocked.preflight).not.toHaveBeenCalledWith(
       expect.objectContaining({ connectionId: 'ai-provider' }),
     )
+  })
+
+  it('does not claim an already queued outbound Run after the parent Task was paused/closed', async () => {
+    for (const status of ['paused','cancelled','partially_completed']) {
+      mocked.taskStatus = status
+      const result = await processAgentTaskOutboundRunQueue({
+        workerId: 'paused-task', limit: 1,
+      })
+      expect(result).toMatchObject({ scanned: 1, gated: 1, attempted: 0, sent: 0 })
+      expect(mocked.claim).not.toHaveBeenCalled()
+      expect(mocked.reserve).not.toHaveBeenCalled()
+    }
   })
 
   it('leaves outbound Run queued without claiming or reserving when exact WhatsApp grant is missing', async () => {
