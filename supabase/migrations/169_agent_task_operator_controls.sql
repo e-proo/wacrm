@@ -249,7 +249,7 @@ begin
 
   return v_task_id;
 end;
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION public.claim_next_agent_task_trigger_firing(p_worker_id text, p_lease_secs integer DEFAULT 120)
  RETURNS jsonb
@@ -353,7 +353,7 @@ begin
 
   return v_result;
 end;
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION public.materialize_agent_task_trigger_firings(p_now timestamp with time zone DEFAULT now(), p_limit integer DEFAULT 100)
  RETURNS jsonb
@@ -481,5 +481,4 @@ begin
     'business_event_firings', v_event_count
   );
 end;
-$function$
-
+$function$;
