@@ -104,9 +104,9 @@ export async function POST(
           '[broadcast-resume] delivery threw:',
           err instanceof Error ? err.message : err
         );
-        // Don't leave it mid-flight — settle whatever did land.
-        await finalizeBroadcastStatus(admin, id).catch(() => {});
       } finally {
+        // A completed pass must settle the parent even without an exception.
+        await finalizeBroadcastStatus(admin, id).catch(() => {});
         await releaseBroadcastDelivery(admin, id);
       }
     });

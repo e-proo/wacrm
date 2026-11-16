@@ -646,6 +646,7 @@
       "delivered": "전달됨",
       "read": "읽음",
       "replied": "응답함",
+      "requires_reconciliation": "전송 결과 확인 필요",
       "unknown": "알 수 없음"
     },
     "detail": {

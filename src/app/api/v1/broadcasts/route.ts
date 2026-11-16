@@ -3,7 +3,7 @@ import { requireApiKey } from '@/lib/auth/api-context';
 export const maxDuration = 60;
 import { ok, fail, toApiErrorResponse } from '@/lib/api/v1/respond';
 import { resolveAuditUserId, ContactError } from '@/lib/api/v1/contacts';
-import { createBroadcast, deliverBroadcast, BroadcastError } from '@/lib/whatsapp/broadcast-core';
+import { createBroadcast, deliverBroadcast, finalizeBroadcastStatus, BroadcastError } from '@/lib/whatsapp/broadcast-core';
 
 export async function POST(request: Request) {
   try {
@@ -22,7 +22,13 @@ export async function POST(request: Request) {
     });
     // WACRM owns fan-out, recipient state, idempotency and pacing. The
     // selected account-scoped connection only chooses the transport.
-    after(() => deliverBroadcast(ctx.supabase, plan));
+    after(async () => {
+      try {
+        await deliverBroadcast(ctx.supabase, plan);
+      } finally {
+        await finalizeBroadcastStatus(ctx.supabase, plan.broadcastId);
+      }
+    });
     return ok({ broadcast_id: plan.broadcastId, connection_id: plan.connectionId, provider: plan.provider, status: 'sending', total_recipients: plan.planned.length, accepted: plan.planned.length, rejected: plan.rejected }, 202);
   } catch (err) {
     if (err instanceof BroadcastError) return fail(err.code, err.message, err.status);

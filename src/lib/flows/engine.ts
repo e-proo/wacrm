@@ -1032,10 +1032,14 @@ async function handleReplyForActiveRun(
     (await loadFlow(db, run.flow_id))?.fallback_policy,
   );
   const newReprompts = run.reprompt_count + 1;
-  await db
+  const { error: repromptError } = await db
     .from("flow_runs")
     .update({ reprompt_count: newReprompts })
     .eq("id", run.id);
+  if (repromptError) throw repromptError;
+  // Each intentional reprompt is a distinct outbound send, but webhook replay
+  // of that very attempt must keep its same idempotency identity.
+  run.reprompt_count = newReprompts;
 
   const action = decideFallback({ policy, reprompt_count: newReprompts });
   await logEvent(db, run.id, "fallback_fired", run.current_node_key, {

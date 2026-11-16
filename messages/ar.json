@@ -646,6 +646,7 @@
       "delivered": "مُسلَّم",
       "read": "مقروء",
       "replied": "تم الرد",
+      "requires_reconciliation": "تتطلب تسوية الإرسال",
       "unknown": "غير معروف"
     },
     "detail": {

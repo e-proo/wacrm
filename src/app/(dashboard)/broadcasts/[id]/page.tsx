@@ -116,6 +116,8 @@ function FunnelChart({ steps }: { steps: FunnelStep[] }) {
 
 const RECIPIENT_STATUSES: readonly RecipientStatus[] = [
   'pending',
+  'sending',
+  'requires_reconciliation',
   'sent',
   'delivered',
   'read',
@@ -320,7 +322,8 @@ export default function BroadcastDetailPage() {
   const status = getBroadcastStatus(broadcast.status);
 
   const pendingCount = recipients.filter((r) => r.status === 'pending').length;
-  const retryableCount = recipients.filter((r) => r.status === 'failed').length;
+  const retryableCount = recipients.filter((r) => r.status === 'failed' && r.error_message === 'PRE_DISPATCH_DENIED').length;
+  const reconciliationCount = recipients.filter((r) => r.status === 'requires_reconciliation' || r.status === 'sending').length;
   // A campaign whose tab went away sits in 'sending' with recipients
   // still pending and nothing left to move them. Name that state rather
   // than leaving a permanently pulsing "sending" badge.
@@ -409,6 +412,11 @@ export default function BroadcastDetailPage() {
         )}
       </div>
 
+      {reconciliationCount > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-600">
+          {reconciliationCount} recipient send(s) have an unsettled provider outcome. Inspect the connection and message ledger before any retry; automatic resend is disabled.
+        </div>
+      )}
       {/* Resume / retry (issue #472). Only rendered when there is
           actually something outstanding. */}
       {(pendingCount > 0 || retryableCount > 0) && (

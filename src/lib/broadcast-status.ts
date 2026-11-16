@@ -48,6 +48,8 @@ export const broadcastStatusConfig: Record<BroadcastStatus, StatusDisplay> = {
 };
 
 export const recipientStatusConfig: Record<RecipientStatus, StatusDisplay> = {
+  sending: { label: 'sending', classes: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' },
+  requires_reconciliation: { label: 'requires_reconciliation', classes: 'bg-amber-500/10 text-amber-500 border-amber-500/20' },
   pending: {
     label: "pending",
     classes: "bg-slate-500/10 text-muted-foreground border-slate-500/20",

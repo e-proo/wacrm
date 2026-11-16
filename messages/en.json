@@ -646,6 +646,7 @@
       "delivered": "Delivered",
       "read": "Read",
       "replied": "Replied",
+      "requires_reconciliation": "Needs reconciliation",
       "unknown": "Unknown"
     },
     "detail": {
