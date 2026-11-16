@@ -115,6 +115,26 @@ export async function GET(
       }
     }
 
+    // The supplier negotiation is separate from initial WhatsApp delivery.
+    // Show the real administrative proposal lifecycle (or its absence) to
+    // the operator without exposing the one-time approval PIN.
+    const { data: negotiations, error: negotiationError } = await db
+      .from('ai_agent_coverage_supplier_negotiations')
+      .select('task_target_id,stage,offered_amount,commission_per_thousand,supplier_details,change_request_id')
+      .eq('account_id', ctx.accountId).eq('task_id', taskId)
+      .limit(selected.length)
+    if (negotiationError) throw negotiationError
+    const negotiationByTarget = new Map((negotiations ?? []).map(row =>
+      [row.task_target_id, row]))
+    const changeRequestIds = (negotiations ?? [])
+      .map(row => row.change_request_id).filter((id): id is string => typeof id === 'string')
+    const changeResult = changeRequestIds.length
+      ? await db.from('change_requests').select('id,code,status')
+        .eq('account_id', ctx.accountId).in('id', changeRequestIds)
+      : { data: [], error: null }
+    if (changeResult.error) throw changeResult.error
+    const changesById = new Map((changeResult.data ?? []).map(change => [change.id, change]))
+
     return NextResponse.json({
       taskStatus: task.status,
       holdReason,
@@ -122,6 +142,9 @@ export async function GET(
         const contact = contacts.get(contactId)
         const target = targets.get(contactId)
         const outbound = target ? outbounds.get(target.id) : null
+        const negotiation = target ? negotiationByTarget.get(target.id) : null
+        const approval = negotiation?.change_request_id
+          ? changesById.get(negotiation.change_request_id) : null
         return {
           contactId,
           pilotApproval: pilotRecipientApproval.get(contactId) ?? null,
@@ -134,6 +157,12 @@ export async function GET(
           outboundStatus: outbound?.status ?? null,
           provider: outbound?.provider ?? null,
           errorCode: outbound?.error_code ?? null,
+          supplierStage: negotiation?.stage ?? null,
+          offeredAmount: negotiation?.offered_amount ?? null,
+          commissionPerThousand: negotiation?.commission_per_thousand ?? null,
+          supplierDetails: negotiation?.supplier_details ?? null,
+          changeRequestCode: approval?.code ?? null,
+          changeRequestStatus: approval?.status ?? null,
         }
       }),
     })
