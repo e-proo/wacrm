@@ -78,6 +78,12 @@ interface TaskRecipientProgress {
   outboundStatus: string | null
   provider: string | null
   errorCode: string | null
+  supplierStage?: string | null
+  offeredAmount?: string | null
+  commissionPerThousand?: string | null
+  supplierDetails?: string | null
+  changeRequestCode?: number | null
+  changeRequestStatus?: string | null
 }
 interface TaskProgressResponse {
   taskStatus: string
@@ -101,6 +107,26 @@ const controlErrorLabel: Record<string, string> = {
   coverage_not_fulfilled: 'طلب التغطية لم يصل بعد إلى حالة fulfilled؛ لا يمكن توثيق المهمة كمكتملة.',
   already_terminal: 'المهمة مغلقة بالفعل ولا يمكن تغيير نتيجتها.',
   TASK_STATE_CHANGED_OR_NOT_FOUND: 'تغيّرت حالة المهمة أو لم تعد متاحة.',
+}
+const supplierStageLabel: Record<string, string> = {
+  availability: 'تأكيد القدرة على التوفير',
+  amount: 'جمع مبلغ التغطية المتاح',
+  commission: 'تحديد عمولة المورد لكل ألف',
+  details: 'جمع تفاصيل التغطية والتنفيذ',
+  confirmation: 'بانتظار تأكيد المورد النهائي',
+  submitting: 'جارٍ تسجيل عرض المورد لدى الإدارة',
+  submitted: 'رُفع عرض المورد للمراجعة الإدارية',
+  needs_human: 'يتطلب متابعة بشرية لإكمال الرفع',
+  declined: 'رفض المورد توفير التغطية',
+}
+const changeApprovalLabel: Record<string, string> = {
+  pending: 'بانتظار موافقة الإدارة',
+  approved: 'وافقت الإدارة؛ بانتظار تنفيذ التسجيل',
+  executed: 'اعتمدت الإدارة وأُنشئ عرض التغطية',
+  rejected: 'رفضت الإدارة العرض',
+  expired: 'انتهت صلاحية طلب الاعتماد',
+  cancelled: 'أُلغي طلب الاعتماد',
+  failed: 'تعذر تنفيذ الطلب الموافق عليه',
 }
 const targetStatusLabel: Record<string, string> = {
   candidate: 'مرشح', eligible: 'مؤهل', queued: 'في الانتظار',
@@ -740,6 +766,25 @@ export function AgentTasksPanel() {
                           ? outboundStatusLabel[recipient.outboundStatus] || recipient.outboundStatus
                           : 'لم تُحجز رسالة'} · المحاولات: {recipient.attemptCount}
                           {recipient.provider ? ' · ' + (recipient.provider === 'openwa' ? 'OpenWA' : 'Meta Cloud') : ''}</p>
+                        {recipient.supplierStage && (
+                          <div className="mt-2 space-y-1 rounded-md border p-2">
+                            <p className="font-semibold">سير تفاوض التغطية: {supplierStageLabel[recipient.supplierStage] ?? recipient.supplierStage}</p>
+                            {recipient.offeredAmount && <p>المبلغ المعروض: {recipient.offeredAmount} SAR</p>}
+                            {recipient.commissionPerThousand !== null && recipient.commissionPerThousand !== undefined &&
+                              <p>عمولة المورد: {recipient.commissionPerThousand} لكل 1000</p>}
+                            {recipient.supplierDetails && <p className="break-words">تفاصيل المورد: {recipient.supplierDetails}</p>}
+                            {recipient.changeRequestCode !== null && recipient.changeRequestCode !== undefined ? (
+                              <p className="font-medium">
+                                مقترح الإدارة CHG-{recipient.changeRequestCode} ·
+                                {' '}{changeApprovalLabel[recipient.changeRequestStatus ?? ''] ?? recipient.changeRequestStatus}
+                              </p>
+                            ) : (
+                              <p className="text-muted-foreground">
+                                لم يُنشأ طلب اعتماد إداري بعد. يجب استكمال التفاصيل وتأكيد المورد النهائي أولًا.
+                              </p>
+                            )}
+                          </div>
+                        )}
                         {recipient.skipReason || recipient.failureCode || recipient.errorCode ? (
                           <p className="text-amber-700 dark:text-amber-400">
                             السبب: {recipient.errorCode || recipient.failureCode || recipient.skipReason}
