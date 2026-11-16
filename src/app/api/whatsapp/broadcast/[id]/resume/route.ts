@@ -1,4 +1,4 @@
-// Enqueues pending or proven-unsent recipients. Never fan out from HTTP or after().
+// Enqueues pending or proven-unsent recipients. Delivery executes only in the dedicated worker.
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { BroadcastError } from '@/lib/whatsapp/broadcast-core'
