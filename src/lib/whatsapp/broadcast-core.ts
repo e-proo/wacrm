@@ -70,7 +70,7 @@ export async function deliverBroadcast(db: SupabaseClient, plan: BroadcastPlan):
       continue
     }
     const { data: reserved, error: reserveError } = await db.from('broadcast_recipients')
-      .update({ status: 'sending', error_message: null })
+      .update({ status: 'sending', error_message: null, dispatch_reserved_at: new Date().toISOString() })
       .eq('id', recipient.recipientRowId).eq('broadcast_id', plan.broadcastId)
       .eq('provider', plan.provider).eq('connection_id', plan.connectionId)
       .eq('status', previous).select('id').maybeSingle()
