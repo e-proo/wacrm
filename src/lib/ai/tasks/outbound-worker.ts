@@ -17,6 +17,7 @@ import { authorizeStoredAgentTask } from './capability-policy'
 import { deferredTestOpenWATaskReason } from './test-openwa-task-admission'
 import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
 import { resolveTaskMessageConnection } from './outbound-message-connection'
+import { isTestAgentTaskWorkerEnabled } from './operator-controls'
 
 export interface AgentTaskOutboundWorkerResult {
   scanned: number
@@ -112,6 +113,12 @@ export async function processAgentTaskOutboundRunQueue(input: {
       continue
     }
 
+    // Stop before one-attempt claim; an in-flight provider send still needs
+    // its normal settlement/reconciliation path.
+    if (!(await isTestAgentTaskWorkerEnabled(db, run.account_id))) {
+      result.gated += 1
+      continue
+    }
     const policy = await loadAccountRuntimePolicy(db, run.account_id)
     if (
       policy.killSwitch ||
