@@ -23,7 +23,7 @@ interface WhatsAppDeliveryOwner {
   user_id: string
 }
 
-async function loadWhatsAppDeliveryOwner(
+export async function loadWhatsAppDeliveryOwner(
   accountId: string,
 ): Promise<WhatsAppDeliveryOwner> {
   const { data, error } = await supabaseAdmin()
@@ -32,8 +32,13 @@ async function loadWhatsAppDeliveryOwner(
     .eq('account_id', accountId)
     .maybeSingle()
   if (error) throw error
-  if (!data?.user_id) throw new Error('WHATSAPP_CONFIG_OWNER_MISSING')
-  return { user_id: data.user_id }
+  if (data?.user_id) return { user_id: data.user_id }
+  // OpenWA-only accounts do not require a Meta whatsapp_config row.
+  // Use the canonical account owner as the non-secret audit identity.
+  const { data: account, error: accountError } = await supabaseAdmin()
+    .from('accounts').select('owner_user_id').eq('id', accountId).maybeSingle()
+  if (accountError || !account?.owner_user_id) throw new Error('WHATSAPP_ACCOUNT_OWNER_MISSING')
+  return { user_id: account.owner_user_id }
 }
 
 export async function deliverActiveSubjectBusinessEventNotifications(input: {

@@ -233,7 +233,7 @@ export function Step4ScheduleSend({
           <DialogTrigger
             render={
               <Button
-                disabled={!name.trim() || !connectionId || isProcessing}
+                disabled={!name.trim() || !connectionId || isProcessing || (connections.some((row) => row.id === connectionId && row.provider === 'openwa') && ['image','video','document'].includes(template.header_type ?? ''))}
                 className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               />
             }
