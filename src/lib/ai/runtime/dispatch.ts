@@ -11,7 +11,9 @@ import {
   loadAgentExecutionRevision,
   runClaimedAgentExecution,
   type AgentExecutionContext,
+  type AgentExecutionResult,
 } from './execution'
+import { handleCoverageSupplierTaskReply } from '@/lib/services/coverage/supplier-task-workflow'
 import { evaluateCurrentTaskCompletion } from '../tasks/current-platform'
 import {
   applyAgentHumanHandoff,
@@ -453,12 +455,43 @@ async function executeAgentRun(
     sourceMessageId: args.inboundMessageId,
   }
 
-  const execution = await runClaimedAgentExecution({
-    context,
-    revision,
-    trustedAdminIdentityId: trustedAdmin?.id ?? null,
-    trustedAdminCapabilities: trustedAdmin?.allowedCapabilities ?? [],
-  })
+  // Coverage supplier replies have a durable, operator-reviewable business
+  // protocol: amount → negotiated commission → settlement details → explicit
+  // confirmation → native Change Request. Plain model prose is not evidence
+  // that a quote was submitted or approved. Historic non-Coverage Tasks still
+  // use the regular native-tool agent loop.
+  let supplierTurn: Awaited<ReturnType<typeof handleCoverageSupplierTaskReply>> = null
+  if (decision.taskReply) {
+    try {
+      supplierTurn = await handleCoverageSupplierTaskReply({
+        accountId: args.accountId,
+        taskId: decision.taskReply.taskId,
+        taskTargetId: decision.taskReply.taskTargetId,
+        runId, contactId: args.contactId,
+        conversationId: args.conversationId,
+        sourceMessageId: args.inboundMessageId,
+      })
+    } catch (error) {
+      console.error('[ai dispatch] supplier Task workflow failed:', error)
+      await markRun(db, args.accountId, runId, 'failed', 'SUPPLIER_WORKFLOW_FAILED')
+      return 'failed'
+    }
+  }
+  const execution: AgentExecutionResult = supplierTurn
+    ? {
+        status: 'message_ready',
+        customerMessage: supplierTurn.text,
+        taskOutcome: supplierTurn.outcome ?? null,
+        nextActionHint: null, toolCalls: [], error: null,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        latestUserMessage: '',
+      }
+    : await runClaimedAgentExecution({
+        context,
+        revision,
+        trustedAdminIdentityId: trustedAdmin?.id ?? null,
+        trustedAdminCapabilities: trustedAdmin?.allowedCapabilities ?? [],
+      })
 
   if (decision.taskReply && execution.taskOutcome) {
     const outcomeState = await db.rpc('record_agent_task_target_outcome', {
