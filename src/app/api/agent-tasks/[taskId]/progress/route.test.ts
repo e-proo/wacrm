@@ -70,8 +70,9 @@ describe('SOF-66 per-recipient progress, read-only and tenant-scoped', () => {
       targetStatus: 'awaiting_reply', outboundStatus: 'sent', attemptCount: 1,
     })
     const queries = stubs.from.mock.results.map(({ value }) => value)
-    expect(queries).toHaveLength(4)
+    expect(queries).toHaveLength(5)
     expect(queries[3].in).toHaveBeenCalledWith('task_target_id', [targetId])
+    expect(queries[4].eq).toHaveBeenCalledWith('task_id', taskId)
     for (const q of queries) expect(q.eq).toHaveBeenCalledWith('account_id', acct)
     expect(stubs.requireAgentCapability).toHaveBeenCalledWith('agents.manage_tasks')
   })
