@@ -25,6 +25,11 @@ const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (conte
     commission_currency?: string
     deal_date?: string
     intent_id?: string
+    conversation_id?: string
+    source_task_id?: string
+    source_task_target_id?: string
+    source_coverage_request_id?: string
+    supplier_terms?: { details?: string }
   }
 
   if (!payload.service_id || !payload.total_amount || !payload.currency || !payload.contact_id) {
@@ -43,6 +48,40 @@ const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (conte
   }
 
   const offerAttrs = readCoverageAttributes(payload.attributes ?? {})
+  // A Coverage Task-originated quote is not an arbitrary customer offer. It
+  // must still refer to the exact frozen supplier and source Request, under
+  // the same account, before an administrator-approved proposal can execute.
+  let linkedTarget: { id: string; status: string } | null = null
+  if (payload.source_task_id || payload.source_task_target_id || payload.source_coverage_request_id) {
+    if (!payload.source_task_id || !payload.source_task_target_id ||
+        !payload.source_coverage_request_id || !payload.conversation_id ||
+        !payload.supplier_terms?.details) {
+      throw new DomainChangeExecutionError('SUPPLIER_OFFER_LINK_INCOMPLETE',
+        'Task-linked supplier offer is missing authenticated source references.')
+    }
+    const checkDb = supabaseAdmin()
+    const { data: task, error: taskError } = await checkDb.from('ai_agent_tasks')
+      .select('id,task_type,task_context,status')
+      .eq('account_id', context.accountId)
+      .eq('id', payload.source_task_id).maybeSingle()
+    if (taskError) throw taskError
+    if (!task || task.task_type !== 'coverage.sourcing' ||
+        (task.task_context as Record<string, unknown>)?.coverageRequestId !== payload.source_coverage_request_id) {
+      throw new DomainChangeExecutionError('SUPPLIER_OFFER_TASK_BINDING_INVALID',
+        'Proposed supplier offer does not match the source Task/Request.')
+    }
+    const { data: target, error: targetError } = await checkDb.from('ai_agent_task_targets')
+      .select('id,contact_id,conversation_id,status')
+      .eq('account_id', context.accountId).eq('task_id', payload.source_task_id)
+      .eq('id', payload.source_task_target_id).maybeSingle()
+    if (targetError) throw targetError
+    if (!target || target.contact_id !== payload.contact_id ||
+        target.conversation_id !== payload.conversation_id) {
+      throw new DomainChangeExecutionError('SUPPLIER_OFFER_TARGET_BINDING_INVALID',
+        'Offer supplier is not the exact Task target.')
+    }
+    linkedTarget = { id: target.id, status: target.status }
+  }
   const reference = 'CHG-' + change.id.slice(0, 8).toUpperCase()
 
   const { data: offer, error: offerError } = await supabaseAdmin()
@@ -73,6 +112,18 @@ const createOfferExecutor: ChangeExecutorRegistration['executor'] = async (conte
     .single()
 
   if (offerError) throw offerError
+
+  if (linkedTarget && payload.source_task_id && 
+      ['replied', 'awaiting_reply', 'in_progress', 'paused_for_human'].includes(linkedTarget.status)) {
+    const { error: targetUpdateError } = await supabaseAdmin()
+      .from('ai_agent_task_targets')
+      .update({ status: 'completed', completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString() })
+      .eq('account_id', context.accountId).eq('task_id', payload.source_task_id)
+      .eq('id', linkedTarget.id).in('status',
+        ['replied', 'awaiting_reply', 'in_progress', 'paused_for_human'])
+    if (targetUpdateError) throw targetUpdateError
+  }
 
   if (payload.intent_id) {
     const { error: intentError } = await supabaseAdmin()
