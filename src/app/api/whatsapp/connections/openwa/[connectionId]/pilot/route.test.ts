@@ -469,7 +469,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
       value.startsWith('123') ? '1'.repeat(64) : '2'.repeat(64))
     const approved = await POST(request({
       action: 'grant_batch', workload: 'agent',
-      recipients: ['12345678901','23456789012'],
+      recipients: ['12345678901','23456789012'], messages_per_recipient: 1,
       consent_confirmed: true, confirm_agent_task_test: true, hours: 4,
     }), context())
     expect(approved.status).toBe(200)
@@ -498,8 +498,8 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(result.status).toBe(409)
     expect(await result.json()).toMatchObject({
       code: 'pilot_cohort_caps_insufficient',
-      required_count: 3,
-      missing_caps: ['first_touch_daily_cap'],
+      required_count: 3, messages_per_recipient: 3, required_messages: 9,
+      missing_caps: ['hourly_cap', 'first_touch_daily_cap', 'warmup_hourly_cap'],
     })
     expect(h.calls).toEqual([])
   })
@@ -512,15 +512,15 @@ describe('OW-13 DEV pilot protected UI API', () => {
     })
     const saved = await POST(request({
       action: 'limits',
-      hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 3,
+      hourly_cap: 9, daily_cap: 10, first_touch_daily_cap: 3,
       minimum_interval_ms: 15000, jitter_ms: 3000,
-      pilot_agent_hourly_cap: 3, pilot_agent_daily_cap: 10,
-      pilot_manual_hourly_cap: 3, pilot_manual_daily_cap: 10,
+      pilot_agent_hourly_cap: 9, pilot_agent_daily_cap: 10,
+      pilot_manual_hourly_cap: 9, pilot_manual_daily_cap: 10,
     }), context())
     expect(saved.status).toBe(200)
     expect(h.guard.first_touch_daily_cap).toBe(3)
-    expect(h.guard).toMatchObject({ pilot_agent_hourly_cap: 3 })
-    expect(h.guard.warmup_hourly_cap).toBe(3)
+    expect(h.guard).toMatchObject({ pilot_agent_hourly_cap: 9 })
+    expect(h.guard.warmup_hourly_cap).toBe(9)
     h.resolveRecipient.mockImplementation(async (_db: unknown, _a: string, _c: string, raw: string) => ({
       recipient: raw + '@c.us', source: 'phone_without_inbound',
     }))
@@ -537,11 +537,55 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(approved.status).toBe(200)
     expect(await approved.json()).toMatchObject({
       approved_count: 3, agent_admissions: 3, paused: true,
+      approved_messages_per_recipient: 3, required_cohort_messages: 9,
     })
     const approval = h.calls.find(call => call.table === 'whatsapp_openwa_pilot_allowlist')
     expect(approval).toBeDefined()
     expect(Array.isArray(approval?.payload)).toBe(true)
     expect(h.guard.manual_paused).toBe(true)
+  })
+
+  it('rejects impossible capacity, even if all recipient grants would be consented', async () => {
+    const response = await POST(request({
+      action: 'grant_batch', workload: 'agent',
+      recipients: ['12345678901', '23456789012'],
+      messages_per_recipient: 51,
+      consent_confirmed: true, confirm_agent_task_test: true,
+    }), context())
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'pilot_capacity_exceeds_max' })
+    expect(h.calls).toEqual([])
+  })
+
+  it('rejects activation if a 3-person × 3-message cohort has only a 3/hour shared cap', async () => {
+    Object.assign(h.guard, { first_touch_daily_cap: 3 })
+    h.active = 3
+    h.grantWorkload = 'agent'
+    h.messagesPerRecipient = 3
+    const response = await POST(request({ action: 'activate' }), context())
+    expect(response.status).toBe(409)
+    expect(h.calls).toEqual([])
+  })
+
+  it('activates an approved 3×3 cohort at 9/hour without increasing first-touch above 3', async () => {
+    Object.assign(h.guard, {
+      hourly_cap: 9, daily_cap: 12, first_touch_daily_cap: 3,
+      warmup_hourly_cap: 9, warmup_daily_cap: 12,
+      pilot_agent_hourly_cap: 9, pilot_agent_daily_cap: 12,
+    })
+    h.active = 3
+    h.grantWorkload = 'agent'
+    h.messagesPerRecipient = 3
+    const response = await POST(request({ action: 'activate' }), context())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      active: true, active_admissions: 3,
+      approved_messages_per_recipient: 3, required_cohort_messages: 9,
+    })
+    expect(h.calls).toContainEqual(expect.objectContaining({
+      table: 'whatsapp_guardrail_events', type: 'insert',
+      payload: expect.objectContaining({ workload: 'agent', decision: 'resumed' }),
+    }))
   })
 
   it('accepts explicit phone-call opt-in for a new Agent number without an inbound chat or CRM contact', async () => {
@@ -563,7 +607,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
 
     const approved = await POST(request({
       action: 'grant_batch', workload: 'agent',
-      recipients: ['12345678901', '23456789012'],
+      recipients: ['12345678901', '23456789012'], messages_per_recipient: 1,
       consent_confirmed: true, confirm_agent_task_test: true,
       consent_basis: 'phone_call', phone_call_opt_in_confirmed: true,
     }), context())
@@ -585,7 +629,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
       recipient: '23456789012@c.us', source: 'phone_without_inbound',
     })
     const res = await POST(request({ action:'grant_batch', workload:'agent',
-      recipients:['12345678901','23456789012'],
+      recipients:['12345678901','23456789012'], messages_per_recipient:1,
       consent_confirmed:true, confirm_agent_task_test:true }),context())
     expect(res.status).toBe(409)
     expect(h.calls.filter(x => x.table === 'whatsapp_openwa_pilot_allowlist')).toHaveLength(0)
@@ -613,7 +657,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     }
     h.resolveRecipient.mockResolvedValue({recipient:'12345678901@c.us',source:'verified_inbound_chat'})
     const duplicate = await POST(request({action:'grant_batch',workload:'manual',
-      recipients:['12345678901','23456789012'],consent_confirmed:true}),context())
+      recipients:['12345678901','23456789012'],messages_per_recipient:1,consent_confirmed:true}),context())
     expect(duplicate.status).toBe(400)
     expect(h.calls.filter(x=>x.table==='whatsapp_openwa_pilot_allowlist')).toHaveLength(0)
   })
