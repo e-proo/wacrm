@@ -66,7 +66,7 @@ function makeDb() {
     from(table:string) {
       let operation:'read'|'update'='read'
       let values:Record<string,unknown>={}
-      let conditions:Record<string,unknown>={}
+      const conditions:Record<string,unknown>={}
       const query={
         select(_fields?:string) { return query },
         eq(field:string,val:unknown) { conditions[field]=val; return query },
