@@ -1,4 +1,6 @@
 import { engineSendText } from '@/lib/automations/meta-send'
+import { classifyBusinessOutboundFailure } from './outbound-delivery-failure'
+import { resolveBusinessEventSendWorkload } from './business-event-delivery-workload'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { createSupabaseTemplateOverrideStore } from '@/lib/messaging/supabase-store'
 import type { MessageAudience, MessageChannel } from '@/lib/messaging/types'
@@ -174,8 +176,10 @@ export async function deliverActiveBusinessEventNotifications(input: {
         db,
       })
 
+      const workload = await resolveBusinessEventSendWorkload(db, input.accountId, row)
       const delivered = await engineSendText({
         accountId: input.accountId,
+        workload,
         userId: input.userId,
         conversationId: row.conversation_id,
         contactId: row.contact_id,
@@ -227,24 +231,26 @@ export async function deliverActiveBusinessEventNotifications(input: {
         `[business event delivery] sent ${row.event_type}@${row.event_version} event=${row.id.slice(0, 8)}`,
       )
     } catch (deliveryError) {
-      const message =
-        deliveryError instanceof Error ? deliveryError.message : String(deliveryError)
-      const { data: reservation } = await db
+      const { data: reservation, error: lookupError } = await db
         .from('messages')
-        .select('id, message_id, status')
+        .select('id, message_id, provider_message_id, status')
         .eq('engine_idempotency_key', engineKey)
         .maybeSingle()
-
-      const requiresReconciliation = Boolean(reservation)
+      const failure = classifyBusinessOutboundFailure({
+        error: deliveryError,
+        reservation,
+        reservationLookupFailed: Boolean(lookupError),
+      })
+      const requiresReconciliation = failure.status === 'requires_reconciliation'
       if (requiresReconciliation) reconciliation += 1
       else failed += 1
 
       const { error: stateError } = await db
         .from('business_event_outbox')
         .update({
-          status: requiresReconciliation ? 'requires_reconciliation' : 'failed',
+          status: failure.status,
           local_message_id: reservation?.id ?? null,
-          last_error: message.slice(0, 1000),
+          last_error: failure.reason.slice(0, 1000),
           claim_token: null,
         })
         .eq('account_id', input.accountId)

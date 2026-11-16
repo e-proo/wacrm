@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../admin-client'
 import { engineSendText } from '@/lib/automations/meta-send'
+import { classifyBusinessOutboundFailure } from '@/lib/services/platform/outbound-delivery-failure'
 import {
   deliverActiveBusinessEventNotifications,
   renderLinkedLegacyBusinessEventNotification,
@@ -153,23 +154,26 @@ export async function deliverCustomerOutcomeNotifications(input: {
         `[customer business event] sent ${row.event_type} notification=${row.id.slice(0, 8)} source=legacy_outbox`,
       )
     } catch (sendError) {
-      const message = sendError instanceof Error ? sendError.message : String(sendError)
-      const { data: localReservation } = await db
+      const { data: localReservation, error: lookupError } = await db
         .from('messages')
-        .select('id, message_id, status')
+        .select('id, message_id, provider_message_id, status')
         .eq('engine_idempotency_key', engineKey)
         .maybeSingle()
-
-      const requiresReconciliation = Boolean(localReservation)
+      const failure = classifyBusinessOutboundFailure({
+        error: sendError,
+        reservation: localReservation,
+        reservationLookupFailed: Boolean(lookupError),
+      })
+      const requiresReconciliation = failure.status === 'requires_reconciliation'
       if (requiresReconciliation) reconciliationCount += 1
       else failedCount += 1
 
       await db
         .from('customer_intent_notifications')
         .update({
-          status: requiresReconciliation ? 'requires_reconciliation' : 'failed',
+          status: failure.status,
           local_message_id: localReservation?.id ?? null,
-          last_error: message.slice(0, 1000),
+          last_error: failure.reason.slice(0, 1000),
           claim_token: null,
         })
         .eq('id', row.id)

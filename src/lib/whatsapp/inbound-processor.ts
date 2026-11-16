@@ -461,6 +461,8 @@ export async function processNormalizedInboundMessage(
           conversationId: conversation.id,
           contactId: contactRecord.id,
           text: changeCommand.reply,
+          workload: 'api',
+          engineIdempotencyKey: `trusted-admin-command-reply:${inboundMessageId}`,
         })
       }
       await dispatchWebhookEvent(supabaseAdmin(), accountId, 'message.received', {
