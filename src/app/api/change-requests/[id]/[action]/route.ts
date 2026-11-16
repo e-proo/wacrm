@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { retryConfirmedAgentTaskSupplierOutcome, SafeOutcomeRecoveryError } from '@/lib/services/platform/business-event-recovery'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import {
@@ -81,6 +82,20 @@ export async function POST(
         return NextResponse.json(approved)
       }
 
+      if (action === 'resend_supplier_outcome') {
+        const body = await request.json().catch(() => ({})) as { supplierTermsReviewed?: boolean }
+        const result = await retryConfirmedAgentTaskSupplierOutcome({
+          accountId:ctx.accountId,
+          changeRequestId:id,
+          actorUserId:ctx.userId,
+          supplierTermsReviewed:body.supplierTermsReviewed === true,
+        })
+        return NextResponse.json(result, {
+          status:result.status === 'provider_accepted' ? 200 :
+            result.status === 'reconciliation_required' ? 202 : 409,
+        })
+      }
+
       if (action === 'resend') {
         const result = await reissueChangeRequestAdminAlert({
           accountId: ctx.accountId, changeRequestId: id,
@@ -119,6 +134,9 @@ export async function POST(
         return NextResponse.json(result)
       }
     } catch (innerErr) {
+      if (innerErr instanceof SafeOutcomeRecoveryError) {
+        return NextResponse.json({ error:innerErr.message, code:innerErr.code },{ status:innerErr.status })
+      }
       if (innerErr instanceof ChangeRequestError) {
         return NextResponse.json(
           { error: innerErr.message, code: innerErr.code },

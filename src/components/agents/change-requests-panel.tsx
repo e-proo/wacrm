@@ -72,7 +72,7 @@ export function ChangeRequestsPanel() {
 
   async function act(
     id: string,
-    action: 'approve' | 'reject' | 'cancel' | 'execute' | 'resend',
+    action: 'approve' | 'reject' | 'cancel' | 'execute' | 'resend' | 'resend_supplier_outcome',
     body?: Record<string, unknown>,
   ) {
     setBusy(`${action}:${id}`);
@@ -93,7 +93,7 @@ export function ChangeRequestsPanel() {
       if (!res.ok || (!json.status && action !== 'execute')) {
         throw new Error(json.error ?? `${action} failed`);
       }
-      if (action === 'resend') {
+      if (action === 'resend' || action === 'resend_supplier_outcome') {
         setNotice(json.message ?? (json.accepted_by_provider ? 'قَبِل المزود إشعار الموافقة. التسليم لم يُؤكد بعد.' : 'تعذّر تأكيد قبول الإشعار.'));
         setConfirmCodeById(prev => ({ ...prev, [id]: '' }));
       }
@@ -245,6 +245,28 @@ export function ChangeRequestsPanel() {
                         <Ban className="me-1.5 h-4 w-4" />
                       )}
                       {tCr('cancel')}
+                    </Button>
+                  </div>
+                ) : null}
+
+                {r.status === 'executed' &&
+                  typeof r.proposed_payload?.source_task_id === 'string' ? (
+                  <div className="space-y-2 rounded-md border border-amber-500/40 p-3">
+                    <p className="text-xs text-muted-foreground">
+                      إشعار اعتماد مورد المهمة: لا يُسمح بإعادته إذا كانت محاولة واتساب السابقة غير مؤكدة.
+                      راجع مبلغ العرض واتجاهه وتفاصيل المورد قبل إعادة الإشعار؛ قد تختلف
+                      أقوال المورد عن المناطق المحفوظة في العرض.
+                    </p>
+                    <Button size="sm" variant="outline" disabled={busy !== null}
+                      onClick={() => {
+                        if (window.confirm(
+                          'هل راجعت بنفسك شروط العرض المنفذ واتجاه التغطية مقابل تفاصيل المورد؟ إن كنت متأكدًا، سيُرسل إشعار واحد فقط بعد إثبات أن المحاولة السابقة لم تصل إلى OpenWA.'
+                        )) void act(r.id, 'resend_supplier_outcome', {supplierTermsReviewed:true})
+                      }}>
+                      {busy === `resend_supplier_outcome:${r.id}`
+                        ? <Loader2 className="me-1.5 h-4 w-4 animate-spin" />
+                        : <Send className="me-1.5 h-4 w-4" />}
+                      استكمال إشعار المورد بعد مراجعة الشروط
                     </Button>
                   </div>
                 ) : null}
