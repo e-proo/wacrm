@@ -23,6 +23,7 @@ interface TaskSupplierRow {
   confirmation_message_id: string | null
   confirmation_run_id: string | null
   change_request_id: string | null
+  updated_at: string
 }
 export interface SupplierTaskReply {
   text: string
@@ -170,6 +171,54 @@ function supplierToolContext(input: SupplierReplyInput): ToolContext {
   }
 }
 
+/**
+ * A process can crash after an idempotent administrative Change Request was
+ * written but before the per-target negotiation linked it. Recover only the
+ * exact Task-bound, confirmed quote. Never create a second proposal here.
+ */
+async function recoverExistingSupplierProposal(
+  db: Db, input: SupplierReplyInput, row: TaskSupplierRow,
+  request: NonNullable<Awaited<ReturnType<typeof verifiedSupplierContext>>>['request'],
+): Promise<SupplierTaskReply | null> {
+  const key = `coverage-sourcing:${input.taskId}:${input.taskTargetId}`
+  const prior = await findChangeRequestByIdempotencyKey(input.accountId, key)
+  if (!prior) return null
+
+  const payload = prior.proposed_payload ?? {}
+  const terms = payload.supplier_terms && typeof payload.supplier_terms === 'object'
+    ? payload.supplier_terms as Record<string, unknown> : {}
+  if (prior.action_key !== 'coverage.offer.create' ||
+      payload.contact_id !== input.contactId ||
+      payload.conversation_id !== input.conversationId ||
+      payload.source_task_id !== input.taskId ||
+      payload.source_task_target_id !== input.taskTargetId ||
+      payload.source_coverage_request_id !== request.id ||
+      payload.service_id !== request.serviceId ||
+      payload.total_amount !== row.offered_amount ||
+      payload.currency !== request.currency ||
+      payload.commission_per_thousand !== row.commission_per_thousand ||
+      terms.details !== row.supplier_details ||
+      terms.explicitly_confirmed_in_message_id !==
+        (row.confirmation_message_id ?? input.sourceMessageId)) {
+    throw new Error('SUPPLIER_PROPOSAL_IDEMPOTENCY_MISMATCH')
+  }
+
+  const { data, error } = await db.from('ai_agent_coverage_supplier_negotiations')
+    .update({ stage: 'submitted', change_request_id: prior.id,
+      updated_at: new Date().toISOString() })
+    .eq('account_id', input.accountId).eq('task_id', input.taskId)
+    .eq('task_target_id', input.taskTargetId).eq('stage', 'submitting')
+    .eq('confirmation_message_id', row.confirmation_message_id ?? input.sourceMessageId)
+    .select('change_request_id').maybeSingle()
+  if (error) throw error
+  if (data?.change_request_id !== prior.id) {
+    throw new Error('SUPPLIER_PROPOSAL_LINK_CONCURRENT_UPDATE')
+  }
+  return {
+    text: `تم تسجيل العرض لدى الإدارة برقم CHG-${prior.code}. حالته ${prior.status}؛ لن نكرر تقديمه. العرض غير معتمد إلا بعد قرار الإدارة.`,
+  }
+}
+
 async function submitConfirmedOffer(
   db: Db, input: SupplierReplyInput, row: TaskSupplierRow,
   request: NonNullable<Awaited<ReturnType<typeof verifiedSupplierContext>>>['request'],
@@ -237,23 +286,9 @@ async function submitConfirmedOffer(
     pay_method: source.receive_method,
     receive_method: source.pay_method,
   }
-  const proposalKey = `coverage-sourcing:${input.taskId}:${input.taskTargetId}`
-  const prior = await findChangeRequestByIdempotencyKey(input.accountId, proposalKey)
-  if (prior) {
-    const pay = prior.proposed_payload ?? {}
-    if (prior.action_key !== 'coverage.offer.create' ||
-        pay.contact_id !== input.contactId ||
-        pay.source_task_target_id !== input.taskTargetId ||
-        pay.source_task_id !== input.taskId ||
-        pay.source_coverage_request_id !== request.id) {
-      throw new Error('SUPPLIER_PROPOSAL_IDEMPOTENCY_MISMATCH')
-    }
-    await db.from('ai_agent_coverage_supplier_negotiations')
-      .update({ stage: 'submitted', change_request_id: prior.id, updated_at: new Date().toISOString() })
-      .eq('account_id', input.accountId).eq('task_id', input.taskId)
-      .eq('task_target_id', input.taskTargetId).eq('stage', 'submitting')
-    return { text: `تم تسجيل العرض سابقًا لدى الإدارة برقم CHG-${prior.code}. حالته ${prior.status}؛ لن نكرر تقديمه.` }
-  }
+  // Check first in case a previous confirmed run committed before a crash.
+  const prior = await recoverExistingSupplierProposal(db, input, row, request)
+  if (prior) return prior
   const outcome = await executeCoverageProposeOfferIntegrated(
     supplierToolContext(input), {
       service_id: request.serviceId,
@@ -272,12 +307,16 @@ async function submitConfirmedOffer(
   const payload = outcome.data as { change_request?: { id?: string; code?: number; status?: string } } | null
   const id = payload?.change_request?.id
   if (!id) throw new Error('SUPPLIER_OFFER_PROPOSAL_NOT_PERSISTED')
-  const { error } = await db.from('ai_agent_coverage_supplier_negotiations')
+  const { data: linked, error } = await db.from('ai_agent_coverage_supplier_negotiations')
     .update({ stage: 'submitted', change_request_id: id, updated_at: new Date().toISOString() })
     .eq('account_id', input.accountId).eq('task_id', input.taskId)
     .eq('task_target_id', input.taskTargetId).eq('stage', 'submitting')
     .eq('confirmation_message_id', input.sourceMessageId)
+    .select('change_request_id').maybeSingle()
   if (error) throw error
+  if (linked?.change_request_id !== id) {
+    throw new Error('SUPPLIER_PROPOSAL_LINK_NOT_PERSISTED')
+  }
   return {
     text: `تم تسجيل عرض التغطية رقم CHG-${payload?.change_request?.code ?? '—'} ورفعه للإدارة للمراجعة. سيتم التواصل معك بعد قرار الإدارة؛ العرض ليس معتمدًا بعد. شكرًا لتعاونك.`,
   }
@@ -294,6 +333,32 @@ export async function handleCoverageSupplierTaskReply(
   const row = await loadOrCreateNegotiation(db, input)
   if (row.last_inbound_message_id === input.sourceMessageId) {
     return { text: 'تم تسجيل ردك. لن يُنشأ طلب إداري مكرر.' }
+  }
+  if (row.stage === 'submitting') {
+    // Fail closed on a stranded write; only recover an already committed,
+    // exact-match Change Request. Never silently re-propose on a later reply.
+    try {
+      const recovered = await recoverExistingSupplierProposal(db, input, row, verified.request)
+      if (recovered) return recovered
+    } catch (error) {
+      console.warn('[coverage supplier task] interrupted proposal recovery failed', {
+        task: input.taskId.slice(0, 8),
+        code: error instanceof Error ? error.message : 'unknown',
+      })
+    }
+    const submittedAt = Date.parse(row.updated_at)
+    if (!Number.isFinite(submittedAt) || Date.now() - submittedAt >= 5 * 60_000) {
+      const { data: held, error } = await db.from('ai_agent_coverage_supplier_negotiations')
+        .update({ stage: 'needs_human', updated_at: new Date().toISOString() })
+        .eq('account_id', input.accountId).eq('task_id', input.taskId)
+        .eq('task_target_id', input.taskTargetId).eq('stage', 'submitting')
+        .eq('confirmation_message_id', row.confirmation_message_id)
+        .select('stage').maybeSingle()
+      if (error) throw error
+      if (!held) throw new Error('SUPPLIER_PROPOSAL_RECOVERY_CONCURRENT_UPDATE')
+      return { text: 'استلمنا تأكيدك، لكن لم نتمكن من التحقق من تسجيل العرض للإدارة. أحلناه لمتابعة بشرية؛ لن ننشئ عرضًا مكررًا أو ندعي اعتماده.' }
+    }
+    return { text: 'عرض التغطية قيد التسجيل. سنؤكد رقم الطلب بعد التحقق، ولن ننشئ عرضًا مكررًا.' }
   }
   if (row.stage === 'submitted' && row.change_request_id) {
     const { data: cr, error } = await db.from('change_requests')
@@ -338,6 +403,24 @@ export async function handleCoverageSupplierTaskReply(
         task: input.taskId.slice(0, 8),
         code: error instanceof Error ? error.message : 'unknown',
       })
+      // The Change Request might have committed even if a later intent-link or
+      // negotiation update failed. Recover its exact idempotency key first.
+      try {
+        const recovered = await recoverExistingSupplierProposal(db, input,
+          { ...row, ...{
+            stage: 'submitting' as const,
+            offered_amount: step.next.offeredAmount,
+            commission_per_thousand: step.next.commissionPerThousand,
+            supplier_details: step.next.supplierDetails,
+            confirmation_message_id: input.sourceMessageId,
+          } }, verified.request)
+        if (recovered) return recovered
+      } catch (recoveryError) {
+        console.warn('[coverage supplier task] recovery after failure did not verify', {
+          task: input.taskId.slice(0, 8),
+          code: recoveryError instanceof Error ? recoveryError.message : 'unknown',
+        })
+      }
       await db.from('ai_agent_coverage_supplier_negotiations')
         .update({ stage: 'needs_human', updated_at: new Date().toISOString() })
         .eq('account_id', input.accountId).eq('task_id', input.taskId)

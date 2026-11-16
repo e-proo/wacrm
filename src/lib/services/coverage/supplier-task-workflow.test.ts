@@ -49,6 +49,7 @@ const stageRow = () => ({
   version:0, last_inbound_message_id:null as string|null,
   confirmation_message_id:null as string|null,confirmation_run_id:null as string|null,
   change_request_id:null as string|null,
+  updated_at:'2026-11-16T16:00:00Z',
 })
 type Negotiation = ReturnType<typeof stageRow>
 let row: Negotiation
@@ -212,6 +213,57 @@ describe('server-bound Coverage supplier lifecycle',()=>{
     expect(row.stage).toBe('needs_human')
     expect(mocked.proposed).not.toHaveBeenCalled()
   })
+  it('recovers a previously committed proposal after a crash without proposing twice',async()=>{
+    const details='الدفع في حضرموت والاستلام في إب حوالة خلال اليوم'
+    const confirmed='bbbbbbbb-bbbb-4bbb-8bbb-000000000007'
+    Object.assign(row,{stage:'submitting',offered_amount:'400',
+      commission_per_thousand:'7',supplier_details:details,version:5,
+      confirmation_message_id:confirmed})
+    mocked.existing.mockResolvedValue({
+      id:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',code:1170,status:'pending',
+      action_key:'coverage.offer.create',
+      proposed_payload:{
+        contact_id:contactId,conversation_id:conversationId,service_id:'service-uuid',
+        total_amount:'400',currency:'SAR',commission_per_thousand:'7',
+        source_task_id:taskId,source_task_target_id:targetId,source_coverage_request_id:requestId,
+        supplier_terms:{details,explicitly_confirmed_in_message_id:confirmed},
+      },
+    })
+    const r=await reply('هل تم رفع العرض؟',10)
+    expect(r?.text).toContain('CHG-1170')
+    expect(row).toMatchObject({stage:'submitted',change_request_id:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'})
+    expect(mocked.proposed).not.toHaveBeenCalled()
+  })
+  it('fails closed on a stale uncommitted submission instead of silently retrying',async()=>{
+    Object.assign(row,{stage:'submitting',offered_amount:'400',
+      commission_per_thousand:'7',supplier_details:'حوالة من حضرموت إلى إب اليوم',
+      confirmation_message_id:'bbbbbbbb-bbbb-4bbb-8bbb-000000000007',
+      updated_at:'2020-01-01T00:00:00Z'})
+    const r=await reply('هل وصل الطلب؟',11)
+    expect(row.stage).toBe('needs_human')
+    expect(r?.text).toContain('متابعة بشرية')
+    expect(mocked.proposed).not.toHaveBeenCalled()
+  })
+  it('rejects mismatched previously committed supplier terms without re-proposing',async()=>{
+    Object.assign(row,{stage:'submitting',offered_amount:'400',
+      commission_per_thousand:'7',supplier_details:'حوالة من حضرموت إلى إب اليوم',
+      confirmation_message_id:'bbbbbbbb-bbbb-4bbb-8bbb-000000000007',
+      updated_at:'2020-01-01T00:00:00Z'})
+    mocked.existing.mockResolvedValue({
+      id:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',code:1170,status:'pending',
+      action_key:'coverage.offer.create',proposed_payload:{
+        contact_id:contactId,conversation_id:conversationId,
+        source_task_id:taskId,source_task_target_id:targetId,source_coverage_request_id:requestId,
+        service_id:'service-uuid',total_amount:'300',currency:'SAR',commission_per_thousand:'7',
+        supplier_terms:{details:'مختلف',explicitly_confirmed_in_message_id:row.confirmation_message_id},
+      },
+    })
+    const r=await reply('تأكيد',12)
+    expect(row.stage).toBe('needs_human')
+    expect(r?.text).toContain('متابعة بشرية')
+    expect(mocked.proposed).not.toHaveBeenCalled()
+  })
+
   it('never re-proposes a submitted supplier quote on repeated confirmation',async()=>{
     Object.assign(row,{stage:'submitted',
       change_request_id:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'})
