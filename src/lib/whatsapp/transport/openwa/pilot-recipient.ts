@@ -13,6 +13,67 @@ function failedLookup(action: string, error: unknown): never {
 }
 
 /**
+ * A newly registered same-phone OpenWA session may receive a signed @lid
+ * before the old CRM contact/conversation linkage is repaired. Cross-check
+ * a native chat from the selected session against a historical chat on the
+ * exact contact and same linked WhatsApp phone. This is an approval-time
+ * identity lookup, NOT a bypass of the explicit Pilot allowlist.
+ */
+async function findHistoricalNativeChatOnSelectedSession(
+  db: SupabaseClient,
+  accountId: string,
+  connectionId: string,
+  conversationIds: string[],
+): Promise<string | null> {
+  const { data: selected, error: selectedError } = await db.from('whatsapp_connections')
+    .select('phone_identity').eq('account_id', accountId)
+    .eq('id', connectionId).eq('provider', 'openwa')
+    .is('archived_at', null).maybeSingle()
+  if (selectedError) failedLookup('read selected session identity', selectedError)
+  if (!selected?.phone_identity) return null
+
+  const { data: related, error: relatedError } = await db.from('whatsapp_connections')
+    .select('id').eq('account_id', accountId).eq('provider', 'openwa')
+    .eq('phone_identity', selected.phone_identity).limit(100)
+  if (relatedError) failedLookup('read same-phone sessions', relatedError)
+  if (!related?.length || related.length >= 100) return null
+
+  const { data: historic, error: historicError } = await db.from('messages')
+    .select('provider_chat_id')
+    .in('conversation_id', conversationIds)
+    .in('connection_id', related.map(row => row.id))
+    .eq('provider', 'openwa').eq('sender_type', 'customer')
+    .order('created_at', { ascending: false }).limit(100)
+  if (historicError) failedLookup('read verified contact chat history', historicError)
+  if (!historic?.length || historic.length >= 100) return null
+  const chats = [...new Set(historic.map(row => row.provider_chat_id).filter(isOpenWAOneToOneChatId))]
+  if (!chats.length) return null
+
+  const { data: selectedInbound, error: selectedInboundError } = await db.from('messages')
+    .select('conversation_id,provider_chat_id').eq('connection_id', connectionId)
+    .eq('provider', 'openwa').eq('sender_type', 'customer')
+    .in('provider_chat_id', chats).order('created_at', { ascending: false }).limit(100)
+  if (selectedInboundError) failedLookup('verify chat on new session', selectedInboundError)
+  if (!selectedInbound?.length || selectedInbound.length >= 100) return null
+  // Verify the new inbound conversations also belong to the selected tenant.
+  // They may currently point at an incorrect LID-digit contact (the bug being
+  // repaired); the exact native ID and same logged-in phone are the evidence.
+  const received = [...new Set(selectedInbound.map(row => row.provider_chat_id).filter(isOpenWAOneToOneChatId))]
+  if (received.length !== 1) {
+    throw new WhatsAppTransportError('connection_restricted',
+      'Multiple native OpenWA chats matched this phone across sessions; review the identity manually')
+  }
+  const convIds = [...new Set(selectedInbound.map(row => row.conversation_id))]
+  const { data: scoped, error: scopedError } = await db.from('conversations')
+    .select('id').eq('account_id', accountId).in('id', convIds).limit(100)
+  if (scopedError) failedLookup('validate current chat account', scopedError)
+  if (!scoped || scoped.length !== convIds.length) {
+    throw new WhatsAppTransportError('connection_restricted', 'Native OpenWA chat is not scoped to this account')
+  }
+  return received[0]
+}
+
+/**
  * Grant the *same provider-native destination* that WACRM would use for a
  * manual reply to an existing conversation on the chosen OpenWA connection.
  *
@@ -71,7 +132,14 @@ export async function resolveOpenWAPilotRecipientForGrant(
     .eq('sender_type', 'customer')
     .order('created_at', { ascending: false }).limit(25)
   if (inboundError) failedLookup('resolve provider-native chat identity', inboundError)
-  if (!inbound?.length) return { recipient: canonical, source: 'phone_without_inbound' }
+  if (!inbound?.length) {
+    const historical = await findHistoricalNativeChatOnSelectedSession(
+      db, accountId, connectionId, threads.map(thread => thread.id),
+    )
+    return historical
+      ? { recipient: historical, source: 'verified_inbound_chat' }
+      : { recipient: canonical, source: 'phone_without_inbound' }
+  }
 
   // If the latest inbound row has an unsupported/missing chat ID, the send
   // core would also refuse to reply. Do not approve a guessed phone instead.
