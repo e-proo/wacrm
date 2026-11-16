@@ -569,6 +569,51 @@ export function AgentTasksPanel() {
       </Card>
 
       <Card>
+        <CardHeader><CardTitle className="text-base">عامل المهام — تحكم TEST وفحص قائمة الانتظار</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            إيقاف العامل يمنع التقاط أعمال جديدة لهذا الحساب، ولا يوقف جلسة واتساب أو يلغي رسالة
+            بدأ المزوّد إرسالها. الإرسال غير المؤكد يتطلب مطابقة.
+          </p>
+          {workerError && <p role="alert" className="text-sm text-destructive">{workerError}</p>}
+          {workerStatus ? (
+            <div className="space-y-2">
+              <p role="status" className="text-sm font-medium">
+                حالة الحساب: {workerStatus.enabled ? 'مسموح بالتشغيل' : 'موقوف'} ·
+                عامل npm run dev: {workerStatus.localRunnerAvailable ? 'متاح' : 'غير مفعّل محليًا'}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                انتظار: {workerStatus.tasks.queued} · تنفيذ: {workerStatus.tasks.running} ·
+                توقف مؤقت: {workerStatus.tasks.paused} · جدولة: {workerStatus.tasks.scheduled} ·
+                Outbound انتظار: {workerStatus.outbound.queued} · Outbound معالجة: {workerStatus.outbound.inFlight}
+                {workerStatus.truncated ? ' · الفحص يعرض أول 1000 سجل فقط' : ''}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                آخر فحص: {new Date(workerStatus.scannedAt).toLocaleTimeString('ar')}
+                {!workerStatus.localRunnerAvailable && workerStatus.enabled
+                  ? ' · التشغيل التلقائي يتطلب npm run dev مع WACRM_DEV_AGENT_TASK_WORKER=on.' : ''}
+              </p>
+            </div>
+          ) : <p className="text-xs text-muted-foreground">جارٍ التحقق من حالة العامل...</p>}
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant={workerStatus?.enabled ? 'destructive' : 'default'}
+              disabled={workerBusy || !workerStatus} onClick={() => void toggleWorker()}>
+              {workerStatus?.enabled ? <Square className="ms-2 h-4 w-4" /> : <Play className="ms-2 h-4 w-4" />}
+              {workerStatus?.enabled ? 'إيقاف العامل' : 'تشغيل العامل'}
+            </Button>
+            <Button type="button" size="sm" variant="outline" disabled={workerBusy}
+              onClick={() => void scanWorker()}>
+              <ScanSearch className="ms-2 h-4 w-4" />
+              {workerBusy ? 'جارٍ الفحص...' : 'فحص المهام الآن'}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            الفحص للقراءة فقط؛ لا يرسل رسائل ولا يشغّل دورة تنفيذ.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="space-y-1">
@@ -578,15 +623,10 @@ export function AgentTasksPanel() {
                 {tasksRefreshedAt ? ` · آخر تحديث: ${tasksRefreshedAt}` : ''}
                 {hasPendingTasks ? ' · تحديث تلقائي كل 15 ثانية' : ''}
               </p>
-              {data?.devTaskWorkerActive ? (
-                <p className="text-xs text-emerald-700 dark:text-emerald-400">
-                  تشغيل المهام المحلي مهيأ على TEST؛ تتقدم المهام المؤهلة تلقائيًا.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  التشغيل التلقائي المحلي غير مفعّل في هذه النسخة؛ راجع إعداد TEST وتشغيل npm run dev.
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground">
+                حالة تنفيذ العامل: {workerStatus?.enabled === false ? 'موقوف من لوحة التحكم'
+                  : data?.devTaskWorkerActive ? 'مهيأ على TEST' : 'التشغيل المحلي يحتاج تفعيل npm run dev'}
+              </p>
             </div>
             <Button type="button" size="sm" variant="outline" disabled={loading || busy}
               onClick={() => void refreshCurrentTasks()} aria-label="تحديث المهام الحالية">
@@ -608,7 +648,15 @@ export function AgentTasksPanel() {
                   <div className="text-sm">
                     <span className="font-semibold">{task.taskType}@{task.version}</span>
                     <span className="mx-2 text-muted-foreground">·</span>
-                    <span>{task.status}</span>
+                    <span>{task.manualClosureKind
+                        ? closureLabel[task.manualClosureKind] ?? taskStatusLabel[task.status] ?? task.status
+                        : taskStatusLabel[task.status] ?? task.status}</span>
+                    {task.manualClosedAt && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        أُغلقت: {new Date(task.manualClosedAt).toLocaleString('ar')}
+                        {task.manualClosureNote ? ' · ملاحظة: ' + task.manualClosureNote : ''}
+                      </p>
+                    )}
                     {task.status === 'queued' && conn?.provider === 'openwa' ? (
                       <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
                         يبدأ التنفيذ تلقائيًا بعد تفعيل جلسة OpenWA واعتماد جميع أرقام الوكيل في Pilot.
@@ -629,6 +677,33 @@ export function AgentTasksPanel() {
                       disabled={!editable || busy} onClick={() => beginEdit(task)}>
                       <Settings2 className="ms-2 h-4 w-4" /> تعديل إعدادات المهمة
                     </Button>
+                    {!terminalTaskStatuses.has(task.status) && (
+                      <>
+                        {task.status === 'paused' ? (
+                          <Button type="button" size="sm" variant="outline" disabled={busy}
+                            onClick={() => void controlTask(task, 'resume')}>
+                            <Play className="ms-2 h-4 w-4" /> استئناف المهمة
+                          </Button>
+                        ) : ['queued','scheduled','running'].includes(task.status) ? (
+                          <Button type="button" size="sm" variant="outline" disabled={busy}
+                            onClick={() => void controlTask(task, 'pause')}>
+                            <Square className="ms-2 h-4 w-4" /> إيقاف مؤقت
+                          </Button>
+                        ) : null}
+                        <Button type="button" size="sm" variant="outline" disabled={busy}
+                          onClick={() => void controlTask(task, 'finish_incomplete')}>
+                          إنهاء غير مكتملة
+                        </Button>
+                        <Button type="button" size="sm" variant="outline" disabled={busy}
+                          onClick={() => void controlTask(task, 'finish_complete')}>
+                          <CheckCircle2 className="ms-2 h-4 w-4" /> إنهاء كمكتملة
+                        </Button>
+                        <Button type="button" size="sm" variant="destructive" disabled={busy}
+                          onClick={() => void controlTask(task, 'cancel')}>
+                          <XCircle className="ms-2 h-4 w-4" /> إلغاء المهمة
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
                 {progressTaskId === task.id ? (
