@@ -119,6 +119,16 @@ export async function processAgentTaskOutboundRunQueue(input: {
       result.gated += 1
       continue
     }
+    // The legacy pause_agent_task RPC only pauses the Task row. Never allow
+    // already-queued outbound Runs to bypass that pause or a manual close.
+    const { data: taskState, error: taskStateError } = await db.from('ai_agent_tasks')
+      .select('status').eq('account_id', run.account_id)
+      .eq('id', run.task_id).maybeSingle()
+    if (taskStateError) throw taskStateError
+    if (!taskState || taskState.status !== 'running') {
+      result.gated += 1
+      continue
+    }
     const policy = await loadAccountRuntimePolicy(db, run.account_id)
     if (
       policy.killSwitch ||
