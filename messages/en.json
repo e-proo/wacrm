@@ -695,7 +695,15 @@
       "retryFailed": "Retry failed ({count})",
       "toastResumeStarted": "Sending {count} recipients in the background.",
       "toastResumeStartedCapped": "Sending {count} recipients in the background. {remaining} more will need another run.",
-      "toastResumeFailed": "Could not resume: {error}"
+      "toastResumeFailed": "Could not resume: {error}",
+      "workerStatus": "Campaign worker:",
+      "workerState": {
+        "queued": "Queued",
+        "leased": "Processing",
+        "paused": "Paused for review",
+        "completed": "Processing completed"
+      },
+      "workerPausedReason": "Worker paused: {reason}"
     },
     "new": {
       "title": "New Broadcast",

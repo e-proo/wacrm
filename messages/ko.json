@@ -695,7 +695,15 @@
       "retryFailed": "실패 재시도 ({count})",
       "toastResumeStarted": "{count}명에게 백그라운드로 발송 중입니다.",
       "toastResumeStartedCapped": "{count}명에게 백그라운드로 발송 중입니다. 나머지 {remaining}명은 한 번 더 실행해야 합니다.",
-      "toastResumeFailed": "이어서 발송할 수 없습니다: {error}"
+      "toastResumeFailed": "이어서 발송할 수 없습니다: {error}",
+      "workerStatus": "캠페인 작업자:",
+      "workerState": {
+        "queued": "대기 중",
+        "leased": "처리 중",
+        "paused": "검토를 위해 일시정지",
+        "completed": "처리 완료"
+      },
+      "workerPausedReason": "작업자 일시정지: {reason}"
     },
     "new": {
       "title": "새 브로드캐스트",

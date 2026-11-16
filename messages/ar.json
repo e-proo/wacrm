@@ -695,7 +695,15 @@
       "retryFailed": "إعادة المحاولة للفاشل ({count})",
       "toastResumeStarted": "إرسال {count} مستلمًا في الخلفية.",
       "toastResumeStartedCapped": "إرسال {count} مستلمًا في الخلفية. سيحتاج {remaining} آخرون إلى تشغيل آخر.",
-      "toastResumeFailed": "تعذّر الاستئناف: {error}"
+      "toastResumeFailed": "تعذّر الاستئناف: {error}",
+      "workerStatus": "حالة عامل الحملات:",
+      "workerState": {
+        "queued": "في قائمة الانتظار",
+        "leased": "قيد المعالجة",
+        "paused": "متوقف للمراجعة",
+        "completed": "انتهى التنفيذ"
+      },
+      "workerPausedReason": "سبب إيقاف العامل: {reason}"
     },
     "new": {
       "title": "بثّ جديد",

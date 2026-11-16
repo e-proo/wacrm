@@ -42,6 +42,12 @@ import {
 } from '@/lib/broadcast-status';
 import { useTranslations } from 'next-intl';
 
+interface DeliveryJobView {
+  state: 'queued' | 'leased' | 'paused' | 'completed';
+  next_attempt_at: string | null;
+  paused_reason: string | null;
+  last_processed_at: string | null;
+}
 interface StatCardProps {
   label: string;
   value: number;
@@ -154,6 +160,7 @@ export default function BroadcastDetailPage() {
   const broadcastId = params.id as string;
 
   const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
+  const [deliveryJob, setDeliveryJob] = useState<DeliveryJobView | null>(null);
   const [recipients, setRecipients] = useState<BroadcastRecipient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -187,6 +194,15 @@ export default function BroadcastDetailPage() {
 
       if (recsError) throw recsError;
       setRecipients(recs ?? []);
+
+      // Read-only, account-scoped queue projection; no worker lease secrets.
+      const statusRes = await fetch('/api/whatsapp/broadcast/' + broadcastId + '/delivery', {
+        cache: 'no-store',
+      });
+      if (statusRes.ok) {
+        const result = await statusRes.json();
+        setDeliveryJob(result.job ?? null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('notFound'));
     } finally {
@@ -195,8 +211,14 @@ export default function BroadcastDetailPage() {
   }, [broadcastId, t]);
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (deliveryJob?.state !== 'queued' && deliveryJob?.state !== 'leased') return;
+    const interval = setInterval(() => { void fetchData(); }, 15_000);
+    return () => clearInterval(interval);
+  }, [deliveryJob?.state, fetchData]);
 
   const filteredRecipients = useMemo(
     () =>
@@ -327,7 +349,8 @@ export default function BroadcastDetailPage() {
   // A campaign whose tab went away sits in 'sending' with recipients
   // still pending and nothing left to move them. Name that state rather
   // than leaving a permanently pulsing "sending" badge.
-  const isStalled = broadcast.status === 'sending' && pendingCount > 0;
+  const isStalled = deliveryJob?.state === 'paused' && pendingCount > 0;
+  const workerActive = deliveryJob?.state === 'queued' || deliveryJob?.state === 'leased';
 
   const funnelSteps: FunnelStep[] = [
     { label: t('stats.sent'), value: broadcast.sent_count, color: 'bg-primary' },
@@ -417,6 +440,16 @@ export default function BroadcastDetailPage() {
           {reconciliationCount} recipient send(s) have an unsettled provider outcome. Inspect the connection and message ledger before any retry; automatic resend is disabled.
         </div>
       )}
+      {deliveryJob && (
+        <div className="rounded-lg border border-border bg-card p-3 text-sm">
+          <span className="font-medium">{t('workerStatus')} </span>
+          <span>{t('workerState.' + deliveryJob.state)}</span>
+          {deliveryJob.paused_reason && (
+            <p className="mt-1 text-amber-600">{t('workerPausedReason', { reason: deliveryJob.paused_reason })}</p>
+          )}
+        </div>
+      )}
+
       {/* Resume / retry (issue #472). Only rendered when there is
           actually something outstanding. */}
       {(pendingCount > 0 || retryableCount > 0) && (
@@ -436,7 +469,7 @@ export default function BroadcastDetailPage() {
               <Button
                 size="sm"
                 onClick={() => handleResume('pending')}
-                disabled={resumingScope !== null}
+                disabled={resumingScope !== null || workerActive}
               >
                 {resumingScope === 'pending' ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -451,7 +484,7 @@ export default function BroadcastDetailPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => handleResume('failed')}
-                disabled={resumingScope !== null}
+                disabled={resumingScope !== null || workerActive}
                 className="border-border text-muted-foreground hover:bg-muted"
               >
                 {resumingScope === 'failed' ? (
