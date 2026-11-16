@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import nextEnv from '@next/env'
-import { developmentPort, shouldRunDevTaskWorker } from './dev-agent-task-config.mjs'
+import { developmentPort, shouldRunDevTaskWorker, shouldRunDevBroadcastWorker } from './dev-agent-task-config.mjs'
 
 const { loadEnvConfig } = nextEnv
 
@@ -16,7 +16,13 @@ const enabled = shouldRunDevTaskWorker({
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
   mode: process.env.WACRM_DEV_AGENT_TASK_WORKER,
 })
-const cronSecret = enabled
+const broadcastEnabled = shouldRunDevBroadcastWorker({
+  nodeEnv: 'development',
+  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  mode: process.env.WACRM_DEV_BROADCAST_WORKER,
+})
+const pollingEnabled = enabled || broadcastEnabled
+const cronSecret = pollingEnabled
   ? (process.env.CRON_SECRET || randomBytes(32).toString('hex'))
   : process.env.CRON_SECRET
 // Always pass an explicit port. Otherwise Next can silently pick 3001
@@ -46,42 +52,50 @@ let failCount = 0
 let lastGatedCount = 0
 let repeatedGatedTicks = 0
 async function tick() {
-  if (!enabled || stopped || polling || next.exitCode !== null) return
+  if (!pollingEnabled || stopped || polling || next.exitCode !== null) return
   polling = true
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/internal/ai-agent-task-worker`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${cronSecret}` },
-      signal: AbortSignal.timeout(120_000),
-      cache: 'no-store',
-    })
-    if (!response.ok) throw new Error(`Worker endpoint HTTP ${response.status}`)
-    const data = await response.json()
-    failCount = 0
-    const activity = (data.tasks?.claimedTasks ?? 0) +
-      (data.outbound?.attempted ?? 0) + (data.triggers?.completed ?? 0)
-    const gated = data.outbound?.gated ?? 0
-    // HTTP 200 with a gate is a successful poll, NOT a delivered message.
-    // Show this once when the gate changes and periodically thereafter,
-    // without flooding the console every 15 seconds while consent is pending.
-    repeatedGatedTicks = gated > 0 && gated === lastGatedCount
-      ? repeatedGatedTicks + 1 : 0
-    const reportGate = gated > 0 &&
-      (gated !== lastGatedCount || repeatedGatedTicks % 20 === 0)
-    lastGatedCount = gated
-    if (activity || data.tasks?.failed || data.outbound?.reconciliation || reportGate) {
-      console.info('[TEST Agent Task worker] tick', {
-        claims: data.tasks?.claimedTasks ?? 0,
-        targets: data.tasks?.materializedTargets ?? 0,
-        runs: data.tasks?.createdRuns ?? 0,
-        queuedOutbound: data.outbound?.scanned ?? 0,
-        attempted: data.outbound?.attempted ?? 0,
-        sent: data.outbound?.sent ?? 0,
-        gated,
-        reconciliation: data.outbound?.reconciliation ?? 0,
-        errors: data.tasks?.failed ?? 0,
+    if (enabled) {
+      const response = await fetch('http://127.0.0.1:' + port + '/api/internal/ai-agent-task-worker', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + cronSecret },
+        signal: AbortSignal.timeout(120_000),
+        cache: 'no-store',
       })
+      if (!response.ok) throw new Error('Agent task worker endpoint HTTP ' + response.status)
+      const data = await response.json()
+      const activity = (data.tasks?.claimedTasks ?? 0) +
+        (data.outbound?.attempted ?? 0) + (data.triggers?.completed ?? 0)
+      const gated = data.outbound?.gated ?? 0
+      repeatedGatedTicks = gated > 0 && gated === lastGatedCount
+        ? repeatedGatedTicks + 1 : 0
+      const reportGate = gated > 0 &&
+        (gated !== lastGatedCount || repeatedGatedTicks % 20 === 0)
+      lastGatedCount = gated
+      if (activity || data.tasks?.failed || data.outbound?.reconciliation || reportGate) {
+        console.info('[TEST Agent Task worker] tick', {
+          claims: data.tasks?.claimedTasks ?? 0,
+          runs: data.tasks?.createdRuns ?? 0,
+          attempted: data.outbound?.attempted ?? 0,
+          sent: data.outbound?.sent ?? 0, gated,
+          reconciliation: data.outbound?.reconciliation ?? 0,
+        })
+      }
     }
+    if (broadcastEnabled) {
+      const response = await fetch('http://127.0.0.1:' + port + '/api/internal/whatsapp-broadcast-worker', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + cronSecret },
+        signal: AbortSignal.timeout(120_000),
+        cache: 'no-store',
+      })
+      if (!response.ok) throw new Error('Broadcast worker endpoint HTTP ' + response.status)
+      const data = await response.json()
+      if (data.claimed || data.paused) {
+        console.info('[TEST Broadcast worker]', data)
+      }
+    }
+    failCount = 0
   } catch (error) {
     // NEXT might still be booting; retry without starting a second tick.
     failCount += 1
@@ -111,12 +125,14 @@ next.on('exit', (code, signal) => {
   shutdown('SIGTERM')
   process.exit(code ?? (signal ? 1 : 0))
 })
-if (enabled) {
-  console.info('[WACRM TEST] Agent Tasks auto-run every 15 seconds while npm run dev is active.' +
-    ' This can send previously approved WhatsApp messages. ' +
-    'Disable with WACRM_DEV_AGENT_TASK_WORKER=off in .env.local, then restart.')
+if (pollingEnabled) {
+  console.info('[WACRM TEST] Automatic workers enabled:', {
+    agentTasks: enabled, broadcastDelivery: broadcastEnabled,
+    cadenceSeconds: 15,
+    notice: 'This can send queued WhatsApp messages on TEST only',
+  })
   firstTimeout = setTimeout(() => { void tick() }, 8_000)
   timer = setInterval(() => { void tick() }, 15_000)
 } else {
-  console.info('[WACRM] Automatic Agent Task worker inactive (non-TEST or explicit opt-out).')
+  console.info('[WACRM] Automatic WhatsApp workers inactive (non-TEST or explicit opt-out).')
 }

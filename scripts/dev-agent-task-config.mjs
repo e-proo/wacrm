@@ -24,3 +24,10 @@ export function developmentPort(args) {
   }
   return 3000
 }
+
+
+/** Same pinned TEST project; explicit opt-out to prevent unintended sends. */
+export function shouldRunDevBroadcastWorker({nodeEnv,supabaseUrl,mode}) {
+  if (nodeEnv !== 'development' || supabaseUrl !== DEV_TASK_TEST_URL) return false
+  return (mode ?? 'on') === 'on'
+}

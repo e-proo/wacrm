@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import {
-  DEV_TASK_TEST_URL, developmentPort, shouldRunDevTaskWorker,
+  DEV_TASK_TEST_URL, developmentPort, shouldRunDevTaskWorker, shouldRunDevBroadcastWorker,
 } from '../../../../scripts/dev-agent-task-config.mjs'
 
 describe('local TEST dev runner safety gate and port', () => {
@@ -13,6 +13,14 @@ describe('local TEST dev runner safety gate and port', () => {
     expect(shouldRunDevTaskWorker({...params,nodeEnv:'production'})).toBe(false)
     expect(shouldRunDevTaskWorker({...params,supabaseUrl:'https://production.supabase.co'})).toBe(false)
     expect(shouldRunDevTaskWorker({...params,supabaseUrl:DEV_TASK_TEST_URL+'.evil'})).toBe(false)
+  })
+  it('enables the broadcast worker only on the pinned TEST project', () => {
+    const base = { nodeEnv:'development', supabaseUrl:DEV_TASK_TEST_URL }
+    expect(shouldRunDevBroadcastWorker(base)).toBe(true)
+    expect(shouldRunDevBroadcastWorker({ ...base, mode:'off' })).toBe(false)
+    expect(shouldRunDevBroadcastWorker({ ...base, mode:'wrong' })).toBe(false)
+    expect(shouldRunDevBroadcastWorker({ ...base, nodeEnv:'production' })).toBe(false)
+    expect(shouldRunDevBroadcastWorker({ ...base, supabaseUrl:'https://production.supabase.co' })).toBe(false)
   })
   it('honors an explicit CLI port and rejects invalid port values', () => {
     expect(developmentPort([])).toBe(3000)
