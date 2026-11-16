@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { RefreshCw, ShieldAlert, Send, Settings2 } from 'lucide-react'
+import { RefreshCw, ShieldAlert, Send, Settings2, Square, Play, CheckCircle2, XCircle, ScanSearch } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -44,6 +44,10 @@ interface Task {
   maxTargets: number
   maxAttemptsPerTarget: number
   createdAt: string
+  completedAt?: string | null
+  manualClosureKind?: 'cancelled' | 'finished_incomplete' | 'finished_complete' | null
+  manualClosedAt?: string | null
+  manualClosureNote?: string | null
 }
 interface ResponseData {
   connections: Connection[]
@@ -52,6 +56,15 @@ interface ResponseData {
   tasks: Task[]
   outboundDeliveryEnabled: boolean
   devTaskWorkerActive?: boolean
+  taskWorkerEnabled?: boolean
+}
+interface WorkerStatus {
+  enabled: boolean
+  localRunnerAvailable: boolean
+  tasks: { queued: number; running: number; paused: number; scheduled: number; validating: number }
+  outbound: { queued: number; inFlight: number }
+  scannedAt: string
+  truncated: boolean
 }
 interface TaskRecipientProgress {
   contactId: string
@@ -70,6 +83,24 @@ interface TaskProgressResponse {
   taskStatus: string
   holdReason?: string | null
   recipients: TaskRecipientProgress[]
+}
+const terminalTaskStatuses = new Set(['completed','partially_completed','failed','cancelled'])
+const taskStatusLabel: Record<string, string> = {
+  draft: 'مسودة', validating: 'قيد التحقق', scheduled: 'مجدولة', queued: 'بانتظار التنفيذ',
+  running: 'قيد التنفيذ', paused: 'متوقفة مؤقتًا', completed: 'مكتملة',
+  partially_completed: 'مكتملة جزئيًا', failed: 'فشلت', cancelled: 'أُلغيت',
+}
+const closureLabel: Record<string, string> = {
+  cancelled: 'أُلغيت بأمر المسؤول',
+  finished_incomplete: 'أُنهيت يدويًا — غير مكتملة',
+  finished_complete: 'أُنهيت مكتملة بعد التحقق من النتائج',
+}
+const controlErrorLabel: Record<string, string> = {
+  in_flight_or_reconciliation: 'توجد عملية إرسال جارية أو تحتاج مطابقة؛ لا يمكن إغلاق المهمة حتى تستقر نتيجتها. الإلغاء لا يسترجع رسالة قد أُرسلت.',
+  targets_not_completed: 'لا يمكن اعتبار المهمة مكتملة لأن بعض المستهدفين لم يكتملوا. استخدم «إنهاء غير مكتملة».',
+  coverage_not_fulfilled: 'طلب التغطية لم يصل بعد إلى حالة fulfilled؛ لا يمكن توثيق المهمة كمكتملة.',
+  already_terminal: 'المهمة مغلقة بالفعل ولا يمكن تغيير نتيجتها.',
+  TASK_STATE_CHANGED_OR_NOT_FOUND: 'تغيّرت حالة المهمة أو لم تعد متاحة.',
 }
 const targetStatusLabel: Record<string, string> = {
   candidate: 'مرشح', eligible: 'مؤهل', queued: 'في الانتظار',
@@ -144,6 +175,9 @@ export function AgentTasksPanel() {
   const progressRequest = useRef<AbortController | null>(null)
   const submissionRef = useRef<{ fingerprint: string; submissionId: string } | null>(null)
   const [tasksRefreshedAt, setTasksRefreshedAt] = useState<string | null>(null)
+  const [workerStatus, setWorkerStatus] = useState<WorkerStatus | null>(null)
+  const [workerBusy, setWorkerBusy] = useState(false)
+  const [workerError, setWorkerError] = useState<string | null>(null)
 
   const reload = useCallback(async (): Promise<ResponseData | null> => {
     setLoading(true)
@@ -163,6 +197,78 @@ export function AgentTasksPanel() {
   }, [])
 
   useEffect(() => { void reload() }, [reload])
+
+  const scanWorker = useCallback(async () => {
+    setWorkerBusy(true)
+    setWorkerError(null)
+    try {
+      const snapshot = await loadResponse<WorkerStatus>(
+        await fetch('/api/agent-tasks/worker', { cache: 'no-store' }),
+      )
+      setWorkerStatus(snapshot)
+    } catch (cause) {
+      setWorkerError(cause instanceof Error ? cause.message : 'تعذّر فحص العامل.')
+    } finally { setWorkerBusy(false) }
+  }, [])
+  useEffect(() => { void scanWorker() }, [scanWorker])
+
+  async function toggleWorker() {
+    if (!workerStatus || workerBusy) return
+    const action = workerStatus.enabled ? 'stop' : 'start'
+    if (!window.confirm(action === 'stop'
+      ? 'إيقاف التقاط أعمال جديدة لهذا الحساب؟ لا يمكن التراجع عن رسائل بدأ إرسالها بالفعل.'
+      : 'تشغيل العامل لهذا الحساب؟ قد يبدأ تنفيذ المهام المعلّقة وإرسال رسائل الموافَق عليها فورًا.')) return
+    setWorkerBusy(true)
+    setWorkerError(null)
+    try {
+      const snapshot = await loadResponse<WorkerStatus>(await fetch('/api/agent-tasks/worker', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action }),
+      }))
+      setWorkerStatus(snapshot)
+      setSuccess(action === 'stop' ? 'تم إيقاف بدء مهام جديدة لهذا الحساب.' : 'تم السماح للعامل بالعمل لهذا الحساب.')
+      await reload()
+    } catch (cause) {
+      setWorkerError(cause instanceof Error ? cause.message : 'تعذّر التحكم في العامل.')
+    } finally { setWorkerBusy(false) }
+  }
+
+  async function controlTask(task: Task,
+    action: 'pause' | 'resume' | 'cancel' | 'finish_incomplete' | 'finish_complete') {
+    if (busy || terminalTaskStatuses.has(task.status)) return
+    const prompts: Record<typeof action,string> = {
+      pause: 'إيقاف هذه المهمة مؤقتًا؟ قد تكتمل عملية إرسال بدأت بالفعل.',
+      resume: 'استئناف المهمة؟ سيتمكن العامل من تنفيذ الأعمال المتبقية.',
+      cancel: 'إلغاء هذه المهمة نهائيًا؟ سيُلغى العمل غير المرسل، ولن يمكن استئنافها.',
+      finish_incomplete: 'إنهاء هذه المهمة الآن بوصفها غير مكتملة؟ ستُحفظ نتائجها الفعلية دون ادعاء النجاح.',
+      finish_complete: 'إنهاء هذه المهمة بوصفها مكتملة؟ لن يُسمح بذلك إلا إذا كانت جميع النتائج وطلب التغطية مكتملين.',
+    }
+    if (!window.confirm(prompts[action])) return
+    let note: string | null = null
+    if (['cancel','finish_incomplete','finish_complete'].includes(action)) {
+      const entered = window.prompt('ملاحظة الإغلاق (اختيارية، حتى 500 حرف):', '')
+      if (entered === null) return
+      note = entered.slice(0, 500)
+    }
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const result = await loadResponse<{ updated: boolean; status: string }>(
+        await fetch('/api/agent-tasks/' + encodeURIComponent(task.id) + '/control', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action, note }),
+        }),
+      )
+      setSuccess('تم تحديث المهمة: ' + (taskStatusLabel[result.status] ?? result.status))
+      setEditingId(null)
+      await reload()
+      if (progressTaskId === task.id) await toggleProgress(task.id, true)
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'تعذّر تغيير حالة المهمة.'
+      setError(controlErrorLabel[message] ?? message)
+    } finally { setBusy(false) }
+  }
 
   // Task status changes asynchronously through the TEST worker. Keep the
   // existing list current without disabling the form or reloading the page.
