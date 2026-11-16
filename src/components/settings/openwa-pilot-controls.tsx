@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-api-response'
 import { normalizeTestRecipient } from '@/lib/whatsapp/transport/openwa/pilot-recipient-input'
-import { missingPilotCohortCaps, suggestedPilotCohortCaps, OPENWA_TEST_PILOT_MAX_HOURLY, OPENWA_TEST_PILOT_MAX_DAILY, OPENWA_TEST_PILOT_MAX_FIRST_TOUCH, OPENWA_TEST_PILOT_MIN_INTERVAL_MS, type PilotCohortWorkload } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
+import { missingPilotCohortCaps, suggestedPilotCohortCaps, OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT, OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT, OPENWA_TEST_PILOT_MAX_HOURLY, OPENWA_TEST_PILOT_MAX_DAILY, OPENWA_TEST_PILOT_MAX_FIRST_TOUCH, OPENWA_TEST_PILOT_MIN_INTERVAL_MS, type PilotCohortWorkload } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
 import { useWhatsAppLabels } from './whatsapp-labels'
 
 interface PilotState extends Record<string, unknown> {
@@ -23,6 +23,8 @@ interface PilotState extends Record<string, unknown> {
   active: boolean
   paused: boolean
   active_admissions: number
+  approved_messages_per_recipient?: number | null
+  required_cohort_messages?: number
   agent_admissions?: number
   manual_admissions?: number
   approved_workload?: 'manual' | 'agent' | null
@@ -58,6 +60,7 @@ const capName: Record<string, string> = {
   pilot_agent_daily_cap: 'حد الوكيل اليومي',
   pilot_manual_hourly_cap: 'حد الرسائل العادية الساعي',
   pilot_manual_daily_cap: 'حد الرسائل العادية اليومي',
+  messages_per_recipient: 'رسائل لكل جهة: القيمة تتجاوز السقف الممكن للمجموعة',
 }
 
 const defaultLimits = { hourly_cap: 3, daily_cap: 10, first_touch_daily_cap: 1,
@@ -82,6 +85,7 @@ export function OpenWAPilotControls({
   const [search, setSearch] = useState('')
   const [contactResults, setContactResults] = useState<Array<{ id: string; name: string | null; phone: string }>>([])
   const [selectedRecipients, setSelectedRecipients] = useState<string[]>([])
+  const [messagesPerRecipient, setMessagesPerRecipient] = useState(OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT)
   const [contactError, setContactError] = useState<string | null>(null)
   const [consent, setConsent] = useState(false)
   const [phoneCallConsent, setPhoneCallConsent] = useState(false)
@@ -186,7 +190,8 @@ export function OpenWAPilotControls({
       if (action === 'prepare') body.confirm_prepare = true
       if (action === 'limits') Object.assign(body, limits)
       if (action === 'grant_batch') Object.assign(body, {
-        workload, recipients: selectedRecipients, consent_confirmed: consent,
+        workload, recipients: selectedRecipients, messages_per_recipient: messagesPerRecipient,
+        consent_confirmed: consent,
         consent_basis: workload === 'agent' && phoneCallConsent ? 'phone_call' : 'verified_inbound',
         phone_call_opt_in_confirmed: workload === 'agent' && phoneCallConsent,
         ack_duplicate_sessions: duplicateAck, hours: 4,
@@ -228,21 +233,28 @@ export function OpenWAPilotControls({
     : state.active_admissions <= 10 ? 'start'
     : 'multiple'
   const running = busy || verifying
-  const agentMissingCaps = state && selectedRecipients.length > 0
-    ? missingPilotCohortCaps(state.guardrails, selectedRecipients.length, 'agent') : []
-  const manualMissingCaps = state && selectedRecipients.length > 0
-    ? missingPilotCohortCaps(state.guardrails, selectedRecipients.length, 'manual') : []
+  const selectedCount = selectedRecipients.length
+  const requiredMessages = selectedCount * messagesPerRecipient
+  const feasibleCapacity = Number.isInteger(messagesPerRecipient) &&
+    messagesPerRecipient >= 1 &&
+    messagesPerRecipient <= OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT &&
+    requiredMessages <= OPENWA_TEST_PILOT_MAX_HOURLY
+  const agentMissingCaps = state && selectedCount > 0
+    ? missingPilotCohortCaps(state.guardrails, selectedCount, 'agent', messagesPerRecipient) : []
+  const manualMissingCaps = state && selectedCount > 0
+    ? missingPilotCohortCaps(state.guardrails, selectedCount, 'manual', messagesPerRecipient) : []
   function recommendCaps(workload: PilotCohortWorkload) {
     if (!state || !state.paused || state.active_admissions > 0 || selectedRecipients.length < 1) return
-    const suggested = suggestedPilotCohortCaps(state.guardrails, selectedRecipients.length, workload)
+    if (!feasibleCapacity) return
+    const suggested = suggestedPilotCohortCaps(state.guardrails, selectedRecipients.length, workload, messagesPerRecipient)
     setLimits(previous => ({ ...previous, ...suggested }))
     setAdvancedOpen(true)
-    setNotice(`تمت تعبئة حدود مناسبة لـ ${selectedRecipients.length} أرقام دون حفظها. راجع القيم في الإعدادات المتقدمة واضغط «حفظ الحدود» قبل الاعتماد.`)
+    setNotice(`تمت تعبئة الحدود اللازمة لـ ${selectedRecipients.length} جهات × ${messagesPerRecipient} رسائل = ${requiredMessages} رسالة، دون حفظها. راجع الإعدادات المتقدمة واضغط «حفظ الحدود» قبل الاعتماد.`)
     setError(null)
   }
   const needsDuplicateReview = (state?.same_identity_ready_connections ?? 0) > 1
   const canApprove = Boolean(state?.configured && state.enforced && state.paused &&
-    selectedRecipients.length > 0 && selectedRecipients.length <= 10 &&
+    selectedCount > 0 && selectedCount <= 10 && feasibleCapacity &&
     consent && verified && state.unsettled_outbound === 0 && (!needsDuplicateReview || duplicateAck))
   const canStart = Boolean(state?.configured && state.enforced && state.paused && verified
     && state.active_admissions > 0 && state.active_admissions <= 10 && state.unsettled_outbound === 0
@@ -403,7 +415,23 @@ export function OpenWAPilotControls({
               <Button type="button" variant="ghost" size="sm" disabled={running}
                 onClick={() => setSelectedRecipients(old => old.filter(item => item !== value))}>إزالة</Button>
             </div>)}
-            <p className="text-xs">المختارة: {selectedRecipients.length} من 10</p>
+            <p className="text-xs">المختارة: {selectedCount} من 10</p>
+          </div>
+          <div className="space-y-2 rounded-md border p-3">
+            <Label htmlFor={`pilot-per-recipient-${connectionId}`}>عدد الرسائل المطلوب استيعابها لكل جهة</Label>
+            <Input id={`pilot-per-recipient-${connectionId}`} type="number" min={1}
+              max={OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT} step={1}
+              value={messagesPerRecipient} disabled={running}
+              onChange={e => setMessagesPerRecipient(Number(e.target.value))} />
+            <p className="text-xs text-muted-foreground">
+              الحساب: {selectedCount} جهات × {Number.isFinite(messagesPerRecipient) ? messagesPerRecipient : 0} رسائل =
+              {' '}{requiredMessages} رسالة. هذا حد سعة مشترك للجلسة ولنوع الإرسال، وليس إرسالًا تلقائيًا أو ضمانًا لكل جهة.
+              حد أول تواصل يقاس بعدد الجهات الجديدة فقط ({selectedCount}).
+            </p>
+            {selectedCount > 0 && !feasibleCapacity &&
+              <p role="alert" className="text-xs text-destructive">
+                الحد الساعي الأقصى 100 رسالة. اختر عددًا من 1 إلى {Math.floor(OPENWA_TEST_PILOT_MAX_HOURLY / selectedCount)} رسالة لكل جهة، أو قلّل الجهات.
+              </p>}
           </div>
           <div className="flex items-start gap-2">
             <Checkbox id={`pilot-consent-${connectionId}`} checked={consent} disabled={running}
@@ -424,14 +452,14 @@ export function OpenWAPilotControls({
             <p className="text-xs text-amber-600">{w('devPilotMustReviewDuplicates')}</p>}
           {selectedRecipients.length > 0 && (agentMissingCaps.length > 0 || manualMissingCaps.length > 0) &&
             <div role="status" className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-              <p className="font-medium">حدود الإرسال المحفوظة لا تكفي لاعتماد {selectedRecipients.length} أرقام.</p>
+              <p className="font-medium">السعة المحفوظة لا تستوعب {selectedCount} جهات × {messagesPerRecipient} رسائل = {requiredMessages} رسالة (وأول تواصل لـ {selectedCount} جهات).</p>
               {agentMissingCaps.length > 0 && <p className="text-xs">قيود مهام الوكيل: {agentMissingCaps.map(key => capName[key] ?? key).join('، ')}.</p>}
               {manualMissingCaps.length > 0 && <p className="text-xs">قيود الرسائل العادية: {manualMissingCaps.map(key => capName[key] ?? key).join('، ')}.</p>}
               <div className="flex flex-wrap gap-2">
                 {agentMissingCaps.length > 0 && <Button type="button" size="sm" variant="outline" disabled={running}
-                  onClick={() => recommendCaps('agent')}>تجهيز حدود الوكيل لـ {selectedRecipients.length} أرقام</Button>}
+                  disabled={running || !feasibleCapacity} onClick={() => recommendCaps('agent')}>تجهيز حدود الوكيل لـ {selectedRecipients.length} أرقام</Button>}
                 {manualMissingCaps.length > 0 && <Button type="button" size="sm" variant="outline" disabled={running}
-                  onClick={() => recommendCaps('manual')}>تجهيز الحدود العادية لـ {selectedRecipients.length} أرقام</Button>}
+                  disabled={running || !feasibleCapacity} onClick={() => recommendCaps('manual')}>تجهيز الحدود العادية لـ {selectedRecipients.length} أرقام</Button>}
               </div>
               <p className="text-xs text-muted-foreground">سيتم تعبئة الإعدادات المتقدمة فقط. يجب مراجعتها وحفظها قبل الاعتماد، ولن يبدأ الإرسال أو تتغيّر الحدود تلقائيًا.</p>
             </div>}
@@ -469,7 +497,7 @@ export function OpenWAPilotControls({
 
         {step === 'active' && <section className="space-y-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4">
           <p className="flex items-center gap-2 font-semibold"><CheckCircle2 className="size-5" />{w('devPilotNowActive')}</p>
-          <p className="text-sm text-muted-foreground">اعتمدت الجلسة {state.active_admissions} أرقام لنوع {state.approved_workload}. الإرسال محدود بالضوابط المحفوظة ويتوقف تلقائيًا عند تجاوزها.</p>
+          <p className="text-sm text-muted-foreground">اعتمدت الجلسة {state.active_admissions} أرقام لنوع {state.approved_workload}؛ سعة الاعتماد المخططة {state.approved_messages_per_recipient ?? 1} رسائل لكل جهة ({state.required_cohort_messages ?? state.active_admissions} رسالة). الإرسال محدود بالضوابط المحفوظة ويتوقف تلقائيًا عند تجاوزها.</p>
           <Button variant="destructive" disabled={running} onClick={() => void submit('stop')}>
             <Square className="me-2 size-4" />{w('devPilotStop')}
           </Button>
@@ -491,6 +519,7 @@ export function OpenWAPilotControls({
             <ChevronDown className="size-4 text-muted-foreground" />
           </summary>
           <p className="mt-2 text-xs text-muted-foreground">{w('devPilotLimitsHelp')}</p>
+          <p className="mt-2 text-xs font-medium">القيم المحفوظة للجلسة: {state.guardrails.hourly_cap} رسالة/ساعة، {state.guardrails.daily_cap} رسالة/يوم؛ الوكيل: {state.guardrails.pilot_agent_hourly_cap ?? state.guardrails.hourly_cap}/ساعة، {state.guardrails.pilot_agent_daily_cap ?? state.guardrails.daily_cap}/يوم. تحديث البيانات متاح أسفل القسم.</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {([
               ['hourly_cap', 'devPilotHourly', 1, OPENWA_TEST_PILOT_MAX_HOURLY],
