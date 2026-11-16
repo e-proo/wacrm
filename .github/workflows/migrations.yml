@@ -57,6 +57,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-pilot-cohort-message-capacity-smoke.sql
       - name: Verify OpenWA Agent phone-call opt-in schema and server-only gates
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-agent-telephone-consent-smoke.sql
+      - name: Verify SOF-66 TEST phone-call consent on exact WhatsApp Task connection
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-openwa-phone-consent-connection-smoke.sql
       - name: Verify per-session TEST Pilot mode and tenant safety
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-pilot-mode-smoke.sql
       - name: Verify Agent Task platform behavior
