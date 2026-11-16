@@ -59,11 +59,11 @@ export async function GET() {
         .in('status', ['active','partially_reserved'])
         .order('created_at', { ascending: false }).limit(100),
       db.from('ai_agent_tasks')
-        .select('id,task_type,task_type_version,status,target_policy,task_context,max_targets,max_attempts_per_target,created_at,agent_id')
+        .select('id,task_type,task_type_version,status,target_policy,task_context,max_targets,max_attempts_per_target,created_at,agent_id,completed_at,manual_closure_kind,manual_closed_at,manual_closure_note')
         .eq('account_id', ctx.accountId)
         .order('created_at', { ascending: false }).limit(80),
       db.from('ai_runtime_policies')
-        .select('outbound_task_delivery_enabled')
+        .select('outbound_task_delivery_enabled,task_worker_enabled')
         .eq('account_id', ctx.accountId).maybeSingle(),
     ])
     if (connectionsError || agentsError || requestsError || tasksError || runtimeError) {
@@ -146,8 +146,13 @@ export async function GET() {
         maxTargets: row.max_targets,
         maxAttemptsPerTarget: row.max_attempts_per_target,
         createdAt: row.created_at,
+        completedAt: row.completed_at,
+        manualClosureKind: row.manual_closure_kind,
+        manualClosedAt: row.manual_closed_at,
+        manualClosureNote: row.manual_closure_note,
       })),
       outboundDeliveryEnabled: runtime?.outbound_task_delivery_enabled === true,
+      taskWorkerEnabled: runtime?.task_worker_enabled !== false,
       devTaskWorkerActive: process.env.NODE_ENV === 'development' &&
         process.env.WACRM_DEV_AGENT_TASK_WORKER_ACTIVE === '1',
     }, { headers: noStore })
