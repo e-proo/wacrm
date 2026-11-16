@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { canonicalOpenWAPilotRecipient, isOpenWATestProject, openWAPilotEnforcementEnabled, openWAPilotRecipientHash } from '@/lib/whatsapp/transport/guardrails'
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
 import { resolveOpenWAPilotRecipientForGrant } from '@/lib/whatsapp/transport/openwa/pilot-recipient'
-import { missingPilotCohortCaps, OPENWA_TEST_PILOT_MAX_HOURLY, OPENWA_TEST_PILOT_MAX_DAILY, OPENWA_TEST_PILOT_MAX_FIRST_TOUCH, OPENWA_TEST_PILOT_MIN_INTERVAL_MS } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
+import { missingPilotCohortCaps, requiredPilotCohortMessages, OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT, OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT, OPENWA_TEST_PILOT_MAX_HOURLY, OPENWA_TEST_PILOT_MAX_DAILY, OPENWA_TEST_PILOT_MAX_FIRST_TOUCH, OPENWA_TEST_PILOT_MIN_INTERVAL_MS } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
 import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
@@ -90,6 +90,22 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     .eq('connection_id', connectionId).eq('active', true).eq('workload', 'agent')
     .gt('expires_at', new Date().toISOString())
   checkDb(agentError, 'agent-grants')
+  let approvedMessagesPerRecipient = 1
+  if ((grants ?? 0) > 0) {
+    const { data: grantCapacity, error: capError } = await db.from('whatsapp_openwa_pilot_allowlist')
+      .select('messages_per_recipient').eq('account_id', accountId)
+      .eq('connection_id', connectionId).eq('active', true)
+      .gt('expires_at', new Date().toISOString()).limit(MAX_BATCH_CONTACTS + 1)
+    checkDb(capError, 'grant-capacity')
+    const perContact = (grantCapacity ?? []).map(row => Number(row.messages_per_recipient))
+    if (perContact.length !== grants ||
+        perContact.some(value => !Number.isInteger(value) ||
+          value < 1 || value > OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT ||
+          value !== perContact[0])) {
+      throw new WhatsAppTransportError('connection_restricted', 'Pilot cohort capacity changed; review grants')
+    }
+    approvedMessagesPerRecipient = perContact[0]
+  }
   const { count: pending, error: me } = await db.from('messages')
     .select('id', { count: 'exact', head: true }).eq('provider', 'openwa')
     .eq('connection_id', connectionId).eq('status', 'sending').is('provider_message_id', null)
@@ -109,7 +125,7 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
   try { enforced = openWAPilotEnforcementEnabled() } catch { enforced = false }
   return { connection, guard: safeGuard, configured, grants: grants ?? 0,
     manualGrants: manualGrants ?? 0, agentGrants: agentGrants ?? 0,
-    pending: pending ?? 0, duplicates, enforced,
+    pending: pending ?? 0, duplicates, enforced, approvedMessagesPerRecipient,
     active: configured && safeGuard.pilot_enabled && enforced && !safeGuard.manual_paused && (grants ?? 0) > 0 }
 }
 
@@ -127,6 +143,8 @@ function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
       pilot_manual_daily_cap: s.guard.pilot_manual_daily_cap,
     },
     active_admissions: s.grants,
+    approved_messages_per_recipient: s.grants > 0 ? s.approvedMessagesPerRecipient : null,
+    required_cohort_messages: s.grants * s.approvedMessagesPerRecipient,
     agent_admissions: s.agentGrants,
     manual_admissions: s.manualGrants,
     approved_workload: s.grants > 0
@@ -303,12 +321,21 @@ export async function POST(request: Request, context: Context) {
       }
       requireLimits(s)
       const count = recipients.length
-      const missingCaps = missingPilotCohortCaps(s.guard, count, workload)
+      const messagesPerRecipient = int(body.messages_per_recipient ??
+        OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT, 1,
+        OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT, 'messages per recipient')
+      if (count * messagesPerRecipient > MAX_HOURLY) {
+        return deny('عدد الجهات × الرسائل لكل جهة يتجاوز سقف TEST الساعي (100). قلّل الرسائل لكل جهة أو حجم المجموعة.', 400, 'pilot_capacity_exceeds_max')
+      }
+      const requiredMessages = requiredPilotCohortMessages(count, messagesPerRecipient)
+      const missingCaps = missingPilotCohortCaps(s.guard, count, workload, messagesPerRecipient)
       if (missingCaps.length > 0) {
         return NextResponse.json({
-          error: `لا تكفي حدود Pilot الحالية لاعتماد ${count} أرقام. عدّل الحد الساعي واليومي وحد أول تواصل، ثم احفظ الحدود قبل إعادة الاعتماد.`,
+          error: `لا تكفي حدود Pilot لاعتماد ${count} جهات × ${messagesPerRecipient} رسائل لكل جهة = ${requiredMessages} رسالة. يجب أن تستوعب حدود الجلسة والإحماء ونوع الإرسال ${requiredMessages} رسالة، وحد أول تواصل ${count} جهات.`,
           code: 'pilot_cohort_caps_insufficient',
           required_count: count,
+          messages_per_recipient: messagesPerRecipient,
+          required_messages: requiredMessages,
           missing_caps: missingCaps,
         }, { status: 409, headers: noStore })
       }
@@ -352,6 +379,7 @@ export async function POST(request: Request, context: Context) {
         hashes.map(recipient_hash => ({
           account_id: accountId, connection_id: connectionId,
           recipient_hash, workload, active: true, approved_by: user.id,
+          messages_per_recipient: messagesPerRecipient,
           consent_basis: workload === 'agent' ? consentBasis : 'verified_inbound',
           consent_attested_at: workload === 'agent' && consentBasis === 'phone_call' ? now.toISOString() : null,
           approved_at: now.toISOString(),
@@ -363,6 +391,7 @@ export async function POST(request: Request, context: Context) {
       return NextResponse.json({
         ...safeStatus(await snapshot(adminDb, accountId, connectionId)),
         approved_workload: workload, approved_count: count,
+         required_messages: requiredMessages, messages_per_recipient: messagesPerRecipient,
       }, { headers: noStore })
     }
 
@@ -434,6 +463,7 @@ export async function POST(request: Request, context: Context) {
       const { error } = await adminDb.from('whatsapp_openwa_pilot_allowlist')
         .upsert({ account_id: accountId, connection_id: connectionId,
           recipient_hash: hash, workload, active: true, approved_by: user.id,
+           messages_per_recipient: 1,
           consent_basis: workload === 'agent' ? consentBasis : 'verified_inbound',
           consent_attested_at: workload === 'agent' && consentBasis === 'phone_call' ? now.toISOString() : null,
           approved_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3600000).toISOString() },
@@ -455,15 +485,11 @@ export async function POST(request: Request, context: Context) {
       }
       if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) return deny('Duplicate sessions need explicit review', 409)
       requireLimits(s)
-      if (s.agentGrants > 0 &&
-          (s.guard.hourly_cap < s.agentGrants ||
-           s.guard.daily_cap < s.agentGrants ||
-           s.guard.first_touch_daily_cap < s.agentGrants ||
-           s.guard.warmup_hourly_cap < s.agentGrants ||
-           s.guard.warmup_daily_cap < s.agentGrants ||
-           (s.guard.pilot_agent_hourly_cap ?? s.guard.hourly_cap) < s.agentGrants ||
-           (s.guard.pilot_agent_daily_cap ?? s.guard.daily_cap) < s.agentGrants)) {
-        return deny('Agent Task TEST requires bounded caps for every approved chat', 409)
+      const grantWorkload = s.agentGrants === s.grants ? 'agent' : 'manual'
+      if (missingPilotCohortCaps(s.guard, s.grants, grantWorkload,
+            s.approvedMessagesPerRecipient).length > 0) {
+        return deny('لا تكفي حدود الجلسة الحالية للعدد المعتمد × الرسائل لكل جهة. راجع حدود Pilot قبل التشغيل.', 409,
+          'pilot_cohort_caps_insufficient')
       }
       // WACRM DB readiness can be stale after a Cloudflare URL rotation.
       // Make a read-only provider-native status check immediately before
@@ -481,15 +507,10 @@ export async function POST(request: Request, context: Context) {
         return deny('Pilot state changed during verification; refresh and review', 409, 'pilot_state_changed')
       }
       requireLimits(latest)
-      if (latest.agentGrants > 0 &&
-          (latest.guard.hourly_cap < latest.agentGrants ||
-           latest.guard.daily_cap < latest.agentGrants ||
-           latest.guard.warmup_hourly_cap < latest.agentGrants ||
-           latest.guard.warmup_daily_cap < latest.agentGrants ||
-           latest.guard.first_touch_daily_cap < latest.agentGrants ||
-           (latest.guard.pilot_agent_hourly_cap ?? latest.guard.hourly_cap) < latest.agentGrants ||
-           (latest.guard.pilot_agent_daily_cap ?? latest.guard.daily_cap) < latest.agentGrants)) {
-        return deny('Agent Task TEST caps changed while validating gateway', 409)
+      if (latest.approvedMessagesPerRecipient !== s.approvedMessagesPerRecipient ||
+          missingPilotCohortCaps(latest.guard, latest.grants,
+            grantWorkload, latest.approvedMessagesPerRecipient).length > 0) {
+        return deny('Pilot cohort capacity changed while validating gateway', 409, 'pilot_state_changed')
       }
       const { data: updated, error } = await adminDb.from('whatsapp_connection_guardrails')
         .update({ manual_paused: false, updated_at: new Date().toISOString() })
@@ -498,7 +519,7 @@ export async function POST(request: Request, context: Context) {
       checkDb(error, 'activate')
       if (!updated) return deny('Pilot state changed; refresh first', 409)
       const { error: auditError } = await adminDb.from('whatsapp_guardrail_events')
-        .insert({ account_id: accountId, connection_id: connectionId, workload: s.agentGrants === 1 ? 'agent' : 'manual',
+        .insert({ account_id: accountId, connection_id: connectionId, workload: grantWorkload,
           decision: 'resumed', reason: 'ow13_dev_pilot_admin_activate' })
       if (auditError) {
         // Compensate: audit failure must not leave an untracked activated cohort.
