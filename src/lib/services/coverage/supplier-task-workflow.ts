@@ -3,6 +3,8 @@ import { CURRENT_AGENT_TASK_PLATFORM } from '@/lib/ai/tasks/current-platform'
 import { authorizeStoredAgentTask } from '@/lib/ai/tasks/capability-policy'
 import { executeCoverageProposeOfferIntegrated } from '@/lib/ai/tools/business-handoff'
 import { loadAccountRuntimePolicy } from '@/lib/ai/runtime/runtime-policy'
+import { authorizeToolInvocation } from '@/lib/ai/runtime/tool-policy'
+import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
 import { findChangeRequestByIdempotencyKey } from '@/lib/ai/runtime/change-requests-service'
 import type { ToolContext } from '@/lib/ai/tools/executors'
 import { readCoverageAttributes } from './attributes'
@@ -187,6 +189,35 @@ async function submitConfirmedOffer(
       !runtime.proposalToolsEnabled) {
     throw new Error('SUPPLIER_PROPOSAL_RUNTIME_DISABLED')
   }
+  const { data: grant, error: grantError } = await db.from('ai_agent_tool_grants')
+    .select('tool_version,permission,constraints')
+    .eq('account_id', input.accountId)
+    .eq('agent_revision_id', authorization.task.agentRevisionId)
+    .eq('tool_key', 'coverage.propose_offer').maybeSingle()
+  if (grantError) throw grantError
+  const tool = getCurrentPlatformTool('coverage.propose_offer', 2)
+  if (!grant || grant.permission !== 'propose' || grant.tool_version !== 2 || !tool) {
+    throw new Error('SUPPLIER_PROPOSAL_TOOL_GRANT_MISSING')
+  }
+  const scoped = authorizeToolInvocation({
+    tool, permission: 'propose',
+    args: { service_id: request.serviceId, currency: request.currency,
+      total_amount: row.offered_amount, attributes: request.attributes },
+    constraints: grant.constraints ?? {},
+    context: {
+      plane: 'customer', channel: 'whatsapp', simulation: false,
+      agentPurpose: 'custom',
+      trustedAdminIdentityId: null, trustedAdminCapabilities: [],
+      agentCapabilities: authorization.capabilities,
+      taskAllowedTools: authorization.allowedTools,
+      features: {
+        killSwitch: runtime.killSwitch,
+        nativeToolsEnabled: runtime.nativeToolsEnabled,
+        proposalToolsEnabled: runtime.proposalToolsEnabled,
+      },
+    },
+  })
+  if (!scoped.ok) throw new Error(scoped.code)
   if (!row.offered_amount || !row.commission_per_thousand || !row.supplier_details) {
     // A zero commission is stored as string "0", which is truthy.
     throw new Error('SUPPLIER_PROPOSAL_INCOMPLETE')
