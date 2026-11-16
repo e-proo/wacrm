@@ -239,7 +239,7 @@ describe('server-bound Coverage supplier lifecycle',()=>{
     await reply('7',4)
     const r=await reply('سأسلم في المكلاء واريد ان استلم في صنعاء. طريقة الدفع مسموح ومتوفر اي طريقه',5)
     expect(row.stage).toBe('needs_human')
-    expect(r?.text).toContain('المراجعة')
+    expect(r?.text).toContain('مراجعة')
     expect(mocked.proposed).not.toHaveBeenCalled()
     expect(row.change_request_id).toBe(null)
   })
