@@ -70,7 +70,8 @@ export function advanceSupplierTurn(
   facts: SupplierRequestFacts,
 ): SupplierTurnStep {
   const input = raw.trim()
-  if (supplierDeclines(input) && state.stage !== 'submitting' && state.stage !== 'submitted') {
+  if (supplierDeclines(input) && state.stage !== 'route' &&
+      state.stage !== 'submitting' && state.stage !== 'submitted') {
     return {
       next: { ...state, stage: 'declined' },
       response: 'شكرًا لتوضيحكم، لن نتابع طلب التغطية معكم حاليًا.',
@@ -104,7 +105,7 @@ export function advanceSupplierTurn(
           action:'reply',
         }
       }
-      if (/^(المسار مختلف|غير مطابق|مختلف|لا|غير متوفر)/i.test(input)) {
+      if (/^(المسار مختلف|المسار غير مطابق|غير مطابق|مختلف|لا|غير متوفر)/i.test(input)) {
         return {
           next:{...state,stage:'needs_human'},
           response:'شكرًا للتوضيح. مساركم مختلف عن طلب الإدارة؛ لن نرفع عرضًا على أنه مطابق. ستحتاج الإدارة لمراجعة الاتجاه والشروط معكم أو إنشاء طلب مناسب.',
