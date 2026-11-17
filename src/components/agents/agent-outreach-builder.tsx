@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 
 type OperationalMode = 'reactive' | 'outbound' | 'both'
 type ApprovalMode = 'none' | 'task' | 'batch'
+type TargetTag = { id: string; name: string; color: string | null }
 
 interface TargetScope {
   requiredTagIds: string[]
@@ -97,6 +98,66 @@ function approvalOptions(required: ApprovalMode): ApprovalMode[] {
   return ['none', 'task', 'batch']
 }
 
+
+/** Named, multi-select CRM tags. IDs remain server-side validated on save. */
+function TagScopePicker(props: {
+  title: string
+  help: string
+  tags: readonly TargetTag[]
+  selected: readonly string[]
+  onChange: (next: string[]) => void
+  required?: boolean
+}) {
+  const chosen = new Set(props.selected)
+  return (
+    <fieldset className="min-w-0 space-y-2 rounded-xl border bg-muted/20 p-3">
+      <legend className="px-1 text-sm font-semibold">{props.title}</legend>
+      <p className="text-xs leading-5 text-muted-foreground">{props.help}</p>
+      {props.tags.length === 0 ? (
+        <p className="rounded-lg border border-dashed p-3 text-xs text-amber-700 dark:text-amber-300">
+          لا توجد وسوم متاحة. أنشئ وسمًا في إعدادات جهات الاتصال أولًا.
+        </p>
+      ) : (
+        <div className="flex max-h-44 flex-wrap gap-2 overflow-y-auto py-1">
+          {props.tags.map(tag => (
+            <label key={tag.id} className={
+              'flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 text-xs transition-colors ' +
+              (chosen.has(tag.id)
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'bg-background hover:bg-muted/60')
+            }>
+              <input
+                type="checkbox"
+                checked={chosen.has(tag.id)}
+                className="size-4 accent-primary"
+                onChange={event => {
+                  const next = event.target.checked
+                    ? [...props.selected, tag.id]
+                    : props.selected.filter(value => value !== tag.id)
+                  props.onChange(next)
+                }}
+              />
+              <span>{tag.name}</span>
+            </label>
+          ))}
+        </div>
+      )}
+      {props.selected.filter(id => !props.tags.some(tag => tag.id === id)).map(id => (
+        <p key={id} className="text-xs text-destructive">
+          وسم غير متاح: {id}
+          <button type="button" className="ms-2 underline"
+            onClick={() => props.onChange(props.selected.filter(value => value !== id))}>إزالته</button>
+        </p>
+      ))}
+      {props.required && props.selected.length === 0 ? (
+        <p role="alert" className="text-xs font-medium text-amber-700 dark:text-amber-300">
+          يجب تحديد وسم واحد على الأقل قبل نشر وكيل الترويج.
+        </p>
+      ) : null}
+    </fieldset>
+  )
+}
+
 export function AgentOutreachBuilder(props: {
   agentId: string
   revisionId: string
@@ -105,6 +166,7 @@ export function AgentOutreachBuilder(props: {
   const [mode, setMode] = useState<OperationalMode>('reactive')
   const [bindings, setBindings] = useState<TaskBinding[]>([])
   const [taskTypes, setTaskTypes] = useState<TaskTypeOption[]>([])
+  const [tags, setTags] = useState<TargetTag[]>([])
   const [busy, setBusy] = useState<'load' | 'save' | 'dry' | null>('load')
   const [note, setNote] = useState<string | null>(null)
   const [dryRun, setDryRun] = useState<DryRunResult | null>(null)
@@ -131,12 +193,14 @@ export function AgentOutreachBuilder(props: {
         }
         const catalogJson = (await catalogRes.json()) as {
           taskTypes?: TaskTypeOption[]
+          tags?: TargetTag[]
         }
         if (cancelled) return
 
         setMode(revisionJson.revision.operational_mode ?? 'reactive')
         setBindings(parseBindings(revisionJson.revision.outreach_policy))
         setTaskTypes(catalogJson.taskTypes ?? [])
+        setTags(catalogJson.tags ?? [])
       })
       .catch((error) => {
         if (!cancelled) {
@@ -428,20 +492,51 @@ export function AgentOutreachBuilder(props: {
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
-                <TextField
-                  label="Required tag UUIDs"
-                  value={csv(binding.targetScope.requiredTagIds)}
-                  onChange={(value) =>
-                    patchScope({ requiredTagIds: parseCsv(value) })
-                  }
-                />
-                <TextField
-                  label="Excluded tag UUIDs"
-                  value={csv(binding.targetScope.excludedTagIds)}
-                  onChange={(value) =>
-                    patchScope({ excludedTagIds: parseCsv(value) })
-                  }
-                />
+                {binding.taskType === 'services.promotion' &&
+                binding.taskTypeVersion === 2 ? (
+                  <>
+                    <TagScopePicker
+                      title="وسوم الجمهور المستهدف"
+                      help="حدد الوسوم التي يجب أن تكون موجودة في جهة الاتصال. هذه ليست موافقة تلقائية على الإرسال."
+                      tags={tags}
+                      selected={binding.targetScope.requiredTagIds}
+                      required
+                      onChange={requiredTagIds => patchScope({
+                        requiredTagIds,
+                        excludedTagIds: binding.targetScope.excludedTagIds.filter(id =>
+                          !requiredTagIds.includes(id)),
+                      })}
+                    />
+                    <TagScopePicker
+                      title="استبعاد وسوم"
+                      help="جهات الاتصال التي تحمل أحد هذه الوسوم لن تدخل الحملة."
+                      tags={tags}
+                      selected={binding.targetScope.excludedTagIds}
+                      onChange={excludedTagIds => patchScope({
+                        excludedTagIds,
+                        requiredTagIds: binding.targetScope.requiredTagIds.filter(id =>
+                          !excludedTagIds.includes(id)),
+                      })}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <TextField
+                      label="Required tag UUIDs"
+                      value={csv(binding.targetScope.requiredTagIds)}
+                      onChange={(value) =>
+                        patchScope({ requiredTagIds: parseCsv(value) })
+                      }
+                    />
+                    <TextField
+                      label="Excluded tag UUIDs"
+                      value={csv(binding.targetScope.excludedTagIds)}
+                      onChange={(value) =>
+                        patchScope({ excludedTagIds: parseCsv(value) })
+                      }
+                    />
+                  </>
+                )}
                 <TextField
                   label="Service UUIDs"
                   value={csv(binding.targetScope.serviceIds)}
