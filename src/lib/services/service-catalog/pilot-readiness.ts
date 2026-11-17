@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
+import { resolveServicePromotionAudience } from './promotion-audience'
 import { inspectAgentTaskTestCutoverReadiness } from '@/lib/ai/tasks/cutover'
 import {
   isAgentBuilderV2Configuration,
@@ -11,7 +12,6 @@ import {
 import { CURRENT_AGENT_TASK_PLATFORM } from '@/lib/ai/tasks/current-platform'
 import { validateAgentRevisionForPublish } from '@/lib/ai/runtime/builder-service'
 import {
-  SERVICE_PROMOTION_AUDIENCE_RESOLVER,
   SERVICE_PROMOTION_TASK_TYPE,
   loadServicePromotionContext,
 } from './agent-task'
@@ -163,25 +163,15 @@ export async function inspectServicePromotionPilotReadiness(input: {
   let candidateIds: string[] = []
   if (serviceContext && binding) {
     try {
-      const candidates = await SERVICE_PROMOTION_AUDIENCE_RESOLVER.resolve(
-        db,
-        {
-          accountId: input.accountId,
-          taskId: 'pilot-readiness',
-          taskType: SERVICE_PROMOTION_TASK_TYPE.key,
-          taskTypeVersion: SERVICE_PROMOTION_TASK_TYPE.version,
-          taskContext: serviceContext,
-          targetPolicy: {
-            requiredTagIds: [...binding.targetScope.requiredTagIds],
-            excludedTagIds: [...binding.targetScope.excludedTagIds],
-          },
-          maxCandidates: Math.min(binding.maxTargets, 100),
-        },
-      )
-      candidateIds = [...new Set(candidates.map(candidate => candidate.contactId))]
+      // Inspector is read-only and pre-approval. A Task resolver is frozen-only;
+      // do not call it with a dynamic audience (or bypass its V2 safety).
+      candidateIds = await resolveServicePromotionAudience(db, {
+        accountId: input.accountId,
+        requiredTagIds: binding.targetScope.requiredTagIds,
+        excludedTagIds: binding.targetScope.excludedTagIds,
+        maxContacts: Math.min(binding.maxTargets, 100),
+      })
     } catch (error) {
-      // Readiness is a read-only diagnostic, not a launch. Surface a
-      // deterministic audience blocker instead of dropping the full check.
       if (error instanceof Error && error.message.startsWith('SERVICE_PROMOTION_')) {
         externalBlockers.push(error.message)
       } else {
