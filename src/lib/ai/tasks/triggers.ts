@@ -29,6 +29,9 @@ export interface AgentTaskTriggerFiring {
   sourceKey: string
   scheduledFor: string | null
   attempts: number
+  policyVersion: number
+  overlapPolicy: 'skip' | 'defer'
+  approvedRevisionId: string | null
   businessEvent: AgentTaskBusinessEventSnapshot | null
 }
 
@@ -60,7 +63,7 @@ export interface AgentTaskTriggerHandler {
   taskType: string
   taskTypeVersion: number
   validate(definition: AgentTaskTriggerDefinition): void
-  start(firing: AgentTaskTriggerFiring): Promise<{ taskId: string }>
+  start(firing: AgentTaskTriggerFiring): Promise<{ taskId: string; created?: boolean }>
 }
 
 const TASK_KEY_RE = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/
@@ -173,6 +176,8 @@ export function normalizeAgentTaskTriggerFiring(
   const sourceKey = asNonEmptyString(raw.source_key)
   const taskTypeVersion = Number(raw.task_type_version)
   const attempts = Number(raw.attempts)
+  const policyVersion = raw.policy_version == null ? 1 : Number(raw.policy_version)
+  const overlapPolicy = raw.overlap_policy == null ? 'skip' : raw.overlap_policy
   const triggerKind =
     raw.trigger_kind === 'schedule' || raw.trigger_kind === 'business_event'
       ? raw.trigger_kind
@@ -189,7 +194,10 @@ export function normalizeAgentTaskTriggerFiring(
     !Number.isInteger(taskTypeVersion) ||
     taskTypeVersion < 1 ||
     !Number.isInteger(attempts) ||
-    attempts < 1
+    attempts < 1 ||
+    !Number.isInteger(policyVersion) ||
+    policyVersion < 1 ||
+    (overlapPolicy !== 'skip' && overlapPolicy !== 'defer')
   ) {
     return null
   }
@@ -218,6 +226,11 @@ export function normalizeAgentTaskTriggerFiring(
         ? raw.scheduled_for
         : null,
     attempts,
+    policyVersion,
+    overlapPolicy,
+    approvedRevisionId:
+      typeof raw.approved_revision_id === 'string'
+        ? raw.approved_revision_id : null,
     businessEvent,
   }
 }

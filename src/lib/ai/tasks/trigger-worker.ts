@@ -10,6 +10,8 @@ export interface AgentTaskTriggerWorkerResult {
   }
   claimed: number
   completed: number
+  skipped: number
+  deferred: number
   failed: number
   dead: number
 }
@@ -39,6 +41,8 @@ export async function processAgentTaskTriggerQueue(input: {
   const materialized = normalizeMaterialized(materialize.data)
   let claimed = 0
   let completed = 0
+  let skipped = 0
+  let deferred = 0
   let failed = 0
   let dead = 0
 
@@ -88,6 +92,27 @@ export async function processAgentTaskTriggerQueue(input: {
 
     try {
       const started = await handler.start(firing)
+      if (started.created === false) {
+        // A reused Task is not a newly created task. Verify whether its
+        // original source is this exact firing before classifying an overlap.
+        const { data: existing, error: lookupError } = await db
+          .from('ai_agent_tasks')
+          .select('trigger_ref')
+          .eq('account_id', firing.accountId)
+          .eq('id', started.taskId)
+          .maybeSingle()
+        if (lookupError) throw lookupError
+        if (!existing) throw new Error('AGENT_TASK_TRIGGER_REUSED_TASK_NOT_FOUND')
+        const expectedRef = firing.triggerKind === 'schedule'
+          ? 'schedule:' + firing.triggerId + ':' + firing.sourceKey
+          : 'business_event:' + firing.businessEvent?.id
+        if (existing.trigger_ref !== expectedRef) {
+          const settled = await settleOverlap(firing, claimOwner, 'OVERLAP_REUSED_ACTIVE_TASK')
+          if (settled === 'skipped') skipped += 1
+          else deferred += 1
+          continue
+        }
+      }
       const complete = await db.rpc('complete_agent_task_trigger_firing', {
         p_firing_id: firing.firingId,
         p_worker_id: claimOwner,
@@ -99,6 +124,13 @@ export async function processAgentTaskTriggerQueue(input: {
       }
       completed += 1
     } catch (error) {
+      const overlap = overlapErrorCode(error)
+      if (overlap) {
+        const settled = await settleOverlap(firing, claimOwner, overlap)
+        if (settled === 'skipped') skipped += 1
+        else deferred += 1
+        continue
+      }
       const outcome = await failFiring({
         firingId: firing.firingId,
         workerId: claimOwner,
@@ -114,6 +146,8 @@ export async function processAgentTaskTriggerQueue(input: {
     materialized,
     claimed,
     completed,
+    skipped,
+    deferred,
     failed,
     dead,
   }
@@ -158,4 +192,34 @@ function normalizeMaterialized(raw: unknown): {
 function describeError(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message
   return String(error || 'AGENT_TASK_TRIGGER_FAILED')
+}
+
+/** Explicit domain overlap is a policy outcome, not a technical error. */
+function overlapErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) return null
+  const code = (error as { code: unknown }).code
+  if (
+    code === 'COVERAGE_SOURCING_ALREADY_ACTIVE' ||
+    code === 'COVERAGE_SOURCING_CONNECTION_CHANGE_REQUIRES_TASK_EDIT' ||
+    code === 'COVERAGE_SOURCING_TARGET_CHANGE_REQUIRES_PENDING_EDIT' ||
+    code === 'SERVICE_PROMOTION_ALREADY_ACTIVE'
+  ) return code
+  return null
+}
+
+async function settleOverlap(
+  firing: { firingId: string; overlapPolicy: 'skip' | 'defer' },
+  claimOwner: string,
+  reason: string,
+): Promise<'skipped' | 'deferred'> {
+  const skip = firing.overlapPolicy !== 'defer'
+  const { data, error } = await supabaseAdmin().rpc(
+    skip ? 'skip_agent_task_trigger_firing' : 'defer_agent_task_trigger_firing',
+    skip
+      ? { p_firing_id: firing.firingId, p_worker_id: claimOwner, p_reason: reason }
+      : { p_firing_id: firing.firingId, p_worker_id: claimOwner, p_reason: reason, p_delay_secs: 300 },
+  )
+  if (error) throw error
+  if (data !== true) throw new Error('AGENT_TASK_TRIGGER_FIRING_CLAIM_LOST')
+  return skip ? 'skipped' : 'deferred'
 }

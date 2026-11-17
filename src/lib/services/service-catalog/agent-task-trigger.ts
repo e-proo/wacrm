@@ -45,6 +45,6 @@ export const SERVICE_PROMOTION_TRIGGER_HANDLER: AgentTaskTriggerHandler = {
       },
     })
 
-    return { taskId: result.taskId }
+    return { taskId: result.taskId, created: result.created }
   },
 }

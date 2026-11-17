@@ -70,7 +70,7 @@ function buildCoverageSourcingTriggerHandler(version: 1 | 2): AgentTaskTriggerHa
       },
     })
 
-    return { taskId: result.taskId }
+    return { taskId: result.taskId, created: result.created }
   },
   }
 }
