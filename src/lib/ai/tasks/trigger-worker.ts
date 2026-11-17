@@ -41,8 +41,8 @@ export async function processAgentTaskTriggerQueue(input: {
   let dead = 0
 
   for (let index = 0; index < limit; index += 1) {
-    // A distinct owner per claim prevents an expired invocation from finalizing
-    // a reclaimed lease when the outer worker ID is reused across ticks.
+    // Request a unique worker ID, then finalize only with the DB-issued
+    // generation owner; old leases cannot finalize a reclaimed firing.
     const claimWorkerId = `${input.workerId.trim()}:${randomUUID()}`
     const claim = await db.rpc('claim_next_agent_task_trigger_firing', {
       p_worker_id: claimWorkerId,
@@ -51,6 +51,13 @@ export async function processAgentTaskTriggerQueue(input: {
     if (claim.error) throw claim.error
     if (!claim.data) break
 
+    const claimOwner = (claim.data as { claim_owner?: unknown }).claim_owner
+    if (
+      typeof claimOwner !== 'string' ||
+      !claimOwner.startsWith(`${claimWorkerId}:`)
+    ) {
+      throw new Error('AGENT_TASK_TRIGGER_DB_CLAIM_OWNER_REQUIRED')
+    }
     const firing = normalizeAgentTaskTriggerFiring(claim.data)
     if (!firing) {
       throw new Error('AGENT_TASK_TRIGGER_FIRING_INVALID')
@@ -64,7 +71,7 @@ export async function processAgentTaskTriggerQueue(input: {
     if (!handler) {
       const outcome = await failFiring({
         firingId: firing.firingId,
-        workerId: claimWorkerId,
+        workerId: claimOwner,
         error:
           'AGENT_TASK_TRIGGER_HANDLER_NOT_REGISTERED:' +
           firing.taskType +
@@ -81,7 +88,7 @@ export async function processAgentTaskTriggerQueue(input: {
       const started = await handler.start(firing)
       const complete = await db.rpc('complete_agent_task_trigger_firing', {
         p_firing_id: firing.firingId,
-        p_worker_id: claimWorkerId,
+        p_worker_id: claimOwner,
         p_task_id: started.taskId,
       })
       if (complete.error) throw complete.error
@@ -92,7 +99,7 @@ export async function processAgentTaskTriggerQueue(input: {
     } catch (error) {
       const outcome = await failFiring({
         firingId: firing.firingId,
-        workerId: claimWorkerId,
+        workerId: claimOwner,
         error: describeError(error),
         delaySeconds: 60,
       })
