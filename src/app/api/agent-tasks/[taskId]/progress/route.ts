@@ -101,14 +101,14 @@ export async function GET(
     const targetIds = (targetResult.data ?? []).map(t => t.id)
     const outboundResult = targetIds.length
       ? await db.from('ai_agent_task_outbound_messages')
-        .select('task_target_id,status,provider,error_code,updated_at')
+        .select('task_target_id,status,provider,error_code,error_detail,updated_at')
         .eq('account_id', ctx.accountId).eq('task_id', taskId)
         .in('task_target_id', targetIds)
         .order('updated_at', { ascending: false })
         .limit(selected.length * 20)
       : { data: [], error: null }
     if (outboundResult.error) throw outboundResult.error
-    const outbounds = new Map<string, { status: string; provider: string | null; error_code: string | null }>()
+    const outbounds = new Map<string, { status: string; provider: string | null; error_code: string | null; error_detail: string | null }>()
     for (const outbound of outboundResult.data ?? []) {
       if (!outbounds.has(outbound.task_target_id)) {
         outbounds.set(outbound.task_target_id, outbound)
@@ -157,6 +157,10 @@ export async function GET(
           outboundStatus: outbound?.status ?? null,
           provider: outbound?.provider ?? null,
           errorCode: outbound?.error_code ?? null,
+          // Only recognized policy codes cross the browser boundary.
+          denialReason: outbound?.error_code === 'OPENWA_PRE_DISPATCH_DENIED' &&
+            /^OPENWA_SEND_BLOCKED_BY_WACRM_GUARDRAIL_[A-Z_]+$/.test(outbound?.error_detail ?? '')
+              ? outbound?.error_detail : null,
           supplierStage: negotiation?.stage ?? null,
           offeredAmount: negotiation?.offered_amount ?? null,
           commissionPerThousand: negotiation?.commission_per_thousand ?? null,
