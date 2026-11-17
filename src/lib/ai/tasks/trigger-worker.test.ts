@@ -147,7 +147,7 @@ describe('trigger worker failure isolation', () => {
         expect(args).toEqual({
           p_firing_id: 'firing-1',
           p_worker_id: owner,
-          p_error: 'temporary handler failure',
+          p_error: 'AGENT_TASK_TRIGGER_HANDLER_ERROR',
           p_delay_secs: 60,
         })
         return { data: 'failed', error: null }
@@ -205,7 +205,7 @@ describe('trigger worker dead-letter and database failures', () => {
         }
       }
       if (name === 'fail_agent_task_trigger_firing') {
-        expect(args.p_error).toBe('permanent handler failure')
+        expect(args.p_error).toBe('AGENT_TASK_TRIGGER_HANDLER_ERROR')
         expect(args.p_delay_secs).toBe(60)
         return { data: 'dead', error: null }
       }
@@ -343,4 +343,77 @@ describe('SCH-3: completion reconciliation after Task creation',()=>{
   expect(rpc).toHaveBeenCalledWith('skip_agent_task_trigger_firing',
     expect.objectContaining({p_reason:'OVERLAP_REUSED_ACTIVE_TASK'}))
  })
+})
+
+describe('SCH-5 — lease loss and non-PII failure audit', () => {
+  const mint = '00000000-0000-4000-8000-000000000186'
+  beforeEach(() => {
+    vi.clearAllMocks()
+    normalizeFiring.mockReturnValue({
+      firingId: 'firing-1', taskType: 'coverage.sourcing',
+      taskTypeVersion: 2, triggerKind: 'schedule', accountId: 'account',
+      triggerId: 'trigger-1', sourceKey: 'due-1', overlapPolicy: 'skip',
+    })
+  })
+
+  it('never reports a lost completion as a normal failed transition', async () => {
+    start.mockResolvedValue({ taskId: 'existing-task', created: true })
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'materialize_agent_task_trigger_firings')
+        return {data:{schedule_firings:0,business_event_firings:0},error:null}
+      if (name === 'claim_next_agent_task_trigger_firing')
+        return {data:{firing_id:'firing-1',
+          claim_owner:String(args.p_worker_id)+':'+mint},error:null}
+      if (name === 'complete_agent_task_trigger_firing') return {data:false,error:null}
+      if (name === 'fail_agent_task_trigger_firing') return {data:null,error:null}
+      throw new Error('Unexpected call '+name)
+    })
+    await expect(processAgentTaskTriggerQueue({workerId:'sch5',limit:1}))
+      .rejects.toThrow('AGENT_TASK_TRIGGER_FIRING_CLAIM_LOST')
+    expect(rpc).toHaveBeenCalledWith('complete_agent_task_trigger_firing',
+      expect.objectContaining({p_firing_id:'firing-1',p_task_id:'existing-task'}))
+    expect(rpc).toHaveBeenCalledWith('fail_agent_task_trigger_firing',
+      expect.objectContaining({p_error:'AGENT_TASK_TRIGGER_FIRING_CLAIM_LOST'}))
+  })
+
+  it('writes only allowlisted codes, never recipient details or provider secrets', async () => {
+    start.mockRejectedValue(Object.assign(new Error(
+      'Provider error for +967777111222 secret=VERY_PRIVATE_TOKEN'), {
+        code:'SERVICE_PROMOTION_SCHEDULE_REVIEW_STALE',
+      }))
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'materialize_agent_task_trigger_firings')
+        return {data:{schedule_firings:0,business_event_firings:0},error:null}
+      if (name === 'claim_next_agent_task_trigger_firing')
+        return {data:{firing_id:'firing-1',
+          claim_owner:String(args.p_worker_id)+':'+mint},error:null}
+      if (name === 'fail_agent_task_trigger_firing') {
+        expect(args.p_error).toBe('SERVICE_PROMOTION_SCHEDULE_REVIEW_STALE')
+        expect(JSON.stringify(args)).not.toContain('967777111222')
+        expect(JSON.stringify(args)).not.toContain('VERY_PRIVATE_TOKEN')
+        return {data:'failed',error:null}
+      }
+      throw new Error('Unexpected call '+name)
+    })
+    expect(await processAgentTaskTriggerQueue({workerId:'sch5',limit:1}))
+      .toMatchObject({claimed:1,failed:1,completed:0})
+  })
+
+  it('stores a generic code for untyped, secret-bearing handler failures', async () => {
+    start.mockRejectedValue(new Error('token=PRIVATE account phone +967700100200'))
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'materialize_agent_task_trigger_firings')
+        return {data:{schedule_firings:0,business_event_firings:0},error:null}
+      if (name === 'claim_next_agent_task_trigger_firing')
+        return {data:{firing_id:'firing-1',claim_owner:
+          String(args.p_worker_id)+':'+mint},error:null}
+      if (name === 'fail_agent_task_trigger_firing') {
+        expect(args.p_error).toBe('AGENT_TASK_TRIGGER_HANDLER_ERROR')
+        return {data:'dead',error:null}
+      }
+      throw new Error('Unexpected call '+name)
+    })
+    expect(await processAgentTaskTriggerQueue({workerId:'sch5',limit:1}))
+      .toMatchObject({claimed:1,failed:0,dead:1})
+  })
 })

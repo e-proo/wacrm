@@ -169,7 +169,12 @@ async function failFiring(input: {
     },
   )
   if (error) throw error
-  return data === 'dead' ? 'dead' : 'failed'
+  // Null means the owner lost its lease or another worker already settled it.
+  // Never report a successful 'failed' transition that did not happen in SQL.
+  if (data !== 'dead' && data !== 'failed') {
+    throw new Error('AGENT_TASK_TRIGGER_FIRING_CLAIM_LOST')
+  }
+  return data
 }
 
 function normalizeMaterialized(raw: unknown): {
@@ -189,9 +194,21 @@ function normalizeMaterialized(raw: unknown): {
   }
 }
 
+/** Failure audit is durable; never persist arbitrary handler exception text.
+ * Unexpected errors may contain customer numbers, tokens or provider payloads.
+ * Only typed system identifiers are eligible for DB persistence.
+ */
 function describeError(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message
-  return String(error || 'AGENT_TASK_TRIGGER_FAILED')
+  if (error && typeof error === 'object') {
+    const candidate = error as { code?: unknown; message?: unknown }
+    for (const value of [candidate.code, candidate.message]) {
+      if (typeof value === 'string' &&
+        /^(?:AGENT_TASK|SCHEDULE|COVERAGE_SOURCING|SERVICE_PROMOTION)_[A-Z0-9_]{3,96}$/.test(value)) {
+        return value
+      }
+    }
+  }
+  return 'AGENT_TASK_TRIGGER_HANDLER_ERROR'
 }
 
 /** Explicit domain overlap is a policy outcome, not a technical error. */
