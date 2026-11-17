@@ -20,6 +20,8 @@ import {
   loadServicePromotionContext,
 } from './agent-task'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 const ACTIVE_TASK_STATUSES = [
   'validating',
   'scheduled',
@@ -393,9 +395,8 @@ export async function startServicePromotionTask(input: {
       p_task_type_version: SERVICE_PROMOTION_TASK_TYPE_V2.version,
       p_agent_id: input.agentId,
       p_agent_revision_id: revisionId,
-      p_trigger_type: input.trigger?.triggerType ?? 'manual',
-      p_trigger_ref:
-        input.trigger?.triggerRef ?? 'service:' + input.serviceId,
+      p_trigger_type: 'manual',
+      p_trigger_ref: 'service:' + input.serviceId,
       p_objective:
         'Promote the frozen service snapshot to the explicit eligible customer segment and capture qualified customer intent.',
       p_task_context: taskContext,
