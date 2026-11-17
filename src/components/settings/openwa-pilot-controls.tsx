@@ -43,6 +43,7 @@ interface PilotState extends Record<string, unknown> {
     hourly_cap: number
     daily_cap: number
     first_touch_daily_cap: number
+    warmup_until?: string | null
     warmup_hourly_cap: number
     warmup_daily_cap: number
     minimum_interval_ms: number
@@ -282,6 +283,8 @@ export function OpenWAPilotControls({
     : state.active_admissions <= 10 ? 'start'
     : 'multiple'
   const running = busy || verifying
+  const warmupActive = Boolean(state?.guardrails.warmup_until &&
+    Date.parse(state.guardrails.warmup_until) > Date.now())
   const selectedCount = selectedRecipients.length
   const requiredMessages = selectedCount * messagesPerRecipient
   const feasibleCapacity = Number.isInteger(messagesPerRecipient) &&
@@ -600,12 +603,25 @@ export function OpenWAPilotControls({
           </div>}
 
         {state.guardrail_usage && <section className="space-y-2 rounded-lg border p-3" aria-label="استهلاك الإرسال">
-           <p className="text-sm font-semibold">استهلاك حدود الإرسال — آخر ساعة / 24 ساعة</p>
+           <div className="flex flex-wrap items-center justify-between gap-2">
+             <p className="text-sm font-semibold">استهلاك حدود الإرسال — آخر ساعة / 24 ساعة</p>
+             <Button type="button" variant="outline" size="sm" disabled={running || !state.paused}
+               onClick={() => setAdvancedOpen(true)}>
+               تعديل حدود الاتصال
+             </Button>
+           </div>
+           {!state.paused && <p className="text-xs text-amber-700 dark:text-amber-400">
+             أوقف Pilot أولًا لتعديل الحدود؛ لا تتغير الحدود ولا تُرسل رسائل من هذا العرض.
+           </p>}
            {([
              ['إجمالي الساعة', state.guardrail_usage.hourly_reserved,
-               Math.min(state.guardrails.hourly_cap, state.guardrails.warmup_hourly_cap)],
+               warmupActive
+                 ? Math.min(state.guardrails.hourly_cap, state.guardrails.warmup_hourly_cap)
+                 : state.guardrails.hourly_cap],
              ['إجمالي 24 ساعة', state.guardrail_usage.daily_reserved,
-               Math.min(state.guardrails.daily_cap, state.guardrails.warmup_daily_cap)],
+               warmupActive
+                 ? Math.min(state.guardrails.daily_cap, state.guardrails.warmup_daily_cap)
+                 : state.guardrails.daily_cap],
              ['جهات مختلفة خلال 24 ساعة', state.guardrail_usage.distinct_recipients_daily,
                state.guardrails.first_touch_daily_cap],
            ] as const).map(([label, used, cap]) => (
@@ -685,7 +701,7 @@ export function OpenWAPilotControls({
             ))}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            يمكنك اختيار أي حد موجب متوافق مع التخزين السليم على TEST للجلسة، وتُقيَّد رسائل الوكيل والرسائل العادية بالحد المشترك. حد أول تواصل قابل للتعديل أيضًا والتباعد 15 ثانية على الأقل؛ لا تعني سعة 1000 رسالة موافقةً على مراسلة 1000 عميل جديد. يجب إيقاف الجلسة وحفظ الحدود بموافقة المسؤول قبل التفعيل.
+            يمكنك تخصيص الحدود العامة للإرسال اليدوي، والوكلاء، والأتمتة، والبث ورسائل النظام على TEST. حد أول تواصل قابل للتعديل أيضًا. تبقى الموافقة على كل مستلم، وفترة التباعد 15 ثانية على الأقل، وإيقاف الجلسة ودائرة الحماية إلزامية. أوقف Pilot واحفظ الحدود قبل التفعيل.
           </p>
           <Button className="mt-3" size="sm" variant="outline" disabled={running || !state.paused || state.active_admissions > 0}
             onClick={() => void submit('limits')}>{w('devPilotSaveLimits')}</Button>
