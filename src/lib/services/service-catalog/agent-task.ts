@@ -12,10 +12,7 @@ import type {
 } from '@/lib/ai/tasks/outbound-policy'
 import {
   assertTenantPromotionContacts,
-  normalizeServicePromotionTagIds,
   parseFrozenServicePromotionContactIds,
-  resolveServicePromotionAudience,
-  MAX_SERVICE_PROMOTION_RECIPIENTS,
 } from './promotion-audience'
 
 const UUID_RE =
@@ -121,29 +118,14 @@ export const SERVICE_PROMOTION_AUDIENCE_RESOLVER: AgentTaskTargetResolver = {
 
   async resolve(db, context): Promise<readonly AgentTaskTargetCandidate[]> {
     const frozen = context.targetPolicy.frozenContactIds
-    let contactIds: string[]
-    if (frozen !== undefined) {
-      // The immutable approved cohort is authoritative, even when tags later
-      // change. SQL materialization independently rechecks eligibility and
-      // suppression; never replace a removed contact with an unapproved one.
-      contactIds = parseFrozenServicePromotionContactIds(frozen)
-      await assertTenantPromotionContacts(db, context.accountId, contactIds)
-    } else {
-      // Legacy tasks without a snapshot fail closed on excess membership.
-      // Do not derive a truncated LIMIT-based cohort for older tasks.
-      const requiredTags = normalizeServicePromotionTagIds(
-        context.targetPolicy.requiredTagIds, true,
-      )
-      const excludedTags = normalizeServicePromotionTagIds(
-        context.targetPolicy.excludedTagIds ?? [], false,
-      )
-      contactIds = await resolveServicePromotionAudience(db, {
-        accountId: context.accountId,
-        requiredTagIds: requiredTags,
-        excludedTagIds: excludedTags,
-        maxContacts: Math.min(context.maxCandidates, MAX_SERVICE_PROMOTION_RECIPIENTS),
-      })
+    if (frozen === undefined) {
+      // Old Task rows were approved only for a tag query, not for exact
+      // contacts. A tag edited since creation could silently authorize a new
+      // recipient. Require explicit new approval instead of cold outreach.
+      throw new Error('SERVICE_PROMOTION_LEGACY_AUDIENCE_REQUIRES_REAPPROVAL')
     }
+    const contactIds = parseFrozenServicePromotionContactIds(frozen)
+    await assertTenantPromotionContacts(db, context.accountId, contactIds)
 
     return contactIds.map((contactId, index) => ({
       contactId,
