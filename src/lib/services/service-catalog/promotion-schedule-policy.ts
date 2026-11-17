@@ -27,6 +27,7 @@ export function readFrozenPromotionSchedule(
   config: Readonly<Record<string, unknown>>,
   input: { serviceId: string; agentId: string; approvedRevisionId: string | null;
     createdBy: string | null },
+  options: { allowExpiredForReconciliation?: boolean } = {},
 ): PromotionScheduledReview {
   const value = config.promotionReview
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -51,7 +52,8 @@ export function readFrozenPromotionSchedule(
   const previewTime = Date.parse(r.reviewedAt)
   if (!Number.isFinite(when) || !Number.isFinite(previewTime) ||
     when < previewTime || when > Date.now() + 30_000 ||
-    Date.now() - when > PROMOTION_SCHEDULE_APPROVAL_MAX_AGE_MS) {
+    (!options.allowExpiredForReconciliation &&
+      Date.now() - when > PROMOTION_SCHEDULE_APPROVAL_MAX_AGE_MS)) {
     throw new Error('SERVICE_PROMOTION_SCHEDULE_APPROVAL_EXPIRED')
   }
   return r as PromotionScheduledReview
@@ -62,4 +64,21 @@ export function samePromotionAudience(expected: readonly string[], actual: reado
   const a = [...expected].sort()
   const b = [...actual].sort()
   return a.every((id, index) => id === b[index])
+}
+
+/** Check the exact server-inspected campaign again at each NEW occurrence. */
+export function scheduledPromotionCampaignMatches(
+  frozen: PromotionScheduledReview,
+  current: {
+    fingerprint: string
+    connection: { id: string; provider: string }
+    agent: { revisionId: string }
+    audience: { ids: readonly string[] }
+  },
+): boolean {
+  return frozen.connectionId === current.connection.id &&
+    frozen.provider === current.connection.provider &&
+    frozen.approvedRevisionId === current.agent.revisionId &&
+    frozen.fingerprint === current.fingerprint &&
+    samePromotionAudience(frozen.frozenContactIds, current.audience.ids)
 }

@@ -43,7 +43,7 @@ export const SERVICE_PROMOTION_TRIGGER_HANDLER_V2: AgentTaskTriggerHandler = {
     const reviewed = readFrozenPromotionSchedule(firing.config, {
       serviceId, agentId: firing.agentId,
       approvedRevisionId: firing.approvedRevisionId, createdBy: firing.createdBy,
-    })
+    }, { allowExpiredForReconciliation: true })
     if (firing.config.scheduleKind === 'recurring' && !reviewed.recurringAcknowledged) {
       throw new Error('SERVICE_PROMOTION_RECURRING_APPROVAL_REQUIRED')
     }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
- readFrozenPromotionSchedule, samePromotionAudience,
+ readFrozenPromotionSchedule, samePromotionAudience, scheduledPromotionCampaignMatches,
 } from './promotion-schedule-policy'
 import { promotionScheduledTaskIdentity } from './agent-task-service'
 
@@ -47,6 +47,27 @@ describe('SCH-3 immutable scheduled promotion policy',()=>{
   vi.setSystemTime(now+31*86400_000)
   expect(()=>readFrozenPromotionSchedule(c,{serviceId:service,agentId:agent,
     approvedRevisionId:revision,createdBy:actor})).toThrow('SERVICE_PROMOTION_SCHEDULE_APPROVAL_EXPIRED')
+  expect(readFrozenPromotionSchedule(c,{serviceId:service,agentId:agent,
+    approvedRevisionId:revision,createdBy:actor},
+    {allowExpiredForReconciliation:true}).connectionId).toBe(connection)
+ })
+ it('rejects changed provider, connection, revision, fingerprint and audience at due',()=>{
+  const frozen=readFrozenPromotionSchedule(config(),{serviceId:service,agentId:agent,
+    approvedRevisionId:revision,createdBy:actor})
+  const current={fingerprint:frozen.fingerprint,
+    connection:{id:connection,provider:'meta_cloud'},
+    agent:{revisionId:revision},audience:{ids:[contact]}}
+  expect(scheduledPromotionCampaignMatches(frozen,current)).toBe(true)
+  expect(scheduledPromotionCampaignMatches(frozen,{...current,
+    fingerprint:'b'.repeat(64)})).toBe(false)
+  expect(scheduledPromotionCampaignMatches(frozen,{...current,
+    connection:{...current.connection,id:a}})).toBe(false)
+  expect(scheduledPromotionCampaignMatches(frozen,{...current,
+    connection:{...current.connection,provider:'openwa'}})).toBe(false)
+  expect(scheduledPromotionCampaignMatches(frozen,{...current,
+    agent:{revisionId:a}})).toBe(false)
+  expect(scheduledPromotionCampaignMatches(frozen,{...current,
+    audience:{ids:[a]}})).toBe(false)
  })
  it('rejects cohort changes and keeps each source idempotent across retries',()=>{
   expect(samePromotionAudience([contact],[contact])).toBe(true)

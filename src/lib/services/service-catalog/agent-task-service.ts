@@ -14,7 +14,7 @@ import {
   loadAgentRevisionToolGrants,
 } from '@/lib/ai/tasks/capability-policy'
 import type { AgentTaskStartSource } from '@/lib/ai/tasks/triggers'
-import { readFrozenPromotionSchedule, samePromotionAudience, type PromotionScheduledReview } from './promotion-schedule-policy'
+import { readFrozenPromotionSchedule, scheduledPromotionCampaignMatches, type PromotionScheduledReview } from './promotion-schedule-policy'
 import {
   SERVICE_PROMOTION_TASK_TYPE,
   SERVICE_PROMOTION_TASK_TYPE_V2,
@@ -123,7 +123,7 @@ export async function startServicePromotionTask(input: {
       serviceId: input.serviceId, agentId: input.agentId,
       approvedRevisionId: input.approvedRevisionId ?? null,
       createdBy: input.actorUserId,
-    })
+    }, { allowExpiredForReconciliation: true })
     if (approved.fingerprint !== reviewInput?.fingerprint ||
         approved.reviewedAt !== reviewInput?.reviewedAt) {
       throw new ServicePromotionTaskError(
@@ -156,6 +156,15 @@ export async function startServicePromotionTask(input: {
       return { taskId: replay.id, agentId: replay.agent_id,
         revisionId: replay.agent_revision_id, created: false }
     }
+  }
+  if (scheduled) {
+    // Reconciliation of an ALREADY-created Task is allowed after approval TTL,
+    // but a new Task creation is not. No target scan occurs on the replay path.
+    readFrozenPromotionSchedule({ promotionReview: reviewInput?.scheduledPolicy }, {
+      serviceId: input.serviceId, agentId: input.agentId,
+      approvedRevisionId: input.approvedRevisionId ?? null,
+      createdBy: input.actorUserId,
+    })
   }
   const runtimePolicy = await loadAccountRuntimePolicy(db, input.accountId)
   if (
@@ -348,10 +357,7 @@ export async function startServicePromotionTask(input: {
     })
     if (scheduled && reviewInput.scheduledPolicy) {
       const pinned = reviewInput.scheduledPolicy
-      if (pinned.fingerprint !== campaign.fingerprint ||
-        pinned.provider !== campaign.connection.provider ||
-        pinned.approvedRevisionId !== revisionId ||
-        !samePromotionAudience(pinned.frozenContactIds, campaign.audience.ids)) {
+      if (!scheduledPromotionCampaignMatches(pinned, campaign)) {
         throw new ServicePromotionReviewError('SERVICE_PROMOTION_SCHEDULE_REVIEW_STALE')
       }
     } else {
