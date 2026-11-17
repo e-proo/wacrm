@@ -15,7 +15,9 @@ export interface AgentTaskTriggerWorkerResult {
 }
 
 export function normalizeAgentTaskTriggerWorkerLimit(limit?: number): number {
-  return Math.max(1, Math.min(limit ?? 20, 100))
+  if (limit === undefined) return 20
+  if (!Number.isFinite(limit)) return 1
+  return Math.max(1, Math.min(Math.trunc(limit), 100))
 }
 
 export async function processAgentTaskTriggerQueue(input: {
