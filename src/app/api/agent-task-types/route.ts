@@ -27,8 +27,19 @@ function catalog() {
 
 export async function GET() {
   try {
-    await requireAgentCapability('agents.read')
-    return NextResponse.json({ taskTypes: catalog() })
+    const ctx = await requireAgentCapability('agents.read')
+    // Human-readable, account-owned tags for Builder's scoped audience picker.
+    // Never rely on a client-provided tenant ID or expose contact identities.
+    const { data: tags, error } = await ctx.supabase.from('tags')
+      .select('id,name,color')
+      .eq('account_id', ctx.accountId)
+      .order('name', { ascending: true })
+      .limit(200)
+    if (error) throw error
+    return NextResponse.json({
+      taskTypes: catalog(),
+      tags: tags ?? [],
+    }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (err) {
     return toErrorResponse(err)
   }
