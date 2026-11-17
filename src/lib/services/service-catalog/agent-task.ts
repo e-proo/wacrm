@@ -10,6 +10,13 @@ import type {
   AgentTaskOutboundMessageCandidate,
   AgentTaskOutboundMessagePolicy,
 } from '@/lib/ai/tasks/outbound-policy'
+import {
+  assertTenantPromotionContacts,
+  normalizeServicePromotionTagIds,
+  parseFrozenServicePromotionContactIds,
+  resolveServicePromotionAudience,
+  MAX_SERVICE_PROMOTION_RECIPIENTS,
+} from './promotion-audience'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -107,59 +114,42 @@ export async function loadServicePromotionContext(
   }
 }
 
-function parseRequiredTags(
-  targetPolicy: Readonly<Record<string, unknown>>,
-): string[] {
-  const raw = targetPolicy.requiredTagIds
-  if (
-    !Array.isArray(raw) ||
-    raw.length === 0 ||
-    raw.length > 100 ||
-    raw.some((value) => typeof value !== 'string' || !UUID_RE.test(value))
-  ) {
-    throw new Error('SERVICE_PROMOTION_FROZEN_SEGMENT_REQUIRED')
-  }
-  return [...new Set(raw as string[])].sort()
-}
-
 export const SERVICE_PROMOTION_AUDIENCE_RESOLVER: AgentTaskTargetResolver = {
   key: 'services.promotion_audience',
   version: 1,
   domain: 'services',
 
   async resolve(db, context): Promise<readonly AgentTaskTargetCandidate[]> {
-    const requiredTags = parseRequiredTags(context.targetPolicy)
-
-    // A promotion may never scan the whole contacts table. Candidate discovery
-    // starts from the explicit frozen tag segment and requires every selected
-    // tag before the generic eligibility boundary evaluates suppression,
-    // cooldown, channel availability, caps, and duplicates.
-    const { data, error } = await db
-      .from('contact_tags')
-      .select('contact_id, tag_id')
-      .in('tag_id', requiredTags)
-      .limit(Math.min(context.maxCandidates * requiredTags.length * 4, 4000))
-    if (error) throw error
-
-    const matched = new Map<string, Set<string>>()
-    for (const row of data ?? []) {
-      const contactId = String(row.contact_id ?? '')
-      const tagId = String(row.tag_id ?? '')
-      if (!UUID_RE.test(contactId) || !requiredTags.includes(tagId)) continue
-      const tags = matched.get(contactId) ?? new Set<string>()
-      tags.add(tagId)
-      matched.set(contactId, tags)
+    const frozen = context.targetPolicy.frozenContactIds
+    let contactIds: string[]
+    if (frozen !== undefined) {
+      // The immutable approved cohort is authoritative, even when tags later
+      // change. SQL materialization independently rechecks eligibility and
+      // suppression; never replace a removed contact with an unapproved one.
+      contactIds = parseFrozenServicePromotionContactIds(frozen)
+      await assertTenantPromotionContacts(db, context.accountId, contactIds)
+    } else {
+      // Legacy tasks without a snapshot fail closed on excess membership.
+      // Do not derive a truncated LIMIT-based cohort for older tasks.
+      const requiredTags = normalizeServicePromotionTagIds(
+        context.targetPolicy.requiredTagIds, true,
+      )
+      const excludedTags = normalizeServicePromotionTagIds(
+        context.targetPolicy.excludedTagIds ?? [], false,
+      )
+      contactIds = await resolveServicePromotionAudience(db, {
+        accountId: context.accountId,
+        requiredTagIds: requiredTags,
+        excludedTagIds: excludedTags,
+        maxContacts: Math.min(context.maxCandidates, MAX_SERVICE_PROMOTION_RECIPIENTS),
+      })
     }
 
-    return [...matched.entries()]
-      .filter(([, tags]) => tags.size === requiredTags.length)
-      .map(([contactId]) => ({
-        contactId,
-        counterpartyRole: 'service_customer',
-        sortKey: contactId,
-      }))
-      .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
-      .slice(0, context.maxCandidates)
+    return contactIds.map((contactId, index) => ({
+      contactId,
+      counterpartyRole: 'service_customer',
+      sortKey: String(index).padStart(3, '0') + ':' + contactId,
+    }))
   },
 }
 
@@ -176,6 +166,7 @@ export const SERVICE_PROMOTION_MESSAGE_POLICY: AgentTaskOutboundMessagePolicy = 
   key: 'services.promotion_message',
   version: 1,
   domain: 'services',
+  generation: 'deterministic',
 
   async prepare(context): Promise<AgentTaskOutboundMessageCandidate> {
     if (
