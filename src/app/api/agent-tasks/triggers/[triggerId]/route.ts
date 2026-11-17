@@ -69,6 +69,12 @@ export async function PATCH(
         skippedFirings:data.skipped_firings??0,tasksUntouched:true,
       },{headers})
     }
+    // The edit branch returns above; narrow the remaining request to status
+    // controls before reading it (both compile-time and runtime fence).
+    if (!('status' in body)) {
+      return NextResponse.json({ error: 'حالة الجدولة غير صالحة.', code: 'INVALID_TRIGGER_CONTROL' },
+        { status: 400, headers })
+    }
     if (body.status === 'enabled') {
       await requireAgentCapability('agents.publish')
       if (process.env.WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST !== '1' ||
