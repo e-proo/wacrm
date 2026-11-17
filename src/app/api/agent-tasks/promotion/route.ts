@@ -17,7 +17,8 @@ export async function GET() {
     await requireAgentCapability('agents.manage_outreach')
     const db = supabaseAdmin()
     const [{ data: services, error: se }, { data: agents, error: ae },
-      { data: connections, error: ce }, { data: tasks, error: te }] = await Promise.all([
+      { data: connections, error: ce }, { data: tasks, error: te },
+      { data: tags, error: ge }] = await Promise.all([
       db.from('services').select('id,name,code,status').eq('account_id', ctx.accountId)
         .eq('status', 'active').order('name', { ascending: true }).limit(100),
       db.from('ai_agents').select('id,name,status,published_revision_id')
@@ -30,8 +31,10 @@ export async function GET() {
         .select('id,status,task_context,task_type_version,created_at')
         .eq('account_id', ctx.accountId).eq('task_type', 'services.promotion')
         .order('created_at', { ascending: false }).limit(50),
+      db.from('tags').select('id,name,color').eq('account_id', ctx.accountId)
+        .order('name', { ascending: true }).limit(200),
     ])
-    if (se || ae || ce || te) throw se ?? ae ?? ce ?? te
+    if (se || ae || ce || te || ge) throw se ?? ae ?? ce ?? te ?? ge
     const ids = (agents ?? []).map(row => row.published_revision_id)
       .filter((value): value is string => typeof value === 'string')
     let revisions: Array<{ id: string; outreach_policy: unknown }> = []
@@ -56,6 +59,7 @@ export async function GET() {
       process.env.WACRM_SERVICE_PROMOTION_PILOT_ALLOW_LIVE === '1'
     return NextResponse.json({
       services: services ?? [],
+      tags: tags ?? [],
       agents: (agents ?? []).map(a => ({ id: a.id, name: a.name,
         published: Boolean(a.published_revision_id),
         promotionV2: typeof a.published_revision_id === 'string' &&
