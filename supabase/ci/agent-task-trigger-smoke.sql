@@ -169,6 +169,39 @@ begin
     raise exception 'Trigger firing queue did not drain cleanly';
   end if;
 
+  -- SCH-1: a missed 3-hour backlog yields one latest firing, not three sends.
+  update public.ai_agent_task_triggers
+     set next_fire_at = v_now - interval '3 hours'
+   where id = v_recurring;
+
+  v_result := public.materialize_agent_task_trigger_firings(v_now, 20);
+  if (v_result->>'schedule_firings')::integer <> 1 then
+    raise exception 'Backlog coalescing did not produce one firing: %', v_result;
+  end if;
+
+  if not exists (
+    select 1 from public.ai_agent_task_triggers
+    where id = v_recurring
+      and skipped_occurrences = 3
+      and next_fire_at = v_now + interval '1 hour'
+  ) then
+    raise exception 'Missed intervals were not durably accounted';
+  end if;
+
+  if not exists (
+    select 1 from public.ai_agent_task_trigger_firings
+    where trigger_id = v_recurring
+      and scheduled_for = v_now
+      and status = 'pending'
+  ) then
+    raise exception 'Coalesced firing must retain latest due source identity';
+  end if;
+
+  v_result := public.materialize_agent_task_trigger_firings(v_now, 20);
+  if (v_result->>'schedule_firings')::integer <> 0 then
+    raise exception 'Coalesced recurrence replayed on second tick';
+  end if;
+
   delete from public.ai_agent_task_trigger_firings where account_id=v_account;
   delete from public.ai_agent_task_triggers where account_id=v_account;
   delete from public.business_event_outbox where account_id=v_account;
