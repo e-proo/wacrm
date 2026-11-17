@@ -116,3 +116,19 @@ Recommended design:
 - Production rollout remains **NO-GO** pending the other OW-12/OW-13 evidence and NOTE-001 risk review.
 
 **Closure classification:** **implementation complete + CI verified + TEST migration/transaction verified** for this engineering work package; **live acceptance incomplete** and **not production ready**.
+
+## 9. Verified manual identity repair and retention (2026-11-17)
+
+Additional, additive implementation extends the durable design without amending migration 179:
+
+- `supabase/migrations/180_openwa_verified_lid_and_retention.sql` adds `verified_phone`, `verification_source`, `verified_at` (constrained to native unresolved identity and `openwa_reverse_lid`), upgrades the service-only SKIP LOCKED claim RPC to return this proof, adds safe retention indexes and `prune_openwa_deferred_events` service-only RPC. Completed items may be pruned after 30 days; operator-review items after 90 days; **pending and leased messages are not automatically deleted**.
+- Session administrator can enter a candidate **real phone** against a pending or review native-LID event, in TEST only. The endpoint first verifies account/connection/original session/linked-own-phone/instance and the `openwa` provider, then requests `GET /api/sessions/{sessionId}/contacts/{phone}/lid` via the connection-scoped, authenticated OpenWA client. Only an **exact match** with the signed native chat ID authorizes persisting the proof. A typed phone alone cannot create a CRM contact or cause an Agent response.
+- The worker checks freshness (at most 24h), repeats the reverse OpenWA lookup **on the same session**, and rejects changed or conflicting LID mapping before passing the original provider message through the unified WACRM inbound pipeline. A manual verification action never sends outbound WhatsApp.
+- The connection Settings reconciliation pane now exposes bilingual Arabic/English phone-to-LID verification for `pending`/`review` identity records; ordinary retry remains review-only, and no message content or native IDs are exposed.
+- Focused tests cover positive exact pairing, mismatched pairing, re-linked session, invalid opaque digits as phone, pending resolution without retry exhaustion, expired proof and worker rejection. Migration smoke checks service-role grants and proof columns.
+
+**Remote TEST schema evidence:** `openwa_verified_lid_and_retention` applied as migration `20261117020829` to `wacrm test`. Read-only checks: RLS on; `anon` prune and `authenticated` claim RPC denied; `service_role` prune permitted; leased claim includes proof columns. A rollback-only database fixture verified exact proof propagation, token-protected claim settlement, and rejection of an incorrect lease token. The deferred table remained at 0 records after rollback. Clean [Migrations workflow](https://github.com/e-proo/wacrm/actions/runs/44000513145) completed/success for the updated migration + smoke.
+
+**Environment gate:** The externally hosted/local OpenWA process still must opt in to `RESOLVE_LID_TO_PHONE=true` where supported and be available with a linked ready TEST session. Some privacy LIDs have **no** provider-verified phone mapping; these stay in pending/review, not falsely created as contacts. There was no active ready/connected OpenWA session at the time of TEST verification, so actual incoming customer/Agent/ACK live acceptance remains open. No Production mutation has been performed.
+
+**Readiness:** Code prepared and TEST database verified; only a completed CI run matching the current runtime implementation plus actual provider live acceptance can upgrade this status to `CI verified` and `live acceptance complete`. Neither is implied by the migrations success alone.
