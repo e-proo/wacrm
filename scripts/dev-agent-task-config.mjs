@@ -31,3 +31,10 @@ export function shouldRunDevBroadcastWorker({nodeEnv,supabaseUrl,mode}) {
   if (nodeEnv !== 'development' || supabaseUrl !== DEV_TASK_TEST_URL) return false
   return (mode ?? 'on') === 'on'
 }
+
+
+/** TEST-only deferred identity/ACK recovery; no unrelated production schedulers. */
+export function shouldRunDevOpenWADeferredWorker({nodeEnv,supabaseUrl,mode}) {
+  if (nodeEnv !== 'development' || supabaseUrl !== DEV_TASK_TEST_URL) return false
+  return (mode ?? 'on') === 'on'
+}
