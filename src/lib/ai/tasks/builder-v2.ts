@@ -416,6 +416,19 @@ export function validateBuilderV2Configuration(input: {
     )
 
     validateTargetScope(binding.targetScope, path + '.targetScope', add)
+    // A promotion without at least one explicitly approved tag can never
+    // reach a safe audience. Reject it during DRAFT validation / publication,
+    // not only later when the operator requests a preview. Historical V1
+    // revisions retain their existing immutable behavior.
+    if (binding.taskType === 'services.promotion' &&
+        binding.taskTypeVersion === 2 &&
+        binding.targetScope.requiredTagIds.length === 0) {
+      add(
+        path + '.targetScope.requiredTagIds',
+        'SERVICE_PROMOTION_SEGMENT_REQUIRED',
+        'Service Promotion V2 requires at least one required CRM contact tag before publishing.',
+      )
+    }
     validateWorkingHours(
       binding.workingHours,
       path + '.workingHours',
