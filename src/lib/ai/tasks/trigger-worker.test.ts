@@ -16,7 +16,7 @@ vi.mock('./current-platform', () => ({
   },
 }))
 
-import { processAgentTaskTriggerQueue } from './trigger-worker'
+import { normalizeAgentTaskTriggerWorkerLimit, processAgentTaskTriggerQueue } from './trigger-worker'
 
 describe('trigger worker lease ownership', () => {
   beforeEach(() => {
@@ -75,5 +75,18 @@ describe('trigger worker lease ownership', () => {
     await expect(processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 1 }))
       .rejects.toThrow('AGENT_TASK_TRIGGER_DB_CLAIM_OWNER_REQUIRED')
     expect(start).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('trigger worker bounded limits', () => {
+  it('normalizes non-finite, fractional, and out-of-range limits before DB work', () => {
+    expect(normalizeAgentTaskTriggerWorkerLimit()).toBe(20)
+    expect(normalizeAgentTaskTriggerWorkerLimit(Number.NaN)).toBe(1)
+    expect(normalizeAgentTaskTriggerWorkerLimit(Infinity)).toBe(1)
+    expect(normalizeAgentTaskTriggerWorkerLimit(-Infinity)).toBe(1)
+    expect(normalizeAgentTaskTriggerWorkerLimit(2.9)).toBe(2)
+    expect(normalizeAgentTaskTriggerWorkerLimit(0)).toBe(1)
+    expect(normalizeAgentTaskTriggerWorkerLimit(999)).toBe(100)
   })
 })
