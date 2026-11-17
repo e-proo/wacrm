@@ -204,9 +204,9 @@ export const SERVICE_PROMOTION_MESSAGE_POLICY: AgentTaskOutboundMessagePolicy = 
   },
 }
 
-function promotionSnapshotName(value: unknown): string {
+export function promotionSnapshotName(value: unknown): string {
   if (typeof value !== 'string' || value.trim().length < 2 ||
-      value.trim().length > 80 || /[\\r\\n<>\\u0000-\\u001f]/.test(value)) {
+      value.trim().length > 80 || /[\r\n<>\u0000-\u001f]/.test(value)) {
     throw new Error('SERVICE_PROMOTION_MESSAGE_FACTS_INVALID')
   }
   return value.trim()
@@ -259,7 +259,7 @@ export const SERVICE_PROMOTION_MESSAGE_POLICY_V2: AgentTaskOutboundMessagePolicy
         'مرحبًا، نود تعريفك بخدمة ' + name + ' المتاحة لدينا.',
         'إذا رغبت في التفاصيل أو كانت الخدمة مناسبة لاحتياجك، يمكنك الرد هنا وسيساعدك فريقنا.',
         'لإيقاف هذه الرسائل، أرسل كلمة «إيقاف».',
-      ].join('\\n'),
+      ].join('\n'),
     }
   },
 }
