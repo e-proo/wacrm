@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { tryExecuteCurrentChangeAction } from '@/lib/services/platform/composition'
 import { DomainChangeExecutionError } from '@/lib/services/platform/change-executor-registry'
+import { finalizeTaskAfterApprovedCoverageOffer } from '@/lib/ai/tasks/approved-coverage-completion'
 
 export class ChangeExecutionError extends Error {
   readonly code: string
@@ -108,6 +109,31 @@ export async function executeApprovedChangeRequest(input: {
       await enqueueCustomerNotification(db, input.accountId, row.id, result)
     } catch (notifyErr) {
       console.error('[change request] could not enqueue customer notification:', notifyErr)
+    }
+    // The approved supplier target is already marked "completed" by the
+    // Coverage executor. Do not wait for the Task orchestrator's previous
+    // five-minute idle backoff before reflecting that durable outcome on the
+    // parent Task. This runs strictly AFTER the Change Request is committed,
+    // and a failure here must NOT undo or re-execute the approved offer.
+    try {
+      await finalizeTaskAfterApprovedCoverageOffer({
+        db,
+        accountId: input.accountId,
+        actionKey: row.action_key,
+        targetType: row.target_type,
+        proposedPayload: row.proposed_payload,
+        evaluate: async (taskId) => {
+          const { evaluateCurrentTaskCompletion } =
+            await import('@/lib/ai/tasks/current-platform')
+          return evaluateCurrentTaskCompletion(taskId)
+        },
+      })
+    } catch (taskCompletionError) {
+      console.error(
+        '[change request] post-approval supplier Task completion deferred to worker:',
+        taskCompletionError instanceof Error
+          ? taskCompletionError.message : 'unknown',
+      )
     }
     return { ...result, status: 'executed' }
   } catch (err) {
