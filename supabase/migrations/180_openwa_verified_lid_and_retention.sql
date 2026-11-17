@@ -52,3 +52,56 @@ $$;
 
 REVOKE ALL ON FUNCTION public.prune_openwa_deferred_events(integer) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.prune_openwa_deferred_events(integer) TO service_role;
+
+-- The original claim RPC from migration 179 predates the additional
+-- provider-verification columns. Recreate with an extended return type in
+-- this additive migration; migration 179 remains untouched.
+DROP FUNCTION public.claim_openwa_deferred_events(integer);
+CREATE FUNCTION public.claim_openwa_deferred_events(p_limit integer DEFAULT 5)
+RETURNS TABLE (
+  job_id uuid,
+  account_id uuid,
+  connection_id uuid,
+  session_id text,
+  own_phone_identity text,
+  instance_id text,
+  event_kind text,
+  provider_message_id text,
+  native_chat_id text,
+  verified_phone text,
+  verification_source text,
+  verified_at timestamptz,
+  normalized_payload jsonb,
+  attempt_count integer,
+  lease_token uuid
+)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=''
+AS $$
+BEGIN
+  IF p_limit IS NULL OR p_limit<1 OR p_limit>10 THEN
+    RAISE EXCEPTION 'Invalid deferred worker batch' USING ERRCODE='22023';
+  END IF;
+  RETURN QUERY
+  WITH picked AS (
+    SELECT q.id FROM public.openwa_deferred_events q
+    WHERE (q.state='pending' AND q.next_attempt_at<=now())
+       OR (q.state='leased' AND q.lease_until<now())
+    ORDER BY q.next_attempt_at,q.created_at
+    FOR UPDATE OF q SKIP LOCKED LIMIT p_limit
+  )
+  UPDATE public.openwa_deferred_events q
+    SET state='leased',lease_token=gen_random_uuid(),
+        lease_until=now()+interval '3 minutes',
+        attempt_count=q.attempt_count+1,updated_at=now()
+    FROM picked p WHERE q.id=p.id
+  RETURNING q.id,q.account_id,q.connection_id,q.session_id,
+    q.own_phone_identity,q.instance_id,q.event_kind,
+    q.provider_message_id,q.native_chat_id,
+    q.verified_phone,q.verification_source,q.verified_at,
+    q.normalized_payload,q.attempt_count,q.lease_token;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.claim_openwa_deferred_events(integer)
+  FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_openwa_deferred_events(integer)
+  TO service_role;
