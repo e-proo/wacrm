@@ -114,6 +114,23 @@ export async function startServicePromotionTask(input: {
       409,
     )
   }
+  if (scheduled && input.trigger) {
+    // Defense-in-depth: the service itself validates DB-frozen approval even
+    // if invoked outside the registered scheduler handler.
+    const approved = readFrozenPromotionSchedule({
+      promotionReview: reviewInput?.scheduledPolicy,
+    }, {
+      serviceId: input.serviceId, agentId: input.agentId,
+      approvedRevisionId: input.approvedRevisionId ?? null,
+      createdBy: input.actorUserId,
+    })
+    if (approved.fingerprint !== reviewInput?.fingerprint ||
+        approved.reviewedAt !== reviewInput?.reviewedAt) {
+      throw new ServicePromotionTaskError(
+        'SERVICE_PROMOTION_SCHEDULE_REVIEW_SCOPE_CONFLICT',
+        'A scheduled Task must use exactly the frozen reviewed campaign.')
+    }
+  }
   const db = supabaseAdmin()
   if (scheduled && input.trigger) {
     const identity = promotionScheduledTaskIdentity({

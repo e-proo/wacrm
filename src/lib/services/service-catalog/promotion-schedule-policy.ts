@@ -58,6 +58,8 @@ export function readFrozenPromotionSchedule(
 }
 
 export function samePromotionAudience(expected: readonly string[], actual: readonly string[]): boolean {
-  return expected.length === actual.length &&
-    [...expected].sort().every((id, index) => id === [...actual].sort()[index])
+  if (expected.length !== actual.length) return false
+  const a = [...expected].sort()
+  const b = [...actual].sort()
+  return a.every((id, index) => id === b[index])
 }
