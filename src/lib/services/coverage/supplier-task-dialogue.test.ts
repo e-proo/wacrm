@@ -74,6 +74,10 @@ describe('concise supplier negotiation',()=>{
     expect(advanceSupplierTurn({...quote.next,stage:'confirmation'},'تعديل',facts).next)
       .toEqual(initialSupplierState())
   })
+  it('does not confuse no extra conditions with a refusal to provide coverage',()=>{
+    expect(advanceSupplierTurn(initialSupplierState(),'لا توجد شروط إضافية',facts).action)
+      .not.toBe('decline')
+  })
   it('supports Arabic digits and requires a real amount',()=>{
     expect(parseSupplierNumber('٥٥٠',550)).toBe('550')
     expect(parseSupplierNumber('٧ لكل 1000',1000,true)).toBe('7')

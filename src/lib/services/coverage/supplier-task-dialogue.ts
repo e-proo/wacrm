@@ -41,7 +41,7 @@ export function supplierAffirms(text: string): boolean {
   return /^(نعم|أجل|اجل|ايوه|أيوه|ايوا|تمام|موافق|يمكنني|أستطيع|استطيع|متوفر|متاح|yes|ok|sure)(?:[\s،,.!]|$)/i.test(text.trim())
 }
 export function supplierDeclines(text: string): boolean {
-  return /^(لا(?=\s|$|[،,.!])|غير\s+متوفر|غير\s+متاح|لا\s+(?:أستطيع|استطيع|يمكنني)|no\b|unavailable\b)/i.test(text.trim()) &&
+  return /^(?:لا(?:[.!،\s]*)$|غير\s+(?:متوفر|متاح)(?:[.!،\s]|$)|لا\s+(?:أستطيع|استطيع|يمكنني|أقدر|اقدر)(?:\s|$)|no(?:\s|$)|unavailable(?:\s|$))/i.test(text.trim()) &&
     !/المسار\s*(?:مختلف|غير\s*مطابق)/.test(text)
 }
 export function supplierConfirmsRoute(text: string): boolean {
