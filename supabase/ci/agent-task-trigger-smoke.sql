@@ -275,6 +275,52 @@ begin
   end if;
 
 
+  -- SCH-1: an expired claim cannot complete or fail, and another worker can reclaim.
+  insert into public.ai_agent_task_trigger_firings(
+    account_id, trigger_id, source_kind, source_key, scheduled_for, available_at
+  ) values (
+    v_account, v_recurring, 'schedule',
+    'schedule:expired-lease-smoke:' || v_recurring::text,
+    v_now - interval '1 minute', v_now - interval '1 minute'
+  );
+
+  v_claim := public.claim_next_agent_task_trigger_firing('lease-worker-old', 120);
+  if v_claim is null or (v_claim->>'trigger_id')::uuid <> v_recurring then
+    raise exception 'Lease smoke could not claim queued firing: %', v_claim;
+  end if;
+
+  update public.ai_agent_task_trigger_firings
+     set lease_expires_at = now() - interval '1 second'
+   where id = (v_claim->>'firing_id')::uuid;
+
+  if public.complete_agent_task_trigger_firing(
+    (v_claim->>'firing_id')::uuid, 'lease-worker-old', null
+  ) then
+    raise exception 'Expired lease was allowed to complete';
+  end if;
+  if public.fail_agent_task_trigger_firing(
+    (v_claim->>'firing_id')::uuid, 'lease-worker-old', 'stale', 0
+  ) is not null then
+    raise exception 'Expired lease was allowed to fail';
+  end if;
+
+  v_result := public.claim_next_agent_task_trigger_firing('lease-worker-new', 120);
+  if v_result is null
+     or (v_result->>'firing_id')::uuid <> (v_claim->>'firing_id')::uuid
+     or (v_result->>'attempts')::integer <> 2 then
+    raise exception 'Expired lease was not reclaimed with same firing identity: %', v_result;
+  end if;
+  if public.complete_agent_task_trigger_firing(
+    (v_claim->>'firing_id')::uuid, 'lease-worker-old', null
+  ) then
+    raise exception 'Old lease owner completed a reclaimed firing';
+  end if;
+  if not public.complete_agent_task_trigger_firing(
+    (v_result->>'firing_id')::uuid, 'lease-worker-new', null
+  ) then
+    raise exception 'New lease owner could not complete reclaimed firing';
+  end if;
+
   delete from public.ai_agent_task_trigger_firings where account_id=v_account;
   delete from public.ai_agent_task_triggers where account_id=v_account;
   delete from public.business_event_outbox where account_id=v_account;
