@@ -58,6 +58,25 @@ export const SERVICE_PROMOTION_TASK_TYPE = defineAgentTaskType({
   },
 })
 
+/**
+ * Versioned provider-neutral launch. V1 remains untouched for historical
+ * tasks; the operator may only create V2 after a pinned-connection review.
+ */
+export const SERVICE_PROMOTION_TASK_TYPE_V2 = defineAgentTaskType({
+  ...SERVICE_PROMOTION_TASK_TYPE,
+  version: 2,
+  description:
+    'Operator-approved frozen Service Promotion on an explicitly pinned WhatsApp provider.',
+  messagePolicy: {
+    key: 'services.promotion_message',
+    version: 2,
+    config: {
+      templateName: 'service_promotion_v1',
+      templateLanguage: 'ar',
+    },
+  },
+})
+
 interface ServiceSnapshot {
   serviceId: string
   name: string
@@ -185,6 +204,66 @@ export const SERVICE_PROMOTION_MESSAGE_POLICY: AgentTaskOutboundMessagePolicy = 
   },
 }
 
+function promotionSnapshotName(value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length < 2 ||
+      value.trim().length > 80 || /[\\r\\n<>\\u0000-\\u001f]/.test(value)) {
+    throw new Error('SERVICE_PROMOTION_MESSAGE_FACTS_INVALID')
+  }
+  return value.trim()
+}
+
+/**
+ * SP-3: one deterministic, business-owned first touch for both providers.
+ * Both go through the existing per-Task SQL reservation, WhatsApp transport
+ * router and ambiguous-send reconciliation. A model cannot author a
+ * marketing first touch or select the provider.
+ */
+export const SERVICE_PROMOTION_MESSAGE_POLICY_V2: AgentTaskOutboundMessagePolicy = {
+  key: 'services.promotion_message',
+  version: 2,
+  domain: 'services',
+  generation: 'deterministic',
+  async prepare(context): Promise<AgentTaskOutboundMessageCandidate> {
+    if (context.taskType !== SERVICE_PROMOTION_TASK_TYPE_V2.key ||
+        context.taskTypeVersion !== 2 ||
+        context.counterpartyRole !== 'service_customer') {
+      throw new Error('SERVICE_PROMOTION_MESSAGE_CONTEXT_INVALID')
+    }
+    if (context.whatsappProvider !== 'meta_cloud' &&
+        context.whatsappProvider !== 'openwa') {
+      throw new Error('SERVICE_PROMOTION_PROVIDER_UNRESOLVED')
+    }
+    const source = context.taskContext.service
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      throw new Error('SERVICE_PROMOTION_SERVICE_SNAPSHOT_REQUIRED')
+    }
+    const name = promotionSnapshotName((source as Record<string, unknown>).name)
+    if (context.whatsappProvider === 'meta_cloud') {
+      if (context.policy.config.templateName !== 'service_promotion_v1' ||
+          context.policy.config.templateLanguage !== 'ar') {
+        throw new Error('SERVICE_PROMOTION_TEMPLATE_POLICY_INVALID')
+      }
+      return {
+        kind: 'template',
+        templateName: 'service_promotion_v1',
+        language: 'ar',
+        params: [name],
+      }
+    }
+    // OpenWA does not fabricate Meta template approval. Its first-touch
+    // consent/grant and anti-abuse checks remain enforced by the TEST pilot
+    // helper and WACRM guarded transport, not by trusting generated prose.
+    return {
+      kind: 'text',
+      text: [
+        'مرحبًا، نود تعريفك بخدمة ' + name + ' المتاحة لدينا.',
+        'إذا رغبت في التفاصيل أو كانت الخدمة مناسبة لاحتياجك، يمكنك الرد هنا وسيساعدك فريقنا.',
+        'لإيقاف هذه الرسائل، أرسل كلمة «إيقاف».',
+      ].join('\\n'),
+    }
+  },
+}
+
 const ACTIONABLE = new Set([
   'candidate',
   'eligible',
@@ -242,8 +321,8 @@ export const SERVICE_PROMOTION_COMPLETION_POLICY: AgentTaskCompletionPolicy = {
 
 export const SERVICE_PROMOTION_TASK_MODULE: AgentTaskModule = {
   domain: 'services',
-  taskTypes: [SERVICE_PROMOTION_TASK_TYPE],
+  taskTypes: [SERVICE_PROMOTION_TASK_TYPE, SERVICE_PROMOTION_TASK_TYPE_V2],
   targetResolvers: [SERVICE_PROMOTION_AUDIENCE_RESOLVER],
-  outboundMessagePolicies: [SERVICE_PROMOTION_MESSAGE_POLICY],
+  outboundMessagePolicies: [SERVICE_PROMOTION_MESSAGE_POLICY, SERVICE_PROMOTION_MESSAGE_POLICY_V2],
   completionPolicies: [SERVICE_PROMOTION_COMPLETION_POLICY],
 }
