@@ -585,7 +585,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
       messages_per_recipient: 51,
       consent_confirmed: true, confirm_agent_task_test: true,
     }), context())
-    expect(response.status).toBe(400)
+    expect(response.status).toBe(409)
     expect(await response.json()).toMatchObject({ code: 'pilot_cohort_caps_insufficient',
       required_messages: 102 })
     expect(h.calls).toEqual([])
