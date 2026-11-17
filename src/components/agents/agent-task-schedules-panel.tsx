@@ -297,8 +297,7 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
       consentAcknowledged && approvalAcknowledged &&
       (scheduleKind !== 'recurring' || recurringAcknowledged))
   const coverageReady = taskType !== 'coverage.sourcing' || version !== 2 ||
-    (selectedConnection?.ready === true &&
-      (selectedConnection.provider !== 'openwa' || selectedContactIds.length > 0))
+    (selectedConnection?.ready === true && selectedContactIds.length > 0)
 
   const selectClass = 'w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/50'
   const labelClass = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
@@ -393,7 +392,7 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
             </select>
           </div>}
           {taskType === 'coverage.sourcing' && version === 2 && <div className="sm:col-span-2">
-            <p className={labelClass}>المستهدفون المحددون (إلزامي لاتصال OpenWA، بحد 20 جهة اتصال)</p>
+            <p className={labelClass}>المستهدفون المعتمدون (إلزامي لجميع اتصالات Coverage V2، بحد 20 جهة اتصال)</p>
             <div className="max-h-36 overflow-y-auto rounded-lg border p-2 grid gap-2 sm:grid-cols-2">
               {(catalog?.contacts ?? []).map(contact =>
                 <label key={contact.id} className="flex items-center gap-2 text-xs">

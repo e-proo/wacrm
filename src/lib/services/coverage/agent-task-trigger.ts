@@ -64,7 +64,7 @@ function buildCoverageSourcingTriggerHandler(version: 1 | 2): AgentTaskTriggerHa
     }
     const contacts = firing.config.selectedContactIds
     if (version === 2 && (
-      !Array.isArray(contacts) || contacts.length > 20 ||
+      !Array.isArray(contacts) || contacts.length < 1 || contacts.length > 20 ||
       !contacts.every(id => typeof id === 'string' && UUID_RE.test(id)) ||
       new Set(contacts).size !== contacts.length
     )) {

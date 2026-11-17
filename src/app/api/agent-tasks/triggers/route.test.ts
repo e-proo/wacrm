@@ -57,7 +57,7 @@ const form = {
   coverageRequestId: sourceId,
   overlapPolicy: 'skip',
   whatsappConnectionId: '88888888-8888-4888-8888-888888888888',
-  selectedContactIds: [],
+  selectedContactIds: [sourceId],
 }
 
 function post(body: unknown) {
@@ -87,6 +87,8 @@ beforeEach(() => {
   mocks.from.mockImplementation((table: string) => ({
     select() { return this },
     eq() { return this },
+    in() { return this },
+    limit() { return Promise.resolve({ data: [{ id: sourceId }], error: null }) },
     async maybeSingle() {
       if (table === 'ai_agents') return {
         data: { id: agentId, status: 'active', published_revision_id: revisionId }, error: null,
@@ -115,12 +117,19 @@ describe('SCH-2 reviewed scheduling API', () => {
       p_agent_id: agentId,
       p_approved_revision_id: revisionId,
       p_config: { coverageRequestId: sourceId,
-        whatsappConnectionId: form.whatsappConnectionId, selectedContactIds: [] },
+        whatsappConnectionId: form.whatsappConnectionId, selectedContactIds: [sourceId] },
       p_idempotency_key: 'sch2:' + submissionId,
       p_overlap_policy: 'skip',
     }))
     expect(mocks.from).toHaveBeenCalledWith('ai_agents')
     expect(mocks.from).toHaveBeenCalledWith('coverage_requests')
+  })
+
+  it('rejects implicit V2 recipients before creating a scheduled Task', async () => {
+    const response = await post({ ...form, selectedContactIds: [] })
+    expect(response.status).toBe(409)
+    expect((await response.json()).code).toBe('SCHEDULE_EXPLICIT_CONTACTS_REQUIRED')
+    expect(mocks.rpc).not.toHaveBeenCalled()
   })
 
   it('rejects malformed source and never reaches the service-role create RPC', async () => {

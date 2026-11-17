@@ -215,10 +215,10 @@ export async function POST(request: Request) {
         code: 'SCHEDULE_CONNECTION_UNAVAILABLE', error: 'الاتصال غير جاهز ضمن الحساب.',
       }, { status: 409, headers })
       const ids = definition.config.selectedContactIds as string[]
-      if (connection.provider === 'openwa' && ids.length === 0) {
+      if (ids.length === 0) {
         return NextResponse.json({
-          code: 'SCHEDULE_OPENWA_CONTACTS_REQUIRED',
-          error: 'اختر جهات اتصال محددة ومراجَعة عند جدولة التغطية عبر OpenWA.',
+          code: 'SCHEDULE_EXPLICIT_CONTACTS_REQUIRED',
+          error: 'اختر جهات اتصال محددة ومراجَعة قبل جدولة التغطية لأي مزود.',
         }, { status: 409, headers })
       }
       if (ids.length) {
