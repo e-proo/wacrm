@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { loadAccountRuntimePolicy } from '@/lib/ai/runtime/runtime-policy'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isAgentBuilderV2Configuration, type AgentBuilderTaskBinding } from '@/lib/ai/tasks/builder-v2'
 import { deferredTestOpenWATaskReason } from '@/lib/ai/tasks/test-openwa-task-admission'
@@ -124,6 +125,20 @@ export async function inspectServicePromotionCampaign(
   })
   const blockers: string[] = []
   if (ids.length === 0) blockers.push('SERVICE_PROMOTION_AUDIENCE_EMPTY')
+  const [runtime, worker] = await Promise.all([
+    loadAccountRuntimePolicy(db, input.accountId),
+    db.from('ai_runtime_policies').select('task_worker_enabled')
+      .eq('account_id', input.accountId).maybeSingle(),
+  ])
+  if (worker.error) throw worker.error
+  if (runtime.killSwitch || !runtime.multiAgentEnabled ||
+      !runtime.recoveryWorkerEnabled || !runtime.nativeToolsEnabled ||
+      !runtime.proposalToolsEnabled || !runtime.outboundTaskDeliveryEnabled) {
+    blockers.push('SERVICE_PROMOTION_RUNTIME_NOT_READY')
+  }
+  if (worker.data?.task_worker_enabled === false) {
+    blockers.push('SERVICE_PROMOTION_WORKER_PAUSED')
+  }
   try { promotionSnapshotName(serviceContext.service.name) }
   catch { blockers.push('SERVICE_PROMOTION_MESSAGE_FACTS_INVALID') }
 
