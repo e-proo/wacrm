@@ -5,6 +5,7 @@ import { CURRENT_AGENT_TASK_TRIGGER_REGISTRY } from '@/lib/ai/tasks/current-plat
 import { parseScheduleDraft, ScheduleValidationError } from '@/lib/ai/tasks/schedule-admin'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
+import { inspectServicePromotionCampaign, assertPromotionReviewFresh, ServicePromotionReviewError } from '@/lib/services/service-catalog/promotion-campaign-review'
 
 export const runtime = 'nodejs'
 const headers = { 'Cache-Control': 'private, no-store, max-age=0' }
@@ -22,6 +23,8 @@ export async function GET() {
       { data: agents, error: agentsError },
       { data: requests, error: requestError },
       { data: services, error: servicesError },
+      { data: connections, error: connectionsError },
+      { data: contacts, error: contactsError },
       { data: runtimePolicy, error: policyError },
     ] = await Promise.all([
       db.from('ai_agent_task_triggers')
@@ -38,11 +41,16 @@ export async function GET() {
       db.from('services').select('id,name,status')
         .eq('account_id', ctx.accountId).eq('status', 'active')
         .order('name', { ascending: true }).limit(100),
+      db.from('whatsapp_connections')
+        .select('id,display_name,provider,status,session_id,archived_at')
+        .eq('account_id', ctx.accountId).order('updated_at', { ascending: false }).limit(100),
+      db.from('contacts').select('id,name,phone_normalized')
+        .eq('account_id', ctx.accountId).order('created_at', { ascending: false }).limit(100),
       db.from('ai_runtime_policies').select('agent_task_trigger_max_pending,task_worker_enabled')
         .eq('account_id', ctx.accountId).maybeSingle(),
     ])
     const err = rulesError ?? firingsError ?? agentsError ??
-      requestError ?? servicesError ?? policyError
+      requestError ?? servicesError ?? connectionsError ?? contactsError ?? policyError
     if (err) throw err
     const taskIds = [...new Set((firings ?? [])
       .map(f => f.task_id).filter((id): id is string => typeof id === 'string'))].slice(0, 300)
@@ -93,6 +101,15 @@ export async function GET() {
       })),
       coverageRequests: requests ?? [],
       services: services ?? [],
+      connections: (connections ?? []).map(c => ({
+        id: c.id, name: c.display_name ?? c.provider,
+        provider: c.provider,
+        ready: !c.archived_at && (c.provider === 'meta_cloud' && c.status === 'connected' ||
+          c.provider === 'openwa' && ['ready','connected'].includes(c.status) && !!c.session_id),
+      })),
+      contacts: (contacts ?? []).map(c => ({
+        id: c.id, name: c.name || c.phone_normalized || c.id.slice(0,8),
+      })),
       maxPendingPerAccount: runtimePolicy?.agent_task_trigger_max_pending ?? 100,
       taskWorkerEnabled: runtimePolicy?.task_worker_enabled !== false,
       enableAllowedInTest: process.env.WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST === '1' && isOpenWATestProject(),
@@ -111,8 +128,9 @@ export async function POST(request: Request) {
     const rate = checkRateLimit('admin:triggerCreate:' + ctx.userId, RATE_LIMITS.adminAction)
     if (!rate.success) return rateLimitResponse(rate)
     let draft: ReturnType<typeof parseScheduleDraft>
+    const submitted: unknown = await request.json().catch(() => null)
     try {
-      draft = parseScheduleDraft(await request.json().catch(() => null))
+      draft = parseScheduleDraft(submitted)
     } catch (error) {
       if (error instanceof ScheduleValidationError) {
         return NextResponse.json({ error: error.message, code: error.code },
@@ -120,7 +138,99 @@ export async function POST(request: Request) {
       }
       throw error
     }
-    const definition = { ...draft.definition, accountId: ctx.accountId, createdBy: ctx.userId }
+    let definition = { ...draft.definition, accountId: ctx.accountId, createdBy: ctx.userId }
+    const db = supabaseAdmin()
+    if (definition.taskType === 'services.promotion') {
+      await requireAgentCapability('agents.manage_outreach')
+      const raw = submitted && typeof submitted === 'object' && !Array.isArray(submitted)
+        ? submitted as Record<string, unknown> : {}
+      const preview = raw.promotionReview
+      const approved = preview && typeof preview === 'object' && !Array.isArray(preview)
+        ? preview as Record<string, unknown> : {}
+      const connectionId = raw.connectionId
+      if (typeof connectionId !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(connectionId) ||
+          typeof approved.fingerprint !== 'string' ||
+          typeof approved.reviewedAt !== 'string' ||
+          approved.consentAcknowledged !== true ||
+          approved.approvalAcknowledged !== true ||
+          (definition.scheduleKind === 'recurring' && approved.recurringAcknowledged !== true)) {
+        return NextResponse.json({
+          code: 'PROMOTION_SCHEDULE_REVIEW_REQUIRED',
+          error: 'راجع الجمهور والاتصال ووافق صراحة على الحملة والتكرار قبل حفظ الجدولة.',
+        }, { status: 400, headers })
+      }
+      try {
+        const campaign = await inspectServicePromotionCampaign(db, {
+          accountId: ctx.accountId, serviceId: definition.config.serviceId as string,
+          agentId: definition.agentId, connectionId,
+        })
+        assertPromotionReviewFresh({
+          fingerprint: approved.fingerprint, reviewedAt: approved.reviewedAt,
+          actualFingerprint: campaign.fingerprint,
+        })
+        if (campaign.blockers.length > 0 || campaign.audience.count < 1) {
+          return NextResponse.json({
+            code: 'PROMOTION_SCHEDULE_REVIEW_BLOCKED',
+            error: 'الجمهور أو الاتصال أو بوابات الحملة غير جاهزة؛ أصلح الأسباب ثم راجع الحملة من جديد.',
+          }, { status: 409, headers })
+        }
+        const frozen = {
+          schemaVersion: 1, serviceId: definition.config.serviceId,
+          agentId: definition.agentId, approvedRevisionId: campaign.agent.revisionId,
+          approvedBy: ctx.userId, connectionId: campaign.connection.id,
+          provider: campaign.connection.provider, fingerprint: campaign.fingerprint,
+          reviewedAt: approved.reviewedAt, approvedAt: new Date().toISOString(),
+          frozenContactIds: [...campaign.audience.ids],
+          consentAcknowledged: true, approvalAcknowledged: true,
+          recurringAcknowledged: approved.recurringAcknowledged === true,
+        }
+        definition = {
+          ...definition,
+          config: { ...definition.config, connectionId, promotionReview: frozen },
+        }
+      } catch (error) {
+        if (error instanceof ServicePromotionReviewError ||
+            error instanceof Error && error.message.startsWith('SERVICE_PROMOTION_')) {
+          return NextResponse.json({
+            code: 'PROMOTION_SCHEDULE_REVIEW_STALE',
+            error: 'تغيّرت بيانات الحملة أو انتهت صلاحية المعاينة. أعد مراجعتها.',
+          }, { status: 409, headers })
+        }
+        throw error
+      }
+    } else if (definition.taskType === 'coverage.sourcing' &&
+               definition.taskTypeVersion === 2) {
+      const connectionId = definition.config.whatsappConnectionId as string
+      const { data: connection, error: connectionError } = await db
+        .from('whatsapp_connections')
+        .select('id,provider,status,session_id,archived_at')
+        .eq('account_id', ctx.accountId).eq('id', connectionId).maybeSingle()
+      if (connectionError) throw connectionError
+      const ready = connection && !connection.archived_at && (
+        connection.provider === 'meta_cloud' && connection.status === 'connected' ||
+        connection.provider === 'openwa' && ['ready','connected'].includes(connection.status) &&
+          !!connection.session_id)
+      if (!ready) return NextResponse.json({
+        code: 'SCHEDULE_CONNECTION_UNAVAILABLE', error: 'الاتصال غير جاهز ضمن الحساب.',
+      }, { status: 409, headers })
+      const ids = definition.config.selectedContactIds as string[]
+      if (connection.provider === 'openwa' && ids.length === 0) {
+        return NextResponse.json({
+          code: 'SCHEDULE_OPENWA_CONTACTS_REQUIRED',
+          error: 'اختر جهات اتصال محددة ومراجَعة عند جدولة التغطية عبر OpenWA.',
+        }, { status: 409, headers })
+      }
+      if (ids.length) {
+        const { data: selected, error: selectedError } = await db.from('contacts')
+          .select('id').eq('account_id', ctx.accountId).in('id', ids).limit(ids.length)
+        if (selectedError) throw selectedError
+        if (selected?.length !== ids.length) {
+          return NextResponse.json({ code: 'SCHEDULE_CONTACT_SCOPE_DENIED',
+            error: 'جهة اتصال غير موجودة ضمن حسابك.' }, { status: 404, headers })
+        }
+      }
+    }
     if (definition.taskType === 'services.promotion') {
       await requireAgentCapability('agents.manage_outreach')
     }
@@ -136,13 +246,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'بيانات مهمة الجدولة لا تطابق العقد المعتمد.', code: 'TRIGGER_POLICY_INVALID' },
         { status: 400, headers })
     }
-    const db = supabaseAdmin()
     const { data: agent, error: agentError } = await db
       .from('ai_agents').select('id,published_revision_id,status')
       .eq('account_id', ctx.accountId).eq('id', definition.agentId).maybeSingle()
     if (agentError) throw agentError
     if (!agent || agent.status !== 'active' || !agent.published_revision_id) {
       return NextResponse.json({ error: 'الوكيل غير نشط أو لا يملك نسخة منشورة.', code: 'PUBLISHED_AGENT_REQUIRED' },
+        { status: 409, headers })
+    }
+    if (definition.taskType === 'services.promotion' &&
+        (definition.config.promotionReview as { approvedRevisionId?: string } | undefined)
+          ?.approvedRevisionId !== agent.published_revision_id) {
+      return NextResponse.json({ code: 'SCHEDULE_REVIEW_REVISION_CHANGED',
+        error: 'تغيّرت نسخة الوكيل المنشورة بعد مراجعة الحملة.' },
         { status: 409, headers })
     }
     const sourceTable = definition.taskType === 'coverage.sourcing' ? 'coverage_requests' : 'services'

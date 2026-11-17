@@ -35,7 +35,7 @@ export function parseScheduleDraft(raw: unknown, nowMs = Date.now()): {
   const taskType = raw.taskType
   const version = raw.taskTypeVersion
   const coverage = taskType === 'coverage.sourcing' && (version === 1 || version === 2)
-  const promotion = taskType === 'services.promotion' && version === 1
+  const promotion = taskType === 'services.promotion' && version === 2
   if (!coverage && !promotion) {
     throw new ScheduleValidationError('SCHEDULE_TASK_TYPE_INVALID', 'نوع المهمة أو الإصدار غير مدعوم.')
   }
@@ -70,8 +70,11 @@ export function parseScheduleDraft(raw: unknown, nowMs = Date.now()): {
       }
       intervalMinutes = raw.intervalMinutes
     }
-    if (coverage && uuid(raw.coverageRequestId)) config = { coverageRequestId: raw.coverageRequestId }
-    else if (promotion && uuid(raw.serviceId)) config = { serviceId: raw.serviceId }
+    if (coverage && uuid(raw.coverageRequestId)) {
+      config = { coverageRequestId: raw.coverageRequestId }
+    } else if (promotion && uuid(raw.serviceId)) {
+      config = { serviceId: raw.serviceId, scheduleKind }
+    }
     else throw new ScheduleValidationError('SCHEDULE_SUBJECT_INVALID', 'اختر مصدر مهمة صالحًا.')
   } else if (raw.triggerKind === 'business_event') {
     if (!coverage ||
@@ -83,11 +86,27 @@ export function parseScheduleDraft(raw: unknown, nowMs = Date.now()): {
     eventType = raw.eventType
     eventVersion = 1
     subjectId = raw.coverageRequestId
+    config = { coverageRequestId: subjectId }
     filters = { subject_type: 'coverage_request', subject_id: subjectId }
   } else {
     throw new ScheduleValidationError('SCHEDULE_TRIGGER_KIND_INVALID', 'حدد جدولًا أو حدث أعمال مدعومًا.')
   }
 
+  // Connection and contact IDs are strictly parsed, then resolved against
+  // the authenticated tenant in POST (never trusted directly as a route).
+  if (coverage && version === 2) {
+    if (!uuid(raw.whatsappConnectionId)) {
+      throw new ScheduleValidationError('SCHEDULE_CONNECTION_REQUIRED', 'اختر اتصال واتساب صالحًا.')
+    }
+    const ids = raw.selectedContactIds == null ? [] : raw.selectedContactIds
+    if (!Array.isArray(ids) || ids.length > 20 ||
+      !ids.every(uuid) || new Set(ids).size !== ids.length) {
+      throw new ScheduleValidationError('SCHEDULE_CONTACT_SELECTION_INVALID',
+        'اختر حتى 20 جهة اتصال فريدة من الحساب.')
+    }
+    config = { ...config, whatsappConnectionId: raw.whatsappConnectionId,
+      selectedContactIds: ids }
+  }
   return {
     overlapPolicy,
     subjectId,
