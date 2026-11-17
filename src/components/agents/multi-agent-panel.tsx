@@ -51,6 +51,7 @@ export function MultiAgentPanel(props: {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const handledEditorId = useRef<string | null>(null);
+  const editorPanelRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{
     agentId: string;
     revisionId: string;
@@ -136,6 +137,12 @@ export function MultiAgentPanel(props: {
     // openEditor is an internal event handler, captured only for one reviewed request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents, props.requestedEditorAgentId, props.onEditorRequestHandled]);
+
+  useEffect(() => {
+    if (editing) editorPanelRef.current?.scrollIntoView({
+      behavior: 'smooth', block: 'start',
+    });
+  }, [editing]);
 
   async function togglePause(agent: AiAgentRow) {
     const action = agent.status === 'paused' ? 'resume' : 'pause';
@@ -430,7 +437,8 @@ export function MultiAgentPanel(props: {
       {editing ? (() => {
         const ed = agents?.find((a) => a.id === editing.agentId);
         return (
-          <AgentEditor
+          <div ref={editorPanelRef} className="scroll-mt-20">
+            <AgentEditor
             key={`${editing.agentId}:${editing.revisionId}`}
             agentId={editing.agentId}
             revisionId={editing.revisionId}
@@ -444,6 +452,7 @@ export function MultiAgentPanel(props: {
             onChanged={() => void load()}
             onClose={() => setEditing(null)}
           />
+          </div>
         );
       })() : null}
 
