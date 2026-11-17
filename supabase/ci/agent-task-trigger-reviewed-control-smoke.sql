@@ -11,6 +11,10 @@ begin
  values (v_user,'sch2-control-smoke@example.test',
   '{"full_name":"SCH2 Control Smoke"}'::jsonb);
  select account_id into strict v_account from public.profiles where user_id=v_user;
+ -- New auth.users fixtures are not privileged by default; set a reviewed
+ -- admin role only within this rolled-back smoke transaction.
+ update public.profiles set account_role='owner' where user_id=v_user;
+ if not found then raise exception 'SCH2_OWNER_FIXTURE_NOT_CREATED'; end if;
  insert into public.ai_agents(id,account_id,slug,name,purpose,status)
  values (v_agent,v_account,'sch2-control-smoke','SCH2 Control Smoke','custom','active');
  v_trigger:=public.create_agent_task_trigger(
@@ -19,6 +23,17 @@ begin
   jsonb_build_object('coverageRequestId',gen_random_uuid()),'{}'::jsonb,
   'sch2-reviewed-control-188',v_user
  );
+ -- An ordinary agent must fail closed, even with the correct account ID.
+ update public.profiles set account_role='agent' where user_id=v_user;
+ begin
+  perform public.set_reviewed_agent_task_trigger_status(
+   v_account,v_trigger,'paused',v_user
+  );
+  raise exception 'SCH2_AGENT_CONTROL_ALLOWED';
+ exception when others then
+  if sqlerrm <> 'AGENT_TASK_TRIGGER_CONTROL_UNAUTHORIZED' then raise; end if;
+ end;
+ update public.profiles set account_role='owner' where user_id=v_user;
  if not public.set_reviewed_agent_task_trigger_status(
   v_account,v_trigger,'paused',v_user
  ) then raise exception 'SCH2_PAUSE_REJECTED'; end if;
