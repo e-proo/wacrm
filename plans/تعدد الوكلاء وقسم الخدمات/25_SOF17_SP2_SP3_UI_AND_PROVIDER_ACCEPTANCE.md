@@ -3,7 +3,7 @@
 **Date:** 2026-11-17  
 **Branch:** `refactor/service-platform-v2`  
 **Scope:** SP-2 operator-facing campaign review/approval; SP-3 versioned Meta/OpenWA initial-message selection and shared Task transport.  
-**Status:** implementation added / technical CI verification pending final exact HEAD; **no live TEST sends and no production changes**.
+**Status:** SP-2/SP-3 implementation added and technical lint/typecheck/test/build verified on code snapshot `1d47a522b84ffd904e0f7c56a1d1fa2e40bddf17` (see CI below); **no live TEST sends and no production changes**.
 
 ## Product / operator flow
 
@@ -53,7 +53,7 @@ The new dedicated Arabic RTL tab **Agents → ترويج الخدمات** is int
 | P3-03 | Provider unknown, malicious service name, wrong role/version | `agent-task-v2.test.ts` | Added; CI gate |
 | P3-04 | OpenWA TEST session & per-recipient Pilot grant | `promotion-campaign-review.test.ts`, existing task guardrails | Added; CI gate |
 | P3-05 | SQL concurrency uniqueness; TEST-only replay | migration 181 + verification query | TEST index verified; CI migration success |
-| P3-06 | Full TypeScript/lint/test/build/Meta regression on final exact HEAD | GitHub Actions CI | Await exact-HEAD outcome |
+| P3-06 | Full TypeScript/lint/test/build/Meta regression on code snapshot | [CI 44014392201](https://github.com/e-proo/wacrm/actions/runs/44014392201) | **PASS**: 2,286 tests passed, 20 skipped, 259 test files passed; lint/typecheck/Meta regression/build all passed |
 
 ## Explicitly remaining before ANY live pilot
 
@@ -62,4 +62,4 @@ The new dedicated Arabic RTL tab **Agents → ترويج الخدمات** is int
 - SP-6: full technical replay/negative security/regression and provider-specific Meta template readiness proof, no-send dry-run evidence, exact-HEAD successful CI, operational shutdown/rollback review.
 - SP-7 / SOF-25: bounded real 1–3 consenting TEST contacts, *operator-authorized only after all above*. Neither a code commit nor CI allows a live send.
 
-**Closure:** SP-2 and SP-3 are implemented at source level but cannot be declared `TEST verified` before final CI; SOF-17 remains `In Progress`; SOF-25 live acceptance remains `NOT RUN`. `PROJECT_NOTES.md` NOTE-001 continues to gate Production readiness.
+**Closure:** SP-2 and SP-3 are **implementation complete + automated CI verified** on the cited code snapshot. TEST unique index is applied/verified; provider live TEST acceptance and real WhatsApp delivery are **not** verified. SOF-17 remains `In Progress` pending SP-4/5/6; SOF-25 live acceptance remains `NOT RUN`. `PROJECT_NOTES.md` NOTE-001 continues to gate Production readiness.
