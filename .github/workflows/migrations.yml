@@ -95,6 +95,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-multiple-targets-smoke.sql
       - name: Verify Agent Task scheduling and Business Event triggers
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-trigger-smoke.sql
+      - name: Verify SCH-4 durable scheduler lease, monitoring and RLS
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-scheduler-health-smoke.sql
       - name: Verify concurrent Agent Task claim and bounded backlog admission
         run: bash supabase/ci/agent-task-trigger-concurrency-smoke.sh
       - name: Verify immutable schedule policies and explicit skip/defer outcomes
