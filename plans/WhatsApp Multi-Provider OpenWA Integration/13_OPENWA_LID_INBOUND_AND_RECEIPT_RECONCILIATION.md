@@ -77,4 +77,42 @@ Recommended design:
 4. Send a new message from one **unsaved** test number, inspect signed `message.received` event fields and WACRM receipt; only `senderPhone` (never LID digits) may initialize the contact.
 5. Re-run with a known contact, verify AI and ACK, and preserve timestamps/event IDs for acceptance evidence.
 
-**Status at authoring:** research verified, scoped on-demand WACRM fallback committed, remaining durable queues/receipt reconciliation and actual OpenWA environment configuration/live TEST not yet implemented or verified. No Production change authorized.
+**Status at authoring (superseded by the implementation evidence below):** preliminary design. See the current status in §8. No Production change authorized.
+
+
+## 8. Implementation and verification evidence — 2026-11-17
+
+**Canonical branch:** `refactor/service-platform-v2`  
+**Implementation verification HEAD:** `34ea9c981d6b7d00630d4759a07731106a235fcf`  
+**GitHub CI:** https://github.com/e-proo/wacrm/actions/runs/43999551280 — **success** (Lint, Typecheck, Test, Build).  
+**Migrations clean replay:** https://github.com/e-proo/wacrm/actions/runs/43999534895 — **success**, including `openwa-deferred-recovery-smoke.sql`.  
+**TEST migration:** `openwa_durable_identity_and_ack_recovery` applied through Supabase on `wacrm test`, version `20261117015956`. No Production migration attempted.
+
+### 8.1 Implemented code
+
+- `supabase/migrations/179_openwa_durable_identity_and_ack_recovery.sql` introduces `openwa_deferred_events`, a compact service-only ledger for signed but unresolved inbound native-LID events and unmatched ACK/status events. It pins the original linked phone identity and OpenWA instance, limits payload size, and supports unique signed event deduplication, lease tokens, retry bounds and review state.
+- Transactional `defer_openwa_webhook_event` inserts or confirms the deferred record and marks the previously verified signed event receipt processed **in one database transaction**, preventing an unsafe 202-before-persistence response.
+- `src/lib/whatsapp/transport/openwa/deferred.ts` runs identity preflight **before CRM/AI side effects**. It reuses the existing `resolveOpenWAInboundContactIdentity` with account/session-scoped on-demand `senderPhone` hydration and persists only minimal normalized business content (not raw webhook, decrypted keys, arbitrary provider metadata or inline media bytes).
+- `src/app/api/whatsapp/openwa/webhook/route.ts` acknowledges a genuinely unresolved LID as `202 pending_identity` only after durable SQL commit. It likewise defers unmatched native ACKs as `202 pending_receipt`; failed durable saves still produce signed `503` retry. Normal verified inbound still enters the existing unified processor.
+- `src/lib/whatsapp/transport/openwa/deferred-worker.ts` claims bounded jobs atomically, checks unchanged account+connection+session+own-phone+instance, re-resolves native LID proof, invokes the shared inbound pipeline, confirms non-reaction message persistence and settles with a compare-and-set lease. It never performs a blind outbound resend.
+- `src/lib/whatsapp/status-lifecycle.ts` rejects webhook-level event IDs as message IDs and conditions message/recipient status writes on the observed prior state (compare-and-set), preventing late status downgrades in concurrent processing.
+- TEST-protected `/api/internal/openwa-deferred-worker` is authenticated using `CRON_SECRET` and enabled in `npm run dev` only against the pinned TEST Supabase project; explicit opt-out is `WACRM_DEV_OPENWA_DEFERRED_WORKER=off`.
+- `/api/whatsapp/connections/openwa/[connectionId]/reconciliation` exposes only admin-scoped safe state/diagnostics and TEST-only recheck of `review` items. The OpenWA Settings session panel includes the Arabic/English dashboard, without showing message content or identifiers.
+- Added `deferred.test.ts`, `deferred-worker.test.ts`, revised webhook/status tests, and migration smoke. Meta remains the default and unchanged transport path.
+
+### 8.2 Verified TEST evidence
+
+- Existing TEST columns in `whatsapp_connections` and `whatsapp_webhook_event_receipts` match the migration's references.
+- RLS is enabled on `openwa_deferred_events`; `anon` cannot SELECT and `authenticated` cannot INSERT or EXECUTE the worker claim RPC; `service_role` can use the table and worker RPC.
+- Transactional TEST fixture (fully rolled back) validated: signed receipt row -> atomic deferred capture and receipt completion -> worker claim -> lease-token settlement; no fixture remained in the database.
+- Latest project security advisor still reports known NOTE-001 security findings. `rls_enabled_no_policy` also flags this new server-only table, **intentionally**: browser table privileges were revoked, RLS is on, and no permissive policy exists. This INFO alone is not an exposure, but NOTE-001 must be assessed before production readiness.
+- Current TEST account inventory has **no active OpenWA connection in ready/connected state** at the verification moment. Hence no fresh live `@lid` acceptance run or real provider ACK trace was possible during this implementation.
+
+### 8.3 Explicitly NOT closed
+
+- Upstream OpenWA host environment variable `RESOLVE_LID_TO_PHONE=true` still requires verification/enabling on the actual running gateway/container; GitHub WACRM code cannot change that external process configuration.
+- Live acceptance from one new unsaved number, one saved number and an unknown-`@lid` sender, including delayed automatic recovery and full media/ACK lifecycle, remains **pending**.
+- Previously failed signed receipts whose payload was not retained cannot be safely reconstructed from the existing receipt ledger. They require a newly signed event from the gateway or a verified read from the authenticated OpenWA archive; do **not** invent or infer phone/contents from old ledger IDs.
+- Production rollout remains **NO-GO** pending the other OW-12/OW-13 evidence and NOTE-001 risk review.
+
+**Closure classification:** **implementation complete + CI verified + TEST migration/transaction verified** for this engineering work package; **live acceptance incomplete** and **not production ready**.
