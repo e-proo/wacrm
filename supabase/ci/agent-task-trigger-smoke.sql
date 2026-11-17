@@ -234,6 +234,47 @@ begin
     raise exception 'Resumed recurring firing completion failed';
   end if;
 
+  -- SCH-1: account-level pause must block claims for already queued firings.
+  update public.ai_runtime_policies
+     set task_worker_enabled = false
+   where account_id = v_account;
+  if not found then
+    insert into public.ai_runtime_policies(account_id, task_worker_enabled)
+    values (v_account, false);
+  end if;
+
+  update public.ai_agent_task_triggers
+     set next_fire_at = v_now - interval '1 minute'
+   where id = v_recurring;
+  -- Account pause blocks materialization; insert a queued firing to simulate
+  -- a firing materialized just before the account was paused.
+  insert into public.ai_agent_task_trigger_firings(
+    account_id, trigger_id, source_kind, source_key, scheduled_for, available_at
+  ) values (
+    v_account, v_recurring, 'schedule',
+    'schedule:account-pause-smoke:' || v_recurring::text,
+    v_now - interval '1 minute', v_now - interval '1 minute'
+  );
+
+  v_claim := public.claim_next_agent_task_trigger_firing('trigger-smoke-worker', 120);
+  if v_claim is not null then
+    raise exception 'Account pause leaked an already queued firing: %', v_claim;
+  end if;
+
+  update public.ai_runtime_policies
+     set task_worker_enabled = true
+   where account_id = v_account;
+  v_claim := public.claim_next_agent_task_trigger_firing('trigger-smoke-worker', 120);
+  if v_claim is null or (v_claim->>'trigger_id')::uuid <> v_recurring then
+    raise exception 'Account resume did not restore queued firing: %', v_claim;
+  end if;
+  if not public.complete_agent_task_trigger_firing(
+    (v_claim->>'firing_id')::uuid, 'trigger-smoke-worker', null
+  ) then
+    raise exception 'Account resume completion failed';
+  end if;
+
+
   delete from public.ai_agent_task_trigger_firings where account_id=v_account;
   delete from public.ai_agent_task_triggers where account_id=v_account;
   delete from public.business_event_outbox where account_id=v_account;
