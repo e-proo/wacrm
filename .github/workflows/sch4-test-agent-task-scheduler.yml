@@ -25,8 +25,12 @@ jobs:
           python3 - <<'PY'
           import os
           from urllib.parse import urlsplit
-          from urllib.request import Request, urlopen
+          from urllib.request import Request, build_opener, HTTPRedirectHandler
           from urllib.error import HTTPError
+
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise HTTPError(req.full_url, code, "TEST worker redirect blocked", headers, fp)
 
           raw = os.environ.get("WACRM_SCH4_TEST_WORKER_URL", "")
           secret = os.environ.get("WACRM_SCH4_TEST_CRON_SECRET", "")
@@ -41,7 +45,7 @@ jobs:
               "Cache-Control": "no-store",
           })
           try:
-              with urlopen(req, timeout=90) as resp:
+              with build_opener(NoRedirect()).open(req, timeout=90) as resp:
                   status = resp.status
                   # Never log server response bodies, credentials, Task IDs or PII.
           except HTTPError as err:
