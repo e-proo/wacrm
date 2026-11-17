@@ -234,3 +234,75 @@ describe('SCH-3: promotion V2 scheduled review', () => {
     expect(mocks.rpc).not.toHaveBeenCalled()
   })
 })
+
+describe('SCH-3 tenant and review drift negative cases',()=>{
+ it('blocks an unavailable or foreign Coverage connection before trigger creation',async()=>{
+  mocks.from.mockImplementation((table:string)=>({
+    select(){return this},eq(){return this},in(){return this},
+    limit(){return Promise.resolve({data:[{id:sourceId}],error:null})},
+    async maybeSingle(){
+      if(table==='whatsapp_connections')return {data:null,error:null}
+      if(table==='ai_agents')return {data:{id:agentId,status:'active',
+        published_revision_id:revisionId},error:null}
+      return {data:{id:sourceId},error:null}
+    },
+  }))
+  const res=await post(form)
+  expect(res.status).toBe(409)
+  expect((await res.json()).code).toBe('SCHEDULE_CONNECTION_UNAVAILABLE')
+  expect(mocks.rpc).not.toHaveBeenCalled()
+ })
+ it('rejects foreign explicit recipients even on a ready Meta connection',async()=>{
+  mocks.from.mockImplementation((table:string)=>({
+    select(){return this},eq(){return this},in(){return this},
+    limit(){return Promise.resolve({data:[],error:null})},
+    async maybeSingle(){
+      if(table==='whatsapp_connections')return {data:{
+        id:form.whatsappConnectionId,provider:'meta_cloud',status:'connected',
+        archived_at:null},error:null}
+      if(table==='ai_agents')return {data:{id:agentId,status:'active',
+        published_revision_id:revisionId},error:null}
+      return {data:{id:sourceId},error:null}
+    },
+  }))
+  const res=await post(form)
+  expect(res.status).toBe(404)
+  expect((await res.json()).code).toBe('SCHEDULE_CONTACT_SCOPE_DENIED')
+  expect(mocks.rpc).not.toHaveBeenCalled()
+ })
+ it('fails closed for a changed promotion preview or published revision',async()=>{
+  const promo={
+    agentId,submissionId,taskType:'services.promotion',taskTypeVersion:2,
+    serviceId:sourceId,connectionId:form.whatsappConnectionId,
+    triggerKind:'schedule',scheduleKind:'once',
+    nextFireAt:'2026-11-17T20:00:00Z',overlapPolicy:'skip',
+    promotionReview:{
+      fingerprint:'a'.repeat(64),reviewedAt:'2026-11-17T19:00:00Z',
+      consentAcknowledged:true,approvalAcknowledged:true,recurringAcknowledged:false,
+    },
+  }
+  mocks.assertFresh.mockImplementationOnce(()=>{throw new Error('SERVICE_PROMOTION_REVIEW_STALE')})
+  const stale=await post(promo)
+  expect(stale.status).toBe(409)
+  expect(mocks.rpc).not.toHaveBeenCalled()
+
+  mocks.inspectCampaign.mockResolvedValueOnce({
+    blockers:[],fingerprint:'a'.repeat(64),
+    agent:{revisionId:'99999999-9999-4999-8999-999999999999'},
+    connection:{id:form.whatsappConnectionId,provider:'meta_cloud'},
+    audience:{ids:[sourceId],count:1},
+  })
+  mocks.from.mockImplementation((table:string)=>({
+    select(){return this},eq(){return this},
+    async maybeSingle(){
+      if(table==='ai_agents')return {data:{
+        id:agentId,status:'active',published_revision_id:revisionId},error:null}
+      return {data:{id:sourceId},error:null}
+    },
+  }))
+  const changed=await post(promo)
+  expect(changed.status).toBe(409)
+  expect((await changed.json()).code).toBe('SCHEDULE_REVIEW_REVISION_CHANGED')
+  expect(mocks.rpc).not.toHaveBeenCalled()
+ })
+})
