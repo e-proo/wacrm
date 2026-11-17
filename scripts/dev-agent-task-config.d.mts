@@ -10,3 +10,8 @@ export declare function shouldRunDevBroadcastWorker(input: {
   supabaseUrl?: string
   mode?: string
 }): boolean
+export declare function shouldRunDevOpenWADeferredWorker(input: {
+  nodeEnv?: string
+  supabaseUrl?: string
+  mode?: string
+}): boolean
