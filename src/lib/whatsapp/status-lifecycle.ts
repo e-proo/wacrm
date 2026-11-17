@@ -32,7 +32,7 @@ export function parseOpenWAStatusEvent(data: unknown): { providerMessageId: stri
   // delivery ID as the WhatsApp message ID.
   const nested = statusRecord(row.message)
   const identity = nested ?? row
-  const providerMessageId = [row.messageId, row.message_id, nested?.messageId, nested?.message_id, nested?.id, row.id]
+  const providerMessageId = [row.messageId, row.message_id, nested?.messageId, nested?.message_id, nested?.id]
     .find((v): v is string => typeof v === 'string' && !!v.trim())?.trim()
   const status = [row.status, row.ack, row.state, nested?.status, nested?.ack, nested?.state]
     .map(openWAStatusValue).find((value) => value !== null) ?? null
@@ -55,7 +55,7 @@ export async function applyWhatsAppStatus(db: SupabaseClient, input: NormalizedW
 
   let updated = false
   if (message && isForwardStatusTransition(message.status, input.status)) {
-    const { error } = await db.from('messages').update({ status: input.status }).eq('id', message.id).eq('connection_id', input.connectionId).eq('provider', input.provider).eq('provider_message_id', input.providerMessageId)
+    const { error } = await db.from('messages').update({ status: input.status }).eq('id', message.id).eq('connection_id', input.connectionId).eq('provider', input.provider).eq('provider_message_id', input.providerMessageId).eq('status', message.status)
     if (error) throw error
     updated = true
   }
@@ -68,7 +68,7 @@ export async function applyWhatsAppStatus(db: SupabaseClient, input: NormalizedW
     if (input.status === 'delivered') update.delivered_at = ts
     if (input.status === 'read') update.read_at = ts
     if (input.status === 'failed' && input.diagnostic) update.error_message = input.diagnostic
-    const { error } = await db.from('broadcast_recipients').update(update).eq('id', recipient.id).eq('connection_id', input.connectionId).eq('provider', input.provider).eq('provider_message_id', input.providerMessageId)
+    const { error } = await db.from('broadcast_recipients').update(update).eq('id', recipient.id).eq('connection_id', input.connectionId).eq('provider', input.provider).eq('provider_message_id', input.providerMessageId).eq('status', recipient.status)
     if (error) throw error
     updated = true
   }
