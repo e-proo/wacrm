@@ -90,3 +90,33 @@ describe('trigger worker bounded limits', () => {
     expect(normalizeAgentTaskTriggerWorkerLimit(999)).toBe(100)
   })
 })
+
+describe('trigger worker admission guards', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('rejects a blank worker identity before any database RPC', async () => {
+    await expect(processAgentTaskTriggerQueue({ workerId: '  ' }))
+      .rejects.toThrow('AGENT_TASK_TRIGGER_WORKER_ID_REQUIRED')
+    expect(rpc).not.toHaveBeenCalled()
+  })
+
+  it('caps materialization and claim iterations for an oversized requested limit', async () => {
+    let claimCalls = 0
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'materialize_agent_task_trigger_firings') {
+        expect(args.p_limit).toBe(400)
+        return { data: { schedule_firings: 0, business_event_firings: 0 }, error: null }
+      }
+      if (name === 'claim_next_agent_task_trigger_firing') {
+        claimCalls += 1
+        return { data: null, error: null }
+      }
+      throw new Error('Unexpected RPC: ' + name)
+    })
+    const result = await processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 100000 })
+    expect(claimCalls).toBe(1)
+    expect(result).toMatchObject({ claimed: 0, completed: 0, failed: 0, dead: 0 })
+  })
+})
