@@ -159,6 +159,14 @@ describe('OW-13 DEV pilot protected UI API', () => {
     h.auth.mockResolvedValue({ accountId: ACCOUNT, user: { id: USER },
       adminDb: { from: vi.fn(dbFrom), rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
         if (name === 'get_openwa_test_guardrail_usage') return { data: h.usage, error: null }
+        if (name === 'set_openwa_test_pilot_paused_mode') {
+          h.calls.push({ table: name, type: 'rpc', payload: args })
+          if (!h.guard.manual_paused || !h.guard.pilot_enabled) return { data: { updated: false }, error: null }
+          h.guard.pilot_enabled = false
+          h.guard.manual_paused = true
+          h.active = 0
+          return { data: { updated: true }, error: null }
+        }
         if (name !== 'set_openwa_test_pilot_mode') return { data: null, error: { code: 'unknown' } }
         h.calls.push({ table: 'set_openwa_test_pilot_mode', type: 'rpc', payload: args })
         h.guard.pilot_enabled = args.p_pilot_enabled === true
@@ -740,6 +748,36 @@ describe('OW-13 DEV pilot protected UI API', () => {
       table: 'whatsapp_guardrail_events', type: 'insert',
       payload: expect.objectContaining({ decision: 'resumed', reason: 'ow13_dev_pilot_admin_activate' }),
     }))
+  })
+
+  it('disables Pilot while keeping the send gate paused despite one unsettled send', async () => {
+    h.pending = 1
+    h.active = 1
+    expect((await POST(request({ action: 'disable_paused' }), context())).status).toBe(400)
+    expect(h.calls).toEqual([])
+    const response = await POST(request({ action: 'disable_paused', confirm_pause_only: true }), context())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      pilot_enabled: false, paused: true, active: false, unsettled_outbound: 1,
+      transition: 'pilot_disabled_sends_paused',
+    })
+    expect(h.refresh).not.toHaveBeenCalled()
+    expect(h.calls).toContainEqual(expect.objectContaining({
+      table: 'set_openwa_test_pilot_paused_mode', type: 'rpc',
+      payload: { p_account_id: ACCOUNT, p_connection_id: CONNECTION, p_actor: USER },
+    }))
+    const resume = await POST(request({ action: 'disable', confirm_normal_sending: true }), context())
+    expect(resume.status).toBe(409)
+    expect(await resume.json()).toMatchObject({ code: 'pilot_unsettled_outbound', unsettled_outbound: 1 })
+    expect(h.guard.manual_paused).toBe(true)
+  })
+
+  it('refuses paused-only mode transition until the session is stopped', async () => {
+    h.guard.manual_paused = false
+    const response = await POST(request({ action: 'disable_paused', confirm_pause_only: true }), context())
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ code: 'pilot_stop_required' })
+    expect(h.calls).toEqual([])
   })
 
   it('can disable Pilot for exactly this TEST session after explicit admin confirmation', async () => {

@@ -216,15 +216,44 @@ export async function POST(request: Request, context: Context) {
     assertTestConnectionId(connectionId)
     const body = await request.json() as Record<string, unknown>
     const action = body.action
-    if (!['prepare', 'limits', 'grant', 'grant_agent', 'grant_batch', 'grant_admin_alert', 'activate', 'stop', 'disable', 'enable'].includes(String(action))) return deny('Unknown pilot action', 400)
+    if (!['prepare', 'limits', 'grant', 'grant_agent', 'grant_batch', 'grant_admin_alert', 'activate', 'stop', 'disable', 'disable_paused', 'enable'].includes(String(action))) return deny('Unknown pilot action', 400)
     const s = await snapshot(adminDb, accountId, connectionId)
+
+    if (action === 'disable_paused') {
+      // Mode switch only: the existing manual pause remains set, even if a
+      // provider outcome is ambiguous. Never send, retry, or unpause here.
+      if (body.confirm_pause_only !== true) {
+        return deny('Confirm disabling Pilot while keeping sending paused', 400, 'pilot_pause_confirmation_required')
+      }
+      if (!s.guard.pilot_enabled) return deny('Pilot state changed; refresh', 409, 'pilot_state_changed')
+      if (!s.configured || !s.guard.manual_paused) {
+        return deny('Stop sending before disabling Pilot', 409, 'pilot_stop_required')
+      }
+      const { data: outcome, error } = await adminDb.rpc('set_openwa_test_pilot_paused_mode', {
+        p_account_id: accountId, p_connection_id: connectionId, p_actor: user.id,
+      })
+      checkDb(error, 'mode-disable-paused')
+      if ((outcome as { updated?: boolean } | null)?.updated !== true) {
+        return deny('Pilot state changed; refresh and stop before retrying', 409, 'pilot_state_changed')
+      }
+      return NextResponse.json({
+        ...safeStatus(await snapshot(adminDb, accountId, connectionId)),
+        transition: 'pilot_disabled_sends_paused',
+      }, { headers: noStore })
+    }
 
     if (action === 'disable' || action === 'enable') {
       const enable = action === 'enable'
       if (!enable) {
         if (body.confirm_normal_sending !== true) return deny('Confirm ordinary sending for this connection', 400)
-        if (s.pending !== 0 || !s.connection.session_id || !['ready', 'connected'].includes(s.connection.status)) {
-          return deny('Reconcile unsettled sends and restore a ready session before disabling Pilot', 409)
+        if (s.pending !== 0) {
+          return NextResponse.json({
+            error: 'لا يمكن استئناف الإرسال العادي مع رسائل غير محسومة. تحقق من نتيجتها لدى OpenWA أولًا، ولا تُعد إرسالها تلقائيًا.',
+            code: 'pilot_unsettled_outbound', unsettled_outbound: s.pending,
+          }, { status: 409, headers: noStore })
+        }
+        if (!s.connection.session_id || !['ready', 'connected'].includes(s.connection.status)) {
+          return deny('Restore a ready OpenWA session before resuming ordinary sends', 409, 'pilot_gateway_not_ready')
         }
         if (s.duplicates > 1 && body.ack_duplicate_sessions !== true) {
           return deny('Review duplicate sessions before enabling ordinary sending', 409)

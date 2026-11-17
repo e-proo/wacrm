@@ -56,7 +56,7 @@ interface PilotState extends Record<string, unknown> {
 }
 
 type RelatedConnection = { id: string; status: string; sessionId: string | null }
-type PilotAction = 'prepare' | 'limits' | 'grant_batch' | 'activate' | 'stop' | 'disable' | 'enable'
+type PilotAction = 'prepare' | 'limits' | 'grant_batch' | 'activate' | 'stop' | 'disable' | 'disable_paused' | 'enable'
 type PilotStep = 'protected' | 'pending' | 'needsStop' | 'verify' | 'prepare' | 'approve' | 'start' | 'active' | 'multiple' | 'normal'
 
 const capName: Record<string, string> = {
@@ -249,6 +249,7 @@ export function OpenWAPilotControls({
       })
       if (action === 'activate' || action === 'disable') body.ack_duplicate_sessions = duplicateAck
       if (action === 'disable') body.confirm_normal_sending = true
+      if (action === 'disable_paused') body.confirm_pause_only = true
       const res = await fetch(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body), cache: 'no-store',
@@ -257,9 +258,11 @@ export function OpenWAPilotControls({
       if (!res.ok) throw new Error(data.error || w('devPilotActionRejected'))
       setState(data)
       if (action === 'grant_batch') { setSelectedRecipients([]); setRecipient(''); setConsent(false); setPhoneCallConsent(false) }
-      if (['stop', 'disable', 'enable'].includes(action)) { setVerified(false); setDuplicateAck(false); setVerifiedStatus(null) }
-      if (action === 'stop' || action === 'disable' || action === 'enable') onPilotChange?.()
-      setNotice(action === 'grant_batch'
+      if (['stop', 'disable', 'disable_paused', 'enable'].includes(action)) { setVerified(false); setDuplicateAck(false); setVerifiedStatus(null) }
+      if (action === 'stop' || action === 'disable' || action === 'disable_paused' || action === 'enable') onPilotChange?.()
+      setNotice(action === 'disable_paused'
+        ? 'تم تعطيل وضع Pilot مع بقاء الإرسال موقوفًا. لم تُرسل أي رسالة ولم تُسوَّ النتائج المعلقة تلقائيًا. يمكن استئناف الإرسال العادي بخطوة مستقلة بعد المطابقة.'
+        : action === 'grant_batch'
         ? `تم اعتماد ${selectedRecipients.length} أرقام فقط لنوع ${workload} لمدة أربع ساعات دون إرسال.`
         : w(action === 'prepare' ? 'devPilotPrepared'
           : action === 'disable' ? 'devPilotDisabled' : action === 'enable' ? 'devPilotEnabled'
@@ -350,20 +353,44 @@ export function OpenWAPilotControls({
         </AlertDescription>
       </Alert>}
 
+      {state && state.unsettled_outbound > 0 && <Alert variant="destructive">
+        <AlertCircle className="size-4" />
+        <AlertTitle>توجد {state.unsettled_outbound} رسالة إرسال غير محسومة</AlertTitle>
+        <AlertDescription className="space-y-2">
+          <p>لا يمكن استئناف الإرسال العادي حتى تتأكد من نتائج الرسائل المعلقة. يمكنك تعطيل Pilot بأمان طالما الإرسال موقوف، ولن تتم أي إعادة إرسال تلقائية.</p>
+          <Button type="button" size="sm" variant="outline" disabled={running} onClick={() => void load()}>
+            <RefreshCw className="me-2 size-3" /> تحديث الفحص
+          </Button>
+        </AlertDescription>
+      </Alert>}
+
       {state && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
         <div className="space-y-1">
           <p className="text-sm font-semibold">{w('devPilotModeTitle')}</p>
-          <p className="text-xs text-muted-foreground">{w(state.pilot_enabled ? 'devPilotModeEnabledHint' : 'devPilotModeDisabledHint')}</p>
-           <p className="text-xs text-amber-700 dark:text-amber-400">تنبيه: تبديل وضع Pilot يعيد حدود الاختبار المحافظة (3 رسائل/ساعة و10/يوم عند التفعيل) ويلغي اعتمادات الأرقام السابقة. إن كنت قد حفظت 100/1000، فستحتاج إلى إعادة حفظها صراحةً وإعادة اعتماد الجهات بعد إيقاف التجربة.</p>
+          <p className="text-xs text-muted-foreground">{!state.pilot_enabled && state.paused
+            ? 'Pilot معطل والإرسال العادي موقوف أيضًا؛ الاستئناف خطوة مستقلة بعد مطابقة النتائج.'
+            : w(state.pilot_enabled ? 'devPilotModeEnabledHint' : 'devPilotModeDisabledHint')}</p>
+           <p className="text-xs text-amber-700 dark:text-amber-400">تنبيه: تبديل وضع Pilot يعيد حدود الاختبار المحافظة عند التفعيل، ويلغي اعتمادات الأرقام السابقة. يجب إعادة حفظ الحدود واعتماد الجهات بعد تبديل الوضع.</p>
         </div>
         {state.pilot_enabled
-          ? <Button variant="outline" disabled={running || (needsDuplicateReview && !duplicateAck)}
-              onClick={() => { if (window.confirm(w('devPilotDisableConfirm'))) void submit('disable') }}>
-              {w('devPilotDisableButton')}
-            </Button>
+          ? <div className="space-y-1">
+              <Button variant="outline" disabled={running || !state.paused}
+                onClick={() => {
+                  if (window.confirm('تعطيل Pilot مع إبقاء كل إرسال موقوفًا؟ ستُلغى الاعتمادات وتعود الحدود العادية الافتراضية. لن تُرسل الرسائل المعلقة تلقائيًا.'))
+                    void submit('disable_paused')
+                }}>
+                تعطيل Pilot بأمان
+              </Button>
+              {!state.paused && <p className="text-xs text-amber-700 dark:text-amber-400">
+                استخدم زر «إيقاف Pilot» أولًا، ثم عطّل الوضع.
+              </p>}
+            </div>
           : <div className="flex flex-wrap gap-2">
-              {state.paused && <Button disabled={running || (needsDuplicateReview && !duplicateAck)}
-                onClick={() => { if (window.confirm(w('devPilotDisableConfirm'))) void submit('disable') }}>
+              {state.paused && <Button disabled={running || state.unsettled_outbound > 0 || (needsDuplicateReview && !duplicateAck)}
+                onClick={() => {
+                  if (window.confirm('استئناف الإرسال العادي بعد مطابقة النتائج؟ سيُرفع الإيقاف مع بقاء حدود الحماية.'))
+                    void submit('disable')
+                }}>
                 {w('devPilotResumeNormal')}
               </Button>}
               <Button variant="outline" disabled={running} onClick={() => void submit('enable')}>
@@ -422,7 +449,9 @@ export function OpenWAPilotControls({
           </div>
         </div>}
 
-        {step === 'normal' && <Alert><AlertDescription>{w('devPilotNormalModeHint')}</AlertDescription></Alert>}
+        {step === 'normal' && <Alert><AlertDescription>{state.paused
+          ? 'Pilot معطل والإرسال موقوف. لا تستأنف الإرسال العادي قبل التحقق من الرسائل غير المحسومة.'
+          : w('devPilotNormalModeHint')}</AlertDescription></Alert>}
         {step === 'protected' && <Alert variant="destructive"><AlertDescription>{w('devPilotEnforceRequired')}</AlertDescription></Alert>}
         {step === 'pending' && <Alert variant="destructive"><AlertDescription>{w('devPilotUnsettledBlocked')}</AlertDescription></Alert>}
         {step === 'needsStop' && <Alert variant="destructive">
