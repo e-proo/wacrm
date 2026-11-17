@@ -5,6 +5,7 @@ const h = vi.hoisted(() => ({
   markProcessed: vi.fn(),
   normalizeInbound: vi.fn(),
   processInbound: vi.fn(),
+  hydratePhone: vi.fn(),
   processEcho: vi.fn(),
   refreshSession: vi.fn(),
   parseStatus: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/lib/whatsapp/inbound-normalization', () => ({
   normalizeOpenWAOwnSentMessage: vi.fn(() => null),
 }))
 vi.mock('@/lib/whatsapp/inbound-processor', () => ({ processNormalizedInboundMessage: h.processInbound }))
+vi.mock('@/lib/whatsapp/transport/openwa/sender-phone', () => ({ hydrateOpenWAInboundSenderPhone: h.hydratePhone }))
 vi.mock('@/lib/whatsapp/transport/openwa/outbound-echo', () => ({ processOpenWAOwnSentEcho: h.processEcho }))
 vi.mock('@/lib/whatsapp/transport/openwa/webhook-media', () => ({ extractOpenWASignedInlineMedia: vi.fn(() => undefined) }))
 vi.mock('@/lib/whatsapp/status-lifecycle', () => ({
@@ -61,6 +63,7 @@ beforeEach(() => {
     message: { id: 'm-1', provider: 'openwa', connectionId: 'connection-1', providerMessageId: 'm-1', type: 'text', from: '12345678901', timestamp: '1792950000', text: { body: 'hi' } },
     contact: { wa_id: '12345678901', profile: { name: 'Contact' } },
   })
+  h.hydratePhone.mockResolvedValue(false)
   h.processInbound.mockResolvedValue(undefined)
   const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => ({ data: { owner_user_id: 'owner-1' }, error: null })) }
   query.select.mockReturnValue(query)
@@ -112,4 +115,36 @@ describe('OpenWA webhook completion acknowledgement', () => {
       warn.mockRestore()
     }
   })
+  it('hydrates a previously unknown native sender before entering the unified inbound processor', async () => {
+    const native = '123456789012345@lid'
+    h.normalizeInbound.mockReturnValue({
+      message: { id: 'm-lid', provider: 'openwa', connectionId: 'connection-1', providerMessageId: 'm-lid', type: 'text', from: native, providerChatId: native, timestamp: '1792950000', text: { body: 'hello' } },
+      contact: { wa_id: native, profile: { name: 'New sender' } },
+    })
+    h.hydratePhone.mockImplementation(async (_db: unknown, input: { inbound: { message: { from: string }; contact: { wa_id: string } } }) => {
+      input.inbound.message.from = '967700000001'
+      input.inbound.contact.wa_id = '967700000001'
+      return true
+    })
+    const res = await POST(request())
+    expect(res.status).toBe(202)
+    expect(h.hydratePhone).toHaveBeenCalledWith(h.db, expect.objectContaining({
+      accountId: 'account-1', connectionId: 'connection-1', sessionId: 'session-1',
+    }))
+    expect(h.processInbound).toHaveBeenCalledWith(
+      expect.objectContaining({ from: '967700000001', providerChatId: native }),
+      expect.objectContaining({ wa_id: '967700000001' }),
+      'account-1', 'connection-1', 'owner-1', '', true, undefined,
+    )
+  })
+  it('does not acknowledge a transient on-demand identity lookup failure as processed', async () => {
+    h.hydratePhone.mockRejectedValueOnce(new Error('provider temporarily unavailable'))
+    const res = await POST(request())
+    expect(res.status).toBe(503)
+    expect(h.processInbound).not.toHaveBeenCalled()
+    expect(h.markProcessed).toHaveBeenCalledWith(
+      h.db, 'account-1', 'connection-1', 'evt-1', 'lease-1', 'processing_failed',
+    )
+  })
+
 })
