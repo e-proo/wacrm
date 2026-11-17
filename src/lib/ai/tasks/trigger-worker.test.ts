@@ -5,7 +5,8 @@ const { rpc, start, normalizeFiring, from, reap } = vi.hoisted(() => ({
   start: vi.fn(),
   normalizeFiring: vi.fn(),
   from: vi.fn(),
-  reap: vi.fn(async () => ({ data: 0, error: null })),
+  reap: vi.fn(async (_name: string, _args: Record<string, unknown>):
+    Promise<{ data: number | null; error: Error | null }> => ({ data: 0, error: null })),
 }))
 
 vi.mock('../admin-client', () => ({
