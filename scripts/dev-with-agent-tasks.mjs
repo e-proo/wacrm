@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import nextEnv from '@next/env'
-import { developmentPort, shouldRunDevTaskWorker, shouldRunDevBroadcastWorker } from './dev-agent-task-config.mjs'
+import { developmentPort, shouldRunDevTaskWorker, shouldRunDevBroadcastWorker, shouldRunDevOpenWADeferredWorker } from './dev-agent-task-config.mjs'
 
 const { loadEnvConfig } = nextEnv
 
@@ -21,7 +21,12 @@ const broadcastEnabled = shouldRunDevBroadcastWorker({
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
   mode: process.env.WACRM_DEV_BROADCAST_WORKER,
 })
-const pollingEnabled = enabled || broadcastEnabled
+const openwaDeferredEnabled = shouldRunDevOpenWADeferredWorker({
+  nodeEnv: 'development',
+  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  mode: process.env.WACRM_DEV_OPENWA_DEFERRED_WORKER,
+})
+const pollingEnabled = enabled || broadcastEnabled || openwaDeferredEnabled
 const cronSecret = pollingEnabled
   ? (process.env.CRON_SECRET || randomBytes(32).toString('hex'))
   : process.env.CRON_SECRET
@@ -95,6 +100,19 @@ async function tick() {
         console.info('[TEST Broadcast worker]', data)
       }
     }
+    if (openwaDeferredEnabled) {
+      const response = await fetch('http://127.0.0.1:' + port + '/api/internal/openwa-deferred-worker', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + cronSecret },
+        signal: AbortSignal.timeout(120_000),
+        cache: 'no-store',
+      })
+      if (!response.ok) throw new Error('OpenWA deferred worker endpoint HTTP ' + response.status)
+      const result = await response.json()
+      if (result.claimed) {
+        console.info('[TEST OpenWA deferred worker] tick', result)
+      }
+    }
     failCount = 0
   } catch (error) {
     // NEXT might still be booting; retry without starting a second tick.
@@ -127,7 +145,7 @@ next.on('exit', (code, signal) => {
 })
 if (pollingEnabled) {
   console.info('[WACRM TEST] Automatic workers enabled:', {
-    agentTasks: enabled, broadcastDelivery: broadcastEnabled,
+    agentTasks: enabled, broadcastDelivery: broadcastEnabled, openwaDeferred: openwaDeferredEnabled,
     cadenceSeconds: 15,
     notice: 'This can send queued WhatsApp messages on TEST only',
   })
