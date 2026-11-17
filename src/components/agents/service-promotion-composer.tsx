@@ -10,7 +10,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 type Service = { id: string; name: string; code: string }
-type Agent = { id: string; name: string; published: boolean; promotionV2: boolean }
+type Agent = { id: string; name: string; published: boolean; promotionV2: boolean;
+  revisionNumber: number | null; promotionAudienceConfigured: boolean;
+  promotionRequiredTagIds: string[] }
 type Connection = { id: string; name: string; provider: 'meta_cloud' | 'openwa'; status: string; ready: boolean }
 type Task = { id: string; status: string; version: number; serviceId: string | null; createdAt: string }
 type Tag = { id: string; name: string; color: string | null }
@@ -51,7 +53,11 @@ const reasons: Record<string, string> = {
   SERVICE_PROMOTION_REVIEW_STALE: 'تغير الجمهور أو القالب أو إعداد الوكيل. أعد المعاينة.',
   SERVICE_PROMOTION_REVIEW_EXPIRED: 'انتهت صلاحية المعاينة. أعد مراجعتها.',
   SERVICE_PROMOTION_ALREADY_ACTIVE: 'هناك حملة ترويج نشطة للخدمة نفسها.',
-  SERVICE_PROMOTION_V2_BINDING_REQUIRED: 'يلزم نشر نسخة وكيل تدعم ترويج الخدمات V2.',
+  SERVICE_PROMOTION_V2_BINDING_REQUIRED: 'الوكيل لا يحتوي على ربط services.promotion@2 في مراجعته المنشورة.',
+  SERVICE_PROMOTION_SEGMENT_REQUIRED: 'الوكيل يدعم ترويج الخدمات V2، لكن لم تُحدّد وسوم الجمهور المستهدف في مراجعته المنشورة.',
+  SERVICE_PROMOTION_SERVICE_SCOPE_DENIED: 'الخدمة المختارة خارج الخدمات المسموح بها للوكيل.',
+  SERVICE_PROMOTION_SELECTOR_UNSUPPORTED: 'يتطلب ترويج الخدمات جمهورًا محددًا بالوسوم فقط، دون محددات مناطق إضافية.',
+  SERVICE_PROMOTION_APPROVAL_REQUIRED: 'يجب اختيار سياسة اعتماد المهمة بدل عدم الاعتماد.',
 }
 function humanReason(reason: string | null) {
   if (reason === 'opted_out_or_blocked') return 'حظر / إلغاء اشتراك'
@@ -75,7 +81,7 @@ async function json<T>(response: Response): Promise<T> {
 }
 const stages = ['تحديد الحملة', 'الجمهور والأمان', 'الموافقة النهائية']
 
-export function ServicePromotionComposer() {
+export function ServicePromotionComposer(props: { onConfigureAgent?: (agentId: string) => void } = {}) {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [serviceId, setServiceId] = useState('')
   const [agentId, setAgentId] = useState('')
@@ -108,7 +114,8 @@ export function ServicePromotionComposer() {
 
   const currentAgent = catalog?.agents.find(a => a.id === agentId)
   const currentConnection = catalog?.connections.find(c => c.id === connectionId)
-  const selected = Boolean(serviceId && currentAgent?.promotionV2 && currentConnection?.ready)
+  const selected = Boolean(serviceId && currentAgent?.promotionV2 &&
+    currentAgent.promotionAudienceConfigured && currentConnection?.ready)
   const valid = Boolean(preview && preview.service.id === serviceId &&
     preview.agent.id === agentId && preview.connection.id === connectionId &&
     Date.parse(preview.expiresAt) > Date.now())
@@ -236,6 +243,44 @@ export function ServicePromotionComposer() {
                   </option>)}
                 </select></label>
               </div>
+              {currentAgent?.promotionV2 && !currentAgent.promotionAudienceConfigured && (
+                <div role="alert" className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-1 size-4 shrink-0 text-amber-600" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold">الوكيل يدعم V2 بالفعل، لكن الجمهور غير مُعدّ</p>
+                      <p className="text-xs leading-6 text-muted-foreground">
+                        مراجعة الوكيل المنشورة {currentAgent.revisionNumber ?? 'الحالية'} تحتوي على
+                        services.promotion@2، لكن لا يوجد أي وسم ضمن «وسوم الجمهور المستهدف».
+                        افتح مسودة جديدة، اختر الوسم من قائمته باسمه، ثم احفظ وانشر المراجعة الجديدة.
+                      </p>
+                      {catalog && catalog.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {catalog.tags.slice(0, 8).map(tag => (
+                            <span key={tag.id} className="rounded-full border bg-background px-2.5 py-1 text-xs">
+                              {tag.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        يلزم أيضًا ربط جهات اتصال مناسبة بالوسم؛ مجرد وجود الوسم لا يُنشئ جمهورًا.
+                      </p>
+                    </div>
+                  </div>
+                  {props.onConfigureAgent && (
+                    <Button type="button" size="sm" variant="outline"
+                      onClick={() => props.onConfigureAgent?.(currentAgent.id)}>
+                      <Bot className="me-2 size-4" /> فتح إعدادات هذا الوكيل
+                    </Button>
+                  )}
+                </div>
+              )}
+              {currentAgent && !currentAgent.promotionV2 && (
+                <p role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-6">
+                  لا تحتوي المراجعة المنشورة على ربط services.promotion@2. انشر مسودة تدعم نوع المهمة المطلوب.
+                </p>
+              )}
               <label className="block space-y-2 text-sm"><span className="flex items-center gap-2 font-medium">
                 <Wifi className="size-4 text-muted-foreground" /> اتصال WhatsApp الخاص بهذه المهمة
               </span><select value={connectionId} disabled={busy !== null}
@@ -251,6 +296,8 @@ export function ServicePromotionComposer() {
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/30 p-3">
                 <p className="max-w-sm text-xs leading-6 text-muted-foreground">
                   يُستخرج الجمهور من وسوم Builder المنشورة في الوكيل. لا تُنشأ جهات اتصال جديدة.
+                  {!currentAgent?.promotionAudienceConfigured && currentAgent?.promotionV2
+                    ? ' اختر وسمًا للجمهور أولًا لتفعيل زر المعاينة.' : ''}
                 </p>
                 <Button disabled={!selected || busy !== null} onClick={() => void inspect()}>
                   {busy === 'preview' ? <Loader2 className="me-2 size-4 animate-spin" /> :
