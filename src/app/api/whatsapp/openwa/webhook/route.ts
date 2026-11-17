@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 
 import { normalizeOpenWAInboundMessage, normalizeOpenWAOwnSentMessage } from '@/lib/whatsapp/inbound-normalization'
 import { processOpenWAOwnSentEcho } from '@/lib/whatsapp/transport/openwa/outbound-echo'
-import { hydrateOpenWAInboundSenderPhone } from '@/lib/whatsapp/transport/openwa/sender-phone'
+import { deferOpenWAWebhook, preflightOpenWAInboundIdentity } from '@/lib/whatsapp/transport/openwa/deferred'
 import { isSensitiveOpenWAAdminOwnSentEcho } from '@/lib/whatsapp/transport/openwa/admin-approval-echo'
 import { extractOpenWASignedInlineMedia } from '@/lib/whatsapp/transport/openwa/webhook-media'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
@@ -62,7 +62,15 @@ export async function POST(request: Request) {
           if (result === 'unknown') {
             // No provider payload, recipient or message contents in logs.
             // Long-running ambiguous sends must be reconciled, not resent.
-            console.warn('[openwa-webhook] unmatched delivery receipt', { connectionId, status: status.status })
+            await deferOpenWAWebhook(db, {
+              accountId, connectionId, sessionId: envelope.sessionId,
+              providerEventId: envelope.eventId,
+              providerMessageId: status.providerMessageId, processingToken,
+              deferred: { kind: 'unmatched_status', status },
+            })
+            // The queue insert and signed receipt finalization committed
+            // atomically. Another signed retry is now a safe duplicate.
+            return NextResponse.json({ ok: true, deferred: 'pending_receipt' }, { status: 202 })
           }
         } else {
           console.warn('[openwa-webhook] unrecognized delivery receipt', { connectionId, event })
@@ -82,12 +90,20 @@ export async function POST(request: Request) {
       } else {
         const normalized = normalizeOpenWAInboundMessage(envelope, connectionId)
         if (normalized) {
-          // A previously unseen @lid may not include senderPhone in the signed
-          // gateway event. Ask the SAME OpenWA session for its real phone
-          // before CRM contact creation. Never use the LID digits as a phone.
-          await hydrateOpenWAInboundSenderPhone(db, {
+          // Identity preflight runs BEFORE any CRM/AI side effect.
+          // Unknown native LIDs must be stored durably, never guessed.
+          const identity = await preflightOpenWAInboundIdentity(db, {
             accountId, connectionId, sessionId: envelope.sessionId, inbound: normalized,
           })
+          if (identity === 'unresolved') {
+            await deferOpenWAWebhook(db, {
+              accountId, connectionId, sessionId: envelope.sessionId,
+              providerEventId: envelope.eventId,
+              providerMessageId: normalized.message.providerMessageId,
+              processingToken, deferred: { kind: 'unresolved_identity', inbound: normalized },
+            })
+            return NextResponse.json({ ok: true, deferred: 'pending_identity' }, { status: 202 })
+          }
           const { data: account, error: accountError } = await db.from('accounts').select('owner_user_id').eq('id', accountId).maybeSingle()
           if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
           await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true, extractOpenWASignedInlineMedia(envelope))
