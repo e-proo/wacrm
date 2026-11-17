@@ -162,21 +162,32 @@ export async function inspectServicePromotionPilotReadiness(input: {
 
   let candidateIds: string[] = []
   if (serviceContext && binding) {
-    const candidates = await SERVICE_PROMOTION_AUDIENCE_RESOLVER.resolve(
-      db,
-      {
-        accountId: input.accountId,
-        taskId: 'pilot-readiness',
-        taskType: SERVICE_PROMOTION_TASK_TYPE.key,
-        taskTypeVersion: SERVICE_PROMOTION_TASK_TYPE.version,
-        taskContext: serviceContext,
-        targetPolicy: {
-          requiredTagIds: [...binding.targetScope.requiredTagIds],
+    try {
+      const candidates = await SERVICE_PROMOTION_AUDIENCE_RESOLVER.resolve(
+        db,
+        {
+          accountId: input.accountId,
+          taskId: 'pilot-readiness',
+          taskType: SERVICE_PROMOTION_TASK_TYPE.key,
+          taskTypeVersion: SERVICE_PROMOTION_TASK_TYPE.version,
+          taskContext: serviceContext,
+          targetPolicy: {
+            requiredTagIds: [...binding.targetScope.requiredTagIds],
+            excludedTagIds: [...binding.targetScope.excludedTagIds],
+          },
+          maxCandidates: Math.min(binding.maxTargets, 100),
         },
-        maxCandidates: 20,
-      },
-    )
-    candidateIds = [...new Set(candidates.map((candidate) => candidate.contactId))]
+      )
+      candidateIds = [...new Set(candidates.map(candidate => candidate.contactId))]
+    } catch (error) {
+      // Readiness is a read-only diagnostic, not a launch. Surface a
+      // deterministic audience blocker instead of dropping the full check.
+      if (error instanceof Error && error.message.startsWith('SERVICE_PROMOTION_')) {
+        externalBlockers.push(error.message)
+      } else {
+        throw error
+      }
+    }
   }
 
   const eligibleTestContactCount =
