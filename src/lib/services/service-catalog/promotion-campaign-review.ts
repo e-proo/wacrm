@@ -4,7 +4,7 @@ import { isAgentBuilderV2Configuration, type AgentBuilderTaskBinding } from '@/l
 import { deferredTestOpenWATaskReason } from '@/lib/ai/tasks/test-openwa-task-admission'
 import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
 import { resolveServicePromotionAudience } from './promotion-audience'
-import { loadServicePromotionContext } from './agent-task'
+import { loadServicePromotionContext, promotionSnapshotName } from './agent-task'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -124,6 +124,8 @@ export async function inspectServicePromotionCampaign(
   })
   const blockers: string[] = []
   if (ids.length === 0) blockers.push('SERVICE_PROMOTION_AUDIENCE_EMPTY')
+  try { promotionSnapshotName(serviceContext.service.name) }
+  catch { blockers.push('SERVICE_PROMOTION_MESSAGE_FACTS_INVALID') }
 
   let contacts: ServicePromotionCampaignReview['audience']['contacts'] = []
   if (ids.length) {
@@ -152,7 +154,7 @@ export async function inspectServicePromotionCampaign(
   }
   const { data: guard, error: guardError } = await db
     .from('whatsapp_connection_guardrails')
-    .select('manual_paused,circuit_open_until')
+    .select('manual_paused,circuit_open_until,pilot_enabled')
     .eq('account_id', input.accountId).eq('connection_id', input.connectionId)
     .maybeSingle()
   if (guardError) throw guardError
@@ -172,7 +174,8 @@ export async function inspectServicePromotionCampaign(
       .limit(2)
     if (error) throw error
     const row = data?.length === 1 ? data[0] : null
-    if (!row || !String(row.body_text ?? '').includes('{{1}}') ||
+    if (!row || String(row.category ?? '').toUpperCase() !== 'MARKETING' ||
+        !String(row.body_text ?? '').includes('{{1}}') ||
         /\{\{(?:[2-9]|[1-9][0-9]+)\}\}/.test(String(row.body_text ?? ''))) {
       blockers.push('SERVICE_PROMOTION_APPROVED_TEMPLATE_MISSING')
     }
@@ -184,6 +187,8 @@ export async function inspectServicePromotionCampaign(
   } else {
     if (!isOpenWATestProject()) {
       blockers.push('SERVICE_PROMOTION_OPENWA_TEST_ONLY')
+    } else if (!guard || guard.pilot_enabled !== true) {
+      blockers.push('SERVICE_PROMOTION_OPENWA_PILOT_REQUIRED')
     } else if (ids.length > 0) {
       const deferral = await deferredTestOpenWATaskReason({
         db, accountId: input.accountId, connectionId: input.connectionId, contactIds: ids,
@@ -205,6 +210,8 @@ export async function inspectServicePromotionCampaign(
     excludedTags: [...binding.targetScope.excludedTagIds].sort(),
     maxTargets: binding.maxTargets, ids,
     template,
+    firstMessage: body,
+    contacts,
   })).digest('hex')
   return {
     service: { id: serviceContext.serviceId, name: serviceContext.service.name,
