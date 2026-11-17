@@ -13,8 +13,9 @@ type Service = { id: string; name: string; code: string }
 type Agent = { id: string; name: string; published: boolean; promotionV2: boolean }
 type Connection = { id: string; name: string; provider: 'meta_cloud' | 'openwa'; status: string; ready: boolean }
 type Task = { id: string; status: string; version: number; serviceId: string | null; createdAt: string }
+type Tag = { id: string; name: string; color: string | null }
 type Catalog = {
-  services: Service[]; agents: Agent[]; connections: Connection[];
+  services: Service[]; agents: Agent[]; connections: Connection[]; tags: Tag[];
   recentTasks: Task[]; launchEnabled: boolean
 }
 type Preview = {
@@ -24,7 +25,7 @@ type Preview = {
   agent: { id: string; name: string; revisionId: string };
   connection: { id: string; name: string; provider: string };
   audience: {
-    total: number; policyMax: number; requiredTagIds: string[];
+    total: number; policyMax: number; requiredTagIds: string[]; excludedTagIds: string[];
     contacts: Array<{ id: string; name: string | null; phone: string | null; reason: string | null }>
   };
   message: { kind: 'template' | 'text'; body: string };
@@ -39,6 +40,10 @@ const reasons: Record<string, string> = {
   SERVICE_PROMOTION_TAG_OUTSIDE_ACCOUNT: 'وسم واحد أو أكثر لا يخص هذا الحساب.',
   SERVICE_PROMOTION_CONTACT_BLOCKED: 'هناك جهات محظورة أو أرقام غير صالحة. راجعها قبل المتابعة.',
   SERVICE_PROMOTION_CONNECTION_PAUSED: 'الجلسة موقوفة أو دائرة الحماية مفعّلة.',
+  SERVICE_PROMOTION_RUNTIME_NOT_READY: 'محرك مهام الوكلاء أو إحدى بوابات الإرسال غير مفعّلة لهذا الحساب.',
+  SERVICE_PROMOTION_WORKER_PAUSED: 'عامل المهام متوقف؛ لن يبدأ تنفيذ هذه الحملة.',
+  SERVICE_PROMOTION_OPENWA_PILOT_REQUIRED: 'يجب تفعيل Pilot على جلسة OpenWA وتوثيق كل مستهدف.',
+  SERVICE_PROMOTION_MESSAGE_FACTS_INVALID: 'اسم الخدمة غير ملائم للرسالة الترويجية (تحقق من الطول والمحارف).',
   SERVICE_PROMOTION_CONNECTION_UNAVAILABLE: 'الجلسة المختارة غير جاهزة.',
   SERVICE_PROMOTION_APPROVED_TEMPLATE_MISSING: 'القالب العربي غير معتمد، أو متغيراته غير صالحة.',
   SERVICE_PROMOTION_OPENWA_TEST_ONLY: 'ترويج OpenWA محدود ببيئة TEST.',
@@ -281,6 +286,28 @@ export function ServicePromotionComposer() {
                     <AlertTriangle className="mt-1 size-4 shrink-0 text-amber-600" />
                     {reasons[b] ?? b}</p>)}
                 </div>}
+                <div className="grid gap-3 rounded-xl border bg-muted/20 p-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold">الوسوم المطلوبة</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {preview.audience.requiredTagIds.map(id => <span key={id}
+                        className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary">
+                        {catalog?.tags.find(tag => tag.id === id)?.name || id.slice(0, 8)}
+                      </span>)}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold">الوسوم المستبعدة</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {preview.audience.excludedTagIds.length > 0
+                        ? preview.audience.excludedTagIds.map(id => <span key={id}
+                            className="rounded-full border bg-background px-2.5 py-1 text-xs text-muted-foreground">
+                            {catalog?.tags.find(tag => tag.id === id)?.name || id.slice(0, 8)}
+                          </span>)
+                        : <span className="text-xs text-muted-foreground">لا يوجد استبعاد إضافي</span>}
+                    </div>
+                  </div>
+                </div>
                 <div className="max-h-72 space-y-2 overflow-y-auto pe-1">
                   {preview.audience.contacts.map((c, i) => <div key={c.id}
                     className="flex items-center gap-3 rounded-lg border p-3">
