@@ -140,10 +140,15 @@ describe('SCH-2 reviewed scheduling API', () => {
 
   it('fails closed when the subject cannot be found in the authorized account', async () => {
     mocks.from.mockImplementation((table: string) => ({
-      select() { return this }, eq() { return this },
+      select() { return this }, eq() { return this }, in() { return this },
+      limit() { return Promise.resolve({ data: [{ id: sourceId }], error: null }) },
       async maybeSingle() {
         if (table === 'ai_agents') return {
           data: { id: agentId, status: 'active', published_revision_id: revisionId }, error: null,
+        }
+        if (table === 'whatsapp_connections') return {
+          data: { id: form.whatsappConnectionId, status: 'connected',
+            provider: 'meta_cloud', archived_at: null }, error: null,
         }
         return { data: null, error: null }
       },

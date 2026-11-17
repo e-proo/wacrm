@@ -121,13 +121,18 @@ describe('Agent Task Trigger Registry', () => {
       'coverage.sourcing',
       1,
     )
-    const promotion = CURRENT_AGENT_TASK_TRIGGER_REGISTRY.get(
+    const legacyPromotion = CURRENT_AGENT_TASK_TRIGGER_REGISTRY.get(
       'services.promotion',
       1,
+    )
+    const promotion = CURRENT_AGENT_TASK_TRIGGER_REGISTRY.get(
+      'services.promotion',
+      2,
     )
 
     expect(coverage?.domain).toBe('coverage')
     expect(promotion?.domain).toBe('services')
+    expect(legacyPromotion?.taskTypeVersion).toBe(1)
 
     expect(() =>
       coverage?.validate({
@@ -138,8 +143,9 @@ describe('Agent Task Trigger Registry', () => {
         triggerKind: 'business_event',
         eventType: 'coverage.request.approved',
         eventVersion: 1,
-        config: {},
-        filters: { subject_type: 'coverage_request' },
+        config: { coverageRequestId: '00000000-0000-4000-8000-000000000002' },
+        filters: { subject_type: 'coverage_request',
+          subject_id: '00000000-0000-4000-8000-000000000002' },
         idempotencyKey: 'coverage-trigger-test-0001',
         createdBy: null,
       }),
@@ -149,7 +155,7 @@ describe('Agent Task Trigger Registry', () => {
       promotion?.validate({
         accountId: 'account',
         taskType: 'services.promotion',
-        taskTypeVersion: 1,
+        taskTypeVersion: 2,
         agentId: 'agent',
         triggerKind: 'schedule',
         scheduleKind: 'recurring',
@@ -157,12 +163,20 @@ describe('Agent Task Trigger Registry', () => {
         intervalMinutes: 1440,
         config: {
           serviceId: '00000000-0000-4000-8000-000000000001',
+          connectionId: '00000000-0000-4000-8000-000000000003',
+          promotionReview: { schemaVersion: 1 },
         },
         filters: {},
         idempotencyKey: 'promotion-trigger-test-0001',
         createdBy: null,
       }),
     ).not.toThrow()
+    expect(() => legacyPromotion?.validate({
+      accountId: 'account',taskType: 'services.promotion',taskTypeVersion: 1,
+      agentId: 'agent',triggerKind: 'schedule',
+      config: { serviceId: '00000000-0000-4000-8000-000000000001' },
+      filters: {},idempotencyKey:'promotion-trigger-test-0002',createdBy:null,
+    })).toThrow('SERVICE_PROMOTION_V1_SCHEDULING_DISABLED')
   })
 
 })
