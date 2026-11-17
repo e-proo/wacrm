@@ -459,3 +459,73 @@ describe('SCH-5 — terminal recovery of exhausted claimed leases', () => {
     expect(rpc).not.toHaveBeenCalled()
   })
 })
+
+describe('SCH-5 — crash after Task creation, before firing settlement', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    normalizeFiring.mockReturnValue({
+      firingId: 'firing-1',
+      accountId: 'tenant-1', triggerId: 'trigger-1',
+      taskType: 'services.promotion', taskTypeVersion: 2,
+      triggerKind: 'schedule',sourceKey: 'occurrence-1',
+      overlapPolicy: 'skip',
+    })
+  })
+
+  it('retries the exact Task identity without treating the recovery as new delivery', async () => {
+    let attempt = 0
+    const sourceRef = 'schedule:trigger-1:occurrence-1'
+    start.mockImplementation(async () => {
+      attempt += 1
+      return {taskId: 'same-durable-task', created: attempt === 1}
+    })
+    from.mockImplementation((table:string) => {
+      expect(table).toBe('ai_agent_tasks')
+      return {
+        select() { return this },
+        eq() { return this },
+        async maybeSingle() { return {
+          data:{trigger_ref:sourceRef},error:null,
+        } },
+      }
+    })
+    let completed = 0
+    let failCount = 0
+    rpc.mockImplementation(async (name:string,args:Record<string,unknown>)=>{
+      if(name==='materialize_agent_task_trigger_firings')
+        return {data:{schedule_firings:0,business_event_firings:0},error:null}
+      if(name==='claim_next_agent_task_trigger_firing') {
+        return {data:{firing_id:'firing-1',claim_owner:
+          String(args.p_worker_id)+':00000000-0000-4000-8000-000000000186'},error:null}
+      }
+      if(name==='complete_agent_task_trigger_firing') {
+        completed++
+        expect(args.p_task_id).toBe('same-durable-task')
+        return completed===1
+          ? {data:null,error:new Error('transient DB commit response failure')}
+          : {data:true,error:null}
+      }
+      if(name==='fail_agent_task_trigger_firing') {
+        failCount++
+        return {data:'failed',error:null}
+      }
+      throw Error('Unexpected RPC '+name)
+    })
+    const failed=await processAgentTaskTriggerQueue({
+      workerId:'sch5',limit:1,
+    })
+    expect(failed).toMatchObject({claimed:1,failed:1,completed:0})
+    // Simulate retry after DB's bounded delay; domain returns the identical
+    // already-created Task and its frozen triggering reference.
+    const recovered=await processAgentTaskTriggerQueue({
+      workerId:'sch5',limit:1,
+    })
+    expect(recovered).toMatchObject({claimed:1,failed:0,completed:1})
+    expect(start).toHaveBeenCalledTimes(2)
+    expect(attempt).toBe(2)
+    expect(completed).toBe(2)
+    expect(failCount).toBe(1)
+    expect(from).toHaveBeenCalledWith('ai_agent_tasks')
+    // No dispatch/outbound adapter is imported into this trigger worker.
+  })
+})
