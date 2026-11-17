@@ -202,6 +202,38 @@ begin
     raise exception 'Coalesced recurrence replayed on second tick';
   end if;
 
+  -- SCH-1: pausing an already-materialized pending firing must block claims.
+  if not public.set_agent_task_trigger_status(v_account, v_recurring, 'paused') then
+    raise exception 'Recurring trigger pause failed';
+  end if;
+
+  if not exists (
+    select 1 from public.ai_agent_task_trigger_firings
+    where trigger_id = v_recurring and status = 'pending'
+  ) then
+    raise exception 'Pause regression requires an existing pending firing';
+  end if;
+
+  v_claim := public.claim_next_agent_task_trigger_firing('trigger-smoke-worker', 120);
+  if v_claim is not null then
+    raise exception 'Paused recurring trigger leaked a pending firing: %', v_claim;
+  end if;
+
+  if not public.set_agent_task_trigger_status(v_account, v_recurring, 'enabled') then
+    raise exception 'Recurring trigger resume failed';
+  end if;
+
+  v_claim := public.claim_next_agent_task_trigger_firing('trigger-smoke-worker', 120);
+  if v_claim is null or (v_claim->>'trigger_id')::uuid <> v_recurring then
+    raise exception 'Resumed recurring trigger did not reclaim its pending firing: %', v_claim;
+  end if;
+
+  if not public.complete_agent_task_trigger_firing(
+    (v_claim->>'firing_id')::uuid, 'trigger-smoke-worker', null
+  ) then
+    raise exception 'Resumed recurring firing completion failed';
+  end if;
+
   delete from public.ai_agent_task_trigger_firings where account_id=v_account;
   delete from public.ai_agent_task_triggers where account_id=v_account;
   delete from public.business_event_outbox where account_id=v_account;
