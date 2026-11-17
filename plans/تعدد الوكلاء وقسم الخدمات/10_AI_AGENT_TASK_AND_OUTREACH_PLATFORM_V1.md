@@ -1802,6 +1802,8 @@ OpenAI-compatible / Anthropic / Gemini native حسب الاتصالات المد
 
 **Phase 18 one-target live TEST checkpoint — 2026-11-14:** SOF-63 (`SOF-23E`) completed its **one-target OpenWA live TEST acceptance** at `bb86ef4e808fbd6de4413a856a21e167be7bfb1c` (CI [#43614965165](https://github.com/e-proo/wacrm/actions/runs/43614965165) successful). A single consented TEST contact received one real outbound; four distinct replies correlated and were answered without duplicate initial outreach; guarded `disabled` rollback, safe cancellation of test-only Task (no fabricated Coverage completion), and **post-rollback inbound CRM receipt** were independently verified with 0 unsettled messages. Test used explicit operator-authorized **OpenWA Pilot OFF** with a frozen own-number hash gate; Agent Task Cutover later disabled. See [SOF-63 acceptance runbook](14_SOF63_ONE_TARGET_LIVE_TEST.md) for exact IDs, timestamps, security caveats and CI/TEST evidence. **This closes only the SOF-63 one-target subgate**, not the broader Phase 18 sequence (including small bounded batch, pause/resume, crash/recovery), nor Production readiness. `NOTE-001` remains open.
 
+**Phase 18 two-target live TEST checkpoint — 2026-11-17:** وُثّقت مهمة واحدة بمستهدفين مختلفين على OpenWA، مع إرسال أول واحد لكل رقم، وردود مرتبطة بالمستهدف الصحيح، واعتماد عرضين وإغلاق تلقائي للمهمة دون تكرار. **لا يُغلق SOF-23:** وضع Cutover بقي `pilot` ولم يُثبت rollback لهذه الدفعة أو pause/resume/crash-recovery حي. دليل مفصل: [19_SOF66_TWO_TARGET_LIVE_TEST_CHECKPOINT.md](19_SOF66_TWO_TARGET_LIVE_TEST_CHECKPOINT.md).
+
 ---
 
 # Phase 19 — Coverage Sourcing Pilot
@@ -1827,6 +1829,8 @@ completion
 ```
 
 بعد نجاحه يمكن زيادة العدد تدريجيًا.
+
+**Phase 19 happy-path progress — 2026-11-17:** اكتمل مسار موردين اثنين مع CHG-31/CHG-32 وعرضي 300 SAR وBusiness Events. **لا يُغلق SOF-24:** لم تُثبت حالة human takeover/decline/alternate-route في اختبار حي متعدد الموردين بعد. الدليل: [19_SOF66_TWO_TARGET_LIVE_TEST_CHECKPOINT.md](19_SOF66_TWO_TARGET_LIVE_TEST_CHECKPOINT.md).
 
 ---
 
