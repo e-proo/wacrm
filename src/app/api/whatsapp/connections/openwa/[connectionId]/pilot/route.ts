@@ -62,7 +62,7 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     throw new WhatsAppTransportError('connection_restricted', 'Pilot connection missing or unavailable')
   }
   const { data: guard, error: ge } = await db.from('whatsapp_connection_guardrails')
-    .select('manual_paused,pilot_enabled,hourly_cap,daily_cap,first_touch_daily_cap,minimum_interval_ms,jitter_ms,warmup_hourly_cap,warmup_daily_cap,pilot_agent_hourly_cap,pilot_agent_daily_cap,pilot_manual_hourly_cap,pilot_manual_daily_cap')
+    .select('manual_paused,pilot_enabled,hourly_cap,daily_cap,first_touch_daily_cap,minimum_interval_ms,jitter_ms,warmup_until,warmup_hourly_cap,warmup_daily_cap,pilot_agent_hourly_cap,pilot_agent_daily_cap,pilot_manual_hourly_cap,pilot_manual_daily_cap')
     .eq('connection_id', connectionId).eq('account_id', accountId).maybeSingle()
   checkDb(ge, 'guardrail')
   // Newly created sessions have no guardrails until an admin prepares them.
@@ -71,7 +71,7 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
   const safeGuard = guard ?? {
     manual_paused: true, pilot_enabled: true, hourly_cap: DEFAULT_HOURLY, daily_cap: DEFAULT_DAILY,
     first_touch_daily_cap: DEFAULT_FIRST_TOUCH, minimum_interval_ms: MIN_INTERVAL,
-    jitter_ms: 3000, warmup_hourly_cap: DEFAULT_HOURLY, warmup_daily_cap: DEFAULT_DAILY,
+    jitter_ms: 3000, warmup_until: null, warmup_hourly_cap: DEFAULT_HOURLY, warmup_daily_cap: DEFAULT_DAILY,
     pilot_agent_hourly_cap: null, pilot_agent_daily_cap: null,
     pilot_manual_hourly_cap: null, pilot_manual_daily_cap: null,
   }
@@ -165,7 +165,7 @@ function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
       hourly_cap: s.guard.hourly_cap, daily_cap: s.guard.daily_cap,
       first_touch_daily_cap: s.guard.first_touch_daily_cap,
       minimum_interval_ms: s.guard.minimum_interval_ms, jitter_ms: s.guard.jitter_ms,
-      warmup_hourly_cap: s.guard.warmup_hourly_cap, warmup_daily_cap: s.guard.warmup_daily_cap,
+      warmup_until: s.guard.warmup_until, warmup_hourly_cap: s.guard.warmup_hourly_cap, warmup_daily_cap: s.guard.warmup_daily_cap,
       pilot_agent_hourly_cap: s.guard.pilot_agent_hourly_cap,
       pilot_agent_daily_cap: s.guard.pilot_agent_daily_cap,
       pilot_manual_hourly_cap: s.guard.pilot_manual_hourly_cap,
