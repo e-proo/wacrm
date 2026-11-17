@@ -8,6 +8,8 @@ const valid = {
   coverageRequestId: '00000000-0000-4000-8000-000000000003',
   taskType: 'coverage.sourcing',
   taskTypeVersion: 2,
+  whatsappConnectionId: '88888888-8888-4888-8888-888888888888',
+  selectedContactIds: [],
   triggerKind: 'schedule',
   scheduleKind: 'recurring',
   nextFireAt: '2026-11-17T20:00:00.000Z',
