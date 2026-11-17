@@ -30,6 +30,27 @@ type Catalog = {
   enableAllowedInTest: boolean
 }
 type Preview = { mode: string; nextFireAt: string | null; intervalMinutes: number | null; notice: string }
+type ScheduleHealth = {
+  enabledSchedules: number
+  pending: number; claimed: number; failed: number; dead: number
+  skippedFirings: number; skippedOccurrences: number
+  backlog: number; backlogCap: number; staleClaims: number
+  dueLagSeconds: number; backlogLagSeconds: number
+  oldestDueAt: string | null; oldestAvailableAt: string | null
+  taskWorkerEnabled: boolean
+  runnerLastSucceededAt: string | null; runnerLastStartedAt: string | null
+  runnerLastResult: 'success' | 'failed' | null; runnerConsecutiveFailures: number
+  runnerTickCount: number; observedAt: string
+}
+type HealthResponse = { health: ScheduleHealth; alerts: string[] }
+const healthAlertNames: Record<string, string> = {
+  STALE_CLAIMS: 'حجوزات تجاوزت مهلة العامل',
+  DEAD_FIRINGS: 'تشغيلات توقفت بعد استنفاد المحاولات',
+  BACKLOG_NEAR_CAP: 'اقتربت قائمة الانتظار من حد الحساب',
+  SCHEDULER_LAG: 'تأخر تنفيذ الجدولة عن الاستحقاق',
+  WORKER_ERRORS: 'فشل سابق في تشغيل العامل',
+  WORKER_HEARTBEAT_STALE: 'لم تُسجل نبضة تشغيل ناجحة حديثًا',
+}
 type PromotionPreview = {
   previewOnly: boolean; readyForApproval: boolean; fingerprint: string; reviewedAt: string
   connection: { id: string; name: string; provider: string }
@@ -74,6 +95,8 @@ function nextSubmission(): string {
  */
 export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => void } = {}) {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
+  const [health, setHealth] = useState<HealthResponse | null>(null)
+  const [healthUnavailable, setHealthUnavailable] = useState(false)
   const [busy, setBusy] = useState<string | null>('load')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -107,20 +130,39 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
     setNextLocal(localDateTime(new Date(Date.now() + 10 * 60_000)))
   }, [])
 
+  const refreshHealth = useCallback(async () => {
+    try {
+      const data = await json<HealthResponse>(await fetch(
+        '/api/agent-tasks/triggers/health', { cache: 'no-store' }))
+      setHealth(data)
+      setHealthUnavailable(false)
+    } catch {
+      // Health failure must never hide or clear the editable schedule list.
+      setHealth(null)
+      setHealthUnavailable(true)
+    }
+  }, [])
+
   const reload = useCallback(async () => {
     setBusy('load')
     setError(null)
     try {
       const data = await json<Catalog>(await fetch('/api/agent-tasks/triggers', { cache: 'no-store' }))
       setCatalog(data)
+      await refreshHealth()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'تعذّر تحميل قواعد الجدولة.')
     } finally {
       setBusy(null)
     }
-  }, [])
+  }, [refreshHealth])
 
   useEffect(() => { void reload() }, [reload])
+  // Read-only telemetry refresh. Never triggers worker execution.
+  useEffect(() => {
+    const timer = setInterval(() => { void refreshHealth() }, 60_000)
+    return () => clearInterval(timer)
+  }, [refreshHealth])
 
   const subjectOptions = useMemo(() =>
     taskType === 'coverage.sourcing'
@@ -329,6 +371,51 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
           <p className="mt-1 text-xs text-muted-foreground">السماح ليس دليلًا على أن رسالة وصلت</p>
         </div>
       </div>
+
+      <section className="rounded-xl border bg-card p-4 shadow-sm sm:p-5" aria-label="مراقبة جدولة المهام">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">صحة الجدولة والتعافي</h3>
+            <p className="mt-1 text-xs text-muted-foreground">مراقبة قراءة فقط، دون تشغيل عامل أو إرسال رسائل. الأرقام تخص حسابك؛ نبضة العامل تخص TEST.</p>
+          </div>
+          {health && <span className="text-xs text-muted-foreground">آخر فحص: {displayTime(health.health.observedAt)}</span>}
+        </div>
+        {healthUnavailable ? (
+          <p role="status" className="text-sm text-muted-foreground">تعذّر تحميل مؤشرات الجدولة. لا يعني ذلك أن العامل توقف؛ راجع CI وMigration 192 وحاول التحديث.</p>
+        ) : health ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">Backlog من أصل الحد</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums">{health.health.backlog} / {health.health.backlogCap}</p>
+                <p className="text-xs text-muted-foreground">بانتظار: {health.health.pending} · محجوزة: {health.health.claimed}</p>
+              </div>
+              <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">فشل / Dead</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums">{health.health.failed} / {health.health.dead}</p>
+                <p className="text-xs text-muted-foreground">عقود منتهية: {health.health.staleClaims}</p>
+              </div>
+              <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">تأخير الجدولة / Backlog</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums">{health.health.dueLagSeconds}ث / {health.health.backlogLagSeconds}ث</p>
+                <p className="text-xs text-muted-foreground">المواعيد حسب UTC وبفواصل زمنية ثابتة</p>
+              </div>
+              <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">آخر نجاح للعامل على TEST</p>
+                <p className="mt-1 text-sm font-medium">{displayTime(health.health.runnerLastSucceededAt)}</p>
+                <p className="text-xs text-muted-foreground">النبضات: {health.health.runnerTickCount} · إخفاقات متتابعة: {health.health.runnerConsecutiveFailures}</p>
+              </div>
+            </div>
+            {health.alerts.length > 0 ? (
+              <div role="alert" className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                <p className="text-xs font-semibold">تنبيهات تشغيلية — لا تُعد دليلًا على فشل الإرسال</p>
+                <ul className="mt-1 list-inside list-disc space-y-1 text-xs">
+                  {health.alerts.map(code =>
+                    <li key={code}>{healthAlertNames[code] ?? code}</li>)}
+                </ul>
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-muted-foreground">لا توجد تنبيهات ضمن حدود القياس الحالية. لا تعني هذه المؤشرات اجتياز الإرسال أو قبول TEST الحي.</p>
+            )}
+          </>
+        ) : <p className="text-xs text-muted-foreground">جارٍ تحميل المؤشرات…</p>}
+      </section>
 
       {error && <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
       {success && <p role="status" className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">{success}</p>}
