@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   Archive,
@@ -40,13 +40,17 @@ interface AiAgentRevision {
   published_at: string | null;
 }
 
-export function MultiAgentPanel() {
+export function MultiAgentPanel(props: {
+  requestedEditorAgentId?: string | null;
+  onEditorRequestHandled?: () => void;
+} = {}) {
   const t = useTranslations('Agents');
   const [agents, setAgents] = useState<AiAgentRow[] | null>(null);
   const [revisions, setRevisions] = useState<Record<string, AiAgentRevision | null>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const handledEditorId = useRef<string | null>(null);
   const [editing, setEditing] = useState<{
     agentId: string;
     revisionId: string;
@@ -113,6 +117,25 @@ export function MultiAgentPanel() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A promotion preview can send the operator straight to the selected
+  // agent's editable DRAFT, without changing the published revision.
+  useEffect(() => {
+    if (!props.requestedEditorAgentId) {
+      handledEditorId.current = null;
+      return;
+    }
+    if (!agents || handledEditorId.current === props.requestedEditorAgentId) return;
+    const requested = agents.find(agent => agent.id === props.requestedEditorAgentId);
+    if (!requested || requested.status === 'archived') {
+      props.onEditorRequestHandled?.();
+      return;
+    }
+    handledEditorId.current = props.requestedEditorAgentId;
+    void openEditor(requested).finally(() => props.onEditorRequestHandled?.());
+    // openEditor is an internal event handler, captured only for one reviewed request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agents, props.requestedEditorAgentId, props.onEditorRequestHandled]);
 
   async function togglePause(agent: AiAgentRow) {
     const action = agent.status === 'paused' ? 'resume' : 'pause';
