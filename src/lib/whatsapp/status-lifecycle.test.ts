@@ -24,6 +24,11 @@ describe('provider-neutral status lifecycle', () => {
       message: { id: 'native-video-1', ack: 3 }, timestamp: 1792950000,
     })).toMatchObject({ providerMessageId: 'native-video-1', status: 'read' })
   })
+  it('never interprets a webhook event identifier as the native WhatsApp message identifier', () => {
+    expect(parseOpenWAStatusEvent({ id: 'delivery-event-id', ack: 2 })).toBeNull()
+    expect(parseOpenWAStatusEvent({ id: 'event-id', message: { id: 'true_123@lid_NATIVE', ack: 3 } }))
+      .toMatchObject({ providerMessageId: 'true_123@lid_NATIVE', status: 'read' })
+  })
   it('rejects unrecognized ACK values rather than guessing delivery', () => {
     expect(parseOpenWAStatusEvent({ messageId: 'm', ack: 0 })).toBeNull()
     expect(parseOpenWAStatusEvent({ messageId: 'm', ack: 99 })).toBeNull()
