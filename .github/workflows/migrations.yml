@@ -57,7 +57,7 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-pilot-admission-smoke.sql
       - name: TEST OpenWA bounded workload limits smoke
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-pilot-workload-limits-smoke.sql
-      - name: Verify TEST OpenWA maximum 100 per hour / 1000 per day constraints
+      - name: Verify TEST OpenWA adjustable caps and usage privacy
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-pilot-extended-caps-smoke.sql
       - name: Verify TEST OpenWA cohort message capacity and grant privacy
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-pilot-cohort-message-capacity-smoke.sql
