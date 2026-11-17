@@ -251,8 +251,9 @@ begin
   update public.ai_agent_task_triggers
      set next_fire_at = v_now - interval '1 minute'
    where id = v_recurring;
-  -- Account pause blocks materialization; insert a queued firing to simulate
-  -- a firing materialized just before the account was paused.
+  -- Insert while the policy is enabled, then pause. The new insert-time
+  -- freeze guard intentionally rejects inserts for already-paused policies.
+  perform public.set_agent_task_trigger_status(v_account,v_recurring,'enabled');
   insert into public.ai_agent_task_trigger_firings(
     account_id, trigger_id, source_kind, source_key, scheduled_for, available_at
   ) values (
@@ -260,6 +261,7 @@ begin
     'schedule:account-pause-smoke:' || v_recurring::text,
     v_now - interval '1 minute', v_now - interval '1 minute'
   );
+  perform public.set_agent_task_trigger_status(v_account,v_recurring,'paused');
 
   v_claim := public.claim_next_agent_task_trigger_firing('trigger-smoke-worker', 120);
   if v_claim is not null then
