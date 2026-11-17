@@ -1,7 +1,7 @@
 import { COVERAGE_SOURCING_TASK_MODULE } from '@/lib/services/coverage/agent-task'
 import { COVERAGE_SOURCING_TRIGGER_HANDLER, COVERAGE_SOURCING_TRIGGER_HANDLER_V2 } from '@/lib/services/coverage/agent-task-trigger'
 import { SERVICE_PROMOTION_TASK_MODULE } from '@/lib/services/service-catalog/agent-task'
-import { SERVICE_PROMOTION_TRIGGER_HANDLER } from '@/lib/services/service-catalog/agent-task-trigger'
+import { SERVICE_PROMOTION_TRIGGER_HANDLER, SERVICE_PROMOTION_TRIGGER_HANDLER_V2 } from '@/lib/services/service-catalog/agent-task-trigger'
 import {
   buildAgentTaskPlatform,
   materializeRegisteredTaskTargets,
@@ -34,6 +34,7 @@ export const CURRENT_AGENT_TASK_TRIGGER_REGISTRY =
     COVERAGE_SOURCING_TRIGGER_HANDLER,
     COVERAGE_SOURCING_TRIGGER_HANDLER_V2,
     SERVICE_PROMOTION_TRIGGER_HANDLER,
+    SERVICE_PROMOTION_TRIGGER_HANDLER_V2,
   ])
 
 for (const handler of CURRENT_AGENT_TASK_TRIGGER_REGISTRY.list()) {

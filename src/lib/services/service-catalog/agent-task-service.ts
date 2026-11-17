@@ -14,6 +14,7 @@ import {
   loadAgentRevisionToolGrants,
 } from '@/lib/ai/tasks/capability-policy'
 import type { AgentTaskStartSource } from '@/lib/ai/tasks/triggers'
+import { readFrozenPromotionSchedule, samePromotionAudience, type PromotionScheduledReview } from './promotion-schedule-policy'
 import {
   SERVICE_PROMOTION_TASK_TYPE,
   SERVICE_PROMOTION_TASK_TYPE_V2,
@@ -75,6 +76,8 @@ export async function startServicePromotionTask(input: {
     submissionId: string
     consentAcknowledged: boolean
     approvalAcknowledged: boolean
+    /** DB-frozen reviewed schedule; not accepted from manual launches. */
+    scheduledPolicy?: PromotionScheduledReview
   }
 }): Promise<{
   taskId: string
@@ -93,10 +96,18 @@ export async function startServicePromotionTask(input: {
     )
   }
   const reviewInput = input.review
-  if (!reviewInput || input.trigger || !UUID_RE.test(reviewInput.connectionId) ||
+  const scheduled = input.trigger !== undefined
+  // Historical direct/manual launch remains unchanged. Scheduled V2 requires
+  // the frozen review created by the privileged account-scoped scheduler API.
+  if (!reviewInput || !UUID_RE.test(reviewInput.connectionId) ||
       !UUID_RE.test(reviewInput.submissionId) ||
       reviewInput.consentAcknowledged !== true ||
-      reviewInput.approvalAcknowledged !== true) {
+      reviewInput.approvalAcknowledged !== true ||
+      (scheduled && (input.trigger?.triggerType !== 'scheduled' ||
+        !input.approvedRevisionId ||
+        !reviewInput.scheduledPolicy ||
+        reviewInput.scheduledPolicy.connectionId !== reviewInput.connectionId)) ||
+      (!scheduled && reviewInput.scheduledPolicy)) {
     throw new ServicePromotionTaskError(
       'SERVICE_PROMOTION_REVIEW_REQUIRED',
       'Manually review and approve a pinned Service Promotion V2 campaign before launch.',
@@ -104,6 +115,31 @@ export async function startServicePromotionTask(input: {
     )
   }
   const db = supabaseAdmin()
+  if (scheduled && input.trigger) {
+    const identity = promotionScheduledTaskIdentity({
+      accountId: input.accountId, serviceId: input.serviceId, agentId: input.agentId,
+      revisionId: input.approvedRevisionId!, sourceKey: input.trigger.sourceKey,
+    })
+    // Retry after an ambiguous worker completion must return the *same* Task
+    // without requiring a fresh preview or creating another audience/outbound.
+    const { data: replay, error: replayError } = await db.from('ai_agent_tasks')
+      .select('id,agent_id,agent_revision_id,trigger_ref,task_type_version')
+      .eq('account_id', input.accountId)
+      .eq('idempotency_key', identity).maybeSingle()
+    if (replayError) throw replayError
+    if (replay) {
+      if (replay.agent_id !== input.agentId ||
+        replay.agent_revision_id !== input.approvedRevisionId ||
+        replay.trigger_ref !== input.trigger.triggerRef ||
+        replay.task_type_version !== SERVICE_PROMOTION_TASK_TYPE_V2.version) {
+        throw new ServicePromotionTaskError(
+          'SERVICE_PROMOTION_SCHEDULE_REPLAY_SCOPE_CONFLICT',
+          'A scheduled firing points to an incompatible existing Task.')
+      }
+      return { taskId: replay.id, agentId: replay.agent_id,
+        revisionId: replay.agent_revision_id, created: false }
+    }
+  }
   const runtimePolicy = await loadAccountRuntimePolicy(db, input.accountId)
   if (
     runtimePolicy.killSwitch ||
@@ -293,11 +329,21 @@ export async function startServicePromotionTask(input: {
       agentId: input.agentId,
       connectionId: reviewInput.connectionId,
     })
-    assertPromotionReviewFresh({
-      fingerprint: reviewInput.fingerprint,
-      reviewedAt: reviewInput.reviewedAt,
-      actualFingerprint: campaign.fingerprint,
-    })
+    if (scheduled && reviewInput.scheduledPolicy) {
+      const pinned = reviewInput.scheduledPolicy
+      if (pinned.fingerprint !== campaign.fingerprint ||
+        pinned.provider !== campaign.connection.provider ||
+        pinned.approvedRevisionId !== revisionId ||
+        !samePromotionAudience(pinned.frozenContactIds, campaign.audience.ids)) {
+        throw new ServicePromotionReviewError('SERVICE_PROMOTION_SCHEDULE_REVIEW_STALE')
+      }
+    } else {
+      assertPromotionReviewFresh({
+        fingerprint: reviewInput.fingerprint,
+        reviewedAt: reviewInput.reviewedAt,
+        actualFingerprint: campaign.fingerprint,
+      })
+    }
   } catch (error) {
     if (error instanceof ServicePromotionReviewError) {
       throw new ServicePromotionTaskError(error.code, error.message, error.status)
@@ -325,8 +371,13 @@ export async function startServicePromotionTask(input: {
     revisionId, connectionId: reviewInput.connectionId,
     submissionId: reviewInput.submissionId,
   })).digest('hex')
-  const idempotencyKey = 'services:promotion:v2:' + campaignDigest
-  const correlationId = 'services:promotion:v2:' + campaignDigest
+  const idempotencyKey = scheduled && input.trigger
+    ? promotionScheduledTaskIdentity({
+      accountId: input.accountId, serviceId: input.serviceId, agentId: input.agentId,
+      revisionId, sourceKey: input.trigger.sourceKey,
+    })
+    : 'services:promotion:v2:' + campaignDigest
+  const correlationId = scheduled ? idempotencyKey : 'services:promotion:v2:' + campaignDigest
 
   // Cross-version overlap: a previous V1 promotion must not silently share
   // its contacts or override the operator's new provider choice.
@@ -403,8 +454,8 @@ export async function startServicePromotionTask(input: {
       p_task_type_version: SERVICE_PROMOTION_TASK_TYPE_V2.version,
       p_agent_id: input.agentId,
       p_agent_revision_id: revisionId,
-      p_trigger_type: 'manual',
-      p_trigger_ref: 'service:' + input.serviceId,
+      p_trigger_type: input.trigger?.triggerType ?? 'manual',
+      p_trigger_ref: input.trigger?.triggerRef ?? 'service:' + input.serviceId,
       p_objective:
         'Promote the frozen service snapshot to the explicit eligible customer segment and capture qualified customer intent.',
       p_task_context: taskContext,
@@ -443,4 +494,13 @@ export async function startServicePromotionTask(input: {
     revisionId,
     created: true,
   }
+}
+
+/** Stable per occurrence and tenant: two workers / retry share one Task id. */
+export function promotionScheduledTaskIdentity(input: {
+  accountId: string; serviceId: string; agentId: string;
+  revisionId: string; sourceKey: string
+}): string {
+  const digest = createHash('sha256').update(JSON.stringify(input)).digest('hex')
+  return 'services:promotion:v2:schedule:' + digest
 }
