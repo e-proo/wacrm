@@ -8,6 +8,8 @@ CREATE TABLE public.openwa_deferred_events (
   account_id uuid NOT NULL REFERENCES public.accounts(id) ON DELETE CASCADE,
   connection_id uuid NOT NULL REFERENCES public.whatsapp_connections(id) ON DELETE CASCADE,
   session_id text NOT NULL CHECK (length(session_id) BETWEEN 1 AND 160),
+  own_phone_identity text,
+  instance_id text,
   provider_event_id text NOT NULL CHECK (length(provider_event_id) BETWEEN 1 AND 255),
   provider_message_id text NOT NULL CHECK (length(provider_message_id) BETWEEN 1 AND 500),
   event_kind text NOT NULL CHECK (event_kind IN ('unresolved_identity','unmatched_status')),
@@ -92,12 +94,14 @@ BEGIN
     RAISE EXCEPTION 'Signed webhook lease missing' USING ERRCODE='55P03';
   END IF;
   INSERT INTO public.openwa_deferred_events (
-    account_id,connection_id,session_id,provider_event_id,
-    provider_message_id,event_kind,native_chat_id,normalized_payload
-  ) VALUES (
-    p_account_id,p_connection_id,p_session_id,p_event_id,
-    p_provider_message_id,p_event_kind,p_native_chat_id,p_payload
-  ) ON CONFLICT (connection_id,provider_event_id) DO NOTHING;
+    account_id,connection_id,session_id,own_phone_identity,instance_id,
+    provider_event_id,provider_message_id,event_kind,native_chat_id,normalized_payload
+  ) SELECT
+    p_account_id,p_connection_id,p_session_id,c.phone_identity,c.instance_id,
+    p_event_id,p_provider_message_id,p_event_kind,p_native_chat_id,p_payload
+    FROM public.whatsapp_connections c
+    WHERE c.id=p_connection_id AND c.account_id=p_account_id AND c.session_id=p_session_id
+  ON CONFLICT (connection_id,provider_event_id) DO NOTHING;
   SELECT * INTO v_row FROM public.openwa_deferred_events
     WHERE connection_id=p_connection_id AND provider_event_id=p_event_id;
   IF NOT FOUND OR v_row.account_id<>p_account_id OR v_row.session_id<>p_session_id
@@ -128,6 +132,8 @@ RETURNS TABLE (
   account_id uuid,
   connection_id uuid,
   session_id text,
+  own_phone_identity text,
+  instance_id text,
   event_kind text,
   provider_message_id text,
   native_chat_id text,
@@ -155,6 +161,7 @@ BEGIN
         attempt_count=q.attempt_count+1,updated_at=now()
     FROM picked p WHERE q.id=p.id
   RETURNING q.id,q.account_id,q.connection_id,q.session_id,
+    q.own_phone_identity,q.instance_id,
     q.event_kind,q.provider_message_id,q.native_chat_id,
     q.normalized_payload,q.attempt_count,q.lease_token;
 END;
