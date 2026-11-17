@@ -42,6 +42,17 @@ export interface RenderedChangeRequestAdminOutcomeMessage {
 export async function renderChangeRequestAdminOutcomeMessage(
   input: ChangeRequestAdminOutcomeMessageInput,
 ): Promise<RenderedChangeRequestAdminOutcomeMessage> {
+  if (input.targetType === 'coverage_supplier_quote') {
+    // This is an acknowledgement of review ONLY; no matching Coverage Offer
+    // is created by the decision. Never use the generic "approved offer"
+    // wording for a different-route proposal.
+    const result = input.outcome === 'approved'
+      ? `✅ تمت مراجعة العرض البديل CHG-${input.requestCode}. لم يُنشأ عرض تغطية مطابق ولم يتم الحجز؛ يلزم تنسيق الشروط مع المورد يدويًا.`
+      : `تم رفض العرض البديل CHG-${input.requestCode}؛ لم يُنشأ عرض تغطية.`
+    return { text: result, source:'system',
+      resolvedEventKey:'coverage.supplier_counteroffer.reviewed',
+      resolvedLocale:'ar' }
+  }
   const eventKey = `change_request.${input.outcome}`
   const context = buildOutcomeContext(input)
   const systemTemplate = findSystemMessageTemplate({
@@ -186,6 +197,7 @@ function firstScalar(
 function targetTypeLabel(targetType: string): string {
   const labels: Record<string, string> = {
     coverage_offer: 'عرض تغطية',
+    coverage_supplier_quote: 'عرض مورد بديل للمراجعة',
     coverage_request: 'طلب تغطية',
     fx_rate_pair: 'تحديث زوج أسعار صرف',
     fx_trade_request: 'قرار طلب صرف عملة',

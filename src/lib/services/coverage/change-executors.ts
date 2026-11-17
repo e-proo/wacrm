@@ -269,7 +269,79 @@ const createRequestExecutor: ChangeExecutorRegistration['executor'] = async (con
   }
 }
 
+/**
+ * A different-route supplier quote is a genuine administrative opportunity,
+ * but NOT a matching Coverage Offer. Recording that the admin has reviewed
+ * the alternative must never reserve the original Request, create a matching
+ * offer, or mark the sourcing Task target completed.
+ */
+const reviewSupplierCounteroffer: ChangeExecutorRegistration['executor'] = async(context,change)=>{
+  const p=change.proposedPayload
+  const terms=p.supplier_terms && typeof p.supplier_terms==='object'
+    ? p.supplier_terms as Record<string,unknown> : null
+  if (change.targetType!=='coverage_supplier_quote' || change.targetId!==null ||
+      change.intent!=='create' || !terms || terms.route_match!==false ||
+      typeof terms.details!=='string' || terms.details.length<10 || terms.details.length>800 ||
+      !p.source_task_id || !p.source_task_target_id || !p.source_coverage_request_id ||
+      !p.contact_id || !p.conversation_id || !p.service_id || !p.total_amount ||
+      !p.currency || !p.commission_per_thousand) {
+    throw new DomainChangeExecutionError('SUPPLIER_REVIEW_INVALID',
+      'Counteroffer review requires original source, exact supplier, and explicit different terms.')
+  }
+  const db=supabaseAdmin()
+  const [taskR,targetR,negR,requestR]=await Promise.all([
+    db.from('ai_agent_tasks').select('id,task_type,task_context,status')
+      .eq('account_id',context.accountId).eq('id',p.source_task_id).maybeSingle(),
+    db.from('ai_agent_task_targets').select('id,contact_id,conversation_id,status')
+      .eq('account_id',context.accountId).eq('task_id',p.source_task_id)
+      .eq('id',p.source_task_target_id).maybeSingle(),
+    db.from('ai_agent_coverage_supplier_negotiations')
+      .select('stage,route_different,route_confirmed,offered_amount,commission_per_thousand,supplier_details,change_request_id')
+      .eq('account_id',context.accountId).eq('task_id',p.source_task_id)
+      .eq('task_target_id',p.source_task_target_id).maybeSingle(),
+    db.from('coverage_requests').select('id,service_id,currency,attributes')
+      .eq('account_id',context.accountId).eq('id',p.source_coverage_request_id).maybeSingle(),
+  ])
+  if (taskR.error || targetR.error || negR.error || requestR.error) {
+    throw taskR.error??targetR.error??negR.error??requestR.error
+  }
+  const task=taskR.data,target=targetR.data,neg=negR.data,request=requestR.data
+  const taskContext=task?.task_context as Record<string,unknown> | null
+  if (!task || task.task_type!=='coverage.sourcing' ||
+      taskContext?.coverageRequestId!==p.source_coverage_request_id ||
+      !target || target.contact_id!==p.contact_id ||
+      target.conversation_id!==p.conversation_id ||
+      !neg || neg.route_different!==true || neg.route_confirmed!==false ||
+      neg.stage!=='submitted' || neg.change_request_id!==change.id ||
+      !Number.isFinite(Number(neg.offered_amount)) ||
+      !Number.isFinite(Number(neg.commission_per_thousand)) ||
+      Number(neg.offered_amount)!==Number(p.total_amount) ||
+      Number(neg.commission_per_thousand)!==Number(p.commission_per_thousand) ||
+      neg.supplier_details!==terms.details ||
+      !request || request.service_id!==p.service_id || request.currency!==p.currency) {
+    throw new DomainChangeExecutionError('SUPPLIER_REVIEW_SOURCE_MISMATCH',
+      'Alternative terms are not bound to the exact supplier/Task/Request; review was not recorded.')
+  }
+  if (['replied','awaiting_reply','in_progress'].includes(target.status)) {
+    const { error }=await db.from('ai_agent_task_targets')
+      .update({status:'paused_for_human',updated_at:new Date().toISOString()})
+      .eq('account_id',context.accountId).eq('task_id',p.source_task_id)
+      .eq('id',p.source_task_target_id).in('status',['replied','awaiting_reply','in_progress'])
+    if (error) throw error
+  }
+  // Deliberately no Coverage Offer mutation, no reservations and no
+  // customer_notification "approved" event: terms still need human work.
+  return {
+    target_type:'coverage_supplier_quote',operation:'review_acknowledged',
+    requires_manual_followup:true, created_offer:false,
+    source_request_id:p.source_coverage_request_id,
+    supplier_task_id:p.source_task_id,supplier_target_id:p.source_task_target_id,
+  }
+}
+
 export const COVERAGE_CHANGE_EXECUTORS: readonly ChangeExecutorRegistration[] = [
+  { actionKey:'coverage.supplier_counteroffer.review',actionVersion:1,
+    executor:reviewSupplierCounteroffer },
   {
     actionKey: 'coverage.offer.create',
     actionVersion: 1,

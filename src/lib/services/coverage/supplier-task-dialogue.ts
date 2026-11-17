@@ -1,10 +1,7 @@
-import { describeSupplierCoverageRoute, supplierNotesConflictWithRoute,
-  type SupplierCoverageRoute, type SupplierRegionReference } from './supplier-request-route'
-/**
- * Coverage sourcing supplier turn protocol. Pure logic; no model can mutate
- * CRM, select recipients, or create an approval based solely on prompt text.
- * Every final submit is separately bound to the run, Task and exact contact.
- */
+import { describeSupplierCoverageRoute, type SupplierCoverageRoute,
+  type SupplierRegionReference } from './supplier-request-route'
+import { extractSupplierQuote } from './supplier-quote-extraction'
+
 export type SupplierStage = 'availability' | 'route' | 'amount' | 'commission' | 'details'
   | 'confirmation' | 'submitting' | 'submitted' | 'needs_human' | 'declined'
 
@@ -13,13 +10,8 @@ export interface SupplierTurnState {
   offeredAmount: string | null
   commissionPerThousand: string | null
   supplierDetails: string | null
-  /** Explicit supplier assent to the *exact* frozen source request legs. */
   routeConfirmed: boolean
-}
-export interface SupplierTurnStep {
-  next: SupplierTurnState
-  response: string
-  action: 'reply' | 'submit' | 'decline'
+  routeDifferent: boolean
 }
 export interface SupplierRequestFacts {
   remainingAmount: string
@@ -27,178 +19,139 @@ export interface SupplierRequestFacts {
   route: SupplierCoverageRoute
   knownRegions: readonly SupplierRegionReference[]
 }
-const moneyPattern = /^([0-9]{1,12}(?:\.[0-9]{1,4})?)(?:\s*(?:ريال|ر[.]س|SAR|﷼))?$/i
+export interface SupplierTurnStep {
+  next: SupplierTurnState
+  response: string
+  action: 'reply' | 'submit' | 'decline'
+}
 
 export function normalizeSupplierNumber(text: string): string {
-  return text.replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 0x660))
-    .replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 0x6f0))
-    .replace(/٫/g, '.')
+  return text.replace(/[٠-٩]/g, d => String(d.charCodeAt(0)-0x660))
+    .replace(/[۰-۹]/g, d => String(d.charCodeAt(0)-0x6f0)).replace(/٫/g,'.')
 }
-export function parseSupplierNumber(raw: string, max: number, allowZero = false): string | null {
-  const normalized = normalizeSupplierNumber(raw).trim()
-  const matched = moneyPattern.exec(normalized) ??
-    /^([0-9]{1,12}(?:\.[0-9]{1,4})?)\s*(?:لكل\s*(?:1000|ألف)|\/\s*1000)$/i.exec(normalized)
-  if (!matched) return null
-  const value = Number(matched[1])
-  if (!Number.isFinite(value) || value > max || (allowZero ? value < 0 : value <= 0)) return null
-  return matched[1]
+export function parseSupplierNumber(raw: string, max: number, allowZero=false): string | null {
+  const t=normalizeSupplierNumber(raw).trim()
+  const m=/^(\d{1,12}(?:\.\d{1,4})?)(?:\s*(?:ريال|ر[.]س|SAR|﷼))?$/i.exec(t) ??
+    /^(\d{1,12}(?:\.\d{1,4})?)\s*(?:لكل\s*(?:1000|ألف)|\/\s*1000)$/i.exec(t)
+  if (!m) return null
+  const n=Number(m[1])
+  return Number.isFinite(n) && n<=max && (allowZero?n>=0:n>0) ? m[1] : null
 }
 export function supplierAffirms(text: string): boolean {
   return /^(نعم|أجل|اجل|ايوه|أيوه|ايوا|تمام|موافق|يمكنني|أستطيع|استطيع|متوفر|متاح|yes|ok|sure)(?:[\s،,.!]|$)/i.test(text.trim())
 }
 export function supplierDeclines(text: string): boolean {
-  return /^(لا|غير متوفر|غير متاح|لا أستطيع|لا استطيع|لا يمكنني|no|unavailable)(?:[\s،,.!]|$)/i.test(text.trim())
+  return /^(لا(?=\s|$|[،,.!])|غير\s+متوفر|غير\s+متاح|لا\s+(?:أستطيع|استطيع|يمكنني)|no\b|unavailable\b)/i.test(text.trim()) &&
+    !/المسار\s*(?:مختلف|غير\s*مطابق)/.test(text)
 }
 export function supplierConfirmsRoute(text: string): boolean {
-  return /^(المسار مطابق|أوافق على المسار|اوافق على المسار|المسار صحيح|route confirmed)$/i.test(text.trim())
+  return /^(?:(?:نعم|أجل|اجل|ايوه|أيوه|تمام)\s*(?:و)?\s*)?(?:المسار\s*(?:مطابق|صحيح)|(?:أوافق|اوافق)\s+على\s+المسار)(?:[\s.!،]*)$/i.test(text.trim())
 }
 export function supplierConfirmsFinal(text: string): boolean {
-  return /^(تأكيد|أؤكد|اؤكد|نعم أؤكد|نعم اؤكد|أوافق على التفاصيل|اوافق على التفاصيل|confirm|confirmed)(?:[\s.!،]*$)/i.test(text.trim())
+  return /^(?:تأكيد|أؤكد|اؤكد|نعم\s+(?:أؤكد|اؤكد)|أوافق\s+على\s+التفاصيل|اوافق\s+على\s+التفاصيل|confirm|confirmed)(?:[\s.!،]*)$/i.test(text.trim())
 }
-const same = (s: SupplierTurnState, response: string): SupplierTurnStep =>
-  ({ next: s, response, action: 'reply' })
 export function initialSupplierState(): SupplierTurnState {
-  return { stage: 'availability', offeredAmount: null, commissionPerThousand: null,
-    supplierDetails: null, routeConfirmed: false }
+  return {stage:'availability',offeredAmount:null,commissionPerThousand:null,
+    supplierDetails:null,routeConfirmed:false,routeDifferent:false}
+}
+function same(next:SupplierTurnState,response:string):SupplierTurnStep {
+  return {next,response,action:'reply'}
+}
+function supplierSummary(s:SupplierTurnState,f:SupplierRequestFacts):string {
+  const status=s.routeDifferent?'⚠️ عرض بديل: اتجاه أو شروط المورد تختلف عن الطلب، ستراجعها الإدارة فقط.'
+    :'المسار المطلوب: مطابق للشروط التي أعلنها النظام.'
+  return [
+    `المبلغ المتاح: ${s.offeredAmount} ${f.currency}`,
+    `العمولة: ${s.commissionPerThousand} لكل 1000`,
+    status,describeSupplierCoverageRoute(f.route),
+    `تصريح المورد: ${s.supplierDetails ?? 'لم يذكر شروطًا إضافية.'}`,
+  ].join('\n')
+}
+function needsMore(s:SupplierTurnState,f:SupplierRequestFacts):string {
+  const missing:string[]=[]
+  if (!s.routeConfirmed && !s.routeDifferent) missing.push('هل تتفق مع مسار الطلب المذكور، أم لديك مسار مختلف؟')
+  if (!s.offeredAmount) missing.push(`كم مبلغ التغطية المتاح لك من أصل ${f.remainingAmount} ${f.currency}؟`)
+  if (s.commissionPerThousand === null) missing.push('وكم عمولتك لكل 1000 (حتى لو كانت صفرًا)؟')
+  if (s.routeDifferent && !/(?:في\s+[\p{L}]{2,}|بدل\s+[\p{L}]{2,})/u.test(s.supplierDetails ?? '')) {
+    missing.push('وضح جهة التسليم والاستلام المختلفة لننقلها للإدارة.')
+  }
+  if (!missing.length) return 'هل تؤكد رفع هذه التفاصيل للإدارة؟ اكتب «تأكيد» أو «تعديل».'
+  return missing.join('\n')
 }
 
-/** Ask for a complete, operator-reviewable offer, never infer absent amounts or
- * convert a supplier's negotiated commission to a published customer rate. */
-export function advanceSupplierTurn(
-  state: SupplierTurnState,
-  raw: string,
-  facts: SupplierRequestFacts,
-): SupplierTurnStep {
-  const input = raw.trim()
-  if (supplierDeclines(input) && state.stage !== 'route' &&
-      state.stage !== 'submitting' && state.stage !== 'submitted') {
-    return {
-      next: { ...state, stage: 'declined' },
-      response: 'شكرًا لتوضيحكم، لن نتابع طلب التغطية معكم حاليًا.',
-      action: 'decline',
+/** Combine any fields already volunteered by the supplier, irrespective of
+ * the current stage. No regex extraction is allowed to change CRM route IDs,
+ * choose recipients, or approve a proposal. Questions ask only for missing
+ * substantive terms, rather than replaying a step-by-step questionnaire.
+ */
+export function advanceSupplierTurn(state:SupplierTurnState,raw:string,facts:SupplierRequestFacts):SupplierTurnStep {
+  const input=raw.trim()
+  if (['submitting','submitted','needs_human','declined'].includes(state.stage)) {
+    const replies:Record<string,string>={
+      submitting:'تم تسجيل بياناتك، نتحقق من رقم العرض ولن نكرر تقديمه.',
+      submitted:'عرضك أُحيل للإدارة بالفعل. سنبلغك بقرارها عند صدوره.',
+      needs_human:'تفاصيلك قيد مراجعة الإدارة؛ لن نعتمد مسارًا مختلفًا دون قرارها.',
+      declined:'شكرًا لتواصلك. تم تسجيل اعتذارك عن الطلب.',
     }
+    return same(state,replies[state.stage])
   }
-  switch (state.stage) {
-    case 'availability':
-      if (!supplierAffirms(input)) {
-        return same(state, [
-          `هل يمكنكم توفير تغطية للطلب بقيمة ${facts.remainingAmount} ${facts.currency}؟`,
-          describeSupplierCoverageRoute(facts.route),
-          'أجيبوا بنعم أو لا. يمكنكم رفض الطلب إن كان المسار غير مناسب.',
-        ].join('\n'))
-      }
-      return {
-        next: { ...state, stage:'route' },
-        response: [
-          'شكرًا. قبل أخذ مبلغكم أو عمولتكم، نحتاج تأكيد أنكم قادرون على تنفيذ *نفس* المسار المطلوب:',
-          describeSupplierCoverageRoute(facts.route),
-          'إذا كانت هذه الجهات وطرق الدفع والاستلام مناسبة، اكتب «المسار مطابق».',
-          'إن أردتم التسليم أو الاستلام في موقع مختلف، اكتب «المسار مختلف»؛ لن نرفع عرضًا مخالفًا للإدارة.',
-        ].join('\n'),
-        action:'reply',
-      }
-    case 'route':
-      if (supplierConfirmsRoute(input)) {
-        return {
-          next: {...state,routeConfirmed:true,stage:'amount'},
-          response:`تم تأكيد مسار الطلب. كم يمكنكم تغطيته فعليًا من أصل ${facts.remainingAmount} ${facts.currency}؟ أرسلوا الرقم فقط.`,
-          action:'reply',
-        }
-      }
-      if (/^(المسار مختلف|المسار غير مطابق|غير مطابق|مختلف|لا|غير متوفر)/i.test(input)) {
-        return {
-          next:{...state,stage:'needs_human'},
-          response:'شكرًا للتوضيح. مساركم مختلف عن طلب الإدارة؛ لن نرفع عرضًا على أنه مطابق. ستحتاج الإدارة لمراجعة الاتجاه والشروط معكم أو إنشاء طلب مناسب.',
-          action:'reply',
-        }
-      }
-      return same(state, [
-        'لم نتلقَّ تأكيدًا صريحًا للمسار المحدد:',
-        describeSupplierCoverageRoute(facts.route),
-        'اكتب «المسار مطابق» إذا كنت ستلتزم بالاتجاه والطرق المذكورة، أو «المسار مختلف».',
-      ].join('\n'))
-    case 'amount': {
-      const amount = parseSupplierNumber(input, Number(facts.remainingAmount))
-      if (!amount) {
-        return same(state, `يرجى تحديد مبلغ موجب لا يتجاوز ${facts.remainingAmount} ${facts.currency}، بالأرقام فقط؛ سنرفعه كما تؤكدونه.`)
-      }
-      const hasCommission = state.commissionPerThousand !== null
-      return {
-        next: { ...state, offeredAmount: amount, stage: hasCommission ? 'details' : 'commission' },
-        response: hasCommission
-          ? 'شكرًا. ما وقت جاهزية المبلغ، وأي شروط تشغيلية إضافية؟ المسار والطرق أكدتموها بالفعل، لذلك لا تغيّروا المدن في الملاحظات. اكتبوا التفاصيل في رسالة واحدة.'
-          : 'ما العمولة التي تطلبونها لكل 1000 من المبلغ؟ أرسلوا الرقم فقط (مثال: 7)، ويمكن إدخال 0 إذا كانت بلا عمولة.',
-        action: 'reply',
-      }
-    }
-    case 'commission': {
-      const commission = parseSupplierNumber(input, 1000, true)
-      if (commission === null) {
-        return same(state, 'يرجى تحديد العمولة لكل 1000 بالأرقام (مثلًا 7 أو 0). لن نفترض عمولة نيابةً عنكم.')
-      }
-      return {
-        next: { ...state, commissionPerThousand: commission, stage: 'details' },
-        response: 'شكرًا. ما وقت جاهزية المبلغ، وأي شروط تشغيلية إضافية؟ المسار والطرق أكدتموها بالفعل، لذلك لا تغيّروا المدن في الملاحظات. اكتبوا التفاصيل في رسالة واحدة.',
-        action: 'reply',
-      }
-    }
-    case 'details': {
-      if (!state.routeConfirmed) {
-        return same({...state,stage:'route'}, 'لم يُؤكَّد مسار الطلب بعد؛ اكتب «المسار مطابق» أو «المسار مختلف» قبل تقديم العرض.')
-      }
-      if (input.length < 12 || input.length > 800 || !state.offeredAmount || state.commissionPerThousand === null) {
-        return same(state, 'تفاصيل العرض غير كافية. اذكر موعد الجاهزية والشروط التشغيلية دون تغيير مدن/طرق طلب الإدارة (12–800 حرف).')
-      }
-      if (supplierNotesConflictWithRoute(input,facts.route,facts.knownRegions)) {
-        return {
-          next:{...state,stage:'needs_human',supplierDetails:input},
-          response:'ورد في تفاصيلكم موقع تسليم أو استلام يحتاج إلى مراجعة مقارنة بمسار الطلب. لن نسجل عرضًا على أنه مطابق قبل التحقق مع الإدارة. احتفظنا بتفاصيلكم للمتابعة البشرية.',
-          action:'reply',
-        }
-      }
-      const next = { ...state, stage: 'confirmation' as const, supplierDetails: input }
-      return {
-        next,
-        response: [
-          'يرجى مراجعة العرض المرتبط بالطلب الأصلي قبل رفعه للإدارة:',
-          `المبلغ المتاح: ${next.offeredAmount} ${facts.currency}`,
-          `العمولة المطلوبة: ${next.commissionPerThousand} لكل 1000`,
-          describeSupplierCoverageRoute(facts.route),
-          `شروطكم الإضافية: ${next.supplierDetails}`,
-          'إذا كانت جميع المعلومات مطابقة اكتب «تأكيد». ولتغيير العرض اكتب «تعديل». لا يُعتبر العرض معتمدًا قبل قرار الإدارة.',
-        ].join('\n'),
-        action:'reply',
-      }
-    }
-    case 'confirmation':
-      if (/^(تعديل|edit|تغيير)/i.test(input)) {
-        return { next: initialSupplierState(), response: 'حسنًا، سنبدأ مراجعة العرض من جديد مع التأكد من مطابقة مسار طلب الإدارة أولًا.', action: 'reply' }
-      }
-      if (!supplierConfirmsFinal(input)) {
-        return same(state, 'لرفع تفاصيل العرض للإدارة، اكتب «تأكيد» بعد مراجعة الملخص، أو «تعديل» لتصحيحه.')
-      }
-      if (!state.routeConfirmed || !state.offeredAmount || state.commissionPerThousand === null || !state.supplierDetails) {
-        return same(state, 'بيانات العرض أو تأكيد المسار غير مكتملة؛ لا يمكن تقديمه للإدارة. اكتب «تعديل» لإعادة إدخالها.')
-      }
-      if (supplierNotesConflictWithRoute(state.supplierDetails,facts.route,facts.knownRegions)) {
-        return {
-          next:{...state,stage:'needs_human'},
-          response:'الشروط التي ذكرتموها تحتاج مراجعة المواقع مقارنة بطلب الإدارة. لم يُرفع أي عرض تلقائيًا.',
-          action:'reply',
-        }
-      }
-      return {
-        next: { ...state, stage: 'submitting' },
-        response: 'جارٍ تسجيل العرض للمراجعة.',
-        action: 'submit',
-      }
-    case 'submitting':
-      return same(state, 'عرض التغطية قيد التسجيل. سنؤكد رقم الطلب عند توفره، ولا نرسل طلبًا مكررًا.')
-    case 'submitted':
-      return same(state, 'تم رفع تفاصيل عرض التغطية للإدارة سابقًا. سيُتواصل معك بعد المراجعة، ولا يعني ذلك الاعتماد النهائي.')
-    case 'needs_human':
-      return same(state, 'تعذر تسجيل العرض إداريًا، وقد أحلناه للمتابعة البشرية. لن نخبرك أنه اعتُمد دون تأكيد.')
-    case 'declined':
-      return same(state, 'شكرًا لتواصلك. تم تسجيل تعذر توفير التغطية لهذا الطلب.')
+  if (/^(?:تعديل|edit|تغيير)(?:\s|$)/i.test(input)) {
+    return same(initialSupplierState(),'ممتاز، ما المبلغ الذي يمكنك تغطيته، وعمولتك لكل 1000، وأي اختلاف في جهة التسليم أو الاستلام؟')
   }
+  if (supplierDeclines(input)) return {
+    next:{...state,stage:'declined'},
+    response:'شكرًا لك، سجلنا عدم توفر التغطية لديك.',
+    action:'decline',
+  }
+  const parsed=extractSupplierQuote(input,facts)
+  const routeDifferent=state.routeDifferent || parsed.routeDifference
+  const routeConfirmed=!routeDifferent && (
+    state.routeConfirmed || supplierConfirmsRoute(input) || parsed.routeAssent
+  )
+  const offeredAmount=parsed.amount ?? parseSupplierNumber(input,Number(facts.remainingAmount)) ??
+    state.offeredAmount
+  const commission=parsed.commission ?? (state.stage==='commission'
+    ? parseSupplierNumber(input,1000,true) : null) ?? state.commissionPerThousand
+  const hadAvailability=state.stage!=='availability'
+  if (!hadAvailability && !parsed.available && !parsed.routeDifference && !supplierConfirmsRoute(input) &&
+    !parsed.amount && parsed.commission===null) {
+    return same(state,`هل تستطيع تغطية ${facts.remainingAmount} ${facts.currency} وفق المسار المعلن؟ اذكر المبلغ والعمولة، وأي تغيير تريده.`)
+  }
+  // Keep supplier-authored terms verbatim (bounded). Short numeric followups
+  // never overwrite a longer, previously signed original quote.
+  const substantive=parsed.details && (
+    parsed.routeDifference || parsed.available || /(?:طريق|جاهز|حوال|استلم|اسلم|سلم|دفع|مبلغ|عمول|شرط|بدل|تسليم)/.test(input)
+  )
+  const supplierDetails=substantive
+    ? (state.supplierDetails && state.supplierDetails!==parsed.details
+        ? [state.supplierDetails,parsed.details].join(' | ').slice(0,800)
+        : parsed.details)
+    : state.supplierDetails
+  let next:SupplierTurnState={
+    ...state,routeDifferent,routeConfirmed,offeredAmount,
+    commissionPerThousand:commission,supplierDetails,
+    stage:state.stage,
+  }
+  const ready=Boolean(offeredAmount && commission!==null && (routeConfirmed||routeDifferent) &&
+    (!routeDifferent || /(?:في\s+[\p{L}]{2,}|بدل\s+[\p{L}]{2,})/u.test(supplierDetails??'')))
+  if (!ready) {
+    next={...next,stage:!routeConfirmed&&!routeDifferent?'route':
+      !offeredAmount?'amount':commission===null?'commission':'details'}
+    return same(next,needsMore(next,facts))
+  }
+  if (!next.supplierDetails) next={...next,supplierDetails:'لم يذكر المورد شروطًا إضافية.'}
+  if (state.stage==='confirmation' &&
+      !supplierConfirmsFinal(input) && !parsed.finalConsent) {
+    return same({...next,stage:'confirmation'},
+      'لتقديم العرض، اكتب «تأكيد» أو «تعديل».')
+  }
+  // One complete explicit acceptance of the advertised request IS an offer:
+  // do not demand another keyword, and honor "أكد على العرض" in the same
+  // first message. For an unqualified quote with no affirmative, show one
+  // compact confirmation summary to avoid proposing without authorization.
+  const consent=supplierConfirmsFinal(input)||parsed.finalConsent||parsed.available ||
+    (state.stage!=='availability' && (state.routeConfirmed||state.routeDifferent))
+  if (!consent) return same({...next,stage:'confirmation'},
+    supplierSummary(next,facts)+'\nهل نعتمد هذه التفاصيل للعرض على الإدارة؟ اكتب «تأكيد» أو «تعديل».')
+  return {next:{...next,stage:'submitting'},response:'تم استلام عرضك للمراجعة.',action:'submit'}
 }

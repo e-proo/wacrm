@@ -5,14 +5,24 @@ import { executeCoverageProposeOfferIntegrated } from '@/lib/ai/tools/business-h
 import { loadAccountRuntimePolicy } from '@/lib/ai/runtime/runtime-policy'
 import { authorizeToolInvocation } from '@/lib/ai/runtime/tool-policy'
 import { getCurrentPlatformTool } from '@/lib/ai/tools/platform/current-domain-registry'
-import { findChangeRequestByIdempotencyKey } from '@/lib/ai/runtime/change-requests-service'
+import { findChangeRequestByIdempotencyKey, createChangeRequest } from '@/lib/ai/runtime/change-requests-service'
 import type { ToolContext } from '@/lib/ai/tools/executors'
 import { readCoverageAttributes, normalizeCoverageAttributes } from './attributes'
-import { loadSupplierCoverageRoute, supplierNotesConflictWithRoute } from './supplier-request-route'
+import { loadSupplierCoverageRoute, supplierNotesConflictWithRoute, describeSupplierCoverageRoute } from './supplier-request-route'
 import {
   advanceSupplierTurn, initialSupplierState, parseSupplierNumber, supplierAffirms,
   type SupplierStage, type SupplierTurnState,
 } from './supplier-task-dialogue'
+
+function supplierDecimalEquals(first: unknown, second: unknown): boolean {
+  const normalize=(value:unknown):string|null=>{
+    const s=String(value)
+    if (!/^\d{1,12}(?:\.\d{1,4})?$/.test(s)) return null
+    return s.replace(/\.0+$/,'').replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'')
+  }
+  const left=normalize(first),right=normalize(second)
+  return left!==null && right!==null && left===right
+}
 
 type Db = ReturnType<typeof supabaseAdmin>
 interface TaskSupplierRow {
@@ -21,6 +31,7 @@ interface TaskSupplierRow {
   offered_amount: string | null
   commission_per_thousand: string | null; supplier_details: string | null
   route_confirmed: boolean
+  route_different: boolean
   version: number; last_inbound_message_id: string | null
   confirmation_message_id: string | null
   confirmation_run_id: string | null
@@ -127,6 +138,7 @@ async function loadOrCreateNegotiation(db: Db, input: SupplierReplyInput): Promi
     task_target_id: input.taskTargetId, contact_id: input.contactId,
     conversation_id: input.conversationId, stage: 'availability' as const,
     route_confirmed: false,
+    route_different: false,
   }
   const { error: insertError } = await db.from('ai_agent_coverage_supplier_negotiations')
     .upsert(initial, { onConflict: 'account_id,task_id,task_target_id', ignoreDuplicates: true })
@@ -153,6 +165,7 @@ async function saveStep(
       commission_per_thousand: next.commissionPerThousand,
       supplier_details: next.supplierDetails,
       route_confirmed: next.routeConfirmed,
+      route_different: next.routeDifferent,
       version: row.version + 1,
       last_inbound_message_id: input.sourceMessageId,
       ...(next.stage === 'submitting'
@@ -213,22 +226,27 @@ async function recoverExistingSupplierProposal(
   const payload = prior.proposed_payload ?? {}
   const terms = payload.supplier_terms && typeof payload.supplier_terms === 'object'
     ? payload.supplier_terms as Record<string, unknown> : {}
-  if (prior.action_key !== 'coverage.offer.create' ||
+  if (!['coverage.offer.create', 'coverage.supplier_counteroffer.review'].includes(prior.action_key ?? '') ||
       payload.contact_id !== input.contactId ||
       payload.conversation_id !== input.conversationId ||
       payload.source_task_id !== input.taskId ||
       payload.source_task_target_id !== input.taskTargetId ||
       payload.source_coverage_request_id !== request.id ||
       payload.service_id !== request.serviceId ||
-      payload.total_amount !== row.offered_amount ||
+      !supplierDecimalEquals(payload.total_amount, row.offered_amount) ||
       payload.currency !== request.currency ||
-      payload.commission_per_thousand !== row.commission_per_thousand ||
+      !supplierDecimalEquals(payload.commission_per_thousand, row.commission_per_thousand) ||
       terms.details !== row.supplier_details ||
       terms.explicitly_confirmed_in_message_id !==
         (row.confirmation_message_id ?? input.sourceMessageId)) {
     throw new Error('SUPPLIER_PROPOSAL_IDEMPOTENCY_MISMATCH')
   }
 
+  if (prior.action_key !== 'coverage.supplier_counteroffer.review' &&
+      !row.route_confirmed) throw new Error('SUPPLIER_PROPOSAL_REPLAY_ROUTE_UNVERIFIED')
+  if ((prior.action_key === 'coverage.supplier_counteroffer.review') !== row.route_different) {
+    throw new Error('SUPPLIER_PROPOSAL_REPLAY_KIND_MISMATCH')
+  }
   const { data, error } = await db.from('ai_agent_coverage_supplier_negotiations')
     .update({ stage: 'submitted', change_request_id: prior.id,
       updated_at: new Date().toISOString() })
@@ -293,13 +311,14 @@ async function submitConfirmedOffer(
     },
   })
   if (!scoped.ok) throw new Error(scoped.code)
-  if (!row.route_confirmed || !row.offered_amount ||
-      !row.commission_per_thousand || !row.supplier_details) {
+  if ((!row.route_confirmed && !row.route_different) ||
+      (row.route_confirmed && row.route_different) ||
+      !row.offered_amount || !row.commission_per_thousand || !row.supplier_details) {
     // Old in-flight negotiations with no route confirmation cannot be
     // submitted until the actual supplier accepts the frozen direction.
     throw new Error('SUPPLIER_PROPOSAL_ROUTE_NOT_CONFIRMED')
   }
-  if (supplierNotesConflictWithRoute(
+  if (!row.route_different && supplierNotesConflictWithRoute(
       row.supplier_details, request.route, request.knownRegions)) {
     throw new Error('SUPPLIER_PROPOSAL_ROUTE_CONTRADICTS_SOURCE')
   }
@@ -321,23 +340,67 @@ async function submitConfirmedOffer(
   // Check first in case a previous confirmed run committed before a crash.
   const prior = await recoverExistingSupplierProposal(db, input, row, request)
   if (prior) return prior
-  const outcome = await executeCoverageProposeOfferIntegrated(
-    supplierToolContext(input), {
-      service_id: request.serviceId,
-      total_amount: row.offered_amount,
-      currency: request.currency,
-      commission_per_thousand: row.commission_per_thousand,
-      commission_currency: request.currency,
-      attributes: inverted,
-      supplier_task: {
-        task_id: input.taskId, task_target_id: input.taskTargetId,
-        source_request_id: request.id, supplier_details: row.supplier_details,
+  let id: string | null = null
+  let code: number | null = null
+  if (row.route_different) {
+    // A counteroffer is NOT an automatically compatible Coverage Offer.
+    // Register an explicit admin review, carrying the raw supplier statement
+    // and the frozen source direction side-by-side. Approval of the review
+    // does not create an active matching offer, reserve funds or satisfy Task.
+    const changed = await createChangeRequest({
+      accountId: input.accountId,
+      actionKey: 'coverage.supplier_counteroffer.review', actionVersion: 1,
+      targetType:'coverage_supplier_quote', targetId:null,intent:'create',
+      idempotencyKey:`coverage-sourcing:${input.taskId}:${input.taskTargetId}`,
+      actorUserId:null, sourceRunId:input.runId,
+      proposedPayload:{
+        contact_id:input.contactId, conversation_id:input.conversationId,
+        source_message_id:input.sourceMessageId,
+        source_task_id:input.taskId,source_task_target_id:input.taskTargetId,
+        source_coverage_request_id:request.id,
+        service_id:request.serviceId,total_amount:row.offered_amount,
+        currency:request.currency,commission_per_thousand:row.commission_per_thousand,
+        commission_currency:request.currency,
+        attributes:inverted,
+        supplier_terms:{
+          details:row.supplier_details,
+          amount:row.offered_amount,currency:request.currency,
+          commission_per_thousand:row.commission_per_thousand,
+          explicitly_confirmed_in_message_id:input.sourceMessageId,
+          route_match:false,
+          requested_route:request.route,
+          supplier_route_statement:row.supplier_details,
+        },
       },
-    },
-  )
-  if (!outcome.ok) throw new Error(outcome.code ?? 'SUPPLIER_OFFER_PROPOSAL_FAILED')
-  const payload = outcome.data as { change_request?: { id?: string; code?: number; status?: string } } | null
-  const id = payload?.change_request?.id
+      summary:[
+        '⚠️ عرض مورد بديل — مراجعة بشرية فقط، لا ينشئ تغطية مطابقة تلقائيًا.',
+        `المورد: ${row.offered_amount} ${request.currency}، العمولة ${row.commission_per_thousand} لكل 1000.`,
+        describeSupplierCoverageRoute(request.route),
+        `الاختلاف/شروط المورد: ${row.supplier_details.slice(0,500)}`,
+      ].join('\n').slice(0,1000),
+    })
+    id=changed.id
+    code=changed.code
+  } else {
+    const outcome = await executeCoverageProposeOfferIntegrated(
+      supplierToolContext(input), {
+        service_id: request.serviceId,
+        total_amount: row.offered_amount,
+        currency: request.currency,
+        commission_per_thousand: row.commission_per_thousand,
+        commission_currency: request.currency,
+        attributes: inverted,
+        supplier_task: {
+          task_id: input.taskId, task_target_id: input.taskTargetId,
+          source_request_id: request.id, supplier_details: row.supplier_details,
+        },
+      },
+    )
+    if (!outcome.ok) throw new Error(outcome.code ?? 'SUPPLIER_OFFER_PROPOSAL_FAILED')
+    const payload = outcome.data as { change_request?: { id?: string; code?: number } } | null
+    id=payload?.change_request?.id ?? null
+    code=payload?.change_request?.code ?? null
+  }
   if (!id) throw new Error('SUPPLIER_OFFER_PROPOSAL_NOT_PERSISTED')
   const { data: linked, error } = await db.from('ai_agent_coverage_supplier_negotiations')
     .update({ stage: 'submitted', change_request_id: id, updated_at: new Date().toISOString() })
@@ -350,7 +413,9 @@ async function submitConfirmedOffer(
     throw new Error('SUPPLIER_PROPOSAL_LINK_NOT_PERSISTED')
   }
   return {
-    text: `تم تسجيل عرض التغطية رقم CHG-${payload?.change_request?.code ?? '—'} ورفعه للإدارة للمراجعة. سيتم التواصل معك بعد قرار الإدارة؛ العرض ليس معتمدًا بعد. شكرًا لتعاونك.`,
+    text: row.route_different
+      ? `شكرًا لك. رفعت عرضك البديل برقم CHG-${code ?? '—'} للإدارة مع توضيح الاختلاف عن الطلب الأصلي. سيُراجع المسؤول شروطك، ولم تُعتمد التغطية بعد.`
+      : `شكرًا لك. رفعت عرضك برقم CHG-${code ?? '—'} للإدارة للمراجعة، ولم يُعتمد بعد. سنتواصل معك بعد القرار.`,
   }
 }
 
@@ -394,10 +459,16 @@ export async function handleCoverageSupplierTaskReply(
   }
   if (row.stage === 'submitted' && row.change_request_id) {
     const { data: cr, error } = await db.from('change_requests')
-      .select('code,status').eq('account_id', input.accountId)
+      .select('code,status,action_key').eq('account_id', input.accountId)
       .eq('id', row.change_request_id).maybeSingle()
     if (error) throw error
-    return { text: cr?.status === 'executed'
+    return { text: cr?.action_key === 'coverage.supplier_counteroffer.review'
+      ? cr.status === 'executed'
+        ? `راجعت الإدارة عرضك البديل CHG-${cr.code}، وما زال بحاجة إلى اتفاق يدوي على الشروط. لم تُنشأ تغطية مطابقة تلقائيًا.`
+        : cr.status === 'rejected' || cr.status === 'cancelled'
+          ? `لم توافق الإدارة على العرض البديل CHG-${cr.code}. يمكنك التواصل معها لمناقشة الشروط.`
+          : `عرضك البديل CHG-${cr.code} بانتظار مراجعة الإدارة.`
+      : cr?.status === 'executed'
       ? `اعتمدت الإدارة عرضك CHG-${cr.code} وتم إنشاء عرض تغطية في النظام. سيتم التواصل معك لاستكمال الإجراءات.`
       : cr?.status === 'rejected' || cr?.status === 'cancelled'
         ? `عرض التغطية CHG-${cr.code} لم يُعتمد. يرجى التواصل مع الإدارة لمراجعة التفاصيل.`
@@ -408,6 +479,7 @@ export async function handleCoverageSupplierTaskReply(
     commissionPerThousand: row.commission_per_thousand,
     supplierDetails: row.supplier_details,
     routeConfirmed: row.route_confirmed === true,
+    routeDifferent: row.route_different === true,
   }
   // Backward-compatible continuation: old GPT loop may have asked the seller
   // to confirm "7 لكل 1000" before the durable protocol existed. Reuse ONLY
@@ -432,7 +504,8 @@ export async function handleCoverageSupplierTaskReply(
         { ...row, stage: step.next.stage, offered_amount: step.next.offeredAmount,
           commission_per_thousand: step.next.commissionPerThousand,
           supplier_details: step.next.supplierDetails,
-          route_confirmed: step.next.routeConfirmed }, verified.request)
+          route_confirmed: step.next.routeConfirmed,
+          route_different: step.next.routeDifferent }, verified.request)
     } catch (error) {
       console.error('[coverage supplier task] proposal failed', {
         task: input.taskId.slice(0, 8),

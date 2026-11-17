@@ -6,6 +6,7 @@ const mocked = vi.hoisted(() => ({
   runtime: vi.fn(),
   existing: vi.fn(),
   proposed: vi.fn(),
+  create: vi.fn(),
   policy: vi.fn(),
   manifest: vi.fn(),
 }))
@@ -18,6 +19,7 @@ vi.mock('@/lib/ai/runtime/runtime-policy', () => ({
 }))
 vi.mock('@/lib/ai/runtime/change-requests-service', () => ({
   findChangeRequestByIdempotencyKey: mocked.existing,
+  createChangeRequest: mocked.create,
 }))
 vi.mock('@/lib/ai/tools/business-handoff', () => ({
   executeCoverageProposeOfferIntegrated: mocked.proposed,
@@ -46,7 +48,7 @@ const stageRow = () => ({
   account_id:accountId, task_id:taskId, task_target_id:targetId, contact_id:contactId,
   conversation_id:conversationId, stage:'availability', offered_amount:null as string|null,
   commission_per_thousand:null as string|null,supplier_details:null as string|null,
-  route_confirmed:false,
+  route_confirmed:false,route_different:false,
   version:0, last_inbound_message_id:null as string|null,
   confirmation_message_id:null as string|null,confirmation_run_id:null as string|null,
   change_request_id:null as string|null,
@@ -162,6 +164,8 @@ beforeEach(()=>{
     ok:true,data:{change_request:{id:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',code:1170,status:'pending'}},
     safe_to_show:true,
   })
+  mocked.create.mockResolvedValue({id:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    code:1170,status:'pending',confirmationCode:'1234'})
 })
 
 describe('server-bound Coverage supplier lifecycle',()=>{
@@ -172,37 +176,22 @@ describe('server-bound Coverage supplier lifecycle',()=>{
     return await handleCoverageSupplierTaskReply(sourceContext())
   }
 
-  it('confirms source-request direction before collecting amount',async()=>{
+  it('uses the first affirmative response to accept the route; only asks for missing price/rate',async()=>{
     const r=await reply('نعم يمكنني توفير التغطية',1)
-    expect(r?.text).toContain('حضرموت')
-    expect(r?.text).toContain('إب')
-    expect(row.stage).toBe('route')
-    expect(row.route_confirmed).toBe(false)
-    await reply('المسار مطابق',2)
+    expect(r?.text).toContain('400 SAR')
     expect(row.stage).toBe('amount')
     expect(row.route_confirmed).toBe(true)
+    expect(row.route_different).toBe(false)
     expect(mocked.proposed).not.toHaveBeenCalled()
   })
-  it('only creates a native administrative proposal after gathering terms and explicit supplier confirmation',async()=>{
-    const r1=await reply('نعم يمكنني توفير التغطية',1)
-    expect(r1?.text).toContain('حضرموت')
-    expect(row.stage).toBe('route')
-    await reply('المسار مطابق',2)
-    expect(row.stage).toBe('amount')
-    await reply('400',3)
-    expect(row.stage).toBe('commission')
-    await reply('7',4)
-    expect(row.stage).toBe('details')
-    await reply('متاح خلال اليوم، يمكن التسليم بالطرق المذكورة دون شروط أخرى',5)
-    expect(row.stage).toBe('confirmation')
-    await reply('تمام',6)
-    expect(row.stage).toBe('confirmation')
-    expect(mocked.proposed).not.toHaveBeenCalled()
-    const res=await reply('تأكيد',7)
+  it('creates a native admin approval from the full user quote in ONE inbound turn',async()=>{
+    const msg='نعم واستطيع توفير المبلغ كامل 400 واريد عموله 7 لكل 1000 وطريقة الدفع والاستلام اي طريقة متوفر عادي اكد على العرض'
+    const res=await reply(msg,1)
     expect(row.stage).toBe('submitted')
+    expect(row.route_confirmed).toBe(true)
+    expect(row.route_different).toBe(false)
     expect(row.change_request_id).toBe('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
     expect(res?.text).toContain('CHG-1170')
-    expect(res?.text).toContain('ليس معتمدًا')
     expect(mocked.proposed).toHaveBeenCalledTimes(1)
     const [ctx,proposal]=mocked.proposed.mock.calls[0]
     expect(ctx).toMatchObject({accountId,contactId,conversationId,sourceMessageId:currentSource})
@@ -210,16 +199,32 @@ describe('server-bound Coverage supplier lifecycle',()=>{
       total_amount:'400',currency:'SAR',
       commission_per_thousand:'7',
       attributes:{pay_region_id:southId,receive_region_id:northId},
-      supplier_task:{task_id:taskId,task_target_id:targetId,source_request_id:requestId},
+      supplier_task:{task_id:taskId,task_target_id:targetId,
+        source_request_id:requestId,supplier_details:msg},
     })
-    expect(mocked.policy).toHaveBeenCalledWith(expect.objectContaining({
-      constraints:{},context:expect.objectContaining({plane:'customer',features:expect.objectContaining({proposalToolsEnabled:true})}),
-    }))
+    expect(mocked.create).not.toHaveBeenCalled()
+  })
+  it('asks both missing money terms in one reply and submits once they arrive',async()=>{
+    const r1=await reply('نعم',1)
+    expect(r1?.text).toContain('المبلغ')
+    expect(r1?.text).toContain('العمولة')
+    await reply('400',2)
+    expect(row.offered_amount).toBe('400')
+    const done=await reply('7',3)
+    expect(done?.text).toContain('CHG-1170')
+    expect(mocked.proposed).toHaveBeenCalledTimes(1)
+  })
+  it('accepts natural route assent without repeating the entire request',async()=>{
+    Object.assign(row,{stage:'route',version:1})
+    const result=await reply('نعم المسار مطابق',9)
+    expect(result?.text).not.toContain('لم نتلق')
+    expect(row.route_confirmed).toBe(true)
+    expect(row.stage).toBe('amount')
   })
   it('continues a pre-migration commission-confirmation question without inferring amount or details',async()=>{
     previousBotMessage='شكراً! للتأكيد، العمولة **7 لكل 1000**؟'
     const result=await reply('نعم أؤكد',9)
-    expect(row).toMatchObject({stage:'route',commission_per_thousand:'7',offered_amount:null})
+    expect(row).toMatchObject({stage:'amount',commission_per_thousand:'7',offered_amount:null})
     expect(result?.text).toContain('حضرموت')
     expect(mocked.proposed).not.toHaveBeenCalled()
   })
@@ -232,23 +237,29 @@ describe('server-bound Coverage supplier lifecycle',()=>{
     expect(row.stage).toBe('needs_human')
     expect(mocked.proposed).not.toHaveBeenCalled()
   })
-  it('blocks a supplier who names a different receipt city even after route assent',async()=>{
-    await reply('نعم',1)
-    await reply('المسار مطابق',2)
-    await reply('400',3)
-    await reply('7',4)
-    const r=await reply('سأسلم في المكلاء واريد ان استلم في صنعاء. طريقة الدفع مسموح ومتوفر اي طريقه',5)
-    expect(row.stage).toBe('needs_human')
-    expect(r?.text).toContain('مراجعة')
+  it('raises mismatched supplier terms for ADMIN REVIEW only, no false matching Coverage Offer',async()=>{
+    const msg='نعم اوفر 300 ريال عموله 7 لكل 1000 لكن أستلم في صنعاء بدل إب، اكد على العرض'
+    const res=await reply(msg,1)
+    expect(row.route_different).toBe(true)
+    expect(row.route_confirmed).toBe(false)
+    expect(row.stage).toBe('submitted')
+    expect(res?.text).toContain('البديل')
     expect(mocked.proposed).not.toHaveBeenCalled()
-    expect(row.change_request_id).toBe(null)
+    expect(mocked.create).toHaveBeenCalledTimes(1)
+    const proposal=mocked.create.mock.calls[0][0]
+    expect(proposal).toMatchObject({actionKey:'coverage.supplier_counteroffer.review',
+      targetType:'coverage_supplier_quote',sourceRunId:currentRun,
+      proposedPayload:{source_task_id:taskId,source_task_target_id:targetId,
+        supplier_terms:{route_match:false,supplier_route_statement:msg}},
+    })
+    expect(proposal.summary).toContain('مراجعة بشرية')
   })
 
   it('recovers a previously committed proposal after a crash without proposing twice',async()=>{
     const details='الدفع في حضرموت والاستلام في إب حوالة خلال اليوم'
     const confirmed='bbbbbbbb-bbbb-4bbb-8bbb-000000000007'
     Object.assign(row,{stage:'submitting',offered_amount:'400',
-      commission_per_thousand:'7',supplier_details:details,version:5,
+      commission_per_thousand:'7',supplier_details:details,route_confirmed:true,version:5,
       confirmation_message_id:confirmed})
     mocked.existing.mockResolvedValue({
       id:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',code:1170,status:'pending',
