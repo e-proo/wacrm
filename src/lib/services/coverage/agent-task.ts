@@ -589,13 +589,14 @@ export const COVERAGE_SOURCING_MESSAGE_POLICY_V2: AgentTaskOutboundMessagePolicy
     return {
       kind:'text',
       text: [
-        `مرحبًا، نتواصل معكم بخصوص طلب ${name} محدد ونرغب بمعرفة قدرتكم على توفيره.`,
-        `إجمالي الطلب: ${requestedAmount} ${currency}.`,
-        `المبلغ المطلوب تغطيته الآن: ${remainingAmount} ${currency}.`,
-        describeSupplierCoverageRoute(route),
-        'هل هذه الجهات وطرق الدفع والاستلام متوفرة لديكم؟ يرجى الرد بنعم أو لا.',
-        'عند الموافقة سنؤكد المسار معكم ثم نسألكم عن المبلغ المتاح والعمولة.',
-        'إذا لم ترغب في تلقي رسائل مماثلة مستقبلًا، اكتب "إيقاف".',
+        `مرحبًا، لدينا طلب ${name} بقيمة ${remainingAmount} ${currency}${
+          requestedAmount !== remainingAmount
+            ? ` (من إجمالي ${requestedAmount} ${currency})` : ''
+        }.`,
+        `العميل يدفع في ${route.requesterPayRegion} (${route.requesterPayMethod})، ويستلم في ${route.requesterReceiveRegion} (${route.requesterReceiveMethod}).`,
+        `أنت تسلّم التغطية في ${route.requesterReceiveRegion} وتستلم مقابلها في ${route.requesterPayRegion}.`,
+        'إذا تستطيع توفيرها، اذكر في رد واحد: المبلغ المتاح، عمولتك لكل 1000، وأي اختلاف في المكان أو الشروط. سنعرض ما تقوله على الإدارة.',
+        'لإيقاف الرسائل، اكتب «إيقاف».',
       ].join('\n'),
     }
   },
