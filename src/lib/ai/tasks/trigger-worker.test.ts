@@ -120,3 +120,59 @@ describe('trigger worker admission guards', () => {
     expect(result).toMatchObject({ claimed: 0, completed: 0, failed: 0, dead: 0 })
   })
 })
+
+describe('trigger worker failure isolation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    normalizeFiring.mockReturnValue({
+      firingId: 'firing-1',
+      taskType: 'coverage',
+      taskTypeVersion: 1,
+    })
+  })
+
+  it('records a handler failure with the database claim owner and bounded retry delay', async () => {
+    const owner = 'scheduler:claim:00000000-0000-4000-8000-000000000186'
+    start.mockRejectedValue(new Error('temporary handler failure'))
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'materialize_agent_task_trigger_firings') {
+        return { data: { schedule_firings: 0, business_event_firings: 0 }, error: null }
+      }
+      if (name === 'claim_next_agent_task_trigger_firing') {
+        return { data: { id: 'firing-1', claim_owner: owner }, error: null }
+      }
+      if (name === 'fail_agent_task_trigger_firing') {
+        expect(args).toEqual({
+          p_firing_id: 'firing-1',
+          p_worker_id: owner,
+          p_error: 'temporary handler failure',
+          p_delay_secs: 60,
+        })
+        return { data: 'failed', error: null }
+      }
+      throw new Error('Unexpected RPC: ' + name)
+    })
+    const result = await processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 1 })
+    expect(result).toMatchObject({ claimed: 1, completed: 0, failed: 1, dead: 0 })
+    expect(rpc).not.toHaveBeenCalledWith('complete_agent_task_trigger_firing', expect.anything())
+  })
+
+  it('stops before invoking a handler when the claimed firing cannot be normalized', async () => {
+    normalizeFiring.mockReturnValue(null)
+    rpc.mockImplementation(async (name: string) => {
+      if (name === 'materialize_agent_task_trigger_firings') {
+        return { data: { schedule_firings: 0, business_event_firings: 0 }, error: null }
+      }
+      if (name === 'claim_next_agent_task_trigger_firing') {
+        return {
+          data: { id: 'firing-1', claim_owner: 'scheduler:claim:00000000-0000-4000-8000-000000000186' },
+          error: null,
+        }
+      }
+      throw new Error('Unexpected RPC: ' + name)
+    })
+    await expect(processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 1 }))
+      .rejects.toThrow('AGENT_TASK_TRIGGER_FIRING_INVALID')
+    expect(start).not.toHaveBeenCalled()
+  })
+})
