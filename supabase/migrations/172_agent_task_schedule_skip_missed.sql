@@ -35,8 +35,8 @@ begin
     v_missed := case when r.schedule_kind = 'recurring' then
       greatest(0, floor(extract(epoch from (p_now - r.next_fire_at)) /
         (r.interval_minutes * 60.0))::bigint) else 0 end;
-    v_occurrence := r.next_fire_at + make_interval(mins =>
-      (v_missed * coalesce(r.interval_minutes, 0))::integer);
+    v_occurrence := r.next_fire_at +
+      (make_interval(mins => coalesce(r.interval_minutes, 0)) * v_missed::double precision);
     insert into public.ai_agent_task_trigger_firings (
       account_id,
       trigger_id,
