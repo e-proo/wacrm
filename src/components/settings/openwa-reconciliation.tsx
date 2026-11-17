@@ -137,7 +137,7 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
                   {item.last_error_code ? ` · ${item.last_error_code}` : ''}
                 </p>
               </div>
-              {item.state === 'review' && data?.may_retry && <div className="flex flex-wrap items-center gap-2">
+              {data?.may_retry && (item.state === 'pending' || item.state === 'review') && <div className="flex flex-wrap items-center gap-2">
                 {item.event_kind === 'unresolved_identity' && <>
                   <Input type="tel" inputMode="tel"
                     aria-label={ar ? 'رقم الهاتف الدولي' : 'International phone number'}
@@ -151,11 +151,11 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
                     {ar ? 'تحقق من OpenWA' : 'Verify with OpenWA'}
                   </Button>
                 </>}
-                <Button variant="outline" size="sm"
+                {item.state === 'review' && <Button variant="outline" size="sm"
                   disabled={retrying !== null} onClick={() => void retry(item.id)}>
                   <AlertCircle className="me-1 h-3 w-3" />
                   {ar ? 'إعادة فحص' : 'Recheck'}
-                </Button>
+                </Button>}
               </div>}
             </div>)}
           </div>}
