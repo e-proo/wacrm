@@ -180,7 +180,8 @@ export async function POST(request: Request) {
           agentId: definition.agentId, approvedRevisionId: campaign.agent.revisionId,
           approvedBy: ctx.userId, connectionId: campaign.connection.id,
           provider: campaign.connection.provider, fingerprint: campaign.fingerprint,
-          reviewedAt: approved.reviewedAt, approvedAt: new Date().toISOString(),
+          // Using the server-preview instant keeps identical retry payloads byte-stable.
+          reviewedAt: approved.reviewedAt, approvedAt: approved.reviewedAt,
           frozenContactIds: [...campaign.audience.ids],
           consentAcknowledged: true, approvalAcknowledged: true,
           recurringAcknowledged: approved.recurringAcknowledged === true,
