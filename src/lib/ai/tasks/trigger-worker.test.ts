@@ -1,13 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { rpc, start, normalizeFiring, from } = vi.hoisted(() => ({
+const { rpc, start, normalizeFiring, from, reap } = vi.hoisted(() => ({
   rpc: vi.fn(),
   start: vi.fn(),
   normalizeFiring: vi.fn(),
   from: vi.fn(),
+  reap: vi.fn(async () => ({ data: 0, error: null })),
 }))
 
-vi.mock('../admin-client', () => ({ supabaseAdmin: () => ({ rpc, from }) }))
+vi.mock('../admin-client', () => ({
+  supabaseAdmin: () => ({
+    rpc: (name: string, args: Record<string, unknown>) =>
+      name === 'reap_expired_agent_task_trigger_firings'
+        ? reap(name, args) : rpc(name, args),
+    from,
+  }),
+}))
 vi.mock('./triggers', () => ({
   normalizeAgentTaskTriggerFiring: normalizeFiring,
 }))
@@ -415,5 +423,38 @@ describe('SCH-5 — lease loss and non-PII failure audit', () => {
     })
     expect(await processAgentTaskTriggerQueue({workerId:'sch5',limit:1}))
       .toMatchObject({claimed:1,failed:0,dead:1})
+  })
+})
+
+describe('SCH-5 — terminal recovery of exhausted claimed leases', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    normalizeFiring.mockReturnValue({
+      firingId:'firing-1',taskType:'coverage.sourcing',
+      taskTypeVersion:2,accountId:'a',triggerId:'t',
+      triggerKind:'schedule',sourceKey:'key',overlapPolicy:'skip',
+    })
+  })
+  it('terminalizes expired fifth attempts before attempting any new claim', async () => {
+    reap.mockResolvedValueOnce({data:2,error:null})
+    rpc.mockImplementation(async (name: string) => {
+      if(name==='materialize_agent_task_trigger_firings')
+        return {data:{schedule_firings:0,business_event_firings:0},error:null}
+      if(name==='claim_next_agent_task_trigger_firing')
+        return {data:null,error:null}
+      throw Error('Unexpected '+name)
+    })
+    const result=await processAgentTaskTriggerQueue({workerId:'sch5',limit:1})
+    expect(result).toMatchObject({claimed:0,completed:0,dead:2})
+    expect(reap).toHaveBeenCalledWith('reap_expired_agent_task_trigger_firings',
+      {p_limit:4})
+    expect(start).not.toHaveBeenCalled()
+  })
+  it('fails closed when the terminal sweep cannot be performed', async () => {
+    reap.mockResolvedValueOnce({data:null,error:new Error('reaper unavailable')})
+    await expect(processAgentTaskTriggerQueue({workerId:'sch5',limit:1}))
+      .rejects.toThrow('reaper unavailable')
+    expect(start).not.toHaveBeenCalled()
+    expect(rpc).not.toHaveBeenCalled()
   })
 })

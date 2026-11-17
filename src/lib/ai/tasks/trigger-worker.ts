@@ -32,6 +32,17 @@ export async function processAgentTaskTriggerQueue(input: {
 
   const db = supabaseAdmin()
   const limit = normalizeAgentTaskTriggerWorkerLimit(input.limit)
+  // A worker killed during its fifth leased attempt leaves a stale claimed
+  // firing that the normal claim RPC intentionally cannot reclaim (attempts
+  // must be < 5). Terminalize it safely, without creating/sending any Task.
+  const reap = await db.rpc('reap_expired_agent_task_trigger_firings', {
+    p_limit: Math.min(limit * 4, 100),
+  })
+  if (reap.error) throw reap.error
+  if (typeof reap.data !== 'number' || !Number.isInteger(reap.data) ||
+      reap.data < 0 || reap.data > 100) {
+    throw new Error('AGENT_TASK_TRIGGER_REAPER_RESULT_INVALID')
+  }
   const materialize = await db.rpc('materialize_agent_task_trigger_firings', {
     p_now: new Date().toISOString(),
     p_limit: Math.min(limit * 4, 500),
@@ -44,7 +55,7 @@ export async function processAgentTaskTriggerQueue(input: {
   let skipped = 0
   let deferred = 0
   let failed = 0
-  let dead = 0
+  let dead = reap.data
 
   for (let index = 0; index < limit; index += 1) {
     // Request a unique worker ID, then finalize only with the DB-issued

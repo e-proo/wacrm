@@ -99,6 +99,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-scheduler-health-smoke.sql
       - name: SCH-5 no-send event replay tenant isolation and pause safety
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-scheduling-sch5-smoke.sql
+      - name: SCH-5 expired fifth-attempt claim reaper and stale-owner fence
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-trigger-sch5-exhausted-lease-smoke.sql
       - name: SCH-5 real two-session scheduler tick lease race and crash reclaim
         run: bash supabase/ci/agent-task-scheduling-sch5-race.sh
       - name: Verify concurrent Agent Task claim and bounded backlog admission
