@@ -61,8 +61,9 @@ describe('SCH-2 tenant-scoped, no-surprise scheduler controls', () => {
   it('pauses using account-scoped existing RPC without touching WhatsApp', async () => {
     const result = await patch({ status: 'paused' })
     expect(result.status).toBe(200)
-    expect(mocks.rpc).toHaveBeenCalledWith('set_agent_task_trigger_status', {
+    expect(mocks.rpc).toHaveBeenCalledWith('set_reviewed_agent_task_trigger_status', {
       p_account_id: accountId, p_trigger_id: triggerId, p_status: 'paused',
+      p_actor_user_id: userId,
     })
   })
 
@@ -79,7 +80,7 @@ describe('SCH-2 tenant-scoped, no-surprise scheduler controls', () => {
     const result = await patch({ status: 'enabled', confirmEnable: true })
     expect(result.status).toBe(200)
     expect(mocks.requireAgentCapability).toHaveBeenCalledWith('agents.publish')
-    expect(mocks.rpc).toHaveBeenCalledWith('set_agent_task_trigger_status',
+    expect(mocks.rpc).toHaveBeenCalledWith('set_reviewed_agent_task_trigger_status',
       expect.objectContaining({ p_account_id: accountId, p_status: 'enabled' }))
     delete process.env.WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST
   })

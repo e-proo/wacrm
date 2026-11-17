@@ -58,10 +58,17 @@ export async function PATCH(
           { status: 409, headers })
       }
     }
-    const { data: updated, error } = await db.rpc('set_agent_task_trigger_status', {
+    const { data: updated, error } = await db.rpc('set_reviewed_agent_task_trigger_status', {
       p_account_id: ctx.accountId, p_trigger_id: triggerId, p_status: body.status,
+      p_actor_user_id: ctx.userId,
     })
-    if (error) throw error
+    if (error) {
+      const code = typeof error.message === 'string' &&
+        /AGENT_TASK_TRIGGER_(?:REVIEW_REVISION_CHANGED|ENABLE_OWNER_ONLY|CONTROL_UNAUTHORIZED)/.test(error.message)
+          ? 'SCHEDULE_APPROVAL_CONFLICT' : 'SCHEDULE_STATUS_UPDATE_FAILED'
+      return NextResponse.json({ error: 'تعذّر تغيير حالة الجدولة بسبب مراجعة الصلاحيات أو النسخة المنشورة.', code },
+        { status: code === 'SCHEDULE_APPROVAL_CONFLICT' ? 409 : 500, headers })
+    }
     if (updated !== true) {
       return NextResponse.json({ error: 'لم تُغيّر الحالة. تحقق من حالة الجدولة.', code: 'SCHEDULE_STATUS_CONFLICT' },
         { status: 409, headers })
