@@ -126,3 +126,37 @@ export function schedulePreview(
         : 'تحقق من موعد الجدولة.',
   }
 }
+
+/** Strict edit of timing/overlap only; source, agent, reviewed revision and
+ * business-event filters remain immutable until cancel-and-recreate.
+ */
+export function parseSchedulePolicyEdit(value: unknown, nowMs=Date.now()): {
+ expectedPolicyVersion: number
+ scheduleKind: 'once' | 'recurring' | null
+ nextFireAt: string | null
+ intervalMinutes: number | null
+ overlapPolicy: 'skip' | 'defer'
+} {
+ if (!record(value) || !Number.isInteger(value.expectedPolicyVersion) ||
+   Number(value.expectedPolicyVersion)<1) throw new ScheduleValidationError(
+   'SCHEDULE_EDIT_VERSION_INVALID','تحتاج إلى تحديث نسخة السياسة.')
+ if (value.overlapPolicy!=='skip' && value.overlapPolicy!=='defer')
+   throw new ScheduleValidationError('SCHEDULE_OVERLAP_INVALID','سياسة التداخل غير صالحة.')
+ const result = {expectedPolicyVersion: value.expectedPolicyVersion as number,
+   overlapPolicy: value.overlapPolicy as 'skip'|'defer'}
+ if (value.scheduleKind===null && value.nextFireAt==null && value.intervalMinutes==null)
+   return {...result,scheduleKind:null,nextFireAt:null,intervalMinutes:null}
+ if (value.scheduleKind!=='once' && value.scheduleKind!=='recurring')
+   throw new ScheduleValidationError('SCHEDULE_EDIT_KIND_INVALID','نوع الجدولة غير صالح.')
+ const at = typeof value.nextFireAt==='string'?Date.parse(value.nextFireAt):Number.NaN
+ if (!Number.isFinite(at)||at<=nowMs+60_000||at>nowMs+366*86400000)
+   throw new ScheduleValidationError('SCHEDULE_EDIT_TIME_INVALID','اختر موعدًا قادمًا بين دقيقة وسنة.')
+ if (value.scheduleKind==='once' && value.intervalMinutes!=null)
+   throw new ScheduleValidationError('SCHEDULE_EDIT_INTERVAL_INVALID','الموعد الواحد لا يقبل تكرارًا.')
+ if (value.scheduleKind==='recurring' &&
+   (typeof value.intervalMinutes!=='number'||!Number.isInteger(value.intervalMinutes)||
+     value.intervalMinutes<5||value.intervalMinutes>525600))
+   throw new ScheduleValidationError('SCHEDULE_EDIT_INTERVAL_INVALID','الفاصل بين 5 و525600 دقيقة.')
+ return {...result,scheduleKind:value.scheduleKind,nextFireAt:new Date(at).toISOString(),
+   intervalMinutes:value.scheduleKind==='recurring'?value.intervalMinutes as number:null}
+}

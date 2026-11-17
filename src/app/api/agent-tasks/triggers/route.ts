@@ -24,7 +24,7 @@ export async function GET() {
       { data: runtimePolicy, error: policyError },
     ] = await Promise.all([
       db.from('ai_agent_task_triggers')
-        .select('id,task_type,task_type_version,agent_id,trigger_kind,status,schedule_kind,next_fire_at,interval_minutes,event_type,config,created_at,policy_version,overlap_policy,approved_revision_id,skipped_occurrences')
+        .select('id,task_type,task_type_version,agent_id,trigger_kind,status,schedule_kind,next_fire_at,interval_minutes,event_type,config,created_at,policy_version,overlap_policy,approved_revision_id,skipped_occurrences,edited_at,cancelled_at')
         .eq('account_id', ctx.accountId).order('created_at', { ascending: false }).limit(100),
       db.from('ai_agent_task_trigger_firings')
         .select('id,trigger_id,status,attempts,created_at,scheduled_for,available_at,skip_reason,last_error,task_id')
@@ -73,7 +73,8 @@ export async function GET() {
           policyVersion: t.policy_version, overlapPolicy: t.overlap_policy,
           approvedRevisionId: t.approved_revision_id,
           skippedOccurrences: t.skipped_occurrences,
-          createdAt: t.created_at, firings: byTrigger.get(t.id) ?? [],
+          createdAt: t.created_at, editedAt: t.edited_at, cancelledAt: t.cancelled_at,
+          firings: byTrigger.get(t.id) ?? [],
         }
       }),
       agents: (agents ?? []).map(a => ({

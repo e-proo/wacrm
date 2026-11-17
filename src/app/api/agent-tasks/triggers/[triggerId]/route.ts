@@ -3,6 +3,7 @@ import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
+import { parseSchedulePolicyEdit, ScheduleValidationError } from '@/lib/ai/tasks/schedule-admin'
 
 export const runtime = 'nodejs'
 const headers = { 'Cache-Control': 'private, no-store, max-age=0' }
@@ -23,7 +24,8 @@ export async function PATCH(
     const { triggerId } = await params
     const body: unknown = await request.json().catch(() => null)
     if (!UUID.test(triggerId) || !body || typeof body !== 'object' || Array.isArray(body) ||
-        !('status' in body) || (body.status !== 'paused' && body.status !== 'enabled')) {
+        !(('status' in body && (body.status === 'paused' || body.status === 'enabled')) ||
+          ('action' in body && body.action === 'edit'))) {
       return NextResponse.json({ error: 'طلب تعديل الجدولة غير صالح.', code: 'INVALID_TRIGGER_CONTROL' },
         { status: 400, headers })
     }
@@ -34,6 +36,39 @@ export async function PATCH(
     if (triggerError) throw triggerError
     if (!trigger) return NextResponse.json({ error: 'الجدولة غير موجودة.', code: 'TRIGGER_NOT_FOUND' },
       { status: 404, headers })
+    if ('action' in body && body.action === 'edit') {
+      let draft: ReturnType<typeof parseSchedulePolicyEdit>
+      try { draft = parseSchedulePolicyEdit(body) }
+      catch (error) {
+        if (error instanceof ScheduleValidationError)
+          return NextResponse.json({error:error.message,code:error.code},{status:400,headers})
+        throw error
+      }
+      if (trigger.status !== 'paused')
+        return NextResponse.json({error:'يجب إيقاف الجدولة قبل تعديلها.',code:'REQUIRES_PAUSE'},
+          {status:409,headers})
+      const {data, error} = await db.rpc('update_reviewed_agent_task_trigger_policy',{
+        p_account_id:ctx.accountId,p_trigger_id:triggerId,p_actor_user_id:ctx.userId,
+        p_expected_policy_version:draft.expectedPolicyVersion,
+        p_schedule_kind:draft.scheduleKind,p_next_fire_at:draft.nextFireAt,
+        p_interval_minutes:draft.intervalMinutes,p_overlap_policy:draft.overlapPolicy,
+      })
+      if (error) return NextResponse.json({
+        error:'تعذّر تعديل الجدولة. راجع البيانات والصلاحيات.',code:'SCHEDULE_EDIT_FAILED',
+      },{status:409,headers})
+      if (!data || data.updated !== true) {
+        const reason = typeof data?.reason === 'string' ? data.reason:'POLICY_CONFLICT'
+        return NextResponse.json({
+          error:reason==='CLAIM_IN_FLIGHT'?'هناك مهمة قيد الحجز؛ انتظر التسوية قبل تعديل السياسة.'
+            :'تغيّرت حالة أو نسخة السياسة؛ قم بتحديث القائمة.',
+          code:reason,
+        },{status:reason==='NOT_FOUND'?404:409,headers})
+      }
+      return NextResponse.json({
+        id:triggerId,status:'paused',updated:true,policyVersion:data.policy_version,
+        skippedFirings:data.skipped_firings??0,tasksUntouched:true,
+      },{headers})
+    }
     if (body.status === 'enabled') {
       await requireAgentCapability('agents.publish')
       if (process.env.WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST !== '1' ||
@@ -77,4 +112,50 @@ export async function PATCH(
   } catch (error) {
     return toErrorResponse(error)
   }
+}
+
+/** Terminal policy cancellation: audit and already-created Tasks are preserved. */
+export async function DELETE(
+ request: Request,
+ {params}:{params:Promise<{triggerId:string}>},
+) {
+ try {
+  const ctx=await requireAgentCapability('agents.manage_tasks')
+  const rate=checkRateLimit('admin:triggerCancel:'+ctx.userId,RATE_LIMITS.adminAction)
+  if (!rate.success) return rateLimitResponse(rate)
+  const {triggerId}=await params
+  const body:unknown=await request.json().catch(()=>null)
+  if (!UUID.test(triggerId)||!body||typeof body!=='object'||Array.isArray(body)||
+    !('confirmCancel' in body)||body.confirmCancel!==true||
+    !('expectedPolicyVersion' in body)||!Number.isInteger(body.expectedPolicyVersion)||
+    Number(body.expectedPolicyVersion)<1)
+    return NextResponse.json({
+      error:'يجب تأكيد الإلغاء وتحديد نسخة السياسة.',code:'SCHEDULE_CANCEL_INVALID',
+    },{status:400,headers})
+  const db=supabaseAdmin()
+  const {data:trigger,error:lookupError}=await db.from('ai_agent_task_triggers')
+    .select('id').eq('account_id',ctx.accountId).eq('id',triggerId).maybeSingle()
+  if (lookupError) throw lookupError
+  if (!trigger) return NextResponse.json({error:'السياسة غير موجودة.',code:'TRIGGER_NOT_FOUND'},
+    {status:404,headers})
+  const {data,error}=await db.rpc('cancel_reviewed_agent_task_trigger',{
+    p_account_id:ctx.accountId,p_trigger_id:triggerId,
+    p_actor_user_id:ctx.userId,p_expected_policy_version:body.expectedPolicyVersion,
+  })
+  if (error) return NextResponse.json({error:'تعذّر إلغاء السياسة.',code:'SCHEDULE_CANCEL_FAILED'},
+    {status:409,headers})
+  if (!data||data.cancelled!==true) {
+    const reason=typeof data?.reason==='string'?data.reason:'POLICY_CONFLICT'
+    return NextResponse.json({
+      error:reason==='CLAIM_IN_FLIGHT'
+        ?'يوجد حجز فعّال؛ انتظر التسوية أو راجع المهمة الجارية قبل إلغاء الجدولة.'
+        :'تغيّرت السياسة. حدّث القائمة ثم أعد المحاولة.',code:reason,
+    },{status:reason==='NOT_FOUND'?404:409,headers})
+  }
+  return NextResponse.json({
+    id:triggerId,status:'cancelled',alreadyCancelled:data.already_cancelled===true,
+    skippedFirings:data.skipped_firings??0,
+    linkedTasksUntouched:data.linked_tasks_untouched??0,tasksUntouched:true,
+  },{headers})
+ } catch(error){return toErrorResponse(error)}
 }
