@@ -1,114 +1,102 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const stubs = vi.hoisted(() => ({
-  authorize: vi.fn(),
+  auth: vi.fn(), inspect: vi.fn(),
+  toError: vi.fn((error: unknown) => { throw error }),
   from: vi.fn(),
-  audience: vi.fn(),
-  unexpectedError: vi.fn((error: unknown) => { throw error }),
 }))
-
 vi.mock('@/lib/auth/account', () => ({
-  requireAgentCapability: stubs.authorize,
-  toErrorResponse: stubs.unexpectedError,
+  requireAgentCapability: stubs.auth,
+  toErrorResponse: stubs.toError,
 }))
 vi.mock('@/lib/ai/admin-client', () => ({
   supabaseAdmin: () => ({ from: stubs.from }),
 }))
-vi.mock('@/lib/services/service-catalog/promotion-audience', () => ({
-  resolveServicePromotionAudience: stubs.audience,
+vi.mock('@/lib/services/service-catalog/promotion-campaign-review', () => ({
+  inspectServicePromotionCampaign: stubs.inspect,
+  ServicePromotionReviewError: class ServicePromotionReviewError extends Error {
+    status = 409
+    constructor(public readonly code: string) { super(code) }
+  },
 }))
-vi.mock('@/lib/ai/tasks/builder-v2', () => ({
-  isAgentBuilderV2Configuration: (value: unknown) =>
-    Boolean(value && typeof value === 'object' && 'bindings' in value),
-}))
-
 import { GET } from './route'
 
-const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+const id = (n: number) => '00000000-0000-4000-8000-' + String(n).padStart(12, '0')
 const accountId = id(1)
 const serviceId = id(2)
 const agentId = id(3)
-const revisionId = id(4)
-const tagId = id(5)
-const contactId = id(6)
-
-const url = (more = '') => new Request(
-  `http://localhost/api/agent-tasks/promotion/preview?serviceId=${serviceId}&agentId=${agentId}${more}`,
-)
-
-function record(table: string) {
-  const state = {
-    services: { id: serviceId, name: 'TEST Service', status: 'active' },
-    ai_agents: { id: agentId, name: 'Promotion Agent', status: 'active', published_revision_id: revisionId },
-    ai_agent_revisions: {
-      id: revisionId, status: 'published', operational_mode: 'both',
-      outreach_policy: {
-        bindings: [{
-          taskType: 'services.promotion', taskTypeVersion: 1, maxTargets: 3,
-          targetScope: { requiredTagIds: [tagId], excludedTagIds: [],
-            serviceIds: [serviceId], regionIds: [], domainSelector: null },
-        }],
-      },
-    },
-  } as Record<string, unknown>
-  const chain = {
-    select: () => chain,
-    eq: () => chain,
-    in: () => chain,
-    maybeSingle: async () => ({ data: state[table] ?? null, error: null }),
-    limit: async () => ({
-      data: table === 'contacts'
-        ? [{ id: contactId, name: 'TEST contact', phone_normalized: '967700000001' }]
-        : table === 'ai_outreach_contact_controls'
-          ? [] : [],
-      error: null,
-    }),
-  }
-  return chain
+const connectionId = id(4)
+const contactId = id(5)
+function url(args = '') {
+  return new Request('http://localhost/api/agent-tasks/promotion/preview?serviceId=' +
+    serviceId + '&agentId=' + agentId + '&connectionId=' + connectionId + args)
 }
-
 beforeEach(() => {
   vi.clearAllMocks()
-  stubs.authorize.mockResolvedValue({ accountId, userId: id(99) })
-  stubs.from.mockImplementation(record)
-  stubs.audience.mockResolvedValue([contactId])
+  stubs.auth.mockResolvedValue({ accountId, userId: id(99) })
+  stubs.inspect.mockResolvedValue({
+    service: { id: serviceId, name: 'TEST', publicDescription: 'Public' },
+    agent: { id: agentId, name: 'Agent', revisionId: id(77) },
+    connection: { id: connectionId, name: 'TEST Meta', provider: 'meta_cloud' },
+    audience: {
+      ids: [contactId],
+      contacts: [{ id: contactId, name: 'Customer', phone: '967700000001', reason: null }],
+      count: 1, max: 3, requiredTags: [id(12)], excludedTags: [],
+    },
+    template: { id: id(99), name: 'service_promotion_v1',
+      language: 'ar', status: 'APPROVED_LOCAL' },
+    firstMessage: { kind: 'template', body: 'مرحبًا {{1}}' },
+    blockers: [],
+    fingerprint: 'e'.repeat(64),
+    binding: {},
+  })
 })
 
-describe('Service Promotion read-only preview API', () => {
-  it('derives tenant from session, previews exact frozen cohort, never creates Task or sends', async () => {
-    const res = await GET(url('&accountId=forged&actorUserId=forged'))
-    expect(res.status).toBe(200)
-    const body = await res.json()
+describe('Promotion preview read-only, scoped API', () => {
+  it('requires both admin capabilities and resolves tenant only from session', async () => {
+    const response = await GET(url('&accountId=forged&contactIds=forged'))
+    expect(response.status).toBe(200)
+    const body = await response.json()
     expect(body.previewOnly).toBe(true)
+    expect(body.readyForApproval).toBe(true)
     expect(body.readyForLaunch).toBe(false)
-    expect(body.audience.contacts).toEqual([{
-      id: contactId, name: 'TEST contact', reason: 'consent_and_transport_not_verified',
-    }])
-    expect(stubs.authorize).toHaveBeenCalledWith('agents.manage_tasks')
-    expect(stubs.authorize).toHaveBeenCalledWith('agents.manage_outreach')
-    expect(stubs.audience).toHaveBeenCalledWith(expect.anything(), {
-      accountId, requiredTagIds: [tagId], excludedTagIds: [], maxContacts: 3,
+    expect(body.audience.contacts).toHaveLength(1)
+    expect(body.connection.id).toBe(connectionId)
+    expect(body.fingerprint).toHaveLength(64)
+    expect(stubs.inspect).toHaveBeenCalledWith(expect.anything(), {
+      accountId, agentId, serviceId, connectionId,
     })
-    expect(stubs.from).not.toHaveBeenCalledWith('ai_agent_tasks')
-    expect(res.headers.get('Cache-Control')).toContain('no-store')
-  })
-
-  it('rejects malformed identifiers without a DB operation', async () => {
-    const res = await GET(new Request('http://localhost/api/agent-tasks/promotion/preview?serviceId=bad&agentId=bad'))
-    expect(res.status).toBe(400)
+    expect(stubs.auth).toHaveBeenCalledWith('agents.manage_tasks')
+    expect(stubs.auth).toHaveBeenCalledWith('agents.manage_outreach')
+    expect(response.headers.get('Cache-Control')).toContain('no-store')
     expect(stubs.from).not.toHaveBeenCalled()
   })
 
-  it('returns a bounded operator-visible blocker when the cohort is too large', async () => {
-    stubs.audience.mockRejectedValue(new Error('SERVICE_PROMOTION_AUDIENCE_EXCEEDS_APPROVED_LIMIT'))
-    const res = await GET(url())
-    expect(res.status).toBe(409)
-    expect((await res.json()).code).toBe('SERVICE_PROMOTION_AUDIENCE_EXCEEDS_APPROVED_LIMIT')
+  it('does not query DB on malformed or missing selection', async () => {
+    const response = await GET(new Request(
+      'http://localhost/api/agent-tasks/promotion/preview?serviceId=bad&agentId=bad',
+    ))
+    expect(response.status).toBe(400)
+    expect(stubs.inspect).not.toHaveBeenCalled()
   })
 
-  it('rejects unauthorized callers without any database query', async () => {
-    stubs.authorize.mockRejectedValue(new Error('FORBIDDEN'))
+  it('shows blockers and NEVER marks a blocked campaign launch ready', async () => {
+    const safe = await stubs.inspect({})
+    stubs.inspect.mockResolvedValueOnce({
+      ...safe,
+      blockers: ['SERVICE_PROMOTION_CONTACT_BLOCKED'],
+    })
+    const response = await GET(url())
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.readyForApproval).toBe(false)
+    expect(body.readyForLaunch).toBe(false)
+    expect(body.blockers).toEqual(['SERVICE_PROMOTION_CONTACT_BLOCKED'])
+  })
+
+  it('rejects unauthorized callers before running the campaign inspector', async () => {
+    stubs.auth.mockRejectedValueOnce(new Error('FORBIDDEN'))
     await expect(GET(url())).rejects.toThrow('FORBIDDEN')
-    expect(stubs.from).not.toHaveBeenCalled()
+    expect(stubs.inspect).not.toHaveBeenCalled()
   })
 })
