@@ -108,8 +108,13 @@ export function advanceSupplierTurn(state:SupplierTurnState,raw:string,facts:Sup
   const routeConfirmed=!routeDifferent && (
     state.routeConfirmed || supplierConfirmsRoute(input) || parsed.routeAssent
   )
-  const offeredAmount=parsed.amount ?? parseSupplierNumber(input,Number(facts.remainingAmount)) ??
-    state.offeredAmount
+  // A bare number in the commission stage belongs to the per-1000 rate,
+  // never silently replaces an amount that the supplier already supplied.
+  const isBareNumber=/^\d{1,12}(?:\.\d{1,4})?$/.test(input)
+  const offeredAmount=state.stage==='commission' && isBareNumber
+    ? state.offeredAmount
+    : (parsed.amount ?? parseSupplierNumber(input,Number(facts.remainingAmount)) ??
+      state.offeredAmount)
   const commission=parsed.commission ?? (state.stage==='commission'
     ? parseSupplierNumber(input,1000,true) : null) ?? state.commissionPerThousand
   const hadAvailability=state.stage!=='availability'
