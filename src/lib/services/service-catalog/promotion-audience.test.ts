@@ -121,6 +121,18 @@ describe('Service Promotion frozen audience', () => {
       .rejects.toThrow('SERVICE_PROMOTION_CONTACT_OUTSIDE_ACCOUNT')
   })
 
+  it('fails closed pre-snapshot promotion tasks instead of expanding a changed tag audience', async () => {
+    const { db, from } = fakeDb({ tags: [REQUIRED], links: [
+      { contact_id: C, tag_id: REQUIRED, account_id: ACCOUNT },
+    ] })
+    await expect(SERVICE_PROMOTION_AUDIENCE_RESOLVER.resolve(db, {
+      accountId: ACCOUNT, taskId: id(60), taskType: 'services.promotion',
+      taskTypeVersion: 1, taskContext: {},
+      targetPolicy: { requiredTagIds: [REQUIRED] }, maxCandidates: 100,
+    })).rejects.toThrow('SERVICE_PROMOTION_LEGACY_AUDIENCE_REQUIRES_REAPPROVAL')
+    expect(from).not.toHaveBeenCalled()
+  })
+
   it('rejects malformed, duplicated and excessive frozen identities', () => {
     expect(() => parseFrozenServicePromotionContactIds([A, A]))
       .toThrow('SERVICE_PROMOTION_FROZEN_AUDIENCE_INVALID')
