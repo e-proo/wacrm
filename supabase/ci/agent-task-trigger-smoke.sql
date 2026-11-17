@@ -7,6 +7,11 @@ declare
   v_recurring uuid;
   v_event_trigger uuid;
   v_event uuid := gen_random_uuid();
+  v_rejected_firing uuid;
+  v_other_user uuid := '00000000-0000-4000-8000-000000000125';
+  v_other_account uuid;
+  v_other_agent uuid := gen_random_uuid();
+  v_other_trigger uuid;
   v_result jsonb;
   v_claim jsonb;
   v_claimed integer := 0;
@@ -326,6 +331,106 @@ begin
   ) then
     raise exception 'New lease owner could not complete reclaimed firing';
   end if;
+
+  -- SCH-1: the per-account pending cap is enforced at insert (not only worker tick).
+  update public.ai_runtime_policies
+     set agent_task_trigger_max_pending = 1
+   where account_id = v_account;
+  insert into public.ai_agent_task_trigger_firings(
+    account_id,trigger_id,source_kind,source_key,scheduled_for,available_at
+  ) values (
+    v_account,v_recurring,'schedule',
+    'schedule:backlog-occupant:' || v_recurring::text,
+    v_now - interval '4 minutes',v_now - interval '4 minutes'
+  );
+  v_rejected_firing := null;
+  insert into public.ai_agent_task_trigger_firings(
+    account_id,trigger_id,source_kind,source_key,scheduled_for,available_at
+  ) values (
+    v_account,v_recurring,'schedule',
+    'schedule:backlog-rejected:' || v_recurring::text,
+    v_now - interval '3 minutes',v_now - interval '3 minutes'
+  ) returning id into v_rejected_firing;
+  if v_rejected_firing is not null then
+    raise exception 'Per-account backlog cap admitted a second firing';
+  end if;
+
+  update public.ai_agent_task_triggers
+     set next_fire_at = v_now - interval '2 minutes'
+   where id = v_recurring;
+  v_result := public.materialize_agent_task_trigger_firings(v_now,20);
+  if (v_result->>'schedule_firings')::integer <> 0
+     or (v_result->>'schedule_deferred')::integer <> 1 then
+    raise exception 'Full backlog did not defer schedule: %',v_result;
+  end if;
+  if not exists (
+    select 1 from public.ai_agent_task_triggers
+    where id=v_recurring and next_fire_at=v_now - interval '2 minutes'
+  ) then
+    raise exception 'Due schedule advanced despite blocked admission';
+  end if;
+  v_claim := public.claim_next_agent_task_trigger_firing('backlog-worker',120);
+  if v_claim is null or (v_claim->>'account_id')::uuid <> v_account
+     or not public.complete_agent_task_trigger_firing(
+       (v_claim->>'firing_id')::uuid,(v_claim->>'claim_owner'),null
+     ) then
+    raise exception 'Backlog occupant did not drain safely: %',v_claim;
+  end if;
+  v_result := public.materialize_agent_task_trigger_firings(v_now,20);
+  if (v_result->>'schedule_firings')::integer <> 1 then
+    raise exception 'Deferred schedule not recovered after drain: %',v_result;
+  end if;
+
+  -- Fairness: a previously unserved account is selected ahead of a busy one.
+  insert into auth.users(id,email,raw_user_meta_data)
+  values (
+    v_other_user,'agent-task-fairness@example.test',
+    '{"full_name":"Trigger Fairness Smoke"}'::jsonb
+  );
+  select account_id into strict v_other_account
+  from public.profiles where user_id=v_other_user;
+  insert into public.ai_agents(id,account_id,slug,name,purpose,status)
+  values (v_other_agent,v_other_account,'trigger-fairness-agent',
+          'Trigger Fairness Agent','custom','active');
+  v_other_trigger := public.create_agent_task_trigger(
+    v_other_account,'services.promotion',1,v_other_agent,
+    'schedule','once',v_now - interval '1 minute',null,null,null,
+    jsonb_build_object('serviceId',gen_random_uuid()),'{}'::jsonb,
+    'trigger-fairness-once-186',v_other_user
+  );
+  insert into public.ai_agent_task_trigger_firings(
+    account_id,trigger_id,source_kind,source_key,scheduled_for,available_at
+  ) values (
+    v_other_account,v_other_trigger,'schedule',
+    'schedule:fairness:' || v_other_trigger::text,
+    v_now - interval '1 minute',v_now
+  );
+  v_claim := public.claim_next_agent_task_trigger_firing('fair-worker',120);
+  if v_claim is null or (v_claim->>'account_id')::uuid <> v_other_account
+     or not public.complete_agent_task_trigger_firing(
+       (v_claim->>'firing_id')::uuid,(v_claim->>'claim_owner'),null
+     ) then
+    raise exception 'Unserved account did not get fair first claim: %',v_claim;
+  end if;
+  v_claim := public.claim_next_agent_task_trigger_firing('fair-worker',120);
+  if v_claim is null or (v_claim->>'account_id')::uuid <> v_account
+     or not public.complete_agent_task_trigger_firing(
+       (v_claim->>'firing_id')::uuid,(v_claim->>'claim_owner'),null
+     ) then
+    raise exception 'Busy account was not served after fair claim: %',v_claim;
+  end if;
+
+  if pg_catalog.has_function_privilege(
+       'authenticated','public.claim_next_agent_task_trigger_firing(text,integer)','EXECUTE'
+     ) then
+    raise exception 'Authenticated user may execute service-only scheduler claim';
+  end if;
+  delete from public.ai_agent_task_trigger_firings where account_id=v_other_account;
+  delete from public.ai_agent_task_triggers where account_id=v_other_account;
+  delete from public.ai_agents where account_id=v_other_account;
+  delete from public.profiles where user_id=v_other_user;
+  delete from public.accounts where id=v_other_account;
+  delete from auth.users where id=v_other_user;
 
   delete from public.ai_agent_task_trigger_firings where account_id=v_account;
   delete from public.ai_agent_task_triggers where account_id=v_account;
