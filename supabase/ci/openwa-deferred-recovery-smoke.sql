@@ -20,7 +20,8 @@ BEGIN
     SELECT unnest(ARRAY[
       'public.defer_openwa_webhook_event(uuid,uuid,text,text,text,text,text,jsonb,uuid)'::regprocedure,
       'public.claim_openwa_deferred_events(integer)'::regprocedure,
-      'public.finish_openwa_deferred_event(uuid,uuid,text,integer,text)'::regprocedure
+      'public.finish_openwa_deferred_event(uuid,uuid,text,integer,text)'::regprocedure,
+      'public.prune_openwa_deferred_events(integer)'::regprocedure
     ])
   LOOP
     IF NOT (SELECT prosecdef FROM pg_proc WHERE oid=v_fn)
@@ -39,6 +40,25 @@ BEGIN
     WHERE conname='openwa_deferred_event_identity'
       AND conrelid='public.openwa_deferred_events'::regclass) THEN
     RAISE EXCEPTION 'OpenWA signed event dedupe constraint missing';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='openwa_deferred_events'
+      AND column_name='verified_phone'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid='public.openwa_deferred_events'::regclass
+      AND conname='openwa_deferred_verified_phone_proof'
+  ) THEN
+    RAISE EXCEPTION 'Provider verified phone proof schema missing';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public' AND p.proname='claim_openwa_deferred_events'
+      AND position('verified_phone' in pg_get_function_result(p.oid)) > 0
+  ) THEN
+    RAISE EXCEPTION 'Deferred claim must expose verified phone proof to worker';
   END IF;
   -- Strict bounds prevent accidentally invoking the worker with unlimited
   -- claims, even from a privileged server process.
