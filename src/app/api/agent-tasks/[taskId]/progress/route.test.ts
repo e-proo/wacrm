@@ -38,7 +38,7 @@ function query(name: string) {
       skip_reason: null, failure_code: null, last_outbound_message_id: messageId,
     }],
     ai_agent_task_outbound_messages: [{
-      task_target_id: targetId, status: 'sent', provider: 'openwa', error_code: null,
+      task_target_id: targetId, status: 'sent', provider: 'openwa', error_code: null, error_detail: null,
     }],
   }
   const q = {
@@ -75,6 +75,22 @@ describe('SOF-66 per-recipient progress, read-only and tenant-scoped', () => {
     expect(queries[4].eq).toHaveBeenCalledWith('task_id', taskId)
     for (const q of queries) expect(q.eq).toHaveBeenCalledWith('account_id', acct)
     expect(stubs.requireAgentCapability).toHaveBeenCalledWith('agents.manage_tasks')
+  })
+
+  it('returns only validated guardrail denial code without raw provider details', async () => {
+    stubs.from.mockImplementation((name: string) => {
+      const q = query(name)
+      if (name === 'ai_agent_task_outbound_messages')
+        q.limit.mockResolvedValue({ data: [{
+          task_target_id: targetId, status: 'failed', provider: 'openwa',
+          error_code: 'OPENWA_PRE_DISPATCH_DENIED',
+          error_detail: 'OPENWA_SEND_BLOCKED_BY_WACRM_GUARDRAIL_FIRST_TOUCH_DAILY_CAP',
+        }], error: null })
+      return q
+    })
+    const body = await (await GET(new Request('http://localhost'), ctx)).json()
+    expect(body.recipients[1].denialReason)
+      .toBe('OPENWA_SEND_BLOCKED_BY_WACRM_GUARDRAIL_FIRST_TOUCH_DAILY_CAP')
   })
 
   it('reports a TEST worker hold without sending, claiming or editing Task state', async () => {
