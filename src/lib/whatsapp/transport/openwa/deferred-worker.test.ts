@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 const h = vi.hoisted(() => ({
   processInbound: vi.fn(), applyStatus: vi.fn(), preflight: vi.fn(),
   readInbound: vi.fn(), readStatus: vi.fn(),
+  resolveClient: vi.fn(), nativeLookup: vi.fn(),
 }))
 vi.mock('@/lib/whatsapp/inbound-processor', () => ({
   processNormalizedInboundMessage: h.processInbound,
@@ -14,6 +15,7 @@ vi.mock('./deferred', () => ({
   readDeferredInbound: h.readInbound,
   readDeferredStatus: h.readStatus,
 }))
+vi.mock('./credentials', () => ({ resolveOpenWAClient: h.resolveClient }))
 import { processOpenWADeferredTick } from './deferred-worker'
 
 function job(kind: 'unresolved_identity' | 'unmatched_status' = 'unresolved_identity') {
@@ -22,6 +24,8 @@ function job(kind: 'unresolved_identity' | 'unmatched_status' = 'unresolved_iden
     own_phone_identity: 'owner-phone', instance_id: 'instance',
     event_kind: kind, provider_message_id: 'native1',
     native_chat_id: kind === 'unresolved_identity' ? '123456789012345@lid' : null,
+    verified_phone: null as string | null, verification_source: null as string | null,
+    verified_at: null as string | null,
     normalized_payload: {}, attempt_count: 1, lease_token: 'lease',
   }
 }
@@ -37,6 +41,7 @@ function fixture(options: {
     id: 'conn', status: 'ready', phone_identity: 'owner-phone', instance_id: 'instance',
   } : options.connection
   const rpc = vi.fn(async (fn: string, args: Record<string, unknown>) => {
+    if (fn === 'prune_openwa_deferred_events') return { data: 0, error: null }
     if (fn === 'claim_openwa_deferred_events') return { data: options.jobs ?? [job()], error: null }
     if (fn === 'finish_openwa_deferred_event') {
       finished.push(args)
@@ -74,6 +79,8 @@ beforeEach(() => {
   h.preflight.mockResolvedValue('ready')
   h.applyStatus.mockResolvedValue('updated')
   h.processInbound.mockResolvedValue(undefined)
+  h.resolveClient.mockResolvedValue({ client: { request: h.nativeLookup } })
+  h.nativeLookup.mockResolvedValue({ lid: '123456789012345@lid' })
 })
 
 describe('OpenWA deferred worker', () => {
@@ -119,6 +126,42 @@ describe('OpenWA deferred worker', () => {
       provider: 'openwa', connectionId: 'conn', accountId: 'acct',
       providerMessageId: 'native1', status: 'delivered',
     }))
+    expect(h.processInbound).not.toHaveBeenCalled()
+  })
+  it('reverifies a fresh admin-supplied phone from the exact provider session before CRM dispatch', async () => {
+    const verified = {
+      ...job(), verified_phone: '967700000001', verification_source: 'openwa_reverse_lid',
+      verified_at: new Date().toISOString(),
+    }
+    const f = fixture({ jobs: [verified] })
+    expect(await processOpenWADeferredTick(f.db)).toMatchObject({ completed: 1 })
+    expect(h.nativeLookup).toHaveBeenCalledWith(
+      '/api/sessions/sess/contacts/967700000001/lid', { timeoutMs: 7000 },
+    )
+    expect(h.processInbound).toHaveBeenCalledWith(
+      expect.objectContaining({ from: '967700000001', providerChatId: '123456789012345@lid' }),
+      expect.objectContaining({ wa_id: '967700000001' }),
+      'acct', 'conn', 'owner', '', true, undefined,
+    )
+  })
+  it('does not trust an expired phone proof even if stored by an admin', async () => {
+    const verified = {
+      ...job(), verified_phone: '967700000001', verification_source: 'openwa_reverse_lid',
+      verified_at: new Date(Date.now() - 48 * 3600_000).toISOString(),
+    }
+    const f = fixture({ jobs: [verified] })
+    expect(await processOpenWADeferredTick(f.db)).toMatchObject({ review: 1 })
+    expect(h.processInbound).not.toHaveBeenCalled()
+    expect(h.nativeLookup).not.toHaveBeenCalled()
+  })
+  it('quarantines changed phone-to-LID mappings rather than assigning a wrong contact', async () => {
+    h.nativeLookup.mockResolvedValueOnce({ lid: '444444444444444@lid' })
+    const verified = {
+      ...job(), verified_phone: '967700000001', verification_source: 'openwa_reverse_lid',
+      verified_at: new Date().toISOString(),
+    }
+    const f = fixture({ jobs: [verified] })
+    expect(await processOpenWADeferredTick(f.db)).toMatchObject({ review: 1 })
     expect(h.processInbound).not.toHaveBeenCalled()
   })
   it('defers after a transient DB failure rather than losing the work', async () => {
