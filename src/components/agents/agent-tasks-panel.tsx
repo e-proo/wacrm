@@ -78,6 +78,7 @@ interface TaskRecipientProgress {
   outboundStatus: string | null
   provider: string | null
   errorCode: string | null
+  denialReason?: string | null
   supplierStage?: string | null
   offeredAmount?: string | null
   commissionPerThousand?: string | null
@@ -143,6 +144,15 @@ const taskHoldLabel: Record<string, string> = {
   pilot_guardrail_missing: 'إعدادات OpenWA Pilot لهذه الجلسة غير مكتملة.',
   pilot_recipient_not_verified: 'تعذّر مطابقة رقم واحد أو أكثر مع هوية OpenWA الصحيحة على هذه الجلسة.',
   pilot_recipient_not_approved: 'بعض الأرقام المحددة لم تُعتمد بعد في OpenWA Agent Pilot، أو انتهت صلاحية الاعتماد. اعتمد جميع الأرقام المقصودة قبل التشغيل.',
+}
+const guardrailDenialLabel: Record<string, string> = {
+  OPENWA_SEND_BLOCKED_BY_WACRM_GUARDRAIL_FIRST_TOUCH_DAILY_CAP: 'وصل حد أول تواصل اليومي؛ افتح إعدادات OpenWA وعدّل الحد أثناء توقف Pilot. لم تُرسل الرسالة.',
+  OPENWA_SEND_BLOCKED_BY_WACRM_GUARDRAIL_HOURLY_CAP: 'وصل الحد الساعي العام للجلسة. لم تُرسل الرسالة.',
+  OPENWA_SEND_BLOCKED_BY_WACRM_GUARDRAIL_DAILY_CAP: 'وصل الحد اليومي العام للجلسة. لم تُرسل الرسالة.',
+  OPENWA_SEND_BLOCKED_BY_WACRM_GUARDRAIL_PILOT_WORKLOAD_HOURLY_CAP: 'وصل الحد الساعي لنوع الإرسال في Pilot. لم تُرسل الرسالة.',
+  OPENWA_SEND_BLOCKED_BY_WACRM_GUARDRAIL_PILOT_WORKLOAD_DAILY_CAP: 'وصل الحد اليومي لنوع الإرسال في Pilot. لم تُرسل الرسالة.',
+  OPENWA_SEND_BLOCKED_BY_WACRM_GUARDRAIL_MANUAL_PAUSE: 'الجلسة موقوفة. لم تُرسل الرسالة.',
+  OPENWA_SEND_BLOCKED_BY_WACRM_GUARDRAIL_FAILURE_CIRCUIT_OPEN: 'دائرة الحماية أوقفت الإرسال. لم تُرسل الرسالة.',
 }
 const outboundStatusLabel: Record<string, string> = {
   reserved: 'محجوز', queued: 'بانتظار الإرسال',
@@ -787,7 +797,9 @@ export function AgentTasksPanel() {
                         )}
                         {recipient.skipReason || recipient.failureCode || recipient.errorCode ? (
                           <p className="text-amber-700 dark:text-amber-400">
-                            السبب: {recipient.errorCode || recipient.failureCode || recipient.skipReason}
+                            السبب: {recipient.denialReason
+                               ? guardrailDenialLabel[recipient.denialReason] ?? 'رفض WACRM الإرسال قبل محاولة التوصيل.'
+                               : recipient.errorCode || recipient.failureCode || recipient.skipReason}
                           </p>
                         ) : null}
                       </div>
