@@ -410,6 +410,15 @@ export async function startServicePromotionTask(input: {
       p_created_by: input.actorUserId,
     },
   )
+  if (createError?.code === '23505') {
+    // Covers the DB unique index when two administrators launch overlapping
+    // campaigns concurrently, after both read the same "no active Task".
+    throw new ServicePromotionTaskError(
+      'SERVICE_PROMOTION_ALREADY_ACTIVE',
+      'An overlapping campaign was created concurrently. Refresh its status before proceeding.',
+      409,
+    )
+  }
   if (createError) throw createError
   if (typeof taskId !== 'string' || !taskId) {
     throw new ServicePromotionTaskError(
