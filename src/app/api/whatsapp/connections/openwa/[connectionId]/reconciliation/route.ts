@@ -67,7 +67,7 @@ export async function POST(request: Request, context: Context) {
         .select('id,event_kind,native_chat_id,session_id,own_phone_identity,instance_id')
         .eq('account_id', state.accountId).eq('connection_id', state.connectionId)
         .eq('id', body.job_id).eq('event_kind', 'unresolved_identity')
-        .eq('state', 'review').maybeSingle()
+        .in('state', ['pending', 'review']).maybeSingle()
       if (jobError || !job || !job.native_chat_id || !/^[0-9]{5,20}@lid$/.test(job.native_chat_id)) {
         return NextResponse.json({ error: 'Unresolved identity not available for verification' }, { status: 409, headers: noStore })
       }
@@ -106,7 +106,7 @@ export async function POST(request: Request, context: Context) {
           last_error_code: null, updated_at: now,
         })
         .eq('account_id', state.accountId).eq('connection_id', state.connectionId)
-        .eq('id', job.id).eq('state', 'review')
+        .eq('id', job.id).in('state', ['pending', 'review'])
         .select('id').maybeSingle()
       if (ue || !updated) {
         return NextResponse.json({ error: 'Provider verification succeeded but the review state changed' },
