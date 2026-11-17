@@ -47,8 +47,10 @@ BEGIN
   END IF;
   SELECT pg_get_functiondef('public.get_openwa_test_guardrail_usage(uuid,uuid)'::regprocedure)
     INTO v_rpc;
-  IF position('SECURITY INVOKER' IN v_rpc)=0 OR position('account_id = p_account_id' IN v_rpc)=0
-     OR position('connection_id = p_connection_id' IN v_rpc)=0 THEN
+  IF (SELECT p.prosecdef FROM pg_proc p
+       WHERE p.oid='public.get_openwa_test_guardrail_usage(uuid,uuid)'::regprocedure)
+     OR position('account_id=p_account_id' IN v_rpc)=0
+     OR position('connection_id=p_connection_id' IN v_rpc)=0 THEN
     RAISE EXCEPTION 'TEST usage RPC missing scoped read-only contract';
   END IF;
   IF public.get_openwa_test_guardrail_usage(
