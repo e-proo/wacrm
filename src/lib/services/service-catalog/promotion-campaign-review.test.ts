@@ -60,7 +60,12 @@ function fakeDb(options: { provider?: string; template?: boolean; paused?: boole
             }] } }
           : table === 'whatsapp_connection_guardrails'
             ? { manual_paused: options.paused ?? false,
-              circuit_open_until: null, pilot_enabled: true } : null
+              circuit_open_until: null, pilot_enabled: true }
+          : table === 'ai_runtime_policies'
+            ? { multi_agent_enabled: true, native_tools_enabled: true,
+                proposal_tools_enabled: true, recovery_worker_enabled: true,
+                outbound_task_delivery_enabled: true, kill_switch: false,
+                task_worker_enabled: true } : null
     const chain = {
       select: () => chain,
       eq: (key: string, value: unknown) => {
