@@ -31,6 +31,13 @@ interface PilotState extends Record<string, unknown> {
   unsettled_outbound: number
   same_identity_ready_connections: number
   last_denial?: { workload: string; reason: string; created_at: string } | null
+  guardrail_usage?: {
+    hourly_reserved: number
+    daily_reserved: number
+    distinct_recipients_daily: number
+    workloads: Record<string, { hourly_reserved: number; daily_reserved: number }>
+    last_blocked?: { reason: string; workload: string; created_at: string } | null
+  }
   error?: string
   guardrails: {
     hourly_cap: number
@@ -280,7 +287,7 @@ export function OpenWAPilotControls({
   const feasibleCapacity = Number.isInteger(messagesPerRecipient) &&
     messagesPerRecipient >= 1 &&
     messagesPerRecipient <= OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT &&
-    requiredMessages <= OPENWA_TEST_PILOT_MAX_HOURLY
+    Number.isSafeInteger(requiredMessages)
   const agentMissingCaps = state && selectedCount > 0
     ? missingPilotCohortCaps(state.guardrails, selectedCount, 'agent', messagesPerRecipient) : []
   const manualMissingCaps = state && selectedCount > 0
@@ -492,7 +499,7 @@ export function OpenWAPilotControls({
             </p>
             {selectedCount > 0 && !feasibleCapacity &&
               <p role="alert" className="text-xs text-destructive">
-                الحد الساعي الأقصى 100 رسالة. اختر عددًا من 1 إلى {Math.floor(OPENWA_TEST_PILOT_MAX_HOURLY / selectedCount)} رسالة لكل جهة، أو قلّل الجهات.
+                اختر عددًا صحيحًا من 1 إلى {OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT} رسالة لكل جهة، ثم اضبط حدود الجلسة.
               </p>}
           </div>
           <div className="flex items-start gap-2">
@@ -592,13 +599,59 @@ export function OpenWAPilotControls({
               onClick={() => void verifyGateway()}><RefreshCw className="me-2 size-4" />{w('devPilotReverify')}</Button>}
           </div>}
 
-        {state.pilot_enabled && state.configured && <details className="rounded-lg border px-4 py-3"
+        {state.guardrail_usage && <section className="space-y-2 rounded-lg border p-3" aria-label="استهلاك الإرسال">
+           <p className="text-sm font-semibold">استهلاك حدود الإرسال — آخر ساعة / 24 ساعة</p>
+           {([
+             ['إجمالي الساعة', state.guardrail_usage.hourly_reserved,
+               Math.min(state.guardrails.hourly_cap, state.guardrails.warmup_hourly_cap)],
+             ['إجمالي 24 ساعة', state.guardrail_usage.daily_reserved,
+               Math.min(state.guardrails.daily_cap, state.guardrails.warmup_daily_cap)],
+             ['جهات مختلفة خلال 24 ساعة', state.guardrail_usage.distinct_recipients_daily,
+               state.guardrails.first_touch_daily_cap],
+           ] as const).map(([label, used, cap]) => (
+             <div key={label} className="flex items-center justify-between gap-2 rounded-md bg-muted/40 p-2 text-xs">
+               <span>{label}</span>
+               <span className={used >= cap ? 'font-semibold text-amber-700 dark:text-amber-400' : 'font-medium'}>
+                 {used} / {cap} · المتبقي {Math.max(0, cap - used)}
+               </span>
+             </div>
+           ))}
+           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+             {([['manual','عادي'],['agent','وكيل'],['automation','أتمتة'],
+               ['broadcast','بث'],['api','رسائل النظام']] as const).map(([kind, label]) => (
+               <div key={kind} className="rounded-md border p-2 text-xs">
+                 <p className="font-medium">{label}</p>
+                 <p className="text-muted-foreground">
+                   {state.guardrail_usage?.workloads?.[kind]?.hourly_reserved ?? 0} ساعة ·
+                   {' '}{state.guardrail_usage?.workloads?.[kind]?.daily_reserved ?? 0} يوم
+                 </p>
+               </div>
+             ))}
+           </div>
+           {state.guardrail_usage.last_blocked && (
+             <p role="alert" className="text-sm text-amber-700 dark:text-amber-400">
+               آخر منع: {({
+                 first_touch_daily_cap: 'بلوغ حد أول تواصل اليومي',
+                 hourly_cap: 'بلوغ الحد الساعي العام',
+                 daily_cap: 'بلوغ الحد اليومي العام',
+                 pilot_workload_hourly_cap: 'بلوغ الحد الساعي لنوع الإرسال',
+                 pilot_workload_daily_cap: 'بلوغ الحد اليومي لنوع الإرسال',
+                 manual_pause: 'الجلسة موقوفة',
+                 failure_circuit_open: 'دائرة الحماية مفتوحة',
+               } as Record<string, string>)[state.guardrail_usage.last_blocked.reason]
+                 ?? 'منع وفق سياسة الحماية'} · {state.guardrail_usage.last_blocked.workload}
+             </p>
+           )}
+           <p className="text-xs text-muted-foreground">الحجوزات المحسوبة ليست ضمانًا لوصول الرسائل. التحديث لا يرسل شيئًا.</p>
+         </section>}
+
+         {state.pilot_enabled && state.configured && <details className="rounded-lg border px-4 py-3"
           open={advancedOpen} onToggle={event => setAdvancedOpen(event.currentTarget.open)}>
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium">
             <span className="flex items-center gap-2"><SlidersHorizontal className="size-4" />{w('devPilotAdvanced')}</span>
             <ChevronDown className="size-4 text-muted-foreground" />
           </summary>
-          <p className="mt-2 text-xs text-muted-foreground">{w('devPilotLimitsHelp')}</p>
+          <p className="mt-2 text-xs text-muted-foreground">اختر حدود الساعة واليوم وأول تواصل المناسبة لاختبارات TEST دون سقف 100/1000 الثابت. الأتمتة والبث ورسائل النظام تستخدم حد الجلسة العام.</p>
           <p className="mt-2 text-xs font-medium">القيم المحفوظة للجلسة: {state.guardrails.hourly_cap} رسالة/ساعة، {state.guardrails.daily_cap} رسالة/يوم؛ الوكيل: {state.guardrails.pilot_agent_hourly_cap ?? state.guardrails.hourly_cap}/ساعة، {state.guardrails.pilot_agent_daily_cap ?? state.guardrails.daily_cap}/يوم. تحديث البيانات متاح أسفل القسم.</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {([
@@ -632,7 +685,7 @@ export function OpenWAPilotControls({
             ))}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            السقف القابل للضبط في TEST هو 100 رسالة/ساعة و1000 رسالة/يوم للجلسة، وتُقيَّد رسائل الوكيل والرسائل العادية بالحد المشترك. يبقى سقف أول تواصل 10 أرقام جديدة/يوم والتباعد 15 ثانية على الأقل؛ لا تعني سعة 1000 رسالة موافقةً على مراسلة 1000 عميل جديد. يجب إيقاف الجلسة وحفظ الحدود بموافقة المسؤول قبل التفعيل.
+            يمكنك اختيار أي حد موجب متوافق مع التخزين السليم على TEST للجلسة، وتُقيَّد رسائل الوكيل والرسائل العادية بالحد المشترك. حد أول تواصل قابل للتعديل أيضًا والتباعد 15 ثانية على الأقل؛ لا تعني سعة 1000 رسالة موافقةً على مراسلة 1000 عميل جديد. يجب إيقاف الجلسة وحفظ الحدود بموافقة المسؤول قبل التفعيل.
           </p>
           <Button className="mt-3" size="sm" variant="outline" disabled={running || !state.paused || state.active_admissions > 0}
             onClick={() => void submit('limits')}>{w('devPilotSaveLimits')}</Button>
