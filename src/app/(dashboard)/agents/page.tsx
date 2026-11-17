@@ -16,6 +16,7 @@ import {
   Activity,
   Brain,
   Route,
+  Megaphone,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AiPlayground } from '@/components/agents/ai-playground';
@@ -27,6 +28,7 @@ import { AgentRoutesPanel } from '@/components/agents/agent-routes-panel';
 import { TrustedAdminsPanel } from '@/components/agents/trusted-admins-panel';
 import { AgentRunsPanel } from '@/components/agents/agent-runs-panel';
 import { AgentTasksPanel } from '@/components/agents/agent-tasks-panel';
+import { ServicePromotionComposer } from '@/components/agents/service-promotion-composer';
 import { ChangeRequestsPanel } from '@/components/agents/change-requests-panel';
 import { ObservabilityPanel } from '@/components/agents/observability-panel';
 import { IntentsPanel } from '@/components/agents/intents-panel';
@@ -43,6 +45,7 @@ type Tab =
   | 'trusted_admins'
   | 'runs'
   | 'tasks'
+  | 'promotion'
   | 'change_requests'
   | 'observability'
   | 'intents';
@@ -95,7 +98,7 @@ export default function AgentsPage() {
           onValueChange={(v) => setTab(v as Tab)}
           className="mt-6"
         >
-          <TabsList>
+          <TabsList className="flex w-full max-w-full justify-start overflow-x-auto">
             <TabsTrigger value="playground">
               <Sparkles className="me-1.5 h-4 w-4" /> {t('tabPlayground')}
             </TabsTrigger>
@@ -122,6 +125,11 @@ export default function AgentsPage() {
             {canSeeMultiAgent && (
               <TabsTrigger value="tasks">
                 <ListTodo className="me-1.5 h-4 w-4" /> مهام الوكلاء
+              </TabsTrigger>
+            )}
+            {canSeeMultiAgent && (
+              <TabsTrigger value="promotion">
+                <Megaphone className="me-1.5 h-4 w-4" /> ترويج الخدمات
               </TabsTrigger>
             )}
             {canSeeMultiAgent && (
@@ -195,6 +203,12 @@ export default function AgentsPage() {
           {canSeeMultiAgent && (
             <TabsContent value="tasks" className="mt-4">
               <AgentTasksPanel />
+            </TabsContent>
+          )}
+
+          {canSeeMultiAgent && (
+            <TabsContent value="promotion" className="mt-4">
+              <ServicePromotionComposer />
             </TabsContent>
           )}
 
