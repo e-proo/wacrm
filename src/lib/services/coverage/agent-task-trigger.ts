@@ -25,6 +25,9 @@ function buildCoverageSourcingTriggerHandler(version: 1 | 2): AgentTaskTriggerHa
       if (typeof requestId !== 'string' || !UUID_RE.test(requestId)) {
         throw new Error('COVERAGE_SOURCING_TRIGGER_REQUEST_ID_REQUIRED')
       }
+      if (version === 2 && !UUID_RE.test(String(definition.config.whatsappConnectionId ?? ''))) {
+        throw new Error('COVERAGE_SOURCING_TRIGGER_CONNECTION_REQUIRED')
+      }
       return
     }
 
@@ -38,10 +41,14 @@ function buildCoverageSourcingTriggerHandler(version: 1 | 2): AgentTaskTriggerHa
 
     const subjectType = definition.filters?.subject_type
     if (
-      subjectType !== undefined &&
-      subjectType !== 'coverage_request'
+      subjectType !== 'coverage_request' ||
+      !UUID_RE.test(String(definition.filters?.subject_id ?? '')) ||
+      definition.filters?.subject_id !== definition.config.coverageRequestId
     ) {
       throw new Error('COVERAGE_SOURCING_TRIGGER_SUBJECT_FILTER_INVALID')
+    }
+    if (version === 2 && !UUID_RE.test(String(definition.config.whatsappConnectionId ?? ''))) {
+      throw new Error('COVERAGE_SOURCING_TRIGGER_CONNECTION_REQUIRED')
     }
   },
 
@@ -51,12 +58,26 @@ function buildCoverageSourcingTriggerHandler(version: 1 | 2): AgentTaskTriggerHa
         ? requestIdFromBusinessEvent(firing)
         : requestIdFromConfig(firing.config)
 
+    const pinnedConnection = firing.config.whatsappConnectionId
+    if (version === 2 && !UUID_RE.test(String(pinnedConnection ?? ''))) {
+      throw new Error('COVERAGE_SOURCING_SCHEDULE_CONNECTION_REQUIRED')
+    }
+    const contacts = firing.config.selectedContactIds
+    if (version === 2 && (
+      !Array.isArray(contacts) || contacts.length > 20 ||
+      !contacts.every(id => typeof id === 'string' && UUID_RE.test(id)) ||
+      new Set(contacts).size !== contacts.length
+    )) {
+      throw new Error('COVERAGE_SOURCING_SCHEDULE_CONTACTS_INVALID')
+    }
     const result = await startCoverageSourcingTask({
       accountId: firing.accountId,
       coverageRequestId,
       agentId: firing.agentId,
       actorUserId: firing.createdBy,
       approvedRevisionId: firing.approvedRevisionId,
+      whatsappConnectionId: version === 2 ? pinnedConnection as string : null,
+      selectedContactIds: version === 2 ? contacts as string[] : null,
       requestedTaskTypeVersion: version,
       trigger: {
         triggerType:
@@ -88,7 +109,12 @@ function requestIdFromBusinessEvent(
     !COVERAGE_REQUEST_TRIGGER_EVENTS.has(event.eventType) ||
     event.eventVersion !== 1 ||
     event.subjectType !== 'coverage_request' ||
-    !UUID_RE.test(event.subjectId)
+    !UUID_RE.test(event.subjectId) ||
+    firing.config.coverageRequestId !== event.subjectId ||
+    firing.filters.subject_type !== 'coverage_request' ||
+    firing.filters.subject_id !== event.subjectId ||
+    (typeof event.payload.account_id === 'string' &&
+      event.payload.account_id !== firing.accountId)
   ) {
     throw new Error('COVERAGE_SOURCING_TRIGGER_EVENT_INVALID')
   }

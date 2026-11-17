@@ -138,6 +138,19 @@ export async function startCoverageSourcingTask(
     coverageRequestId: input.coverageRequestId,
   })
 
+  // A reused Task must still match the frozen reviewed revision.
+  if (input.trigger && input.approvedRevisionId) {
+    const { data: pinned, error: pinError } = await db.from('ai_agents')
+      .select('id,status,published_revision_id')
+      .eq('account_id', input.accountId).eq('id', input.agentId).maybeSingle()
+    if (pinError) throw pinError
+    if (!pinned || pinned.status !== 'active' ||
+      pinned.published_revision_id !== input.approvedRevisionId) {
+      throw new CoverageSourcingTaskError('COVERAGE_SOURCING_SCHEDULE_REVISION_CHANGED',
+        'The reviewed agent revision changed and requires approval.')
+    }
+  }
+
   const { data: existingTask, error: existingError } = await db
     .from('ai_agent_tasks')
     .select('id, agent_id, agent_revision_id, target_policy')
@@ -159,6 +172,11 @@ export async function startCoverageSourcingTask(
       agent_id: string
       agent_revision_id: string
       target_policy: Record<string, unknown> | null
+    }
+    if (input.trigger && input.approvedRevisionId &&
+        row.agent_revision_id !== input.approvedRevisionId) {
+      throw new CoverageSourcingTaskError('COVERAGE_SOURCING_SCHEDULE_REVISION_CHANGED',
+        'The active Task belongs to another approved agent revision.')
     }
     if (row.agent_id !== input.agentId) {
       throw new CoverageSourcingTaskError(
@@ -402,7 +420,7 @@ export async function startCoverageSourcingTask(
       .eq('id', connectionId).maybeSingle()
     if (chosenError) throw chosenError
     if (chosen?.provider === 'openwa' &&
-        input.trigger == null && !explicitContacts) {
+        !explicitContacts) {
       throw new CoverageSourcingTaskError(
         'COVERAGE_SOURCING_EXPLICIT_CONTACT_REQUIRED',
         'Select verified CRM contacts for this manual OpenWA Task.', 400,
