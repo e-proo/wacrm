@@ -108,13 +108,25 @@ export async function inspectServicePromotionCampaign(
   }
   const binding = config.bindings.find(item =>
     item.taskType === 'services.promotion' && item.taskTypeVersion === 2)
-  if (!binding || binding.targetScope.requiredTagIds.length === 0 ||
-      (binding.targetScope.serviceIds.length > 0 &&
-        !binding.targetScope.serviceIds.includes(input.serviceId)) ||
-      binding.targetScope.regionIds.length > 0 ||
-      binding.targetScope.domainSelector !== null ||
-      binding.approvalMode === 'none') {
+  // A published Revision N is unrelated to the Task Type V2 version. Keep
+  // mismatched Task versions distinct from a correctly published V2 with
+  // an incomplete audience. Never bypass the mandatory frozen tag cohort.
+  if (!binding) {
     throw new ServicePromotionReviewError('SERVICE_PROMOTION_V2_BINDING_REQUIRED')
+  }
+  if (binding.targetScope.requiredTagIds.length === 0) {
+    throw new ServicePromotionReviewError('SERVICE_PROMOTION_SEGMENT_REQUIRED')
+  }
+  if (binding.targetScope.serviceIds.length > 0 &&
+      !binding.targetScope.serviceIds.includes(input.serviceId)) {
+    throw new ServicePromotionReviewError('SERVICE_PROMOTION_SERVICE_SCOPE_DENIED')
+  }
+  if (binding.targetScope.regionIds.length > 0 ||
+      binding.targetScope.domainSelector !== null) {
+    throw new ServicePromotionReviewError('SERVICE_PROMOTION_SELECTOR_UNSUPPORTED')
+  }
+  if (binding.approvalMode === 'none') {
+    throw new ServicePromotionReviewError('SERVICE_PROMOTION_APPROVAL_REQUIRED')
   }
 
   const ids = await resolveServicePromotionAudience(db, {
