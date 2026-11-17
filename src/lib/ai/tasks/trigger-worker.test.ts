@@ -132,13 +132,14 @@ describe('trigger worker failure isolation', () => {
   })
 
   it('records a handler failure with the database claim owner and bounded retry delay', async () => {
-    const owner = 'scheduler:claim:00000000-0000-4000-8000-000000000186'
+    let owner = ''
     start.mockRejectedValue(new Error('temporary handler failure'))
     rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
       if (name === 'materialize_agent_task_trigger_firings') {
         return { data: { schedule_firings: 0, business_event_firings: 0 }, error: null }
       }
       if (name === 'claim_next_agent_task_trigger_firing') {
+        owner = String(args.p_worker_id) + ':00000000-0000-4000-8000-000000000186'
         return { data: { id: 'firing-1', claim_owner: owner }, error: null }
       }
       if (name === 'fail_agent_task_trigger_firing') {
@@ -159,13 +160,13 @@ describe('trigger worker failure isolation', () => {
 
   it('stops before invoking a handler when the claimed firing cannot be normalized', async () => {
     normalizeFiring.mockReturnValue(null)
-    rpc.mockImplementation(async (name: string) => {
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
       if (name === 'materialize_agent_task_trigger_firings') {
         return { data: { schedule_firings: 0, business_event_firings: 0 }, error: null }
       }
       if (name === 'claim_next_agent_task_trigger_firing') {
         return {
-          data: { id: 'firing-1', claim_owner: 'scheduler:claim:00000000-0000-4000-8000-000000000186' },
+          data: { id: 'firing-1', claim_owner: String(args.p_worker_id) + ':00000000-0000-4000-8000-000000000186' },
           error: null,
         }
       }
