@@ -101,6 +101,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-schedule-policy-smoke.sql
       - name: Verify reviewed tenant-scoped schedule controls
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-trigger-reviewed-control-smoke.sql
+      - name: Verify scheduling policy edit/cancel and claimed Task preservation
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-trigger-policy-lifecycle-smoke.sql
       - name: Seed shared Agent Task account fixture
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-shared-account-fixture.sql
       - name: Verify Agent Task budgets and abuse protection
