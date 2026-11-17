@@ -5,6 +5,19 @@
 **Repository/branch inspected:** `e-proo/wacrm` / `refactor/service-platform-v2`. **Code/CI baseline:** `779c7910677049dd5a62394440861a1e9051c513`; [CI success](https://github.com/e-proo/wacrm/actions/runs/44005517505). **Date:** 2026-11-17.  
 **Dependencies:** [Master V1 plan](10_AI_AGENT_TASK_AND_OUTREACH_PLATFORM_V1.md), [Coverage bounded acceptance pack](20_SOF66_PHASE18_PHASE19_TEST_ACCEPTANCE_PACK.md), SOF-16 completed at one-supplier TEST level. SOF-66/SOF-23/SOF-24 are **not signed off** simply by that pack.
 
+## 0. Delivery sequence — code and technical verification before live acceptance
+
+**User-approved gate ordering (2026-11-17):**
+
+1. **Code only:** implement and review SP-0..SP-5 in bounded commits, preserving WACRM's existing Agent Task, CRM and WhatsApp pipelines. New launch controls remain disabled until authorization is complete.
+2. **Technical evidence:** unit/API/provider/integration/security/replay tests, lint/typecheck/build, TEST read-only schema checks and additive migrations/clean replay only if required; every gate must have an exact HEAD + CI result.
+3. **No-send dry run:** inspect exact audience, template/connection/consent eligibility, quotas, opt-outs, handoff/Intent and rollback using mocks or safe TEST reads, without creating a provider dispatch.
+4. **Live pilot LAST (SP-7 / SOF-25):** start only after all previous evidence passes and the TEST operator separately approves exact contacts, connection, workload caps and rollback.
+
+**Current engineering checkpoint:** [24_SOF17_SERVICE_PROMOTION_CODE_FIRST_CHECKPOINT.md](24_SOF17_SERVICE_PROMOTION_CODE_FIRST_CHECKPOINT.md). Initial safety code, frozen-audience handling, read-only preview and automated tests are in-progress; this is **not** completion of Phase 12, CI signoff, Phase 20 acceptance, or a send authorization.
+
+---
+
 ## 1. Product outcome & non-goals
 
 Deliver an agent that converts an **operator-approved, bounded WhatsApp offer** for one active CRM service into measurable commercial outcomes: delivered/contacted → inbound reply → qualified `Intent` or Service Request where the domain allows → staff handoff or auditable not-interested/opt-out outcome → factual Task/Target completion. A sent message is **not** a sale, successful lead, or accepted service order.
