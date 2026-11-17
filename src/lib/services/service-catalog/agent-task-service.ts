@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { createHash } from 'node:crypto'
-import { resolveServicePromotionAudience } from './promotion-audience'
+import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
+import { inspectServicePromotionCampaign, assertPromotionReviewFresh, ServicePromotionReviewError } from './promotion-campaign-review'
 import { loadAccountRuntimePolicy } from '@/lib/ai/runtime/runtime-policy'
 import {
   isAgentBuilderV2Configuration,
@@ -15,6 +16,7 @@ import {
 import type { AgentTaskStartSource } from '@/lib/ai/tasks/triggers'
 import {
   SERVICE_PROMOTION_TASK_TYPE,
+  SERVICE_PROMOTION_TASK_TYPE_V2,
   loadServicePromotionContext,
 } from './agent-task'
 
@@ -51,7 +53,7 @@ function findBinding(
     bindings.find(
       (binding) =>
         binding.taskType === SERVICE_PROMOTION_TASK_TYPE.key &&
-        binding.taskTypeVersion === SERVICE_PROMOTION_TASK_TYPE.version,
+        binding.taskTypeVersion === SERVICE_PROMOTION_TASK_TYPE_V2.version,
     ) ?? null
   )
 }
@@ -62,12 +64,41 @@ export async function startServicePromotionTask(input: {
   agentId: string
   actorUserId: string | null
   trigger?: AgentTaskStartSource
+  review?: {
+    connectionId: string
+    fingerprint: string
+    reviewedAt: string
+    submissionId: string
+    consentAcknowledged: boolean
+    approvalAcknowledged: boolean
+  }
 }): Promise<{
   taskId: string
   agentId: string
   revisionId: string
   created: boolean
 }> {
+  // SP-2/3 are code-first. Block ALL historical manual/trigger bypasses
+  // unless a TEST operator has separately enabled the bounded live gate.
+  if (!isOpenWATestProject() ||
+      process.env.WACRM_SERVICE_PROMOTION_PILOT_ALLOW_LIVE !== '1') {
+    throw new ServicePromotionTaskError(
+      'SERVICE_PROMOTION_LIVE_ACCEPTANCE_NOT_AUTHORIZED',
+      'Service Promotion dispatch is disabled until the bounded TEST pilot is approved.',
+      403,
+    )
+  }
+  const reviewInput = input.review
+  if (!reviewInput || input.trigger || !UUID_RE.test(reviewInput.connectionId) ||
+      !UUID_RE.test(reviewInput.submissionId) ||
+      reviewInput.consentAcknowledged !== true ||
+      reviewInput.approvalAcknowledged !== true) {
+    throw new ServicePromotionTaskError(
+      'SERVICE_PROMOTION_REVIEW_REQUIRED',
+      'Manually review and approve a pinned Service Promotion V2 campaign before launch.',
+      409,
+    )
+  }
   const db = supabaseAdmin()
   const runtimePolicy = await loadAccountRuntimePolicy(db, input.accountId)
   if (
@@ -202,13 +233,13 @@ export async function startServicePromotionTask(input: {
   ) {
     throw new ServicePromotionTaskError(
       'SERVICE_PROMOTION_SELECTOR_UNSUPPORTED',
-      'Service promotion V1 accepts frozen tag segments only.',
+      'Service promotion accepts frozen tag segments only.',
     )
   }
 
   const manifest = CURRENT_AGENT_TASK_PLATFORM.taskTypes.get(
     SERVICE_PROMOTION_TASK_TYPE.key,
-    SERVICE_PROMOTION_TASK_TYPE.version,
+    SERVICE_PROMOTION_TASK_TYPE_V2.version,
   )
   if (!manifest) {
     throw new ServicePromotionTaskError(
@@ -241,29 +272,60 @@ export async function startServicePromotionTask(input: {
     )
   }
 
+  // Re-evaluate the exact approved audience, service snapshot, published
+  // revision, pinned provider, provider admission and Meta template. If any
+  // relevant scope changes after preview, the operator must review again.
+  let campaign
+  try {
+    campaign = await inspectServicePromotionCampaign(db, {
+      accountId: input.accountId,
+      serviceId: input.serviceId,
+      agentId: input.agentId,
+      connectionId: reviewInput.connectionId,
+    })
+    assertPromotionReviewFresh({
+      fingerprint: reviewInput.fingerprint,
+      reviewedAt: reviewInput.reviewedAt,
+      actualFingerprint: campaign.fingerprint,
+    })
+  } catch (error) {
+    if (error instanceof ServicePromotionReviewError) {
+      throw new ServicePromotionTaskError(error.code, error.message, error.status)
+    }
+    throw error
+  }
+  if (campaign.blockers.length > 0 ||
+      campaign.agent.revisionId !== revisionId ||
+      campaign.binding.maxTargets !== binding.maxTargets) {
+    throw new ServicePromotionTaskError(
+      'SERVICE_PROMOTION_REVIEW_BLOCKED',
+      'Review blocked: ' + [...campaign.blockers, 'revision_or_caps_changed']
+        .filter(Boolean).join(', '),
+    )
+  }
   const frozenTags = [...binding.targetScope.requiredTagIds].sort()
   const excludedTags = [...binding.targetScope.excludedTagIds].sort()
-  const segmentKey = frozenTags.join(',')
-  // A bounded stable identity prevents unbounded tag/source strings from
-  // exceeding SQL's idempotency-key cap. The key includes the source firing.
+  const frozenContactIds = [...campaign.audience.ids]
+  if (frozenContactIds.length === 0) {
+    throw new ServicePromotionTaskError('SERVICE_PROMOTION_AUDIENCE_EMPTY',
+      'No eligible contacts are approved.', 409)
+  }
   const campaignDigest = createHash('sha256').update(JSON.stringify({
-    accountId: input.accountId,
-    serviceId: input.serviceId,
-    segmentKey,
-    excludedTags,
-    agentId: input.agentId,
-    revisionId,
-    sourceKey: input.trigger?.sourceKey ?? 'manual',
+    accountId: input.accountId, serviceId: input.serviceId, agentId: input.agentId,
+    revisionId, connectionId: reviewInput.connectionId,
+    submissionId: reviewInput.submissionId,
   })).digest('hex')
-  const idempotencyKey = 'services:promotion:' + campaignDigest
-  const correlationId = 'services:promotion:' + campaignDigest
+  const idempotencyKey = 'services:promotion:v2:' + campaignDigest
+  const correlationId = 'services:promotion:v2:' + campaignDigest
 
+  // Cross-version overlap: a previous V1 promotion must not silently share
+  // its contacts or override the operator's new provider choice.
   const { data: existing, error: existingError } = await db
     .from('ai_agent_tasks')
     .select('id, agent_id, agent_revision_id, idempotency_key')
     .eq('account_id', input.accountId)
     .eq('task_type', SERVICE_PROMOTION_TASK_TYPE.key)
-    .eq('task_type_version', SERVICE_PROMOTION_TASK_TYPE.version)
+    .in('task_type_version', [1, 2])
     .in('status', [...ACTIVE_TASK_STATUSES])
     .contains('task_context', { serviceId: input.serviceId })
     .order('created_at', { ascending: false })
@@ -274,34 +336,14 @@ export async function startServicePromotionTask(input: {
     if (existing.idempotency_key !== idempotencyKey ||
         existing.agent_id !== input.agentId ||
         existing.agent_revision_id !== revisionId) {
-      throw new ServicePromotionTaskError(
-        'SERVICE_PROMOTION_ALREADY_ACTIVE',
-        'A different campaign is already active for this service. Review or close it before starting another.',
-      )
+      throw new ServicePromotionTaskError('SERVICE_PROMOTION_ALREADY_ACTIVE',
+        'A different campaign is already active for this service.')
     }
-    return {
-      taskId: existing.id,
-      agentId: existing.agent_id,
-      revisionId: existing.agent_revision_id,
-      created: false,
-    }
+    return { taskId: existing.id, agentId: existing.agent_id,
+      revisionId: existing.agent_revision_id, created: false }
   }
 
-  // Resolve and freeze EVERY contact now, not when the worker executes.
-  // No live send is performed here. Consent/suppression/transport policies
-  // must still be revalidated by materialization and outbound admission.
-  const frozenContactIds = await resolveServicePromotionAudience(db, {
-    accountId: input.accountId,
-    requiredTagIds: frozenTags,
-    excludedTagIds: excludedTags,
-    maxContacts: binding.maxTargets,
-  })
-  if (frozenContactIds.length === 0) {
-    throw new ServicePromotionTaskError(
-      'SERVICE_PROMOTION_AUDIENCE_EMPTY',
-      'The approved tagged audience has no eligible candidate contacts.',
-    )
-  }
+  const approvedAt = new Date().toISOString()
   const taskContext = {
     serviceId: input.serviceId,
     service: { ...promotionContext.service },
@@ -310,11 +352,24 @@ export async function startServicePromotionTask(input: {
       excludedTagIds: excludedTags,
       frozenContactIds,
     },
+    promotionApproval: {
+      actorUserId: input.actorUserId,
+      approvedAt,
+      reviewedAt: reviewInput.reviewedAt,
+      fingerprint: campaign.fingerprint,
+      submissionId: reviewInput.submissionId,
+      provider: campaign.connection.provider,
+      connectionId: reviewInput.connectionId,
+      consentBasis: 'operator_attestation',
+      consentPlatformVerified: campaign.connection.provider === 'openwa',
+      metaTemplateLocalStatus: campaign.template?.status ?? null,
+    },
   }
   const targetPolicy = {
     requiredTagIds: frozenTags,
     excludedTagIds: excludedTags,
     frozenContactIds,
+    whatsappConnectionId: reviewInput.connectionId,
     maxNewContactsPerHour: binding.maxNewContactsPerHour,
     maxContactsPerAgentPerDay: binding.maxContactsPerAgentPerDay,
     cooldownMinutes: binding.cooldownMinutes,
@@ -335,7 +390,7 @@ export async function startServicePromotionTask(input: {
     {
       p_account_id: input.accountId,
       p_task_type: SERVICE_PROMOTION_TASK_TYPE.key,
-      p_task_type_version: SERVICE_PROMOTION_TASK_TYPE.version,
+      p_task_type_version: SERVICE_PROMOTION_TASK_TYPE_V2.version,
       p_agent_id: input.agentId,
       p_agent_revision_id: revisionId,
       p_trigger_type: input.trigger?.triggerType ?? 'manual',
@@ -346,7 +401,7 @@ export async function startServicePromotionTask(input: {
       p_task_context: taskContext,
       p_target_policy: targetPolicy,
       p_channel: 'whatsapp',
-      p_max_targets: binding.maxTargets,
+      p_max_targets: frozenContactIds.length,
       p_max_attempts_per_target: binding.maxAttemptsPerTarget,
       p_budget_policy: budgetPolicy,
       p_scheduled_at: null,
