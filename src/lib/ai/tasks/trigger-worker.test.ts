@@ -177,3 +177,56 @@ describe('trigger worker failure isolation', () => {
     expect(start).not.toHaveBeenCalled()
   })
 })
+
+describe('trigger worker dead-letter and database failures', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    normalizeFiring.mockReturnValue({
+      firingId: 'firing-1',
+      taskType: 'coverage',
+      taskTypeVersion: 1,
+    })
+  })
+
+  it('counts a dead-letter outcome without treating it as a completed task', async () => {
+    start.mockRejectedValue(new Error('permanent handler failure'))
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'materialize_agent_task_trigger_firings') {
+        return { data: { schedule_firings: 0, business_event_firings: 0 }, error: null }
+      }
+      if (name === 'claim_next_agent_task_trigger_firing') {
+        return {
+          data: {
+            id: 'firing-1',
+            claim_owner: String(args.p_worker_id) + ':00000000-0000-4000-8000-000000000186',
+          },
+          error: null,
+        }
+      }
+      if (name === 'fail_agent_task_trigger_firing') {
+        expect(args.p_error).toBe('permanent handler failure')
+        expect(args.p_delay_secs).toBe(60)
+        return { data: 'dead', error: null }
+      }
+      throw new Error('Unexpected RPC: ' + name)
+    })
+
+    const result = await processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 1 })
+    expect(result).toMatchObject({ claimed: 1, completed: 0, failed: 0, dead: 1 })
+    expect(rpc).not.toHaveBeenCalledWith('complete_agent_task_trigger_firing', expect.anything())
+  })
+
+  it('aborts before claiming when materialization fails', async () => {
+    const databaseError = new Error('materialization unavailable')
+    rpc.mockResolvedValue({ data: null, error: databaseError })
+
+    await expect(processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 1 }))
+      .rejects.toThrow('materialization unavailable')
+    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(rpc).toHaveBeenCalledWith(
+      'materialize_agent_task_trigger_firings',
+      expect.objectContaining({ p_limit: 4 }),
+    )
+    expect(start).not.toHaveBeenCalled()
+  })
+})
