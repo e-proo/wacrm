@@ -46,6 +46,41 @@ function registry() {
 }
 
 describe('Agent Builder V2 task configuration', () => {
+  it('refuses publishing Service Promotion V2 with zero required tags but accepts an explicit tag', () => {
+    const legacy = registry().get('services.promotion', 1)!
+    const v2 = defineAgentTaskType({ ...legacy, version: 2 })
+    const v2registry = new AgentTaskTypeRegistry().register('services', v2)
+    const binding = defaultBuilderTaskBinding(v2)
+    const input = {
+      operationalMode: 'outbound' as const,
+      bindings: [binding],
+    }
+    const invalid = validateBuilderV2Configuration({
+      config: input,
+      registry: v2registry,
+      revisionToolGrants: [{ toolKey: 'services.get', toolVersion: 1, permission: 'read' }],
+    })
+    expect(invalid.issues.map(issue => issue.code))
+      .toContain('SERVICE_PROMOTION_SEGMENT_REQUIRED')
+    const valid = validateBuilderV2Configuration({
+      config: {
+        ...input,
+        bindings: [{
+          ...binding,
+          targetScope: {
+            ...binding.targetScope,
+            requiredTagIds: ['00000000-0000-4000-8000-000000000001'],
+          },
+        }],
+      },
+      registry: v2registry,
+      revisionToolGrants: [{ toolKey: 'services.get', toolVersion: 1, permission: 'read' }],
+    })
+    expect(valid.issues.map(issue => issue.code))
+      .not.toContain('SERVICE_PROMOTION_SEGMENT_REQUIRED')
+  })
+
+
   it('accepts the canonical persisted configuration shape and rejects legacy/malformed payloads', () => {
     const manifest = registry().get('services.promotion', 1)!
     const binding = defaultBuilderTaskBinding(manifest)
