@@ -1448,6 +1448,8 @@ required amount satisfied
 
 وليس فقط لأن جميع الرسائل أرسلت.
 
+**قبول Phase 11 — 2026-11-17 (TEST فقط):** اكتملت دورة مورد واحد فعلية من طلب تغطية مجمّد، عبر OpenWA والرد المرتبط بالمهمة وChange Request وموافقة الإدارة وإنشاء Coverage Offer وBusiness Event ثم `task.completed`. اجتازت اختبارات السلوك السلبي وCompletion Policy والـCI. يُغلق **SOF-16** بهذا النطاق؛ أما Pilot متعدد الموردين (Phase 19 / SOF-24 وSOF-66) والتشغيل التدريجي (Phase 18) فتبقى بوابات مستقلة مفتوحة. مرجع الأدلة والتواريخ والأكواد: [18_SOF16_COVERAGE_SOURCING_ACCEPTANCE.md](18_SOF16_COVERAGE_SOURCING_ACCEPTANCE.md). إغلاق مهمة البحث لا يساوي تسوية طلب التغطية المالي.
+
 ---
 
 # Phase 12 — Service Promotion / Sales Agent
