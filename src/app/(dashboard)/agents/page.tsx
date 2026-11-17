@@ -17,6 +17,7 @@ import {
   Brain,
   Route,
   Megaphone,
+  CalendarClock,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AiPlayground } from '@/components/agents/ai-playground';
@@ -28,6 +29,7 @@ import { AgentRoutesPanel } from '@/components/agents/agent-routes-panel';
 import { TrustedAdminsPanel } from '@/components/agents/trusted-admins-panel';
 import { AgentRunsPanel } from '@/components/agents/agent-runs-panel';
 import { AgentTasksPanel } from '@/components/agents/agent-tasks-panel';
+import { AgentTaskSchedulesPanel } from '@/components/agents/agent-task-schedules-panel';
 import { ServicePromotionComposer } from '@/components/agents/service-promotion-composer';
 import { ChangeRequestsPanel } from '@/components/agents/change-requests-panel';
 import { ObservabilityPanel } from '@/components/agents/observability-panel';
@@ -45,6 +47,7 @@ type Tab =
   | 'trusted_admins'
   | 'runs'
   | 'tasks'
+  | 'schedules'
   | 'promotion'
   | 'change_requests'
   | 'observability'
@@ -129,6 +132,11 @@ export default function AgentsPage() {
               </TabsTrigger>
             )}
             {canSeeMultiAgent && (
+              <TabsTrigger value="schedules">
+                <CalendarClock className="me-1.5 h-4 w-4" /> جدولة المهام
+              </TabsTrigger>
+            )}
+            {canSeeMultiAgent && (
               <TabsTrigger value="promotion">
                 <Megaphone className="me-1.5 h-4 w-4" /> ترويج الخدمات
               </TabsTrigger>
@@ -207,6 +215,12 @@ export default function AgentsPage() {
           {canSeeMultiAgent && (
             <TabsContent value="tasks" className="mt-4">
               <AgentTasksPanel />
+            </TabsContent>
+          )}
+
+          {canSeeMultiAgent && (
+            <TabsContent value="schedules" className="mt-4">
+              <AgentTaskSchedulesPanel />
             </TabsContent>
           )}
 
