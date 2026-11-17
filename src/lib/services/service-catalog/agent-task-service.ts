@@ -66,6 +66,8 @@ export async function startServicePromotionTask(input: {
   agentId: string
   actorUserId: string | null
   trigger?: AgentTaskStartSource
+  /** SCH-1: bind scheduled work to the reviewed published revision. */
+  approvedRevisionId?: string | null
   review?: {
     connectionId: string
     fingerprint: string
@@ -144,6 +146,12 @@ export async function startServicePromotionTask(input: {
   }
 
   const revisionId = agent.published_revision_id
+  if (input.approvedRevisionId && input.approvedRevisionId !== revisionId) {
+    throw new ServicePromotionTaskError(
+      'SERVICE_PROMOTION_SCHEDULE_REVISION_CHANGED',
+      'The published agent revision changed after this schedule was reviewed.',
+    )
+  }
   const { data: revision, error: revisionError } = await db
     .from('ai_agent_revisions')
     .select('id, status, operational_mode, outreach_policy, max_tool_rounds')

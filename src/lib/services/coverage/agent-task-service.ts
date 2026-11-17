@@ -67,6 +67,8 @@ export interface StartCoverageSourcingTaskInput {
   maxAttemptsPerTarget?: number
   requestedTaskTypeVersion?: 1 | 2
   trigger?: AgentTaskStartSource
+  /** SCH-1: reviewed schedule must execute only on the frozen published revision. */
+  approvedRevisionId?: string | null
 }
 
 export interface StartCoverageSourcingTaskResult {
@@ -217,6 +219,12 @@ export async function startCoverageSourcingTask(
   }
 
   const revisionId = agentRow.published_revision_id
+  if (input.approvedRevisionId && input.approvedRevisionId !== revisionId) {
+    throw new CoverageSourcingTaskError(
+      'COVERAGE_SOURCING_SCHEDULE_REVISION_CHANGED',
+      'The published agent revision changed after the scheduled policy was reviewed.',
+    )
+  }
   const { data: revision, error: revisionError } = await db
     .from('ai_agent_revisions')
     .select(

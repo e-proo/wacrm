@@ -38,6 +38,7 @@ export const SERVICE_PROMOTION_TRIGGER_HANDLER: AgentTaskTriggerHandler = {
       serviceId,
       agentId: firing.agentId,
       actorUserId: firing.createdBy,
+      approvedRevisionId: firing.approvedRevisionId,
       trigger: {
         triggerType: 'scheduled',
         triggerRef: 'schedule:' + firing.triggerId + ':' + firing.sourceKey,

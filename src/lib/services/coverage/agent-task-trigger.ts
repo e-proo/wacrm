@@ -56,6 +56,7 @@ function buildCoverageSourcingTriggerHandler(version: 1 | 2): AgentTaskTriggerHa
       coverageRequestId,
       agentId: firing.agentId,
       actorUserId: firing.createdBy,
+      approvedRevisionId: firing.approvedRevisionId,
       requestedTaskTypeVersion: version,
       trigger: {
         triggerType:
