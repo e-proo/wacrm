@@ -148,7 +148,9 @@ export const SERVICE_PROMOTION_MESSAGE_POLICY: AgentTaskOutboundMessagePolicy = 
   key: 'services.promotion_message',
   version: 1,
   domain: 'services',
-  generation: 'deterministic',
+  // Keep the existing V1 model-first behavior frozen until a separately
+  // approved provider-aware V2 policy passes template/consent gates.
+  // In particular, do NOT silently turn existing queued Tasks into senders.
 
   async prepare(context): Promise<AgentTaskOutboundMessageCandidate> {
     if (
