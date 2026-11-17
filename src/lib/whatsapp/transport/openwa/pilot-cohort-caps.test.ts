@@ -15,9 +15,9 @@ describe('OpenWA TEST bounded cohort capacity guidance', () => {
   }
 
   it('retains TEST-only ceilings, default 3 messages per contact and minimum pacing', () => {
-    expect(OPENWA_TEST_PILOT_MAX_HOURLY).toBe(100)
-    expect(OPENWA_TEST_PILOT_MAX_DAILY).toBe(1000)
-    expect(OPENWA_TEST_PILOT_MAX_FIRST_TOUCH).toBe(10)
+    expect(OPENWA_TEST_PILOT_MAX_HOURLY).toBe(2_147_483_647)
+    expect(OPENWA_TEST_PILOT_MAX_DAILY).toBe(2_147_483_647)
+    expect(OPENWA_TEST_PILOT_MAX_FIRST_TOUCH).toBe(2_147_483_647)
     expect(OPENWA_TEST_PILOT_MIN_INTERVAL_MS).toBeGreaterThanOrEqual(15000)
     expect(OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT).toBe(3)
   })
@@ -90,13 +90,21 @@ describe('OpenWA TEST bounded cohort capacity guidance', () => {
 
   it('fails closed for invalid sizes and unsupportable per-contact counts', () => {
     expect(missingPilotCohortCaps(saved, 11, 'agent', 3)).toEqual(['recipient_count'])
-    expect(missingPilotCohortCaps(saved, 10, 'agent', 11)).toEqual(['messages_per_recipient'])
+    expect(missingPilotCohortCaps(saved, 10, 'agent', 101)).toEqual(['messages_per_recipient'])
     expect(() => requiredPilotCohortMessages(0, 3)).toThrow('PILOT_COHORT_SIZE_INVALID')
     expect(() => requiredPilotCohortMessages(3, 0)).toThrow('PILOT_MESSAGES_PER_RECIPIENT_INVALID')
-    expect(() => suggestedPilotCohortCaps(saved, 10, 'agent', 11))
-      .toThrow('PILOT_COHORT_CAPACITY_UNSUPPORTED')
+    expect(() => suggestedPilotCohortCaps(saved, 10, 'agent', 101))
+      .toThrow('PILOT_MESSAGES_PER_RECIPIENT_INVALID')
   })
 
+  it('permits operator capacities above the old 100/1000 fixed ceilings', () => {
+    expect(requiredPilotCohortMessages(10, 100)).toBe(1000)
+    const higher = { ...saved, hourly_cap: 4000, daily_cap: 25000,
+      warmup_hourly_cap: 4000, warmup_daily_cap: 25000,
+      pilot_agent_hourly_cap: 4000, pilot_agent_daily_cap: 25000,
+      first_touch_daily_cap: 100 }
+    expect(missingPilotCohortCaps(higher, 10, 'agent', 100)).toEqual([])
+  })
   it('still checks per-workload and warmup independently of shared cap', () => {
     const caps = {
       ...saved, hourly_cap: 20, daily_cap: 20,

@@ -125,6 +125,13 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
     }
     approvedMessagesPerRecipient = perContact[0]
   }
+  // Exact SQL aggregation; no page-size truncation or recipient identities.
+  const { data: usage, error: usageError } = await db.rpc('get_openwa_test_guardrail_usage', {
+    p_account_id: accountId, p_connection_id: connectionId,
+  })
+  checkDb(usageError, 'guardrail-usage')
+  if (!usage) throw new WhatsAppTransportError('connection_restricted', 'Guardrail usage unavailable')
+
   const { count: pending, error: me } = await db.from('messages')
     .select('id', { count: 'exact', head: true }).eq('provider', 'openwa')
     .eq('connection_id', connectionId).eq('status', 'sending').is('provider_message_id', null)
@@ -144,7 +151,7 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
   try { enforced = openWAPilotEnforcementEnabled() } catch { enforced = false }
   return { connection, guard: safeGuard, configured, grants: grants ?? 0,
     manualGrants: manualGrants ?? 0, agentGrants: agentGrants ?? 0, apiGrants: apiGrants ?? 0, cohortGrants,
-    pending: pending ?? 0, duplicates, enforced, approvedMessagesPerRecipient,
+    pending: pending ?? 0, duplicates, enforced, approvedMessagesPerRecipient, usage,
     lastDenial: lastDenial && ['not_allowlisted','invalid_identity','connection_scope_mismatch','invalid_request'].includes(lastDenial.reason)
       ? { workload: lastDenial.workload, reason: lastDenial.reason, created_at: lastDenial.created_at }
       : lastDenial ? { workload: lastDenial.workload, reason: 'policy', created_at: lastDenial.created_at } : null,
@@ -174,7 +181,7 @@ function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
       ? (s.agentGrants === s.grants ? 'agent' : s.manualGrants === s.grants ? 'manual' : null)
       : null,
     unsettled_outbound: s.pending, same_identity_ready_connections: s.duplicates,
-    last_denial: s.lastDenial }
+    last_denial: s.lastDenial, guardrail_usage: s.usage }
 }
 
 function requireLimits(s: Awaited<ReturnType<typeof snapshot>>) {
@@ -409,9 +416,6 @@ export async function POST(request: Request, context: Context) {
       const messagesPerRecipient = int(body.messages_per_recipient ??
         OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT, 1,
         OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT, 'messages per recipient')
-      if (count * messagesPerRecipient > MAX_HOURLY) {
-        return deny('عدد الجهات × الرسائل لكل جهة يتجاوز سقف TEST الساعي (100). قلّل الرسائل لكل جهة أو حجم المجموعة.', 400, 'pilot_capacity_exceeds_max')
-      }
       const requiredMessages = requiredPilotCohortMessages(count, messagesPerRecipient)
       const missingCaps = missingPilotCohortCaps(s.guard, count, workload, messagesPerRecipient)
       if (missingCaps.length > 0) {

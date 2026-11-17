@@ -3,11 +3,11 @@
  * The server and SQL remain authoritative; suggestions never change a guardrail
  * or activate a session until the administrator saves explicitly.
  */
-// Editable ceilings apply ONLY to the explicitly controlled, pinned TEST Pilot.
-// Production retains its independent guardrail settings and transport policy.
-export const OPENWA_TEST_PILOT_MAX_HOURLY = 100
-export const OPENWA_TEST_PILOT_MAX_DAILY = 1000
-export const OPENWA_TEST_PILOT_MAX_FIRST_TOUCH = 10
+// TEST cap settings are limited only by the Postgres signed integer storage.
+// Pilot admission, pacing, stop gates and Production policy still apply.
+export const OPENWA_TEST_PILOT_MAX_HOURLY = 2_147_483_647
+export const OPENWA_TEST_PILOT_MAX_DAILY = 2_147_483_647
+export const OPENWA_TEST_PILOT_MAX_FIRST_TOUCH = 2_147_483_647
 export const OPENWA_TEST_PILOT_MIN_INTERVAL_MS = 15_000
 export const OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT = 3
 export const OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT = 100
@@ -37,7 +37,6 @@ export function requiredPilotCohortMessages(count: number, messagesPerRecipient 
     throw new Error('PILOT_MESSAGES_PER_RECIPIENT_INVALID')
   }
   const total = count * messagesPerRecipient
-  if (total > OPENWA_TEST_PILOT_MAX_HOURLY) throw new Error('PILOT_COHORT_CAPACITY_UNSUPPORTED')
   return total
 }
 
@@ -50,7 +49,7 @@ export function missingPilotCohortCaps(
   if (!Number.isInteger(count) || count < 1 || count > 10) return ['recipient_count']
   if (!Number.isInteger(messagesPerRecipient) || messagesPerRecipient < 1 ||
       messagesPerRecipient > OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT ||
-      count * messagesPerRecipient > OPENWA_TEST_PILOT_MAX_HOURLY) {
+      !Number.isSafeInteger(count * messagesPerRecipient)) {
     return ['messages_per_recipient']
   }
   const requiredMessages = count * messagesPerRecipient

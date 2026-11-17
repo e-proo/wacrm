@@ -20,6 +20,10 @@ const h = vi.hoisted(() => ({
   pending: 0,
   duplicates: 1,
   lastDenied: null as null | { workload: string; reason: string; created_at: string },
+  usage: { hourly_reserved: 9, daily_reserved: 30, distinct_recipients_daily: 3,
+    workloads: { agent: { hourly_reserved: 5, daily_reserved: 20 } },
+    last_blocked: { reason: 'first_touch_daily_cap', workload: 'agent',
+      created_at: '2026-11-17T21:17:30Z' } },
   calls: [] as { table: string; type: string; payload: unknown }[],
 }))
 
@@ -154,6 +158,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = TEST_URL
     h.auth.mockResolvedValue({ accountId: ACCOUNT, user: { id: USER },
       adminDb: { from: vi.fn(dbFrom), rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
+        if (name === 'get_openwa_test_guardrail_usage') return { data: h.usage, error: null }
         if (name !== 'set_openwa_test_pilot_mode') return { data: null, error: { code: 'unknown' } }
         h.calls.push({ table: 'set_openwa_test_pilot_mode', type: 'rpc', payload: args })
         h.guard.pilot_enabled = args.p_pilot_enabled === true
@@ -243,11 +248,11 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(h.calls).toEqual([])
   })
 
-  it('rejects values above 100/hour and 1000/day, or an excessive first-touch cap', async () => {
+  it('rejects invalid caps or numbers exceeding Postgres integer storage', async () => {
     for (const invalid of [
-      { hourly_cap: 101, daily_cap: 1000, first_touch_daily_cap: 10 },
-      { hourly_cap: 100, daily_cap: 1001, first_touch_daily_cap: 10 },
-      { hourly_cap: 100, daily_cap: 1000, first_touch_daily_cap: 11 },
+      { hourly_cap: 0, daily_cap: 1000, first_touch_daily_cap: 10 },
+      { hourly_cap: 100, daily_cap: 2_147_483_648, first_touch_daily_cap: 10 },
+      { hourly_cap: 100, daily_cap: 1000, first_touch_daily_cap: 2_147_483_648 },
     ]) {
       const response = await POST(request({
         action: 'limits', ...invalid,
@@ -281,6 +286,21 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(h.active).toBe(0)
   })
 
+  it('accepts explicitly selected large TEST caps without granting any recipients', async () => {
+    const response = await POST(request({
+      action: 'limits', hourly_cap: 5000, daily_cap: 50000, first_touch_daily_cap: 100,
+      minimum_interval_ms: 15000, jitter_ms: 3000,
+      pilot_agent_hourly_cap: 5000, pilot_agent_daily_cap: 50000,
+      pilot_manual_hourly_cap: 5000, pilot_manual_daily_cap: 50000,
+    }), context())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      guardrails: { hourly_cap: 5000, daily_cap: 50000, first_touch_daily_cap: 100 },
+      guardrail_usage: { hourly_reserved: 9, daily_reserved: 30,
+        last_blocked: { reason: 'first_touch_daily_cap' } },
+    })
+    expect(h.active).toBe(0)
+  })
   it('refuses workload caps higher than shared per-session caps', async () => {
     const response = await POST(request({
       action: 'limits', hourly_cap: 20, daily_cap: 200,
@@ -558,7 +578,7 @@ describe('OW-13 DEV pilot protected UI API', () => {
     expect(h.guard.manual_paused).toBe(true)
   })
 
-  it('rejects impossible capacity, even if all recipient grants would be consented', async () => {
+  it('requires sufficient chosen capacity instead of an arbitrary 100/hour ceiling', async () => {
     const response = await POST(request({
       action: 'grant_batch', workload: 'agent',
       recipients: ['12345678901', '23456789012'],
@@ -566,7 +586,8 @@ describe('OW-13 DEV pilot protected UI API', () => {
       consent_confirmed: true, confirm_agent_task_test: true,
     }), context())
     expect(response.status).toBe(400)
-    expect(await response.json()).toMatchObject({ code: 'pilot_capacity_exceeds_max' })
+    expect(await response.json()).toMatchObject({ code: 'pilot_cohort_caps_insufficient',
+      required_messages: 102 })
     expect(h.calls).toEqual([])
   })
 
