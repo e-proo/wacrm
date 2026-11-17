@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '../admin-client'
 import { CURRENT_AGENT_TASK_TRIGGER_REGISTRY } from './current-platform'
 import { normalizeAgentTaskTriggerFiring } from './triggers'
@@ -40,8 +41,11 @@ export async function processAgentTaskTriggerQueue(input: {
   let dead = 0
 
   for (let index = 0; index < limit; index += 1) {
+    // A distinct owner per claim prevents an expired invocation from finalizing
+    // a reclaimed lease when the outer worker ID is reused across ticks.
+    const claimWorkerId = `${input.workerId.trim()}:${randomUUID()}`
     const claim = await db.rpc('claim_next_agent_task_trigger_firing', {
-      p_worker_id: input.workerId,
+      p_worker_id: claimWorkerId,
       p_lease_secs: 120,
     })
     if (claim.error) throw claim.error
@@ -60,7 +64,7 @@ export async function processAgentTaskTriggerQueue(input: {
     if (!handler) {
       const outcome = await failFiring({
         firingId: firing.firingId,
-        workerId: input.workerId,
+        workerId: claimWorkerId,
         error:
           'AGENT_TASK_TRIGGER_HANDLER_NOT_REGISTERED:' +
           firing.taskType +
@@ -88,7 +92,7 @@ export async function processAgentTaskTriggerQueue(input: {
     } catch (error) {
       const outcome = await failFiring({
         firingId: firing.firingId,
-        workerId: input.workerId,
+        workerId: claimWorkerId,
         error: describeError(error),
         delaySeconds: 60,
       })
