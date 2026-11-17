@@ -9,6 +9,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
 import { applyWhatsAppStatus } from '@/lib/whatsapp/status-lifecycle'
 import { preflightOpenWAInboundIdentity, readDeferredInbound, readDeferredStatus } from './deferred'
+import { resolveOpenWAClient } from './credentials'
 
 interface DeferredJob {
   job_id: string
@@ -20,6 +21,9 @@ interface DeferredJob {
   event_kind: 'unresolved_identity' | 'unmatched_status'
   provider_message_id: string
   native_chat_id: string | null
+  verified_phone: string | null
+  verification_source: string | null
+  verified_at: string | null
   normalized_payload: unknown
   attempt_count: number
   lease_token: string
@@ -74,6 +78,29 @@ async function processDeferredJob(db: SupabaseClient, job: DeferredJob): Promise
     job.provider_message_id, job.native_chat_id,
   )
   if (!inbound) return review('invalid_deferred_identity')
+  if (job.verified_phone || job.verification_source || job.verified_at) {
+    // A phone asserted by a human is not enough: only a prior admin action
+    // that compared the SAME provider session's reverse phone -> LID lookup
+    // against this native chat may set these service-only proof columns.
+    const age = Date.now() - Date.parse(job.verified_at ?? '')
+    const phone = job.verified_phone ?? ''
+    if (job.verification_source !== 'openwa_reverse_lid' ||
+        !/^[1-9][0-9]{6,14}$/.test(phone) ||
+        !Number.isFinite(age) || age < 0 || age > 24 * 3600_000 ||
+        phone === job.native_chat_id.slice(0, -4)) {
+      return review('verified_phone_proof_expired')
+    }
+    const { client } = await resolveOpenWAClient(db, job.account_id, job.connection_id, { timeoutMs: 7000 })
+    const response = await client.request<unknown>(
+      `/api/sessions/${encodeURIComponent(job.session_id)}/contacts/${encodeURIComponent(phone)}/lid`,
+      { timeoutMs: 7000 },
+    )
+    const confirmed = response && typeof response === 'object' && !Array.isArray(response)
+      ? (response as Record<string, unknown>).lid : null
+    if (confirmed !== job.native_chat_id) return review('verified_lid_pairing_changed')
+    inbound.message.from = phone
+    inbound.contact.wa_id = phone
+  }
   const identity = await preflightOpenWAInboundIdentity(db, {
     accountId: job.account_id, connectionId: job.connection_id,
     sessionId: job.session_id, inbound,
@@ -135,6 +162,13 @@ export async function processOpenWADeferredTick(
       throw new Error('OpenWA deferred event lease could not be finalized')
     }
     result[outcome.state] += 1
+  }
+  // Bounded retention protects privacy without discarding pending/in-flight work.
+  // Cleanup failure cannot invalidate already-settled jobs.
+  try {
+    await db.rpc('prune_openwa_deferred_events', { p_limit: 50 })
+  } catch {
+    console.warn('[openwa-deferred-worker] retention cleanup unavailable')
   }
   return result
 }
