@@ -19,6 +19,19 @@ export const COVERAGE_DOMAIN = defineBusinessDomain({
   tools: COVERAGE_TOOL_MANIFESTS,
   changeActions: [
     {
+      key: 'coverage.supplier_counteroffer.review',
+      version: 1,
+      domain: 'coverage',
+      title: 'Review alternative supplier coverage terms',
+      description:
+        'Record a human review of a supplier counteroffer with differing settlement terms. Does not create or reserve a matching Coverage Offer.',
+      approvalRequired: true,
+      idempotent: true,
+      legacySelectors: [
+        { targetType: 'coverage_supplier_quote', intent: 'create', targetId: 'absent' },
+      ],
+    },
+    {
       key: 'coverage.offer.create',
       version: 1,
       domain: 'coverage',

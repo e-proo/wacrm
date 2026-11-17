@@ -78,7 +78,7 @@ export function extractSupplierQuote(
   )
   const available = /^(?:نعم|اجل|ايوه|ايوا|تمام|موافق|متوفر|متاح|استطيع|يمكنني)(?=\s|$|[،,.!])/.test(text)
     || /(?:استطيع\s+توفير|اقدر\s+اوفر|يمكنني\s+توفير|اوفر\s+المبلغ)/.test(text)
-  const finalConsent = /(?:^|\s)(?:اكد|اعتمد|ارفع|قدم)\s+(?:على\s+)?(?:العرض|الطلب)|(?:^|\s)(?:تاكيد|اؤكد|اوافق\s+على\s+التفاصيل)(?:\s|$)/.test(text)
+  const finalConsent = /(?:^|\s)(?:اكد|اعتمد|ارفع|قدم)\s+(?:(?:على|علي)\s+)?(?:العرض|الطلب)|(?:^|\s)(?:تاكيد|اؤكد|اوافق\s+(?:على|علي)\s+التفاصيل)(?:\s|$)/.test(text)
   const details = raw.trim().length >= 10 && raw.trim().length <= 800 ?
     raw.trim() : null
   return {amount,commission,routeDifference,routeAssent,available,finalConsent,details}
