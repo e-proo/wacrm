@@ -251,8 +251,9 @@ begin
   update public.ai_agent_task_triggers
      set next_fire_at = v_now - interval '1 minute'
    where id = v_recurring;
-  -- Insert while the policy is enabled, then pause. The new insert-time
-  -- freeze guard intentionally rejects inserts for already-paused policies.
+  -- Keep the policy enabled and pause only the account worker, so this
+  -- regression isolates the account-level admission gate. The insert-time
+  -- freeze guard intentionally rejects firings for paused policies.
   perform public.set_agent_task_trigger_status(v_account,v_recurring,'enabled');
   insert into public.ai_agent_task_trigger_firings(
     account_id, trigger_id, source_kind, source_key, scheduled_for, available_at
@@ -261,7 +262,6 @@ begin
     'schedule:account-pause-smoke:' || v_recurring::text,
     v_now - interval '1 minute', v_now - interval '1 minute'
   );
-  perform public.set_agent_task_trigger_status(v_account,v_recurring,'paused');
 
   v_claim := public.claim_next_agent_task_trigger_firing('trigger-smoke-worker', 120);
   if v_claim is not null then
