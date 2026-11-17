@@ -1456,6 +1456,8 @@ required amount satisfied
 
 **خطة التنفيذ الحالية (SOF-17 + SOF-25):** [21_SOF17_SOF25_SERVICE_PROMOTION_EXECUTION_PLAN.md](21_SOF17_SOF25_SERVICE_PROMOTION_EXECUTION_PLAN.md) — مراجعة الكود الحالي، فجوات إطلاق مهمة الترويج، قبول Intent/Request، تجميد الجمهور، قواعد Meta/OpenWA، واختبار Pilot محدود. هذه وثيقة عمل وليست إغلاقًا للمرحلة.
 
+**التسلسل التنفيذي المعتمد — الاختبارات الحية أخيرًا:** [24_SOF17_SERVICE_PROMOTION_CODE_FIRST_CHECKPOINT.md](24_SOF17_SERVICE_PROMOTION_CODE_FIRST_CHECKPOINT.md) — الكود → الاختبارات التقنية/CI/TEST بلا إرسال → dry-run/الأمان → SP-7 فقط بعد اعتماد المشغّل. لا يعتبر تجهيز الـpreview أو تجميد الجمهور تفويضًا للإرسال.
+
 ثاني حالة قبول للمنصة.
 
 ## السيناريو
