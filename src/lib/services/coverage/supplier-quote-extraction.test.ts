@@ -28,6 +28,22 @@ describe('natural supplier quote extraction',()=>{
     const q=extractSupplierQuote('نعم اوفر 500 ريال عمولتي 9 لكل 1000 لكن استلم في إب بدل صنعاء، اكد العرض',facts)
     expect(q).toMatchObject({amount:'500',commission:'9',routeDifference:true,finalConsent:true})
   })
+  it('does not confuse the full 550 SAR request with a smaller 300 SAR supplier counterquote',()=>{
+    const q=extractSupplierQuote(
+      'الطلب 550 ريال، وأنا أقدر أوفر 300 ريال وعمولتي 7 لكل 1000، أكد العرض',
+      facts)
+    expect(q.amount).toBe('300')
+    expect(q.commission).toBe('7')
+    expect(q.finalConsent).toBe(true)
+  })
+  it('detects reversed settlement legs as a counteroffer rather than exact match',()=>{
+    const q=extractSupplierQuote(
+      'نعم أوفر 550 ريال عمولة 7 لكل 1000 لكن أسلم في صنعاء واستلم في حضرموت',
+      facts)
+    expect(q.routeDifference).toBe(true)
+    expect(q.routeAssent).toBe(false)
+  })
+
   it('avoids interpreting only a per-1000 commission as offered amount',()=>{
     const q=extractSupplierQuote('عمولة 7 لكل 1000',facts)
     expect(q.commission).toBe('7')

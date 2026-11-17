@@ -45,6 +45,15 @@ describe('frozen Coverage supplier route contract',()=>{
       ...attrs,receive_region_id:null,
     })).rejects.toThrow('ROUTE_INCOMPLETE')
   })
+  it('detects a reversed supplier settlement direction even when both known region names are valid',()=>{
+    expect(supplierNotesConflictWithRoute(
+      'سأسلم في إب وأستلم المقابل في حضرموت',route,regions)).toBe(true)
+    expect(supplierNotesConflictWithRoute(
+      'التسليم في حضرموت والاستلام في إب',route,regions)).toBe(false)
+    expect(supplierNotesConflictWithRoute(
+      'الدفع في إب والاستلام في حضرموت',route,regions)).toBe(true)
+  })
+
   it('blocks the actual TEST discrepancy (Mukalla delivery, Sana’a receipt)',()=>{
     expect(supplierNotesConflictWithRoute(
       'سأسلم في المكلاء واريد ان استلم في صنعاء. طريقة الدفع مسموح ومتوفر اي طريقه',

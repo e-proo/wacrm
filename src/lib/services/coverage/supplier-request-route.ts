@@ -141,18 +141,26 @@ export function supplierNotesConflictWithRoute(
   const allowed = new Set([route.requesterPayRegionId,route.requesterReceiveRegionId])
   if (knownRegions.some(x => !allowed.has(x.id) && placeMentioned(notes,x.name))) return true
   const n = normalizeArabicPlaceText(notes)
+  // Both region names being valid is insufficient. The SUPPLIER's deliver
+  // leg must equal the requester's receive leg, and the SUPPLIER's payment
+  // receipt must equal the requester's pay leg. Reversed statements must be
+  // reviewed as alternative terms, not silently marked compatible.
   const locationStatements = [
-    /(?:اسلم|ساسلم|التسليم|ادفع|الدفع|اسدد|سلم)\s+(?:المبلغ\s+)?(?:في|بمنطقه|بمدينه)\s+([\p{L}]{2,30})/gu,
-    /(?:استلم|الاستلام|اتسلم|اقبض)\s+(?:المبلغ\s+)?(?:في|بمنطقه|بمدينه)\s+([\p{L}]{2,30})/gu,
+    {
+      pattern: /(?:اسلم|ساسلم|التسليم|ادفع|الدفع|اسدد|سلم)\s+(?:المبلغ\s+)?(?:في|بمنطقه|بمدينه)\s+([\p{L}]{2,30})/gu,
+      expected: route.requesterReceiveRegionId,
+    },
+    {
+      pattern: /(?:استلم|الاستلام|اتسلم|اقبض)\s+(?:المبلغ\s+)?(?:في|بمنطقه|بمدينه)\s+([\p{L}]{2,30})/gu,
+      expected: route.requesterPayRegionId,
+    },
   ]
-  for (const pattern of locationStatements) {
+  for (const { pattern, expected } of locationStatements) {
     for (const match of n.matchAll(pattern)) {
       const place = match[1]
       const known = knownRegions.find(x => placeMentioned(place,x.name))?.id
-      // Named city-level detail cannot silently redefine the approved
-      // governorate. Ask a human to verify it if it is not a recognized
-      // request-region label. No "city -> governorate" guess.
-      if (!known || !allowed.has(known)) return true
+      // Unknown cities remain for human review. Never guess city-to-region.
+      if (!known || known !== expected) return true
     }
   }
   return false

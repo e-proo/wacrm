@@ -59,9 +59,20 @@ export function extractSupplierQuote(
       /(?:اوفر|اغطي|اغطيه|توفير|عندي)\s+(?:المبلغ\s+)?كامل(?:ه)?/.test(text)) {
     amount = price(facts.remainingAmount, Number(facts.remainingAmount))
   }
+  // A message may mention the original request (550) AND the supplier's
+  // smaller available amount (300). Prefer explicit first-person offered
+  // amounts; never mistake the request's face value for their commitment.
+  const supplierAmountPattern = /(?:اوفر|اغطي|يمكنني\s+توفير|استطيع\s+توفير|اقدر\s+اوفر|متاح\s+عندي|عندي)\D{0,30}(\d{1,12}(?:\.\d{1,4})?)/i
+  const explicitSupplier = supplierAmountPattern.exec(noRate)
   const amountPattern = /(?:مبلغ|المبلغ|قيمه|القيمه|اغطي|تغطيه|توفير|اوفر|كامل|متاح|متوفر|عندي)\D{0,35}(\d{1,12}(?:\.\d{1,4})?)/i
+  const allNumbers = [...noRate.matchAll(money)].map(x=>x[1]).filter(x=>x!=='1000')
+  const distinctNumbers = [...new Set(allNumbers)]
   const explicit = amountPattern.exec(noRate)
-  if (explicit) amount = price(explicit[1],Number(facts.remainingAmount))
+  if (explicitSupplier) {
+    amount = price(explicitSupplier[1],Number(facts.remainingAmount))
+  } else if (explicit && distinctNumbers.length <= 1) {
+    amount = price(explicit[1],Number(facts.remainingAmount))
+  }
   if (!amount) {
     // A single remaining quantity after removing the per-1000 rate is a
     // deterministic offer; multiple candidate numbers need clarification.
