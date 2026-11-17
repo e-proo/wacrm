@@ -1814,6 +1814,8 @@ OpenAI-compatible / Anthropic / Gemini native حسب الاتصالات المد
 
 **حزمة القبول الحي SOF-66 + Phase 18 + Phase 19:** [20_SOF66_PHASE18_PHASE19_TEST_ACCEPTANCE_PACK.md](20_SOF66_PHASE18_PHASE19_TEST_ACCEPTANCE_PACK.md) — أُرشفت كما قدمها المشغل في 2026-11-17. تحتوي إثبات happy-path سابقًا وخطوات AC-01..AC-13 **غير مملوءة النتائج**؛ لا تعد شهادة PASS نهائية ولا تسمح بإغلاق SOF-66/SOF-23/SOF-24 قبل تسجيل دليل قبول مستقل لكل شرط.
 
+**سجل الأدلة وفجوات القبول:** [23_SOF66_PHASE18_PHASE19_ACCEPTANCE_EVIDENCE_REGISTER.md](23_SOF66_PHASE18_PHASE19_ACCEPTANCE_EVIDENCE_REGISTER.md) — يربط كل AC بالدليل التاريخي ويُبقي القرارات الثلاثة OPEN إلى أن تُسجَّل أدلة PASS فعلية.
+
 ابدأ بـ:
 
 ```text
