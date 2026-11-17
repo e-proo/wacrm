@@ -5,7 +5,8 @@ const h = vi.hoisted(() => ({
   markProcessed: vi.fn(),
   normalizeInbound: vi.fn(),
   processInbound: vi.fn(),
-  hydratePhone: vi.fn(),
+  preflight: vi.fn(),
+  defer: vi.fn(),
   processEcho: vi.fn(),
   refreshSession: vi.fn(),
   parseStatus: vi.fn(),
@@ -24,7 +25,9 @@ vi.mock('@/lib/whatsapp/inbound-normalization', () => ({
   normalizeOpenWAOwnSentMessage: vi.fn(() => null),
 }))
 vi.mock('@/lib/whatsapp/inbound-processor', () => ({ processNormalizedInboundMessage: h.processInbound }))
-vi.mock('@/lib/whatsapp/transport/openwa/sender-phone', () => ({ hydrateOpenWAInboundSenderPhone: h.hydratePhone }))
+vi.mock('@/lib/whatsapp/transport/openwa/deferred', () => ({
+  preflightOpenWAInboundIdentity: h.preflight, deferOpenWAWebhook: h.defer,
+}))
 vi.mock('@/lib/whatsapp/transport/openwa/outbound-echo', () => ({ processOpenWAOwnSentEcho: h.processEcho }))
 vi.mock('@/lib/whatsapp/transport/openwa/webhook-media', () => ({ extractOpenWASignedInlineMedia: vi.fn(() => undefined) }))
 vi.mock('@/lib/whatsapp/status-lifecycle', () => ({
@@ -63,7 +66,8 @@ beforeEach(() => {
     message: { id: 'm-1', provider: 'openwa', connectionId: 'connection-1', providerMessageId: 'm-1', type: 'text', from: '12345678901', timestamp: '1792950000', text: { body: 'hi' } },
     contact: { wa_id: '12345678901', profile: { name: 'Contact' } },
   })
-  h.hydratePhone.mockResolvedValue(false)
+  h.preflight.mockResolvedValue('ready')
+  h.defer.mockResolvedValue(undefined)
   h.processInbound.mockResolvedValue(undefined)
   const query = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => ({ data: { owner_user_id: 'owner-1' }, error: null })) }
   query.select.mockReturnValue(query)
@@ -121,14 +125,14 @@ describe('OpenWA webhook completion acknowledgement', () => {
       message: { id: 'm-lid', provider: 'openwa', connectionId: 'connection-1', providerMessageId: 'm-lid', type: 'text', from: native, providerChatId: native, timestamp: '1792950000', text: { body: 'hello' } },
       contact: { wa_id: native, profile: { name: 'New sender' } },
     })
-    h.hydratePhone.mockImplementation(async (_db: unknown, input: { inbound: { message: { from: string }; contact: { wa_id: string } } }) => {
+    h.preflight.mockImplementation(async (_db: unknown, input: { inbound: { message: { from: string }; contact: { wa_id: string } } }) => {
       input.inbound.message.from = '967700000001'
       input.inbound.contact.wa_id = '967700000001'
-      return true
+      return 'ready'
     })
     const res = await POST(request())
     expect(res.status).toBe(202)
-    expect(h.hydratePhone).toHaveBeenCalledWith(h.db, expect.objectContaining({
+    expect(h.preflight).toHaveBeenCalledWith(h.db, expect.objectContaining({
       accountId: 'account-1', connectionId: 'connection-1', sessionId: 'session-1',
     }))
     expect(h.processInbound).toHaveBeenCalledWith(
@@ -138,13 +142,58 @@ describe('OpenWA webhook completion acknowledgement', () => {
     )
   })
   it('does not acknowledge a transient on-demand identity lookup failure as processed', async () => {
-    h.hydratePhone.mockRejectedValueOnce(new Error('provider temporarily unavailable'))
+    h.preflight.mockRejectedValueOnce(new Error('provider temporarily unavailable'))
     const res = await POST(request())
     expect(res.status).toBe(503)
     expect(h.processInbound).not.toHaveBeenCalled()
     expect(h.markProcessed).toHaveBeenCalledWith(
       h.db, 'account-1', 'connection-1', 'evt-1', 'lease-1', 'processing_failed',
     )
+  })
+
+  it('persists an unresolved native LID and acknowledges only after the durable SQL claim commits', async () => {
+    h.preflight.mockResolvedValueOnce('unresolved')
+    const native = '123456789012345@lid'
+    h.normalizeInbound.mockReturnValue({
+      message: { id: 'm-native', provider: 'openwa', connectionId: 'connection-1', providerMessageId: 'm-native', type: 'text', from: native, providerChatId: native, timestamp: '1792950000', text: { body: 'new customer' } },
+      contact: { wa_id: native, profile: { name: 'Unknown sender' } },
+    })
+    const res = await POST(request())
+    expect(res.status).toBe(202)
+    expect(await res.json()).toEqual({ ok: true, deferred: 'pending_identity' })
+    expect(h.defer).toHaveBeenCalledWith(h.db, expect.objectContaining({
+      accountId: 'account-1', connectionId: 'connection-1', sessionId: 'session-1',
+      providerEventId: 'evt-1', providerMessageId: 'm-native', processingToken: 'lease-1',
+      deferred: expect.objectContaining({ kind: 'unresolved_identity' }),
+    }))
+    expect(h.processInbound).not.toHaveBeenCalled()
+    expect(h.markProcessed).not.toHaveBeenCalled()
+  })
+
+  it('durably defers unmatched native ACK without a second WhatsApp send', async () => {
+    h.verify.mockResolvedValue({ ...claim, envelope: { ...envelope, event: 'message.ack' } })
+    h.parseStatus.mockReturnValue({ providerMessageId: 'true_123@lid_MSG', status: 'delivered' })
+    h.applyStatus.mockResolvedValue('unknown')
+    const res = await POST(request())
+    expect(res.status).toBe(202)
+    expect(await res.json()).toEqual({ ok: true, deferred: 'pending_receipt' })
+    expect(h.defer).toHaveBeenCalledWith(h.db, expect.objectContaining({
+      providerMessageId: 'true_123@lid_MSG',
+      deferred: expect.objectContaining({ kind: 'unmatched_status' }),
+    }))
+    expect(h.processInbound).not.toHaveBeenCalled()
+    expect(h.markProcessed).not.toHaveBeenCalled()
+  })
+
+  it('returns 503 and keeps the signed lease recoverable if durable storage fails', async () => {
+    h.preflight.mockResolvedValue('unresolved')
+    h.defer.mockRejectedValueOnce(new Error('database unavailable'))
+    const res = await POST(request())
+    expect(res.status).toBe(503)
+    expect(h.markProcessed).toHaveBeenCalledWith(
+      h.db, 'account-1', 'connection-1', 'evt-1', 'lease-1', 'processing_failed',
+    )
+    expect(h.processInbound).not.toHaveBeenCalled()
   })
 
 })
