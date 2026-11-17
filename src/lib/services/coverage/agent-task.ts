@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import {
   loadSupplierCoverageRoute, validSupplierCoverageRoute, assertSupplierRouteMatchesAttributes,
-  describeSupplierCoverageRoute, type SupplierCoverageRoute,
+  type SupplierCoverageRoute,
 } from './supplier-request-route'
 import { defineAgentTaskType } from '@/lib/ai/tasks/contracts'
 import type { AgentTaskCompletionPolicy } from '@/lib/ai/tasks/completion-policy'
