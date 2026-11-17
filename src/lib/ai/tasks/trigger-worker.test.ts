@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { rpc, start, normalizeFiring } = vi.hoisted(() => ({
+const { rpc, start, normalizeFiring, from } = vi.hoisted(() => ({
   rpc: vi.fn(),
   start: vi.fn(),
   normalizeFiring: vi.fn(),
+  from: vi.fn(),
 }))
 
-vi.mock('../admin-client', () => ({ supabaseAdmin: () => ({ rpc }) }))
+vi.mock('../admin-client', () => ({ supabaseAdmin: () => ({ rpc, from }) }))
 vi.mock('./triggers', () => ({
   normalizeAgentTaskTriggerFiring: normalizeFiring,
 }))
@@ -297,4 +298,49 @@ describe('schedule overlap outcomes', () => {
     const result = await processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 1 })
     expect(result).toMatchObject({ failed: 1, skipped: 0, deferred: 0 })
   })
+})
+
+describe('SCH-3: completion reconciliation after Task creation',()=>{
+ beforeEach(()=>{
+  vi.clearAllMocks()
+  normalizeFiring.mockReturnValue({
+    firingId:'firing-1',accountId:'account-1',triggerId:'trigger-1',
+    taskType:'services.promotion',taskTypeVersion:2,triggerKind:'schedule',
+    sourceKey:'schedule-occur-1',overlapPolicy:'skip',
+  })
+  start.mockResolvedValue({taskId:'existing-task',created:false})
+  from.mockImplementation((table:string)=>{
+    if(table!=='ai_agent_tasks')throw new Error('Unexpected table')
+    return { select(){return this},eq(){return this},
+      async maybeSingle(){return {data:{
+        trigger_ref:'schedule:trigger-1:schedule-occur-1'},error:null}} }
+  })
+  rpc.mockImplementation(async (name:string,args:Record<string,unknown>)=>{
+    if(name==='materialize_agent_task_trigger_firings')
+      return {data:{schedule_firings:0,business_event_firings:0},error:null}
+    if(name==='claim_next_agent_task_trigger_firing')
+      return {data:{id:'firing-1',claim_owner:
+        String(args.p_worker_id)+':00000000-0000-4000-8000-000000000186'},error:null}
+    if(name==='complete_agent_task_trigger_firing')
+      return {data:true,error:null}
+    if(name==='skip_agent_task_trigger_firing')
+      return {data:true,error:null}
+    throw Error('Unexpected RPC '+name)
+  })
+ })
+ it('settles the same source Task without duplicate creation or outbound',async()=>{
+  const result=await processAgentTaskTriggerQueue({workerId:'scheduler',limit:1})
+  expect(result).toMatchObject({claimed:1,completed:1,failed:0,skipped:0})
+  expect(rpc).toHaveBeenCalledWith('complete_agent_task_trigger_firing',
+    expect.objectContaining({p_task_id:'existing-task'}))
+  expect(rpc).not.toHaveBeenCalledWith('fail_agent_task_trigger_firing',expect.anything())
+ })
+ it('records overlap instead of completing another source Task',async()=>{
+  from.mockImplementation(()=>({select(){return this},eq(){return this},
+    async maybeSingle(){return {data:{trigger_ref:'schedule:foreign:other'},error:null}}}))
+  const result=await processAgentTaskTriggerQueue({workerId:'scheduler',limit:1})
+  expect(result).toMatchObject({skipped:1,completed:0,failed:0})
+  expect(rpc).toHaveBeenCalledWith('skip_agent_task_trigger_firing',
+    expect.objectContaining({p_reason:'OVERLAP_REUSED_ACTIVE_TASK'}))
+ })
 })
