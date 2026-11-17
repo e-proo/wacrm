@@ -83,10 +83,16 @@ describe('SCH-3: promotion scheduled V2 no-send replay',()=>{
   expect(mocks.rpc).not.toHaveBeenCalled()
   vi.clearAllMocks()
   delete process.env.WACRM_SERVICE_PROMOTION_PILOT_ALLOW_LIVE
+  const replay = await startServicePromotionTask(input())
+  expect(replay).toMatchObject({taskId:'replay-task',created:false})
+  expect(mocks.rpc).not.toHaveBeenCalled()
+  // A NEW Task is forbidden when the test pilot is disabled.
+  mocks.from.mockImplementation(()=>({select(){return this},eq(){return this},
+    async maybeSingle(){return {data:null,error:null}}}))
   await expect(startServicePromotionTask(input())).rejects.toMatchObject({
     code:'SERVICE_PROMOTION_LIVE_ACCEPTANCE_NOT_AUTHORIZED',
   })
-  expect(mocks.from).not.toHaveBeenCalled()
+  expect(mocks.rpc).not.toHaveBeenCalled()
  })
  it('derives unique stable idempotency identity for each firing and tenant',()=>{
   const common={accountId:account,serviceId:service,agentId:agent,

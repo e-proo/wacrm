@@ -85,16 +85,6 @@ export async function startServicePromotionTask(input: {
   revisionId: string
   created: boolean
 }> {
-  // SP-2/3 are code-first. Block ALL historical manual/trigger bypasses
-  // unless a TEST operator has separately enabled the bounded live gate.
-  if (!isOpenWATestProject() ||
-      process.env.WACRM_SERVICE_PROMOTION_PILOT_ALLOW_LIVE !== '1') {
-    throw new ServicePromotionTaskError(
-      'SERVICE_PROMOTION_LIVE_ACCEPTANCE_NOT_AUTHORIZED',
-      'Service Promotion dispatch is disabled until the bounded TEST pilot is approved.',
-      403,
-    )
-  }
   const reviewInput = input.review
   const scheduled = input.trigger !== undefined
   // Historical direct/manual launch remains unchanged. Scheduled V2 requires
@@ -156,6 +146,17 @@ export async function startServicePromotionTask(input: {
       return { taskId: replay.id, agentId: replay.agent_id,
         revisionId: replay.agent_revision_id, created: false }
     }
+  }
+  // Creating a NEW promotion Task remains TEST-only and explicitly gated.
+  // Existing matching Task reconciliation above is read-only and safe even
+  // after the Pilot is paused, preventing ambiguous resend.
+  if (!isOpenWATestProject() ||
+      process.env.WACRM_SERVICE_PROMOTION_PILOT_ALLOW_LIVE !== '1') {
+    throw new ServicePromotionTaskError(
+      'SERVICE_PROMOTION_LIVE_ACCEPTANCE_NOT_AUTHORIZED',
+      'Service Promotion dispatch is disabled until the bounded TEST pilot is approved.',
+      403,
+    )
   }
   if (scheduled) {
     // Reconciliation of an ALREADY-created Task is allowed after approval TTL,
