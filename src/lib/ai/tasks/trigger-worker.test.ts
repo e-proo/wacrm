@@ -230,3 +230,71 @@ describe('trigger worker dead-letter and database failures', () => {
     expect(start).not.toHaveBeenCalled()
   })
 })
+
+describe('schedule overlap outcomes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    normalizeFiring.mockReturnValue({
+      firingId: 'firing-1',
+      taskType: 'coverage.sourcing',
+      taskTypeVersion: 2,
+      overlapPolicy: 'skip',
+    })
+  })
+
+  it.each([
+    ['skip', 'skip_agent_task_trigger_firing', 'skipped'],
+    ['defer', 'defer_agent_task_trigger_firing', 'deferred'],
+  ] as const)('settles %s on a domain conflict without a technical retry', async (policy, rpcName, count) => {
+    normalizeFiring.mockReturnValue({
+      firingId: 'firing-1',
+      taskType: 'coverage.sourcing',
+      taskTypeVersion: 2,
+      overlapPolicy: policy,
+    })
+    start.mockRejectedValue(Object.assign(new Error('Another task is running'), {
+      code: 'COVERAGE_SOURCING_ALREADY_ACTIVE',
+    }))
+    let owner = ''
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'materialize_agent_task_trigger_firings') {
+        return { data: { schedule_firings: 0, business_event_firings: 0 }, error: null }
+      }
+      if (name === 'claim_next_agent_task_trigger_firing') {
+        owner = String(args.p_worker_id) + ':00000000-0000-4000-8000-000000000186'
+        return { data: { id: 'firing-1', claim_owner: owner }, error: null }
+      }
+      if (name === rpcName) {
+        expect(args).toMatchObject({
+          p_firing_id: 'firing-1',
+          p_worker_id: owner,
+          p_reason: 'COVERAGE_SOURCING_ALREADY_ACTIVE',
+        })
+        if (policy === 'defer') expect(args.p_delay_secs).toBe(300)
+        return { data: true, error: null }
+      }
+      throw new Error('Unexpected scheduling RPC: ' + name)
+    })
+    const result = await processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 1 })
+    expect(result).toMatchObject({ claimed: 1, completed: 0, failed: 0, dead: 0, [count]: 1 })
+    expect(rpc).not.toHaveBeenCalledWith('fail_agent_task_trigger_firing', expect.anything())
+  })
+
+  it('does not classify arbitrary runtime errors as scheduled overlaps', async () => {
+    start.mockRejectedValue(Object.assign(new Error('Transport unavailable'), {
+      code: 'TRANSIENT_TRANSPORT',
+    }))
+    let claimOwner = ''
+    rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'materialize_agent_task_trigger_firings') return { data: {}, error: null }
+      if (name === 'claim_next_agent_task_trigger_firing') {
+        claimOwner = String(args.p_worker_id) + ':00000000-0000-4000-8000-000000000186'
+        return { data: { id: 'firing-1', claim_owner: claimOwner }, error: null }
+      }
+      if (name === 'fail_agent_task_trigger_firing') return { data: 'failed', error: null }
+      throw new Error('Unexpected RPC: ' + name)
+    })
+    const result = await processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 1 })
+    expect(result).toMatchObject({ failed: 1, skipped: 0, deferred: 0 })
+  })
+})

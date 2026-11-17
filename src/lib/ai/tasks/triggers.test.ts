@@ -72,6 +72,32 @@ describe('Agent Task Trigger Registry', () => {
     expect(firing?.businessEvent?.subjectType).toBe('coverage_request')
   })
 
+  it('reads frozen version and overlap policy from a firing and rejects malformed policy', () => {
+    const base = {
+      firing_id: 'firing',
+      account_id: 'account',
+      trigger_id: 'trigger',
+      task_type: 'coverage.sourcing',
+      task_type_version: 2,
+      agent_id: 'agent',
+      trigger_kind: 'schedule',
+      config: { coverageRequestId: 'test' },
+      filters: {},
+      source_key: 'schedule:test',
+      attempts: 1,
+      policy_version: 3,
+      overlap_policy: 'defer',
+      approved_revision_id: 'revision-1',
+    }
+    expect(normalizeAgentTaskTriggerFiring(base)).toMatchObject({
+      policyVersion: 3,
+      overlapPolicy: 'defer',
+      approvedRevisionId: 'revision-1',
+    })
+    expect(normalizeAgentTaskTriggerFiring({ ...base, overlap_policy: 'retry_forever' })).toBeNull()
+    expect(normalizeAgentTaskTriggerFiring({ ...base, policy_version: 0 })).toBeNull()
+  })
+
   it('fails closed when a Business Event firing has no event snapshot', () => {
     expect(
       normalizeAgentTaskTriggerFiring({
