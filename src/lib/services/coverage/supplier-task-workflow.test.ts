@@ -56,6 +56,7 @@ const stageRow = () => ({
 })
 type Negotiation = ReturnType<typeof stageRow>
 let row: Negotiation
+let priorRunQuotes:Array<{id:string,text:string}>=[]
 let currentMessage='نعم يمكنني توفير التغطية'
 let previousBotMessage='هل يمكنكم توفير تغطية بقيمة 400 SAR؟'
 let currentRun='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -71,6 +72,7 @@ function makeDb() {
       let operation:'read'|'update'='read'
       let values:Record<string,unknown>={}
       let regionIds: string[] | null = null
+      let messageIds: string[] | null = null
       const conditions:Record<string,unknown>={}
       const query={
         select(_fields?:string) { return query },
@@ -79,11 +81,17 @@ function makeDb() {
         order(_field:string,_opts?:unknown) { return query },
         in(field:string, vals:unknown[]) {
           if(table==='coverage_regions' && field==='id') regionIds=vals as string[]
+          if(table==='messages' && field==='id') messageIds=vals as string[]
           return query
         },
         limit(n:number) {
           if(table==='messages') {
             return Promise.resolve({data:[{ content_text:previousBotMessage }].slice(0,n),error:null})
+          }
+          if(table==='ai_agent_runs') {
+            return Promise.resolve({data:priorRunQuotes.slice(0,n).map(r=>({
+              inbound_message_id:r.id,created_at:'2026-11-16T15:00:00Z',
+            })),error:null})
           }
           if(table==='coverage_regions') {
             return Promise.resolve({data:[
@@ -98,7 +106,11 @@ function makeDb() {
           return Promise.resolve({error:null})
         },
         update(patch:Record<string,unknown>) { operation='update';values=patch;return query },
-        then<T>(resolve:(result:{error:null})=>T):Promise<T> {
+        then<T>(resolve:(result:{error:null;data?:unknown})=>T):Promise<T> {
+          if(operation==='read' && table==='messages' && messageIds) {
+            return Promise.resolve({error:null as null,data:priorRunQuotes
+              .filter(r=>messageIds?.includes(r.id)).map(r=>({id:r.id,content_text:r.text}))}).then(resolve)
+          }
           if(operation==='update' && table==='ai_agent_coverage_supplier_negotiations') {
             storeWrites.push({table,op:'update',changes:values})
             Object.assign(row,values)
@@ -147,6 +159,7 @@ beforeEach(()=>{
   storeWrites=[]
   row=stageRow()
   currentMessage='نعم يمكنني توفير التغطية'
+  priorRunQuotes=[]
   previousBotMessage='هل يمكنكم توفير تغطية بقيمة 400 SAR؟'
   currentRun='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
   currentSource='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -253,6 +266,31 @@ describe('server-bound Coverage supplier lifecycle',()=>{
         supplier_terms:{route_match:false,supplier_route_statement:msg}},
     })
     expect(proposal.summary).toContain('مراجعة بشرية')
+  })
+
+  it('recovers the original full quote from signed previous Task replies, without asking 550/7 again',async()=>{
+    const text='نعم واستطيع توفير المبلغ كامل 400 واريد عموله 7 لكل 1000 وطريقة الدفع والاستلام اي طريقة متوفر عادي اكد على العرض'
+    priorRunQuotes=[{id:'aaaaaaaa-aaaa-4aaa-8aaa-111111111111',text}]
+    Object.assign(row,{stage:'amount',version:4,route_confirmed:true,
+      last_inbound_message_id:'aaaaaaaa-aaaa-4aaa-8aaa-222222222222'})
+    const res=await reply('تأكيد',9)
+    expect(res?.text).toContain('CHG-1170')
+    expect(row.stage).toBe('submitted')
+    expect(row.supplier_details).toContain('المبلغ كامل 400')
+    expect(mocked.proposed).toHaveBeenCalledTimes(1)
+    expect(mocked.proposed.mock.calls[0][1].supplier_task.supplier_details).toBe(text)
+  })
+  it('does not revive a previous supplier quote after a later edit',async()=>{
+    const text='نعم واستطيع توفير المبلغ كامل 400 واريد عموله 7 لكل 1000 اكد على العرض'
+    priorRunQuotes=[
+      {id:'aaaaaaaa-aaaa-4aaa-8aaa-222222222222',text:'تعديل'},
+      {id:'aaaaaaaa-aaaa-4aaa-8aaa-111111111111',text},
+    ]
+    Object.assign(row,{stage:'amount',version:4,route_confirmed:true,
+      last_inbound_message_id:'aaaaaaaa-aaaa-4aaa-8aaa-333333333333'})
+    const res=await reply('تأكيد',9)
+    expect(res?.text).toContain('المبلغ')
+    expect(mocked.proposed).not.toHaveBeenCalled()
   })
 
   it('recovers a previously committed proposal after a crash without proposing twice',async()=>{
