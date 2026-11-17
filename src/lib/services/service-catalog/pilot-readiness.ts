@@ -13,6 +13,7 @@ import { CURRENT_AGENT_TASK_PLATFORM } from '@/lib/ai/tasks/current-platform'
 import { validateAgentRevisionForPublish } from '@/lib/ai/runtime/builder-service'
 import {
   SERVICE_PROMOTION_TASK_TYPE,
+  SERVICE_PROMOTION_TASK_TYPE_V2,
   loadServicePromotionContext,
 } from './agent-task'
 
@@ -102,7 +103,7 @@ export async function inspectServicePromotionPilotReadiness(input: {
   const binding = config?.bindings.find(
     (candidate) =>
       candidate.taskType === SERVICE_PROMOTION_TASK_TYPE.key &&
-      candidate.taskTypeVersion === SERVICE_PROMOTION_TASK_TYPE.version,
+      candidate.taskTypeVersion === SERVICE_PROMOTION_TASK_TYPE_V2.version,
   )
   if (config && !binding) blockers.push('SERVICE_PROMOTION_BINDING_MISSING')
 
