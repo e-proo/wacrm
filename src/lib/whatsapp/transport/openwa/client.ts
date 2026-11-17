@@ -122,7 +122,7 @@ export class OpenWAClient {
     } catch (error) {
       if (error instanceof WhatsAppTransportError) throw error
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new WhatsAppTransportError('ambiguous_outcome', 'OpenWA request timed out; outcome requires reconciliation', error)
+        throw new WhatsAppTransportError(canHaveSent ? 'ambiguous_outcome' : 'retryable_provider_failure', canHaveSent ? 'OpenWA request timed out; outcome requires reconciliation' : 'OpenWA read-only request timed out', error)
       }
       const detail = safeNetworkFailureKind(error)
       const message = `OpenWA network request failed${detail ? ` (${detail})` : ''}${canHaveSent ? '; outcome requires reconciliation' : ''}`
