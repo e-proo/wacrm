@@ -38,7 +38,8 @@ const tagId = id(6)
 const A = id(101)
 const B = id(102)
 
-function fakeDb(options: { provider?: string; template?: boolean; paused?: boolean; tenant?: string } = {}) {
+function fakeDb(options: { provider?: string; template?: boolean; paused?: boolean; tenant?: string;
+  missingTags?: boolean; missingBinding?: boolean } = {}) {
   const eqs: Array<[string, string, string]> = []
   const from = vi.fn((table: string) => {
     const where = new Map<string, unknown>()
@@ -52,11 +53,12 @@ function fakeDb(options: { provider?: string; template?: boolean; paused?: boole
           archived_at: null }
         : table === 'ai_agent_revisions'
           ? { id: revisionId, status: 'published', operational_mode: 'both',
-            outreach_policy: { bindings: [{
+            outreach_policy: { bindings: options.missingBinding ? [] : [{
               taskType: 'services.promotion', taskTypeVersion: 2,
               maxTargets: 3, approvalMode: 'task',
-              targetScope: { requiredTagIds: [tagId], excludedTagIds: [],
-                serviceIds: [serviceId], regionIds: [], domainSelector: null },
+              targetScope: { requiredTagIds: options.missingTags ? [] : [tagId],
+                excludedTagIds: [], serviceIds: [serviceId],
+                regionIds: [], domainSelector: null },
             }] } }
           : table === 'whatsapp_connection_guardrails'
             ? { manual_paused: options.paused ?? false,
@@ -170,6 +172,16 @@ describe('Promotion campaign approval inspection', () => {
     stubs.allow.mockResolvedValueOnce('pilot_recipient_not_approved')
     const denied = await inspectServicePromotionCampaign(db, input)
     expect(denied.blockers).toContain('SERVICE_PROMOTION_PILOT_RECIPIENT_NOT_APPROVED')
+  })
+
+  it('distinguishes a published Promotion V2 without tags from an unsupported Task Type', async () => {
+    const { db } = fakeDb({ missingTags: true })
+    await expect(inspectServicePromotionCampaign(db, input))
+      .rejects.toMatchObject({ code: 'SERVICE_PROMOTION_SEGMENT_REQUIRED' })
+    expect(stubs.audience).not.toHaveBeenCalled()
+    await expect(inspectServicePromotionCampaign(fakeDb({ missingBinding: true }).db, input))
+      .rejects.toMatchObject({ code: 'SERVICE_PROMOTION_V2_BINDING_REQUIRED' })
+    expect(stubs.audience).not.toHaveBeenCalled()
   })
 
   it('cannot inspect invalid UUID selections', async () => {
