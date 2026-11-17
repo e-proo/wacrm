@@ -33,6 +33,7 @@ function db(options: { hasJob?: boolean; matching?: boolean; ready?: boolean } =
     const q = {
       select: () => q,
       eq: (name: string, val: unknown) => { filters[name] = val; return q },
+      in: (name: string, values: unknown[]) => { filters[name] = values; return q },
       is: (name: string, val: unknown) => { filters[name] = val; return q },
       order: () => q, limit: () => q,
       update: (values: Record<string, unknown>) => { patch = values; updates.push(values); return q },
@@ -94,6 +95,15 @@ describe('OpenWA deferred reconciliation admin boundary', () => {
     })
     expect(fixture.queries.some(x => x.table === 'openwa_deferred_events' &&
       x.filters.account_id === ACCOUNT && x.filters.connection_id === CONNECTION)).toBe(true)
+  })
+  it('rechecks a pending LID before exhausting retry attempts', async () => {
+    const fixture = db()
+    h.auth.mockResolvedValue({ accountId: ACCOUNT, adminDb: fixture })
+    const response = await POST(request({ action: 'verify_phone', job_id: JOB, phone: PHONE }), context)
+    expect(response.status).toBe(200)
+    expect(fixture.queries.some(x => x.table === 'openwa_deferred_events' &&
+      Array.isArray(x.filters.state) &&
+      (x.filters.state as string[]).includes('pending'))).toBe(true)
   })
   it('does not create any mapping when upstream returns a different LID', async () => {
     const fixture = db()
