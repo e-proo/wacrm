@@ -238,7 +238,7 @@ describe('server-bound Coverage supplier lifecycle',()=>{
     previousBotMessage='شكراً! للتأكيد، العمولة **7 لكل 1000**؟'
     const result=await reply('نعم أؤكد',9)
     expect(row).toMatchObject({stage:'amount',commission_per_thousand:'7',offered_amount:null})
-    expect(result?.text).toContain('حضرموت')
+    expect(result?.text).toContain('المبلغ')
     expect(mocked.proposed).not.toHaveBeenCalled()
   })
   it('fails closed when the frozen proposal permission is revoked',async()=>{

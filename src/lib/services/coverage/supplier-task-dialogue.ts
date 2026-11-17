@@ -70,8 +70,8 @@ function supplierSummary(s:SupplierTurnState,f:SupplierRequestFacts):string {
 function needsMore(s:SupplierTurnState,f:SupplierRequestFacts):string {
   const missing:string[]=[]
   if (!s.routeConfirmed && !s.routeDifferent) missing.push('هل تتفق مع مسار الطلب المذكور، أم لديك مسار مختلف؟')
-  if (!s.offeredAmount) missing.push(`كم مبلغ التغطية المتاح لك من أصل ${f.remainingAmount} ${f.currency}؟`)
-  if (s.commissionPerThousand === null) missing.push('وكم عمولتك لكل 1000 (حتى لو كانت صفرًا)؟')
+  if (!s.offeredAmount) missing.push(`كم المبلغ المتاح للتغطية من أصل ${f.remainingAmount} ${f.currency}؟`)
+  if (s.commissionPerThousand === null) missing.push('وما العمولة المطلوبة لكل 1000 (حتى لو كانت صفرًا)؟')
   if (s.routeDifferent && !/(?:في\s+[\p{L}]{2,}|بدل\s+[\p{L}]{2,})/u.test(s.supplierDetails ?? '')) {
     missing.push('وضح جهة التسليم والاستلام المختلفة لننقلها للإدارة.')
   }
