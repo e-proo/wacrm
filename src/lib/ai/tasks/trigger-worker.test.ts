@@ -31,13 +31,15 @@ describe('trigger worker lease ownership', () => {
 
   it('uses the unique claim owner for successful completion, not the outer worker id', async () => {
     let claimOwner = ''
+    let requestOwner = ''
     rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
       if (name === 'materialize_agent_task_trigger_firings') {
         return { data: { schedule_firings: 0, business_event_firings: 0 }, error: null }
       }
       if (name === 'claim_next_agent_task_trigger_firing') {
-        claimOwner = String(args.p_worker_id)
-        return { data: { id: 'firing-1' }, error: null }
+        requestOwner = String(args.p_worker_id)
+        claimOwner = `${requestOwner}:00000000-0000-4000-8000-000000000186`
+        return { data: { id: 'firing-1', claim_owner: claimOwner }, error: null }
       }
       if (name === 'complete_agent_task_trigger_firing') {
         return { data: args.p_worker_id === claimOwner, error: null }
@@ -50,12 +52,28 @@ describe('trigger worker lease ownership', () => {
 
     const result = await processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 1 })
 
-    expect(claimOwner).toMatch(/^scheduler:[0-9a-f-]{36}$/)
+    expect(requestOwner).toMatch(/^scheduler:[0-9a-f-]{36}$/)
+    expect(claimOwner).toBe(`${requestOwner}:00000000-0000-4000-8000-000000000186`)
     expect(rpc).toHaveBeenCalledWith('complete_agent_task_trigger_firing', {
       p_firing_id: 'firing-1',
       p_worker_id: claimOwner,
       p_task_id: 'task-1',
     })
     expect(result).toMatchObject({ claimed: 1, completed: 1, failed: 0, dead: 0 })
+  })
+
+  it('fails closed without a DB-minted claim owner', async () => {
+    rpc.mockImplementation(async (name: string) => {
+      if (name === 'materialize_agent_task_trigger_firings') {
+        return { data: { schedule_firings: 0, business_event_firings: 0 }, error: null }
+      }
+      if (name === 'claim_next_agent_task_trigger_firing') {
+        return { data: { id: 'firing-1' }, error: null }
+      }
+      throw new Error('Unexpected RPC after missing claim owner: ' + name)
+    })
+    await expect(processAgentTaskTriggerQueue({ workerId: 'scheduler', limit: 1 }))
+      .rejects.toThrow('AGENT_TASK_TRIGGER_DB_CLAIM_OWNER_REQUIRED')
+    expect(start).not.toHaveBeenCalled()
   })
 })

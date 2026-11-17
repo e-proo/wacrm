@@ -149,7 +149,7 @@ begin
 
     if not public.complete_agent_task_trigger_firing(
       (v_claim->>'firing_id')::uuid,
-      'trigger-smoke-worker',
+      (v_claim->>'claim_owner'),
       null
     ) then
       raise exception 'Trigger firing completion failed: %', v_claim;
@@ -229,7 +229,7 @@ begin
   end if;
 
   if not public.complete_agent_task_trigger_firing(
-    (v_claim->>'firing_id')::uuid, 'trigger-smoke-worker', null
+    (v_claim->>'firing_id')::uuid, (v_claim->>'claim_owner'), null
   ) then
     raise exception 'Resumed recurring firing completion failed';
   end if;
@@ -269,7 +269,7 @@ begin
     raise exception 'Account resume did not restore queued firing: %', v_claim;
   end if;
   if not public.complete_agent_task_trigger_firing(
-    (v_claim->>'firing_id')::uuid, 'trigger-smoke-worker', null
+    (v_claim->>'firing_id')::uuid, (v_claim->>'claim_owner'), null
   ) then
     raise exception 'Account resume completion failed';
   end if;
@@ -284,7 +284,7 @@ begin
     v_now - interval '1 minute', v_now - interval '1 minute'
   );
 
-  v_claim := public.claim_next_agent_task_trigger_firing('lease-worker-old', 120);
+  v_claim := public.claim_next_agent_task_trigger_firing('lease-worker-shared', 120);
   if v_claim is null or (v_claim->>'trigger_id')::uuid <> v_recurring then
     raise exception 'Lease smoke could not claim queued firing: %', v_claim;
   end if;
@@ -294,29 +294,35 @@ begin
    where id = (v_claim->>'firing_id')::uuid;
 
   if public.complete_agent_task_trigger_firing(
-    (v_claim->>'firing_id')::uuid, 'lease-worker-old', null
+    (v_claim->>'firing_id')::uuid, (v_claim->>'claim_owner'), null
   ) then
     raise exception 'Expired lease was allowed to complete';
   end if;
   if public.fail_agent_task_trigger_firing(
-    (v_claim->>'firing_id')::uuid, 'lease-worker-old', 'stale', 0
+    (v_claim->>'firing_id')::uuid, (v_claim->>'claim_owner'), 'stale', 0
   ) is not null then
     raise exception 'Expired lease was allowed to fail';
   end if;
 
-  v_result := public.claim_next_agent_task_trigger_firing('lease-worker-new', 120);
+  v_result := public.claim_next_agent_task_trigger_firing('lease-worker-shared', 120);
   if v_result is null
      or (v_result->>'firing_id')::uuid <> (v_claim->>'firing_id')::uuid
      or (v_result->>'attempts')::integer <> 2 then
     raise exception 'Expired lease was not reclaimed with same firing identity: %', v_result;
   end if;
+
+  if (v_result->>'claim_owner') = (v_claim->>'claim_owner')
+     or (v_result->>'lease_generation')::bigint <>
+       (v_claim->>'lease_generation')::bigint + 1 then
+    raise exception 'Same worker ID reused lease generation without fencing';
+  end if;
   if public.complete_agent_task_trigger_firing(
-    (v_claim->>'firing_id')::uuid, 'lease-worker-old', null
+    (v_claim->>'firing_id')::uuid, (v_claim->>'claim_owner'), null
   ) then
     raise exception 'Old lease owner completed a reclaimed firing';
   end if;
   if not public.complete_agent_task_trigger_firing(
-    (v_result->>'firing_id')::uuid, 'lease-worker-new', null
+    (v_result->>'firing_id')::uuid, (v_result->>'claim_owner'), null
   ) then
     raise exception 'New lease owner could not complete reclaimed firing';
   end if;
