@@ -143,7 +143,7 @@ export async function inspectServicePromotionCampaign(
       .map(row => row.contact_id))
     contacts = ids.map(id => {
       const row = contactMap.get(id)
-      const phone = String(row?.phone_normalized ?? row?.phone ?? '').replace(/^\\+/, '')
+      const phone = String(row?.phone_normalized ?? row?.phone ?? '').replace(/^\+/, '')
       const reason = !row ? 'contact_missing' : suppressed.has(id) ? 'opted_out_or_blocked'
         : !/^[1-9][0-9]{7,14}$/.test(phone) ? 'invalid_phone' : null
       if (reason) blockers.push('SERVICE_PROMOTION_CONTACT_BLOCKED')
@@ -173,7 +173,7 @@ export async function inspectServicePromotionCampaign(
     if (error) throw error
     const row = data?.length === 1 ? data[0] : null
     if (!row || !String(row.body_text ?? '').includes('{{1}}') ||
-        /\\{\\{(?:[2-9]|[1-9][0-9]+)\\}\\}/.test(String(row.body_text ?? ''))) {
+        /\{\{(?:[2-9]|[1-9][0-9]+)\}\}/.test(String(row.body_text ?? ''))) {
       blockers.push('SERVICE_PROMOTION_APPROVED_TEMPLATE_MISSING')
     }
     template = { id: row?.id ?? null, name: 'service_promotion_v1',
@@ -194,7 +194,7 @@ export async function inspectServicePromotionCampaign(
       'مرحبًا، نود تعريفك بخدمة ' + serviceContext.service.name + ' المتاحة لدينا.',
       'إذا رغبت في التفاصيل أو كانت الخدمة مناسبة لاحتياجك، يمكنك الرد هنا وسيساعدك فريقنا.',
       'لإيقاف هذه الرسائل، أرسل كلمة «إيقاف».',
-    ].join('\\n')
+    ].join('\n')
   }
   const fingerprint = createHash('sha256').update(JSON.stringify({
     accountId: input.accountId,
