@@ -23,11 +23,19 @@ type Catalog = {
   agents: Array<{ id: string; name: string; publishedRevisionId: string | null }>
   coverageRequests: Array<{ id: string; status: string }>
   services: Array<{ id: string; name: string; status: string }>
+  connections: Array<{ id: string; name: string; provider: 'meta_cloud'|'openwa'; ready: boolean }>
+  contacts: Array<{ id: string; name: string }>
   maxPendingPerAccount: number
   taskWorkerEnabled: boolean
   enableAllowedInTest: boolean
 }
 type Preview = { mode: string; nextFireAt: string | null; intervalMinutes: number | null; notice: string }
+type PromotionPreview = {
+  previewOnly: boolean; readyForApproval: boolean; fingerprint: string; reviewedAt: string
+  connection: { id: string; name: string; provider: string }
+  audience: { total: number; contacts: Array<{ id: string; name: string | null; phone: string | null }> }
+  blockers: string[]
+}
 
 async function json<T>(response: Response): Promise<T> {
   const data: unknown = await response.json().catch(() => null)
@@ -75,6 +83,12 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
   const [taskType, setTaskType] = useState<'coverage.sourcing' | 'services.promotion'>('coverage.sourcing')
   const [version, setVersion] = useState<1 | 2>(2)
   const [sourceId, setSourceId] = useState('')
+  const [connectionId, setConnectionId] = useState('')
+  const [selectedContactIds, setSelectedContactIds] = useState<string[]>([])
+  const [promotionReview, setPromotionReview] = useState<PromotionPreview | null>(null)
+  const [consentAcknowledged, setConsentAcknowledged] = useState(false)
+  const [approvalAcknowledged, setApprovalAcknowledged] = useState(false)
+  const [recurringAcknowledged, setRecurringAcknowledged] = useState(false)
   const [triggerKind, setTriggerKind] = useState<'schedule' | 'business_event'>('schedule')
   const [scheduleKind, setScheduleKind] = useState<'once' | 'recurring'>('once')
   const [eventType, setEventType] = useState('coverage.request.activated')
@@ -124,20 +138,47 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
     eventType: triggerKind === 'business_event' ? eventType : null,
     coverageRequestId: taskType === 'coverage.sourcing' ? sourceId : null,
     serviceId: taskType === 'services.promotion' ? sourceId : null,
+    whatsappConnectionId: taskType === 'coverage.sourcing' ? connectionId : null,
+    selectedContactIds: taskType === 'coverage.sourcing' ? selectedContactIds : [],
+    connectionId: taskType === 'services.promotion' ? connectionId : null,
+    promotionReview: taskType === 'services.promotion' && promotionReview
+      ? {
+        fingerprint: promotionReview.fingerprint,
+        reviewedAt: promotionReview.reviewedAt,
+        consentAcknowledged,
+        approvalAcknowledged,
+        recurringAcknowledged: scheduleKind === 'recurring' && recurringAcknowledged,
+      } : null,
     overlapPolicy,
   }), [agentId, submissionId, taskType, version, triggerKind, scheduleKind, nextLocal,
-    intervalMinutes, eventType, sourceId, overlapPolicy])
+    intervalMinutes, eventType, sourceId, connectionId, selectedContactIds,
+    promotionReview, consentAcknowledged, approvalAcknowledged,
+    recurringAcknowledged, overlapPolicy])
 
   const inspect = async () => {
     setBusy('preview')
     setError(null)
     setPreview(null)
     try {
-      const result = await json<Preview>(await fetch('/api/agent-tasks/triggers/preview', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(draft(submissionId || nextSubmission())),
-      }))
-      setPreview(result)
+      if (taskType === 'services.promotion') {
+        const params = new URLSearchParams({ serviceId: sourceId, agentId, connectionId })
+        const review = await json<PromotionPreview>(await fetch(
+          '/api/agent-tasks/promotion/preview?' + params.toString(), { cache: 'no-store' }))
+        setPromotionReview(review)
+        setPreview({
+          mode: 'schedule', nextFireAt: nextLocal ? new Date(nextLocal).toISOString() : null,
+          intervalMinutes: scheduleKind === 'recurring' ? intervalMinutes : null,
+          notice: review.readyForApproval
+            ? 'الجمهور جاهز للمراجعة. راجع القائمة وأقر بالموافقة؛ لن يتم إرسال أي رسالة عند الحفظ.'
+            : 'المعاينة لا تسمح بالحفظ بسبب ضوابط الحملة. أزل العوائق ثم أعد المعاينة.',
+        })
+      } else {
+        const result = await json<Preview>(await fetch('/api/agent-tasks/triggers/preview', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(draft(submissionId || nextSubmission())),
+        }))
+        setPreview(result)
+      }
     } catch (e) { setError(e instanceof Error ? e.message : 'تعذّرت المعاينة.') }
     finally { setBusy(null) }
   }
@@ -157,6 +198,10 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
       setSuccess('حُفظت قاعدة الجدولة ' + result.id.slice(0, 8) + ' بحالة إيقاف. لم تُرسل رسائل.')
       setSubmissionId('')
       setPreview(null)
+      setPromotionReview(null)
+      setConsentAcknowledged(false)
+      setApprovalAcknowledged(false)
+      setRecurringAcknowledged(false)
       await reload()
     } catch (e) { setError(e instanceof Error ? e.message : 'تعذّر حفظ الجدولة.') }
     finally { setBusy(null) }
@@ -245,6 +290,16 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
     finally { setBusy(null) }
   }
 
+  const selectedConnection = catalog?.connections?.find(c => c.id === connectionId)
+  const promoReady = taskType !== 'services.promotion' ||
+    (promotionReview?.readyForApproval === true &&
+      promotionReview.connection.id === connectionId &&
+      consentAcknowledged && approvalAcknowledged &&
+      (scheduleKind !== 'recurring' || recurringAcknowledged))
+  const coverageReady = taskType !== 'coverage.sourcing' || version !== 2 ||
+    (selectedConnection?.ready === true &&
+      (selectedConnection.provider !== 'openwa' || selectedContactIds.length > 0))
+
   const selectClass = 'w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/50'
   const labelClass = 'mb-1.5 block text-xs font-semibold text-muted-foreground'
 
@@ -285,7 +340,7 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className={labelClass} htmlFor="sch-agent">الوكيل المنشور</label>
-            <select id="sch-agent" className={selectClass} value={agentId} onChange={e => { setAgentId(e.target.value); setPreview(null) }}>
+            <select id="sch-agent" className={selectClass} value={agentId} onChange={e => { setAgentId(e.target.value); setPreview(null); setPromotionReview(null) }}>
               <option value="">اختر وكيلاً</option>
               {(catalog?.agents ?? []).map(a =>
                 <option key={a.id} value={a.id} disabled={!a.publishedRevisionId}>
@@ -297,8 +352,11 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
             <label className={labelClass} htmlFor="sch-tasktype">نوع المهمة</label>
             <select id="sch-tasktype" className={selectClass} value={taskType} onChange={e => {
               const value = e.target.value as typeof taskType
-              setTaskType(value); setVersion(value === 'coverage.sourcing' ? 2 : 1)
-              setTriggerKind('schedule'); setSourceId(''); setPreview(null)
+              setTaskType(value); setVersion(2)
+              setTriggerKind('schedule'); setSourceId(''); setConnectionId('')
+              setSelectedContactIds([]); setPromotionReview(null)
+              setConsentAcknowledged(false); setApprovalAcknowledged(false)
+              setPreview(null)
             }}>
               <option value="coverage.sourcing">البحث عن عروض تغطية</option>
               <option value="services.promotion">ترويج الخدمات (يخضع لبوابة Pilot)</option>
@@ -316,11 +374,38 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
           )}
           <div>
             <label className={labelClass} htmlFor="sch-source">{taskType === 'coverage.sourcing' ? 'طلب التغطية' : 'الخدمة'}</label>
-            <select id="sch-source" className={selectClass} value={sourceId} onChange={e => { setSourceId(e.target.value); setPreview(null) }}>
+            <select id="sch-source" className={selectClass} value={sourceId} onChange={e => { setSourceId(e.target.value); setPreview(null); setPromotionReview(null) }}>
               <option value="">اختر المصدر ضمن الحساب</option>
               {subjectOptions.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </div>
+          {version === 2 && <div>
+            <label className={labelClass} htmlFor="sch-connection">اتصال واتساب المعتمد</label>
+            <select id="sch-connection" className={selectClass} value={connectionId}
+              onChange={e => { setConnectionId(e.target.value); setPromotionReview(null);
+                setSelectedContactIds([]); setPreview(null) }}>
+              <option value="">اختر اتصالًا جاهزًا</option>
+              {(catalog?.connections ?? []).map(c =>
+                <option key={c.id} value={c.id} disabled={!c.ready}>
+                  {c.name} · {c.provider === 'meta_cloud' ? 'Meta Cloud' : 'OpenWA'}
+                  {!c.ready ? ' · غير جاهز' : ''}
+                </option>)}
+            </select>
+          </div>}
+          {taskType === 'coverage.sourcing' && version === 2 && <div className="sm:col-span-2">
+            <p className={labelClass}>المستهدفون المحددون (إلزامي لاتصال OpenWA، بحد 20 جهة اتصال)</p>
+            <div className="max-h-36 overflow-y-auto rounded-lg border p-2 grid gap-2 sm:grid-cols-2">
+              {(catalog?.contacts ?? []).map(contact =>
+                <label key={contact.id} className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={selectedContactIds.includes(contact.id)}
+                    onChange={e => setSelectedContactIds(old => e.target.checked
+                      ? old.includes(contact.id) || old.length >= 20 ? old : [...old, contact.id]
+                      : old.filter(id => id !== contact.id))} />
+                  <span>{contact.name}</span>
+                </label>)}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">المحدد: {selectedContactIds.length}. سيتم التحقق من أهلية كل جهة اتصال عند الاستحقاق.</p>
+          </div>}
           <div>
             <label className={labelClass} htmlFor="sch-kind">نوع المشغّل</label>
             <select id="sch-kind" className={selectClass} value={triggerKind}
@@ -371,16 +456,47 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
             </select>
           </div>
         </div>
+        {taskType === 'services.promotion' && promotionReview && (
+          <section className="mt-4 rounded-xl border border-primary/25 bg-muted/20 p-4 space-y-3">
+            <h4 className="text-sm font-semibold">مراجعة الترويج V2 — بدون إرسال</h4>
+            <p className="text-xs">الاتصال: {promotionReview.connection.name} · الجمهور الحالي: {promotionReview.audience.total} جهة</p>
+            {promotionReview.blockers.length > 0 && <p role="alert" className="text-xs text-destructive">
+              عوائق الترويج: {promotionReview.blockers.join('، ')}
+            </p>}
+            <div className="max-h-36 overflow-y-auto rounded-lg border p-2 space-y-1">
+              {promotionReview.audience.contacts.map(c =>
+                <p key={c.id} className="text-xs">{c.name || c.id.slice(0, 8)} · {c.phone || 'بدون رقم'}</p>)}
+            </div>
+            <label className="flex items-start gap-2 text-xs">
+              <input type="checkbox" checked={consentAcknowledged}
+                onChange={e => setConsentAcknowledged(e.target.checked)} />
+              أؤكد مراجعة أهلية التواصل والموافقة من جهات الاتصال المحددة.
+            </label>
+            <label className="flex items-start gap-2 text-xs">
+              <input type="checkbox" checked={approvalAcknowledged}
+                onChange={e => setApprovalAcknowledged(e.target.checked)} />
+              أعتمد هذه الحملة وجمهورها واتصالها وبصمتها لأغراض الجدولة.
+            </label>
+            {scheduleKind === 'recurring' && <label className="flex items-start gap-2 text-xs">
+              <input type="checkbox" checked={recurringAcknowledged}
+                onChange={e => setRecurringAcknowledged(e.target.checked)} />
+              أوافق صراحة على التكرار، مع إعادة التحقق عند كل تشغيل وصلاحية مراجعة محدودة.
+            </label>}
+            <p className="text-xs text-muted-foreground">تُرفض الحملة إذا تغيّر الجمهور أو الاتصال أو النسخة المنشورة، وتنتهي الموافقة بعد 30 يومًا كحد أقصى.</p>
+          </section>
+        )}
         {preview && <div role="status" className="mt-4 rounded-xl border bg-muted/30 p-3 text-sm">
           <p className="font-medium">معاينة بلا إرسال</p>
           <p className="mt-1">{preview.notice}</p>
           {preview.nextFireAt && <p className="mt-1"><Clock3 className="ms-1 inline h-4 w-4" /> التشغيل المتوقع: {displayTime(preview.nextFireAt)}</p>}
         </div>}
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button variant="outline" disabled={busy !== null || !agentId || !sourceId} onClick={() => void inspect()}>
+          <Button variant="outline" disabled={busy !== null || !agentId || !sourceId ||
+              (version === 2 && !connectionId)} onClick={() => void inspect()}>
             <Eye className="me-2 h-4 w-4" /> {busy === 'preview' ? 'جارٍ التحقق…' : 'معاينة'}
           </Button>
-          <Button disabled={busy !== null || !agentId || !sourceId} onClick={() => void save()}>
+          <Button disabled={busy !== null || !agentId || !sourceId || !promoReady || !coverageReady}
+            onClick={() => void save()}>
             <Plus className="me-2 h-4 w-4" /> {busy === 'create' ? 'جارٍ الحفظ…' : 'حفظ كقاعدة موقوفة'}
           </Button>
         </div>
