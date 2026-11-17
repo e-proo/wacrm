@@ -1,0 +1,53 @@
+name: SCH-4 TEST Agent Task Scheduler
+
+on:
+  schedule:
+    # GitHub schedules use the default branch; rollout is opt-in and never
+    # grants a deployment, a recipient or permission to send WhatsApp.
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sch4-test-agent-task-scheduler
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    if: vars.WACRM_SCH4_TEST_SCHEDULER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Invoke existing TEST-only Agent Task worker
+        env:
+          WACRM_SCH4_TEST_WORKER_URL: ${{ vars.WACRM_SCH4_TEST_WORKER_URL }}
+          WACRM_SCH4_TEST_CRON_SECRET: ${{ secrets.WACRM_SCH4_TEST_CRON_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+
+          raw = os.environ.get("WACRM_SCH4_TEST_WORKER_URL", "")
+          secret = os.environ.get("WACRM_SCH4_TEST_CRON_SECRET", "")
+          u = urlsplit(raw)
+          if (not secret or u.scheme != "https" or not u.hostname
+                  or u.username or u.password or u.query or u.fragment
+                  or u.path != "/api/internal/ai-agent-task-worker"):
+              raise SystemExit("SCH4 TEST endpoint URL/secret not safely configured")
+          req = Request(raw, data=b"{}", method="POST", headers={
+              "Authorization": "Bearer " + secret,
+              "Content-Type": "application/json",
+              "Cache-Control": "no-store",
+          })
+          try:
+              with urlopen(req, timeout=90) as resp:
+                  status = resp.status
+                  # Never log server response bodies, credentials, Task IDs or PII.
+          except HTTPError as err:
+              raise SystemExit("SCH4 TEST tick rejected: HTTP " + str(err.code))
+          if status not in (200, 202):
+              raise SystemExit("SCH4 TEST tick unexpected HTTP " + str(status))
+          print("SCH4 TEST worker: HTTP", status,
+                "(202 means another worker owns the lease)")
+          PY
