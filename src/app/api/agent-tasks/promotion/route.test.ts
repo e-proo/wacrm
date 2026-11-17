@@ -57,9 +57,11 @@ function fakeFrom(table: string) {
       published_revision_id: agentId }]
       : table === 'whatsapp_connections' ? [{ id: connectionId, display_name: 'Meta TEST',
         provider: 'meta_cloud', status: 'connected', archived_at: null }]
-        : table === 'ai_agent_revisions' ? [{ id: agentId, outreach_policy: {
-          bindings: [{ taskType: 'services.promotion', taskTypeVersion: 2 }],
-        } }]
+        : table === 'ai_agent_revisions' ? [{ id: agentId, revision_number: 3,
+          outreach_policy: {
+            bindings: [{ taskType: 'services.promotion', taskTypeVersion: 2,
+              targetScope: { requiredTagIds: [] } }],
+          } }]
           : []
   const chain = {
     select: () => chain, eq: () => chain, in: () => chain,
@@ -88,6 +90,9 @@ describe('Service Promotion operator API', () => {
     expect(data.mode).toBe('preview_only')
     expect(data.launchEnabled).toBe(false)
     expect(data.agents[0].promotionV2).toBe(true)
+    expect(data.agents[0].revisionNumber).toBe(3)
+    expect(data.agents[0].promotionAudienceConfigured).toBe(false)
+    expect(data.agents[0].promotionRequiredTagIds).toEqual([])
     expect(data.connections[0].provider).toBe('meta_cloud')
     expect(stubs.auth).toHaveBeenCalledWith('agents.manage_tasks')
     expect(stubs.auth).toHaveBeenCalledWith('agents.manage_outreach')
