@@ -178,6 +178,7 @@ function firstScalar(
 function targetTypeLabel(targetType: string): string {
   const labels: Record<string, string> = {
     coverage_offer: 'عرض تغطية',
+    coverage_supplier_quote: 'عرض مورد بديل — يحتاج مراجعة بشرية',
     coverage_request: 'طلب تغطية',
     fx_rate_pair: 'تحديث زوج أسعار صرف',
     fx_trade_request: 'قرار طلب صرف عملة',

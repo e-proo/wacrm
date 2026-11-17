@@ -305,6 +305,7 @@ describe('Coverage second-domain migration', () => {
       ]),
     )
     expect(COVERAGE_DOMAIN.changeActions.map((action) => action.key)).toEqual([
+      'coverage.supplier_counteroffer.review',
       'coverage.offer.create',
       'coverage.request.create',
     ])
@@ -324,6 +325,12 @@ describe('Coverage second-domain migration', () => {
       })?.key,
     ).toBe('coverage.request.create')
 
+    expect(CURRENT_CHANGE_EXECUTOR_REGISTRY.has('coverage.supplier_counteroffer.review', 1)).toBe(true)
+    expect(CURRENT_BUSINESS_DOMAIN_REGISTRY.resolveLegacyChangeAction({
+      targetType: 'coverage_supplier_quote',
+      targetId: null,
+      intent: 'create',
+    })?.key).toBe('coverage.supplier_counteroffer.review')
     expect(CURRENT_CHANGE_EXECUTOR_REGISTRY.has('coverage.offer.create', 1)).toBe(true)
     expect(CURRENT_CHANGE_EXECUTOR_REGISTRY.has('coverage.request.create', 1)).toBe(true)
   })
