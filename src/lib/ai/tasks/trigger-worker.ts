@@ -81,7 +81,7 @@ export async function processAgentTaskTriggerQueue(input: {
       const started = await handler.start(firing)
       const complete = await db.rpc('complete_agent_task_trigger_firing', {
         p_firing_id: firing.firingId,
-        p_worker_id: input.workerId,
+        p_worker_id: claimWorkerId,
         p_task_id: started.taskId,
       })
       if (complete.error) throw complete.error
