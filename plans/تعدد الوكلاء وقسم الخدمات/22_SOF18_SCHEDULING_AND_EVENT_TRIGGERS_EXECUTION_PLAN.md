@@ -138,3 +138,17 @@ Record PASS/FAIL/BLOCKED, UTC timestamp, exact observed HEAD/CI/Migrations URLs,
 **Owner roles:** backend/schema (contracts + migrations), frontend (trigger UX), QA (concurrency, regression and live TEST), operator (consent/cohort and rollback), security (tenant/RLS and production gate).
 
 **Stop conditions:** unexpected contact/provider, lost account scope, duplicate Task/outbound, replay producing a new message, ambiguous send without reconciliation, unbounded backfill, scheduled task after pause/kill-switch, invalid event source, PROD access during TEST. On STOP: disable new Task sends, pause worker/trigger, preserve existing messages and evidence, reconcile pending, then retest.
+
+## 7. SCH-0 execution checkpoint — 2026-11-17 (no-send)
+
+**Audited HEAD:** `18b7df778c7762b607463f67161c95f6743e84c2`. [CI for that HEAD: success](https://github.com/e-proo/wacrm/actions/runs/44018192789). This CI success does **not** prove a future scheduling migration or live acceptance.
+
+**V1 release decision:** Ship fixed UTC instant (`once`) and fixed elapsed-minute interval (`recurring`) only; no cron, monthly, calendar, timezone-anchored wall-clock or DST recurrence claims. Display timezone is a presentation concern, not the recurrence policy. Calendar semantics require a separately reviewed additive schema and DST contract.
+
+**Observed code contracts:** Migration 124 creates service-role-only `ai_agent_task_triggers` and `ai_agent_task_trigger_firings`, with `(account_id,idempotency_key)` unique for policies and `(trigger_id,source_key)` unique for occurrences. `materialize_agent_task_trigger_firings` advances recurring `next_fire_at` by exactly one interval per tick; old missed periods may therefore be replayed over successive ticks. `claim_next_agent_task_trigger_firing` permits enabled/completed policies, but not paused, and reclaims expired leases up to five attempts. `trigger-worker.ts` bounds processing to 1–100 claims per invocation, with 120-second leases. `triggers.ts` validates registered handler identity and uses service-role RPC; it is **not** a user-facing authorization boundary. `/api/internal/ai-agent-worker` is protected by `CRON_SECRET`, but this route invokes the AI run worker, not a standalone scheduling control API.
+
+**Safe engineering defaults for SCH-1:** prevent surprise backlog by defaulting to `skip_missed` (record durable skipped/coalesced counts), no unbounded replay; use a configurable finite max backfill and per-account cap. `pause` blocks future materialization and unclaimed claims; already-created tasks are managed through existing Task cancellation and transport reconciliation, never retroactively erased. An expired lease retry must retain the same `source_key` and Task identity. A previously active Task must be recorded as overlap `skipped` or `deferred`, never falsely counted as a new launch. Preserve service-role-only RPC grants and tenant authorization at the admin API layer.
+
+**Next deliverable:** SCH-1 additive migration for explicit policy snapshot, skipped/coalesced outcomes, bounded catch-up and concurrency tests, followed by SCH-2 scoped admin API/UI. This checkpoint is a documented contract/audit, **not** implementation complete. No TEST database changes, no outbound sends and no live acceptance were performed in this checkpoint.
+
+**Live acceptance deferred:** SCH-AC-01..11 require independent TEST evidence, approved operator/cohort and no-send or authorized-send scenarios as specified above. No PASS is claimed.
