@@ -107,7 +107,7 @@ export async function POST(request: Request, context: Context) {
         })
         .eq('account_id', state.accountId).eq('connection_id', state.connectionId)
         .eq('id', job.id).eq('state', 'review')
-        .is('verified_phone', null).select('id').maybeSingle()
+        .select('id').maybeSingle()
       if (ue || !updated) {
         return NextResponse.json({ error: 'Provider verification succeeded but the review state changed' },
           { status: 409, headers: noStore })
