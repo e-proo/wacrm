@@ -152,3 +152,14 @@ Record PASS/FAIL/BLOCKED, UTC timestamp, exact observed HEAD/CI/Migrations URLs,
 **Next deliverable:** SCH-1 additive migration for explicit policy snapshot, skipped/coalesced outcomes, bounded catch-up and concurrency tests, followed by SCH-2 scoped admin API/UI. This checkpoint is a documented contract/audit, **not** implementation complete. No TEST database changes, no outbound sends and no live acceptance were performed in this checkpoint.
 
 **Live acceptance deferred:** SCH-AC-01..11 require independent TEST evidence, approved operator/cohort and no-send or authorized-send scenarios as specified above. No PASS is claimed.
+
+
+## 8. SCH-1 verification checkpoint — 2026-11-17 10:42 Europe/Warsaw
+
+**Verified HEAD:** `de2c66c3e728db522254891c6824e5c9f6b33182` (same as prior engineering checkpoint). Both workflows for this exact HEAD finished **successfully**: [application CI 44049178927](https://github.com/e-proo/wacrm/actions/runs/44049178927) and [Migrations CI 44049178977](https://github.com/e-proo/wacrm/actions/runs/44049178977). This supersedes the previous pending-CI statement for this HEAD; earlier migration failures on `79a4f139` and `6a7942ec` were fixed by migrations 182/183.
+
+**Code already committed, not newly changed in this checkpoint:** `182_agent_task_schedule_skip_missed.sql` records missed recurring occurrences and coalesces overdue intervals; `183_agent_task_trigger_materialization_account_pause.sql` prevents materialization for paused accounts; `supabase/ci/agent-task-trigger-smoke.sql` checks coalescing and pause/resume. Do not duplicate these changes. The clean-replay workflow result is evidence of CI verification, **not** proof that migration 182/183 was independently applied to the dedicated TEST Supabase project.
+
+**SCH-1 remains partial implementation:** no demonstrated per-account fairness/backlog cap, complete lease/pause race tests, or recorded overlap skip outcome. **SOF-18 stays In Progress.** Next: inspect and implement bounded per-account backlog and lease-safe claim behavior with regression tests, then SCH-2 admin control surface. Do not widen into OpenWA/other project phases.
+
+**Live acceptance deferred:** SCH-AC-01..11 are still unexecuted; no provider send or Production change was performed. TEST-specific migration application, security evidence and operator-signed live acceptance remain separate gates.
