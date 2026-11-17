@@ -6,6 +6,7 @@ import { AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 
 type Row = {
   id: string
@@ -27,6 +28,7 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
   const [data, setData] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(false)
   const [retrying, setRetrying] = useState<string | null>(null)
+  const [phoneInputs, setPhoneInputs] = useState<Record<string, string>>({})
   const endpoint = `/api/whatsapp/connections/openwa/${connectionId}/reconciliation`
 
   async function refresh() {
@@ -57,6 +59,33 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
     } catch {
       toast.error(ar ? 'تعذر إعادة المحاولة. راجع حالة الاتصال' : 'Retry failed; check connection status')
     } finally { setRetrying(null) }
+  }
+
+  async function verifyPhone(jobId: string) {
+    const phone = phoneInputs[jobId]?.trim()
+    if (!phone) {
+      toast.error(ar ? 'أدخل رقم الهاتف الدولي المراد التحقق منه' : 'Enter the international phone to verify')
+      return
+    }
+    setRetrying(jobId)
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify_phone', job_id: jobId, phone }),
+      })
+      if (!response.ok) throw new Error('provider_proof_rejected')
+      setPhoneInputs((previous) => ({ ...previous, [jobId]: '' }))
+      toast.success(ar
+        ? 'تحقق OpenWA من الربط وأعاد الحدث للمعالجة الآمنة'
+        : 'OpenWA verified the native pairing; the event is queued')
+      await refresh()
+    } catch {
+      toast.error(ar
+        ? 'لم يتمكن OpenWA من إثبات ربط هذا الرقم بالهوية الأصلية'
+        : 'OpenWA could not verify this phone-to-LID pairing')
+    } finally {
+      setRetrying(null)
+    }
   }
 
   const pending = Object.entries(data?.counts ?? {}).reduce((n, [k, v]) =>
@@ -108,11 +137,26 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
                   {item.last_error_code ? ` · ${item.last_error_code}` : ''}
                 </p>
               </div>
-              {item.state === 'review' && data?.may_retry && <Button variant="outline" size="sm"
-                disabled={retrying !== null} onClick={() => void retry(item.id)}>
-                <AlertCircle className="me-1 h-3 w-3" />
-                {ar ? 'إعادة فحص' : 'Recheck'}
-              </Button>}
+              {item.state === 'review' && data?.may_retry && <div className="flex flex-wrap items-center gap-2">
+                {item.event_kind === 'unresolved_identity' && <>
+                  <Input type="tel" inputMode="tel"
+                    aria-label={ar ? 'رقم الهاتف الدولي' : 'International phone number'}
+                    placeholder={ar ? 'رقم الهاتف الدولي' : 'International phone'}
+                    className="h-8 w-40 text-xs" value={phoneInputs[item.id] ?? ''}
+                    onChange={(event) => setPhoneInputs((previous) => ({
+                      ...previous, [item.id]: event.target.value,
+                    }))} />
+                  <Button variant="outline" size="sm" disabled={retrying !== null}
+                    onClick={() => void verifyPhone(item.id)}>
+                    {ar ? 'تحقق من OpenWA' : 'Verify with OpenWA'}
+                  </Button>
+                </>}
+                <Button variant="outline" size="sm"
+                  disabled={retrying !== null} onClick={() => void retry(item.id)}>
+                  <AlertCircle className="me-1 h-3 w-3" />
+                  {ar ? 'إعادة فحص' : 'Recheck'}
+                </Button>
+              </div>}
             </div>)}
           </div>}
       <p className="text-xs text-muted-foreground">
