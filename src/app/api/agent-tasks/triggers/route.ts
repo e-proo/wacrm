@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { CURRENT_AGENT_TASK_TRIGGER_REGISTRY } from '@/lib/ai/tasks/current-platform'
 import { parseScheduleDraft, ScheduleValidationError } from '@/lib/ai/tasks/schedule-admin'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
+import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
 
 export const runtime = 'nodejs'
 const headers = { 'Cache-Control': 'private, no-store, max-age=0' }
@@ -43,6 +44,15 @@ export async function GET() {
     const err = rulesError ?? firingsError ?? agentsError ??
       requestError ?? servicesError ?? policyError
     if (err) throw err
+    const taskIds = [...new Set((firings ?? [])
+      .map(f => f.task_id).filter((id): id is string => typeof id === 'string'))].slice(0, 300)
+    const taskStatuses = new Map<string, string>()
+    if (taskIds.length > 0) {
+      const { data: taskRows, error: taskError } = await db.from('ai_agent_tasks')
+        .select('id,status').eq('account_id', ctx.accountId).in('id', taskIds)
+      if (taskError) throw taskError
+      for (const task of taskRows ?? []) taskStatuses.set(task.id, task.status)
+    }
     const byTrigger = new Map<string, Array<Record<string, unknown>>>()
     for (const f of firings ?? []) {
       const key = f.trigger_id as string
@@ -50,6 +60,7 @@ export async function GET() {
       if (list.length < 8) {
         list.push({
           id: f.id, status: f.status, attempts: f.attempts, taskId: f.task_id,
+          taskStatus: f.task_id ? taskStatuses.get(f.task_id) ?? null : null,
           scheduledFor: f.scheduled_for, createdAt: f.created_at,
           availableAt: f.available_at, skipReason: f.skip_reason,
           reason: typeof f.last_error === 'string' && /^[A-Z0-9_:.@-]{1,100}$/.test(f.last_error)
@@ -84,7 +95,7 @@ export async function GET() {
       services: services ?? [],
       maxPendingPerAccount: runtimePolicy?.agent_task_trigger_max_pending ?? 100,
       taskWorkerEnabled: runtimePolicy?.task_worker_enabled !== false,
-      enableAllowedInTest: process.env.WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST === '1',
+      enableAllowedInTest: process.env.WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST === '1' && isOpenWATestProject(),
     }, { headers })
   } catch (error) {
     return toErrorResponse(error)

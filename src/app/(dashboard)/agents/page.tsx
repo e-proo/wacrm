@@ -220,7 +220,7 @@ export default function AgentsPage() {
 
           {canSeeMultiAgent && (
             <TabsContent value="schedules" className="mt-4">
-              <AgentTaskSchedulesPanel />
+              <AgentTaskSchedulesPanel onOpenTasks={() => setTab('tasks')} />
             </TabsContent>
           )}
 

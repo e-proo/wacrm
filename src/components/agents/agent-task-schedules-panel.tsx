@@ -1,13 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CalendarClock, Clock3, PauseCircle, PlayCircle, RefreshCw, ShieldCheck, Eye, Plus, AlertTriangle } from 'lucide-react'
+import { CalendarClock, Clock3, PauseCircle, PlayCircle, RefreshCw, ShieldCheck, Eye, Plus, AlertTriangle, Pencil, Ban, ListChecks } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 type Firing = {
   id: string; status: string; attempts: number; createdAt: string
   scheduledFor: string | null; availableAt: string; taskId: string | null
-  skipReason: string | null; reason: string | null
+  skipReason: string | null; reason: string | null; taskStatus?: string | null
 }
 type Rule = {
   id: string; taskType: string; version: number; agentId: string
@@ -16,7 +16,7 @@ type Rule = {
   intervalMinutes: number | null; eventType: string | null; subjectId: string | null
   policyVersion: number; overlapPolicy: 'skip' | 'defer'
   approvedRevisionId: string | null; skippedOccurrences: number
-  createdAt: string; firings: Firing[]
+  createdAt: string; editedAt: string | null; cancelledAt: string | null; firings: Firing[]
 }
 type Catalog = {
   rules: Rule[]
@@ -54,7 +54,7 @@ function statusName(status: string) {
   return ({
     enabled: 'نشطة', paused: 'موقوفة', completed: 'انتهى توليد الجدولة',
     pending: 'بانتظار الحجز', claimed: 'محجوزة', failed: 'إعادة المحاولة',
-    dead: 'توقفت بعد المحاولات', skipped: 'تم تجاوز التداخل',
+    dead: 'توقفت بعد المحاولات', skipped: 'تم تجاوز التداخل', cancelled: 'ملغاة نهائيًا',
   } as Record<string, string>)[status] ?? status
 }
 function nextSubmission(): string {
@@ -64,7 +64,7 @@ function nextSubmission(): string {
 /** A strictly no-send admin editor. Create only PAUSED policies; start is separately
  * operator-confirmed and additionally server-gated in TEST.
  */
-export function AgentTaskSchedulesPanel() {
+export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => void } = {}) {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [busy, setBusy] = useState<string | null>('load')
   const [error, setError] = useState<string | null>(null)
@@ -82,6 +82,11 @@ export function AgentTaskSchedulesPanel() {
   const [intervalMinutes, setIntervalMinutes] = useState(60)
   const [overlapPolicy, setOverlapPolicy] = useState<'skip' | 'defer'>('skip')
   const [submissionId, setSubmissionId] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editKind, setEditKind] = useState<'once' | 'recurring'>('once')
+  const [editLocalTime, setEditLocalTime] = useState('')
+  const [editInterval, setEditInterval] = useState(60)
+  const [editOverlap, setEditOverlap] = useState<'skip' | 'defer'>('skip')
 
   useEffect(() => {
     setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
@@ -155,6 +160,70 @@ export function AgentTaskSchedulesPanel() {
       await reload()
     } catch (e) { setError(e instanceof Error ? e.message : 'تعذّر حفظ الجدولة.') }
     finally { setBusy(null) }
+  }
+
+  const beginEdit = (rule: Rule) => {
+    if (rule.status !== 'paused') return
+    setEditingId(rule.id)
+    setEditKind(rule.scheduleKind ?? 'once')
+    setEditLocalTime(rule.nextFireAt ? localDateTime(new Date(rule.nextFireAt)) : '')
+    setEditInterval(rule.intervalMinutes ?? 60)
+    setEditOverlap(rule.overlapPolicy)
+    setError(null)
+    setSuccess(null)
+  }
+
+  const saveEdit = async (rule: Rule) => {
+    setBusy('edit:' + rule.id)
+    setError(null)
+    setSuccess(null)
+    try {
+      const nextFireAt = rule.triggerKind === 'schedule' && editLocalTime
+        ? new Date(editLocalTime).toISOString() : null
+      const result = await json<{ policyVersion: number; skippedFirings: number }>(
+        await fetch('/api/agent-tasks/triggers/' + rule.id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'edit', expectedPolicyVersion: rule.policyVersion,
+            scheduleKind: rule.triggerKind === 'schedule' ? editKind : null,
+            nextFireAt,
+            intervalMinutes: rule.triggerKind === 'schedule' && editKind === 'recurring'
+              ? editInterval : null,
+            overlapPolicy: editOverlap,
+          }),
+        }))
+      setEditingId(null)
+      setSuccess('حُفظت سياسة V' + result.policyVersion + ' وهي موقوفة. تم تجاوز ' +
+        result.skippedFirings + ' من الحجوزات القديمة دون إلغاء المهام المنشأة.')
+      await reload()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'تعذّر تعديل سياسة الجدولة.')
+    } finally { setBusy(null) }
+  }
+
+  const cancelRule = async (rule: Rule) => {
+    if (!window.confirm('إلغاء سياسة الجدولة نهائيًا؟ لن تنشأ حجوزات جديدة. لا تُلغى المهام التي بدأت أو الرسائل المرسلة بالفعل، ويجب إدارتها من قسم المهام.')) return
+    setBusy('cancel:' + rule.id)
+    setError(null)
+    setSuccess(null)
+    try {
+      const result = await json<{ skippedFirings: number; linkedTasksUntouched: number }>(
+        await fetch('/api/agent-tasks/triggers/' + rule.id, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            expectedPolicyVersion: rule.policyVersion,
+            confirmCancel: true,
+          }),
+        }))
+      if (editingId === rule.id) setEditingId(null)
+      setSuccess('أُلغيت السياسة نهائيًا. أوقفت ' + result.skippedFirings +
+        ' من الحجوزات المعلقة؛ المهام المنشأة باقية ويجب متابعتها بشكل مستقل.')
+      await reload()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'تعذّر إلغاء السياسة.')
+    } finally { setBusy(null) }
   }
 
   const changeStatus = async (rule: Rule, status: 'paused' | 'enabled') => {
@@ -334,6 +403,19 @@ export function AgentTaskSchedulesPanel() {
                   <p className="mt-1 text-xs text-muted-foreground">الموعد القادم: {displayTime(rule.nextFireAt)} · التداخل: {rule.overlapPolicy === 'skip' ? 'تجاوز' : 'تأجيل'} · الفترات المتخطاة: {rule.skippedOccurrences}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {rule.status === 'paused' && <Button variant="outline" size="sm"
+                    disabled={busy !== null} onClick={() => editingId === rule.id
+                      ? setEditingId(null) : beginEdit(rule)}>
+                    <Pencil className="me-1.5 h-4 w-4" /> {editingId === rule.id ? 'إغلاق التعديل' : 'تعديل'}
+                  </Button>}
+                  {rule.status !== 'cancelled' && <Button variant="outline" size="sm"
+                    disabled={busy !== null} onClick={() => void cancelRule(rule)}>
+                    <Ban className="me-1.5 h-4 w-4" /> إلغاء نهائي
+                  </Button>}
+                  {rule.firings.some(f => f.taskId) && onOpenTasks && <Button variant="outline"
+                    size="sm" disabled={busy !== null} onClick={onOpenTasks}>
+                    <ListChecks className="me-1.5 h-4 w-4" /> مهام الوكلاء
+                  </Button>}
                   {rule.status === 'enabled' && <Button variant="outline" size="sm"
                     disabled={busy !== null} onClick={() => void changeStatus(rule, 'paused')}>
                     <PauseCircle className="me-1.5 h-4 w-4" /> إيقاف
@@ -345,17 +427,66 @@ export function AgentTaskSchedulesPanel() {
                   </Button>}
                 </div>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">المصدر: {rule.subjectId?.slice(0, 12) ?? 'مُحدد بفلتر الحدث'} · معرّف القاعدة: {rule.id.slice(0, 12)}</p>
+              <p className="mt-2 text-xs text-muted-foreground">المصدر: {rule.subjectId?.slice(0, 12) ?? 'مُحدد بفلتر الحدث'} · معرّف القاعدة: {rule.id.slice(0, 12)}
+              {rule.cancelledAt ? ' · أُلغيت: ' + displayTime(rule.cancelledAt) : ''}
+              </p>
+              {editingId === rule.id && rule.status === 'paused' && (
+                <div className="mt-4 space-y-3 rounded-xl border bg-muted/30 p-4">
+                  <h5 className="text-sm font-semibold">تعديل السياسة V{rule.policyVersion}</h5>
+                  <p className="text-xs leading-6 text-muted-foreground">يسمح بتغيير الموعد والفاصل وسياسة التداخل فقط. الوكيل والمصدر والنسخة المنشورة ثابتة. تُتجاوز الحجوزات المعلقة السابقة مع الاحتفاظ بسجلها، وتبقى الجدولة موقوفة بعد الحفظ.</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {rule.triggerKind === 'schedule' && <>
+                      <div>
+                        <label className={labelClass} htmlFor={'edit-kind-' + rule.id}>نوع الجدولة</label>
+                        <select id={'edit-kind-' + rule.id} className={selectClass}
+                          value={editKind} onChange={e => setEditKind(e.target.value as typeof editKind)}>
+                          <option value="once">مرة واحدة</option>
+                          <option value="recurring">تكرار كل عدد ثابت من الدقائق</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className={labelClass} htmlFor={'edit-time-' + rule.id}>الموعد القادم — {timezone}</label>
+                        <input id={'edit-time-' + rule.id} className={selectClass}
+                          type="datetime-local" value={editLocalTime}
+                          onChange={e => setEditLocalTime(e.target.value)} />
+                      </div>
+                      {editKind === 'recurring' && <div>
+                        <label className={labelClass} htmlFor={'edit-interval-' + rule.id}>التكرار بالدقائق</label>
+                        <input id={'edit-interval-' + rule.id} className={selectClass}
+                          type="number" min={5} max={525600} value={editInterval}
+                          onChange={e => setEditInterval(Number(e.target.value))} />
+                      </div>}
+                    </>}
+                    <div>
+                      <label className={labelClass} htmlFor={'edit-overlap-' + rule.id}>سياسة التداخل</label>
+                      <select id={'edit-overlap-' + rule.id} className={selectClass}
+                        value={editOverlap} onChange={e => setEditOverlap(e.target.value as typeof editOverlap)}>
+                        <option value="skip">تجاوز (skip)</option>
+                        <option value="defer">تأجيل (defer)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" disabled={busy !== null} onClick={() => void saveEdit(rule)}>
+                      حفظ التعديل بدون تفعيل
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
+                      تراجع
+                    </Button>
+                  </div>
+                </div>
+              )}
               {rule.firings.length > 0 && <div className="mt-4 overflow-x-auto rounded-lg border">
                 <table className="w-full min-w-[520px] text-start text-xs">
                   <thead className="bg-muted/50 text-muted-foreground"><tr>
-                    <th className="p-2 text-start">الوقت</th><th className="p-2 text-start">حالة firing</th><th className="p-2 text-start">محاولات</th><th className="p-2 text-start">السبب / Task</th>
+                    <th className="p-2 text-start">الوقت</th><th className="p-2 text-start">حالة firing</th><th className="p-2 text-start">محاولات</th><th className="p-2 text-start">السبب / Task</th><th className="p-2 text-start">حالة المهمة</th>
                   </tr></thead>
                   <tbody>{rule.firings.map(f => <tr key={f.id} className="border-t">
                     <td className="p-2">{displayTime(f.scheduledFor ?? f.createdAt)}</td>
                     <td className="p-2 font-medium">{statusName(f.status)}</td>
                     <td className="p-2">{f.attempts}</td>
                     <td className="p-2">{f.skipReason ?? f.reason ?? (f.taskId ? 'Task ' + f.taskId.slice(0, 8) : '—')}</td>
+                    <td className="p-2">{f.taskStatus ? statusName(f.taskStatus) : f.taskId ? 'تحقق من المهام' : '—'}</td>
                   </tr>)}</tbody>
                 </table>
               </div>}
@@ -365,7 +496,7 @@ export function AgentTaskSchedulesPanel() {
       </section>
       <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-6">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-        <p>حالة القاعدة تختلف عن حالة firing والمهمة ورسالة واتساب. لا يُعادل نجاح الجدولة نجاح الإرسال. تمكين الجدولة مقيد بـTEST وبموافقة إضافية؛ الاختبارات الحية مؤجلة.</p>
+        <p>تعديل السياسة لا يغيّر المصدر أو الوكيل؛ ولتغييرهما ألغِ السياسة وأنشئ أخرى. الإلغاء نهائي لكنه لا يلغي Task بدأ أو رسالة واتساب أُرسلت. هذه الحالات تُدار من تبويب «مهام الوكلاء». تمكين الجدولة مقيد بـTEST؛ اختبار الواجهة والقبول الحي مؤجلان.</p>
       </div>
     </div>
   )
