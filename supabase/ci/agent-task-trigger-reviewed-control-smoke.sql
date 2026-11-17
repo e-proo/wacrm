@@ -37,9 +37,14 @@ begin
  if not public.set_reviewed_agent_task_trigger_status(
   v_account,v_trigger,'paused',v_user
  ) then raise exception 'SCH2_PAUSE_REJECTED'; end if;
- if public.set_reviewed_agent_task_trigger_status(
-  gen_random_uuid(),v_trigger,'paused',v_user
- ) then raise exception 'SCH2_FOREIGN_TENANT_MUTATION'; end if;
+ begin
+  perform public.set_reviewed_agent_task_trigger_status(
+   gen_random_uuid(),v_trigger,'paused',v_user
+  );
+  raise exception 'SCH2_FOREIGN_TENANT_MUTATION';
+ exception when others then
+  if sqlerrm <> 'AGENT_TASK_TRIGGER_CONTROL_UNAUTHORIZED' then raise; end if;
+ end;
  begin
   perform public.set_reviewed_agent_task_trigger_status(
    v_account,v_trigger,'enabled',v_user
