@@ -55,6 +55,7 @@ export default function AgentsPage() {
   const t = useTranslations('Agents');
   const canViewUsage = accountRole ? canEditSettings(accountRole) : false;
   const [tab, setTab] = useState<Tab>('playground');
+  const [requestedEditorAgentId, setRequestedEditorAgentId] = useState<string | null>(null);
   const [decided, setDecided] = useState(false);
   const [multiProvider, setMultiProvider] = useState(false);
 
@@ -168,7 +169,10 @@ export default function AgentsPage() {
 
           {canSeeMultiAgent && (
             <TabsContent value="multi_agent" className="mt-4">
-              <MultiAgentPanel />
+              <MultiAgentPanel
+                requestedEditorAgentId={requestedEditorAgentId}
+                onEditorRequestHandled={() => setRequestedEditorAgentId(null)}
+              />
             </TabsContent>
           )}
 
@@ -208,7 +212,10 @@ export default function AgentsPage() {
 
           {canSeeMultiAgent && (
             <TabsContent value="promotion" className="mt-4">
-              <ServicePromotionComposer />
+              <ServicePromotionComposer onConfigureAgent={(agentId) => {
+                setRequestedEditorAgentId(agentId);
+                setTab('multi_agent');
+              }} />
             </TabsContent>
           )}
 
