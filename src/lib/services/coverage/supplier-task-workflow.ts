@@ -9,6 +9,7 @@ import { findChangeRequestByIdempotencyKey, createChangeRequest } from '@/lib/ai
 import type { ToolContext } from '@/lib/ai/tools/executors'
 import { readCoverageAttributes, normalizeCoverageAttributes } from './attributes'
 import { loadSupplierCoverageRoute, supplierNotesConflictWithRoute, describeSupplierCoverageRoute } from './supplier-request-route'
+import { extractSupplierQuote } from './supplier-quote-extraction'
 import {
   advanceSupplierTurn, initialSupplierState, parseSupplierNumber, supplierAffirms,
   type SupplierStage, type SupplierTurnState,
@@ -419,6 +420,57 @@ async function submitConfirmedOffer(
   }
 }
 
+/**
+ * Older v2 workers parsed supplier replies only after a rigid route stage,
+ * dropping a complete first response. Recover only exact signed prior Task
+ * runs (same tenant, task, target, conversation, customer sender), and only
+ * when the durable negotiation has no amount, rate or terms yet.
+ *
+ * Rehydration NEVER creates an outbound message or Change Request itself.
+ * A NEW signed supplier message is still required for submission.
+ */
+async function recoverUnrecordedSupplierQuote(
+  db: Db,input:SupplierReplyInput,row:TaskSupplierRow,
+  request:NonNullable<Awaited<ReturnType<typeof verifiedSupplierContext>>>['request'],
+  currentText:string,currentCreatedAt:string,
+): Promise<Pick<SupplierTurnState,'offeredAmount'|'commissionPerThousand'|'supplierDetails'>|null> {
+  if (!['amount','commission'].includes(row.stage) || row.version<3 ||
+      !row.route_confirmed || row.route_different ||
+      row.offered_amount!==null || row.commission_per_thousand!==null ||
+      row.supplier_details !== null || row.change_request_id !== null ||
+      /^(?:تعديل|تغيير|إلغاء|الغاء|لا\s+(?:أستطيع|استطيع))/i.test(currentText)) return null
+  const {data:runs,error:re}=await db.from('ai_agent_runs')
+    .select('inbound_message_id,created_at').eq('account_id',input.accountId)
+    .eq('task_id',input.taskId).eq('task_target_id',input.taskTargetId)
+    .eq('run_mode','inbound').eq('status','succeeded')
+    .lt('created_at',currentCreatedAt)
+    .order('created_at',{ascending:false}).limit(10)
+  if(re) throw re
+  const ids=[...new Set((runs??[]).map(r=>r.inbound_message_id).filter((x):x is string=>typeof x==='string'))]
+  if(!ids.length) return null
+  const {data:messages,error:me}=await db.from('messages')
+    .select('id,content_text').eq('conversation_id',input.conversationId)
+    .eq('sender_type','customer').in('id',ids)
+  if(me) throw me
+  const byId=new Map((messages??[]).map(m=>[m.id,m.content_text]))
+  const facts={remainingAmount:request.remainingAmount,route:request.route,knownRegions:request.knownRegions}
+  // Most recent accepted full quote wins, but any later "edit", decline or
+  // alternative direction voids automatic recovery.
+  for(const run of runs??[]) {
+    const text=byId.get(run.inbound_message_id)
+    if(typeof text!=='string') continue
+    if(/^(?:تعديل|تغيير|إلغاء|الغاء|لا\s+(?:أستطيع|استطيع))/i.test(text)) return null
+    const quote=extractSupplierQuote(text,facts)
+    if(quote.routeDifference) return null
+    if(quote.amount && quote.commission!==null && quote.available &&
+       quote.finalConsent && quote.routeAssent && quote.details) {
+      return {offeredAmount:quote.amount,commissionPerThousand:quote.commission,
+        supplierDetails:quote.details}
+    }
+  }
+  return null
+}
+
 export async function handleCoverageSupplierTaskReply(
   input: SupplierReplyInput,
 ): Promise<SupplierTaskReply | null> {
@@ -480,6 +532,19 @@ export async function handleCoverageSupplierTaskReply(
     supplierDetails: row.supplier_details,
     routeConfirmed: row.route_confirmed === true,
     routeDifferent: row.route_different === true,
+  }
+  // Preserve a supplier's already-confirmed, full first message from
+  // authenticated prior inbound Task runs instead of asking them to retype
+  // amount and commission that the old stage protocol dropped.
+  try {
+    const recovered=await recoverUnrecordedSupplierQuote(
+      db,input,row,verified.request,raw,verified.inbound.created_at,
+    )
+    if (recovered) current={...current,...recovered}
+  } catch (recoveryError) {
+    console.warn('[coverage supplier task] old quote rehydration unavailable', {
+      code:recoveryError instanceof Error?recoveryError.message:'unknown',
+    })
   }
   // Backward-compatible continuation: old GPT loop may have asked the seller
   // to confirm "7 لكل 1000" before the durable protocol existed. Reuse ONLY
