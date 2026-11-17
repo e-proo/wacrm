@@ -37,33 +37,57 @@ export async function GET() {
     if (se || ae || ce || te || ge) throw se ?? ae ?? ce ?? te ?? ge
     const ids = (agents ?? []).map(row => row.published_revision_id)
       .filter((value): value is string => typeof value === 'string')
-    let revisions: Array<{ id: string; outreach_policy: unknown }> = []
+    let revisions: Array<{ id: string; revision_number: number; outreach_policy: unknown }> = []
     if (ids.length > 0) {
       const { data, error } = await db.from('ai_agent_revisions')
-        .select('id,outreach_policy')
+        .select('id,revision_number,outreach_policy')
         .eq('account_id', ctx.accountId).eq('status', 'published')
         .in('id', ids).limit(ids.length)
       if (error) throw error
       revisions = data ?? []
     }
-    const bindingsByRevision = new Map<string, boolean>()
+    const bindingsByRevision = new Map<string, {
+      supported: boolean
+      requiredTagIds: string[]
+      revisionNumber: number
+    }>()
     for (const rev of revisions) {
       const policy = rev.outreach_policy
       const bindings = policy && typeof policy === 'object' && !Array.isArray(policy)
         ? (policy as Record<string, unknown>).bindings : undefined
-      bindingsByRevision.set(rev.id, Array.isArray(bindings) && bindings.some(b =>
-        b && typeof b === 'object' && b.taskType === 'services.promotion' &&
-        b.taskTypeVersion === 2))
+      const binding = Array.isArray(bindings)
+        ? bindings.find(b => b && typeof b === 'object' &&
+            b.taskType === 'services.promotion' && b.taskTypeVersion === 2)
+        : null
+      const scope = binding && typeof binding.targetScope === 'object' &&
+        binding.targetScope !== null && !Array.isArray(binding.targetScope)
+        ? binding.targetScope as Record<string, unknown> : {}
+      const requiredTagIds = Array.isArray(scope.requiredTagIds)
+        ? scope.requiredTagIds.filter((id: unknown): id is string =>
+            typeof id === 'string') : []
+      bindingsByRevision.set(rev.id, {
+        supported: Boolean(binding),
+        requiredTagIds,
+        revisionNumber: rev.revision_number,
+      })
     }
     const launchEnabled = isOpenWATestProject() &&
       process.env.WACRM_SERVICE_PROMOTION_PILOT_ALLOW_LIVE === '1'
     return NextResponse.json({
       services: services ?? [],
       tags: tags ?? [],
-      agents: (agents ?? []).map(a => ({ id: a.id, name: a.name,
-        published: Boolean(a.published_revision_id),
-        promotionV2: typeof a.published_revision_id === 'string' &&
-          bindingsByRevision.get(a.published_revision_id) === true })),
+      agents: (agents ?? []).map(a => {
+        const promotion = a.published_revision_id
+          ? bindingsByRevision.get(a.published_revision_id) : null
+        return {
+          id: a.id, name: a.name,
+          published: Boolean(a.published_revision_id),
+          revisionNumber: promotion?.revisionNumber ?? null,
+          promotionV2: promotion?.supported ?? false,
+          promotionAudienceConfigured: (promotion?.requiredTagIds.length ?? 0) > 0,
+          promotionRequiredTagIds: promotion?.requiredTagIds ?? [],
+        }
+      }),
       connections: (connections ?? []).map(c => ({
         id: c.id, name: c.display_name || (c.provider === 'openwa' ? 'OpenWA' : 'Meta Cloud'),
         provider: c.provider,
