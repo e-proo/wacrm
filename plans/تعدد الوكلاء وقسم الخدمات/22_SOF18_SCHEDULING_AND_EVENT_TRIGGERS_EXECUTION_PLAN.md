@@ -163,3 +163,32 @@ Record PASS/FAIL/BLOCKED, UTC timestamp, exact observed HEAD/CI/Migrations URLs,
 **SCH-1 remains partial implementation:** no demonstrated per-account fairness/backlog cap, complete lease/pause race tests, or recorded overlap skip outcome. **SOF-18 stays In Progress.** Next: inspect and implement bounded per-account backlog and lease-safe claim behavior with regression tests, then SCH-2 admin control surface. Do not widen into OpenWA/other project phases.
 
 **Live acceptance deferred:** SCH-AC-01..11 are still unexecuted; no provider send or Production change was performed. TEST-specific migration application, security evidence and operator-signed live acceptance remain separate gates.
+
+
+## 9. SCH-5 technical regression and TEST evidence — 2026-11-17
+
+**Engineering implementation:** Additive
+`193_agent_task_trigger_exhausted_lease_reaper.sql` fixes an exhausted
+fifth-attempt crash lease that could otherwise remain `claimed` forever,
+and `trigger-worker.ts` now distinguishes a lost DB claim from a
+successful `failed` settlement and redacts arbitrary provider exceptions.
+No historical migration changes, no provider retransmission.
+
+**Detailed audit / evidence matrix:**
+[Agent Task Scheduling SCH-5 Technical Acceptance](../../docs/development/agent-task-scheduling-sch5-technical-acceptance.md).
+
+**Migrations CI:** [44193042736](https://github.com/e-proo/wacrm/actions/runs/44193042736)
+completed/success, clean replay + real two-session scheduler lease race,
+backlog cap / claim race, Business Event dedup/tenant isolation, fifth-claim
+lease reaper and policy pause/cancel smoke.
+
+**Dedicated TEST:** migration 193 applied in `wacrm test` with ledger
+`20261117224716`. Exact smoke SQL for recovery, event isolation,
+SCH-4 heartbeat and policy lifecycle all passed transactionally; fixtures
+rolled back, no live send. Final Application CI exact-HEAD gate is tracked
+in SOF-18 Linear engineering comment, not inferred from migration success.
+
+**DoD:** SCH-5 code/tests and TEST schema/security validation ready;
+SCH-6 operator/live scenarios `SCH-AC-01..11` **deferred** at user request.
+Keep SOF-18 In Progress. Do not claim live acceptance complete or
+production ready (NOTE-001 remains relevant).
