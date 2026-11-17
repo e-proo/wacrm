@@ -1,4 +1,6 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
+import { createHash } from 'node:crypto'
+import { resolveServicePromotionAudience } from './promotion-audience'
 import { loadAccountRuntimePolicy } from '@/lib/ai/runtime/runtime-policy'
 import {
   isAgentBuilderV2Configuration,
@@ -86,33 +88,6 @@ export async function startServicePromotionTask(input: {
     accountId: input.accountId,
     serviceId: input.serviceId,
   })
-
-  const { data: existing, error: existingError } = await db
-    .from('ai_agent_tasks')
-    .select('id, agent_id, agent_revision_id')
-    .eq('account_id', input.accountId)
-    .eq('task_type', SERVICE_PROMOTION_TASK_TYPE.key)
-    .eq('task_type_version', SERVICE_PROMOTION_TASK_TYPE.version)
-    .in('status', [...ACTIVE_TASK_STATUSES])
-    .contains('task_context', { serviceId: input.serviceId })
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (existingError) throw existingError
-  if (existing) {
-    if (existing.agent_id !== input.agentId) {
-      throw new ServicePromotionTaskError(
-        'SERVICE_PROMOTION_ALREADY_ACTIVE',
-        'This service already has an active promotion task assigned to another agent.',
-      )
-    }
-    return {
-      taskId: existing.id,
-      agentId: existing.agent_id,
-      revisionId: existing.agent_revision_id,
-      created: false,
-    }
-  }
 
   const { data: agent, error: agentError } = await db
     .from('ai_agents')
@@ -267,17 +242,79 @@ export async function startServicePromotionTask(input: {
   }
 
   const frozenTags = [...binding.targetScope.requiredTagIds].sort()
+  const excludedTags = [...binding.targetScope.excludedTagIds].sort()
+  const segmentKey = frozenTags.join(',')
+  // A bounded stable identity prevents unbounded tag/source strings from
+  // exceeding SQL's idempotency-key cap. The key includes the source firing.
+  const campaignDigest = createHash('sha256').update(JSON.stringify({
+    accountId: input.accountId,
+    serviceId: input.serviceId,
+    segmentKey,
+    excludedTags,
+    agentId: input.agentId,
+    revisionId,
+    sourceKey: input.trigger?.sourceKey ?? 'manual',
+  })).digest('hex')
+  const idempotencyKey = 'services:promotion:' + campaignDigest
+  const correlationId = 'services:promotion:' + campaignDigest
+
+  const { data: existing, error: existingError } = await db
+    .from('ai_agent_tasks')
+    .select('id, agent_id, agent_revision_id, idempotency_key')
+    .eq('account_id', input.accountId)
+    .eq('task_type', SERVICE_PROMOTION_TASK_TYPE.key)
+    .eq('task_type_version', SERVICE_PROMOTION_TASK_TYPE.version)
+    .in('status', [...ACTIVE_TASK_STATUSES])
+    .contains('task_context', { serviceId: input.serviceId })
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (existingError) throw existingError
+  if (existing) {
+    if (existing.idempotency_key !== idempotencyKey ||
+        existing.agent_id !== input.agentId ||
+        existing.agent_revision_id !== revisionId) {
+      throw new ServicePromotionTaskError(
+        'SERVICE_PROMOTION_ALREADY_ACTIVE',
+        'A different campaign is already active for this service. Review or close it before starting another.',
+      )
+    }
+    return {
+      taskId: existing.id,
+      agentId: existing.agent_id,
+      revisionId: existing.agent_revision_id,
+      created: false,
+    }
+  }
+
+  // Resolve and freeze EVERY contact now, not when the worker executes.
+  // No live send is performed here. Consent/suppression/transport policies
+  // must still be revalidated by materialization and outbound admission.
+  const frozenContactIds = await resolveServicePromotionAudience(db, {
+    accountId: input.accountId,
+    requiredTagIds: frozenTags,
+    excludedTagIds: excludedTags,
+    maxContacts: binding.maxTargets,
+  })
+  if (frozenContactIds.length === 0) {
+    throw new ServicePromotionTaskError(
+      'SERVICE_PROMOTION_AUDIENCE_EMPTY',
+      'The approved tagged audience has no eligible candidate contacts.',
+    )
+  }
   const taskContext = {
     serviceId: input.serviceId,
     service: { ...promotionContext.service },
     segmentSnapshot: {
       requiredTagIds: frozenTags,
-      excludedTagIds: [...binding.targetScope.excludedTagIds].sort(),
+      excludedTagIds: excludedTags,
+      frozenContactIds,
     },
   }
   const targetPolicy = {
     requiredTagIds: frozenTags,
-    excludedTagIds: [...binding.targetScope.excludedTagIds].sort(),
+    excludedTagIds: excludedTags,
+    frozenContactIds,
     maxNewContactsPerHour: binding.maxNewContactsPerHour,
     maxContactsPerAgentPerDay: binding.maxContactsPerAgentPerDay,
     cooldownMinutes: binding.cooldownMinutes,
@@ -293,16 +330,6 @@ export async function startServicePromotionTask(input: {
     dailyMessageBudget: binding.dailyMessageBudget,
     dailyTokenBudget: binding.dailyTokenBudget,
   }
-  const segmentKey = frozenTags.join(',')
-  const baseIdempotencyKey =
-    `services:promotion:service:${input.serviceId}:segment:${segmentKey}:agent:${input.agentId}:revision:${revisionId}`
-  const idempotencyKey = input.trigger
-    ? baseIdempotencyKey + ':source:' + input.trigger.sourceKey
-    : baseIdempotencyKey
-  const correlationId =
-    `services:promotion:${input.serviceId}:${revisionId}:${segmentKey}` +
-    (input.trigger ? ':source:' + input.trigger.sourceKey : '')
-
   const { data: taskId, error: createError } = await db.rpc(
     'create_ai_agent_task',
     {
