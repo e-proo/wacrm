@@ -1454,6 +1454,8 @@ required amount satisfied
 
 # Phase 12 — Service Promotion / Sales Agent
 
+**خطة التنفيذ الحالية (SOF-17 + SOF-25):** [21_SOF17_SOF25_SERVICE_PROMOTION_EXECUTION_PLAN.md](21_SOF17_SOF25_SERVICE_PROMOTION_EXECUTION_PLAN.md) — مراجعة الكود الحالي، فجوات إطلاق مهمة الترويج، قبول Intent/Request، تجميد الجمهور، قواعد Meta/OpenWA، واختبار Pilot محدود. هذه وثيقة عمل وليست إغلاقًا للمرحلة.
+
 ثاني حالة قبول للمنصة.
 
 ## السيناريو
@@ -1501,6 +1503,8 @@ Intent / Request
 ---
 
 # Phase 13 — Scheduling & Business Event Triggers
+
+**خطة التنفيذ والقبول الحالية (SOF-18):** [22_SOF18_SCHEDULING_AND_EVENT_TRIGGERS_EXECUTION_PLAN.md](22_SOF18_SCHEDULING_AND_EVENT_TRIGGERS_EXECUTION_PLAN.md) — تطوير Trigger Registry الموجود وواجهته، التكرار/التزامن/التعافي، Business Events، والقبول على TEST. لا تعني الخطة اكتمال تشغيل scheduler إنتاجي.
 
 بعد نجاح manual tasks.
 
@@ -1808,6 +1812,8 @@ OpenAI-compatible / Anthropic / Gemini native حسب الاتصالات المد
 
 # Phase 19 — Coverage Sourcing Pilot
 
+**حزمة القبول الحي SOF-66 + Phase 18 + Phase 19:** [20_SOF66_PHASE18_PHASE19_TEST_ACCEPTANCE_PACK.md](20_SOF66_PHASE18_PHASE19_TEST_ACCEPTANCE_PACK.md) — أُرشفت كما قدمها المشغل في 2026-11-17. تحتوي إثبات happy-path سابقًا وخطوات AC-01..AC-13 **غير مملوءة النتائج**؛ لا تعد شهادة PASS نهائية ولا تسمح بإغلاق SOF-66/SOF-23/SOF-24 قبل تسجيل دليل قبول مستقل لكل شرط.
+
 ابدأ بـ:
 
 ```text
@@ -1835,6 +1841,8 @@ completion
 ---
 
 # Phase 20 — Service Promotion Pilot
+
+**خطة العمل / Definition of Done:** [21_SOF17_SOF25_SERVICE_PROMOTION_EXECUTION_PLAN.md](21_SOF17_SOF25_SERVICE_PROMOTION_EXECUTION_PLAN.md) — حالات SP-AC-01..09، قبول فعلي محدود على TEST بعد إنهاء Phase 12، دون Production.
 
 بعد نجاح Coverage sourcing.
 
