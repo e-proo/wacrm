@@ -16,6 +16,8 @@
 
 **Current engineering checkpoint:** [24_SOF17_SERVICE_PROMOTION_CODE_FIRST_CHECKPOINT.md](24_SOF17_SERVICE_PROMOTION_CODE_FIRST_CHECKPOINT.md). Initial safety code, frozen-audience handling, read-only preview and automated tests are in-progress; this is **not** completion of Phase 12, CI signoff, Phase 20 acceptance, or a send authorization.
 
+**SP-2 + SP-3 code delivery:** [25_SOF17_SP2_SP3_UI_AND_PROVIDER_ACCEPTANCE.md](25_SOF17_SP2_SP3_UI_AND_PROVIDER_ACCEPTANCE.md) — RTL campaign wizard, explicit approvals, immutable provider selection, promotion V2 policy, TEST uniqueness migration, negative tests and live deferral. The earlier checkpoint records SP-1 historical work; this appendix records the current code-first increment.
+
 ---
 
 ## 1. Product outcome & non-goals
