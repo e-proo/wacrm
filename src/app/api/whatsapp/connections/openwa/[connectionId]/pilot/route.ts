@@ -132,10 +132,18 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
   checkDb(usageError, 'guardrail-usage')
   if (!usage) throw new WhatsAppTransportError('connection_restricted', 'Guardrail usage unavailable')
 
-  const { count: pending, error: me } = await db.from('messages')
-    .select('id', { count: 'exact', head: true }).eq('provider', 'openwa')
-    .eq('connection_id', connectionId).eq('status', 'sending').is('provider_message_id', null)
-  checkDb(me, 'pending')
+  // Only unresolved messages that have NOT received explicit admin review
+  // prevent resuming the test session. Reviewed reservations remain 'sending'
+  // with their original idempotency keys and never become inferred successes.
+  const { data: reviewQueue, error: re } = await db.rpc('get_openwa_outbound_review_queue', {
+    p_account_id: accountId, p_connection_id: connectionId,
+  })
+  checkDb(re, 'outbound-review-queue')
+  if (!reviewQueue || !Number.isSafeInteger(reviewQueue.unreviewed_count) ||
+      reviewQueue.unreviewed_count < 0 || !Number.isSafeInteger(reviewQueue.reviewed_uncertain_count) ||
+      reviewQueue.reviewed_uncertain_count < 0) {
+    throw new WhatsAppTransportError('connection_restricted', 'OpenWA outbound review status unavailable')
+  }
   let duplicates = 0
   if (connection.phone_identity) {
     const { count, error: de } = await db.from('whatsapp_connections')
@@ -151,7 +159,9 @@ async function snapshot(db: Db, accountId: string, connectionId: string) {
   try { enforced = openWAPilotEnforcementEnabled() } catch { enforced = false }
   return { connection, guard: safeGuard, configured, grants: grants ?? 0,
     manualGrants: manualGrants ?? 0, agentGrants: agentGrants ?? 0, apiGrants: apiGrants ?? 0, cohortGrants,
-    pending: pending ?? 0, duplicates, enforced, approvedMessagesPerRecipient, usage,
+    pending: reviewQueue.unreviewed_count as number,
+    reviewedUncertain: reviewQueue.reviewed_uncertain_count as number,
+    duplicates, enforced, approvedMessagesPerRecipient, usage,
     lastDenial: lastDenial && ['not_allowlisted','invalid_identity','connection_scope_mismatch','invalid_request'].includes(lastDenial.reason)
       ? { workload: lastDenial.workload, reason: lastDenial.reason, created_at: lastDenial.created_at }
       : lastDenial ? { workload: lastDenial.workload, reason: 'policy', created_at: lastDenial.created_at } : null,
@@ -180,7 +190,8 @@ function safeStatus(s: Awaited<ReturnType<typeof snapshot>>) {
     approved_workload: s.grants > 0
       ? (s.agentGrants === s.grants ? 'agent' : s.manualGrants === s.grants ? 'manual' : null)
       : null,
-    unsettled_outbound: s.pending, same_identity_ready_connections: s.duplicates,
+    unsettled_outbound: s.pending, reviewed_uncertain_outbound: s.reviewedUncertain,
+    same_identity_ready_connections: s.duplicates,
     last_denial: s.lastDenial, guardrail_usage: s.usage }
 }
 

@@ -159,6 +159,9 @@ describe('OW-13 DEV pilot protected UI API', () => {
     h.auth.mockResolvedValue({ accountId: ACCOUNT, user: { id: USER },
       adminDb: { from: vi.fn(dbFrom), rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
         if (name === 'get_openwa_test_guardrail_usage') return { data: h.usage, error: null }
+        if (name === 'get_openwa_outbound_review_queue') return { data: {
+          unreviewed_count: h.pending, reviewed_uncertain_count: 0, items: [],
+        }, error: null }
         if (name === 'set_openwa_test_pilot_paused_mode') {
           h.calls.push({ table: name, type: 'rpc', payload: args })
           if (!h.guard.manual_paused || !h.guard.pilot_enabled) return { data: { updated: false }, error: null }
