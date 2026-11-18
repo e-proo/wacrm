@@ -112,6 +112,9 @@ export async function GET() {
       })),
       maxPendingPerAccount: runtimePolicy?.agent_task_trigger_max_pending ?? 100,
       taskWorkerEnabled: runtimePolicy?.task_worker_enabled !== false,
+      // Read-only gate diagnostics for authorized admins; never expose secret values.
+      schedulerTestGateConfigured: process.env.WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST === '1',
+      testProjectVerified: isOpenWATestProject(),
       enableAllowedInTest: process.env.WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST === '1' && isOpenWATestProject(),
     }, { headers })
   } catch (error) {

@@ -74,6 +74,25 @@ describe('SCH-2 tenant-scoped, no-surprise scheduler controls', () => {
     expect(mocks.rpc).not.toHaveBeenCalled()
   })
 
+  it('blocks unexpectedly activating an overdue TEST firing', async () => {
+    process.env.WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST = '1'
+    mocks.from.mockImplementation((table: string) => ({
+      select() { return this }, eq() { return this },
+      async maybeSingle() {
+        if (table === 'ai_agent_task_triggers') {
+          return {data:{id:triggerId,status:'paused',agent_id:agentId,
+            approved_revision_id:revisionId,trigger_kind:'schedule',
+            next_fire_at:new Date(Date.now() - 60_000).toISOString()},error:null}
+        }
+        return {data:{id:agentId,status:'active',published_revision_id:revisionId},error:null}
+      },
+    }))
+    const res = await patch({status:'enabled',confirmEnable:true})
+    expect(res.status).toBe(409)
+    expect((await res.json()).code).toBe('SCHEDULE_NEXT_FIRE_REVIEW_REQUIRED')
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
   it('requires owner publish permission plus reviewed revision to enable', async () => {
     process.env.WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST = '1'
     mocks.requireAgentCapability.mockResolvedValue({ accountId, userId })

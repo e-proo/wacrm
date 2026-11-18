@@ -31,7 +31,7 @@ export async function PATCH(
     }
     const db = supabaseAdmin()
     const { data: trigger, error: triggerError } = await db.from('ai_agent_task_triggers')
-      .select('id,status,approved_revision_id,agent_id')
+      .select('id,status,approved_revision_id,agent_id,trigger_kind,next_fire_at')
       .eq('account_id', ctx.accountId).eq('id', triggerId).maybeSingle()
     if (triggerError) throw triggerError
     if (!trigger) return NextResponse.json({ error: 'الجدولة غير موجودة.', code: 'TRIGGER_NOT_FOUND' },
@@ -84,6 +84,17 @@ export async function PATCH(
           error: 'التمكين يتطلب اعتمادًا صريحًا وبيئة TEST مفعلة، ولا يسمح بالإرسال التلقائي الآن.',
           code: 'SCHEDULE_LIVE_ENABLE_NOT_AUTHORIZED',
         }, { status: 409, headers })
+      }
+      // Enabling a stale, paused schedule would fire immediately without a
+      // fresh reviewed time. Require an explicit edit to a future due date.
+      if (trigger.trigger_kind === 'schedule' &&
+        (!trigger.next_fire_at ||
+         !Number.isFinite(Date.parse(trigger.next_fire_at)) ||
+         Date.parse(trigger.next_fire_at) <= Date.now() + 60_000)) {
+        return NextResponse.json({
+          error: 'الموعد المحدد مضى أو أصبح قريبًا جدًا. عدّل الموعد إلى وقت قادم ثم فعّل TEST.',
+          code: 'SCHEDULE_NEXT_FIRE_REVIEW_REQUIRED',
+        }, {status:409,headers})
       }
       if (!trigger.approved_revision_id) {
         return NextResponse.json({ error: 'الجدولة غير مرتبطة بنسخة معتمدة.', code: 'SCHEDULE_APPROVAL_REQUIRED' },
