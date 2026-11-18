@@ -38,7 +38,7 @@ export async function GET() {
       .is('archived_at', null)
       .order('created_at', { ascending: false })
     if (error) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA connections', error)
-    // Expose only the scoped pause state to authorized admins; no hashes.
+    // Expose only the scoped pause and review counts to authorized admins; no hashes.
     const { data: guardrails, error: guardrailError } = await adminDb
       .from('whatsapp_connection_guardrails')
       .select('connection_id, manual_paused, pilot_enabled')
@@ -50,13 +50,42 @@ export async function GET() {
       .eq('account_id', accountId)
       .eq('provider', 'openwa')
     if (gatewayError) throw new WhatsAppTransportError('retryable_provider_failure', 'Failed to load OpenWA gateway settings', gatewayError)
+    // One read-only, account-scoped aggregate covers every existing or newly
+    // created OpenWA connection, including those without configured Pilot.
+    const { data: reviewCounts, error: reviewError } = await adminDb.rpc(
+      'list_openwa_outbound_review_counts', { p_account_id: accountId })
+    if (reviewError || !Array.isArray(reviewCounts)) {
+      throw new WhatsAppTransportError('retryable_provider_failure',
+        'OpenWA outbound review counts are unavailable', reviewError)
+    }
+    const reviewsByConnection = new Map<string, { unreviewed_count: number; reviewed_uncertain_count: number }>()
+    for (const item of reviewCounts) {
+      if (!item || typeof item !== 'object' || typeof item.connection_id !== 'string' ||
+          !Number.isSafeInteger(item.unreviewed_count) || item.unreviewed_count < 0 ||
+          !Number.isSafeInteger(item.reviewed_uncertain_count) || item.reviewed_uncertain_count < 0 ||
+          reviewsByConnection.has(item.connection_id)) {
+        throw new WhatsAppTransportError('retryable_provider_failure',
+          'OpenWA outbound review summary is invalid')
+      }
+      reviewsByConnection.set(item.connection_id, {
+        unreviewed_count: item.unreviewed_count,
+        reviewed_uncertain_count: item.reviewed_uncertain_count,
+      })
+    }
+    for (const row of data ?? []) {
+      if (!reviewsByConnection.has(row.id)) {
+        throw new WhatsAppTransportError('retryable_provider_failure',
+          'OpenWA outbound review summary is incomplete')
+      }
+    }
     const gatewayByConnection = new Map((gateways ?? []).map((row) => [row.connection_id, row] as const))
     const guardrailByConnection = new Map((guardrails ?? []).map((row) => [row.connection_id, row] as const))
     // A new OpenWA session without a guardrail row is fail-closed: the UI
     // must not claim sending is enabled before explicit TEST pilot setup.
     const connections = (data ?? []).map((row) => ({
       ...row, gateway_base_url: gatewayByConnection.get(row.id)?.base_url ?? null,
-      webhook_url: gatewayByConnection.get(row.id)?.webhook_url ?? null, guardrail: {
+      webhook_url: gatewayByConnection.get(row.id)?.webhook_url ?? null,
+      outbound_review: reviewsByConnection.get(row.id), guardrail: {
         manual_paused: guardrailByConnection.get(row.id)?.manual_paused !== false,
         pilot_enabled: guardrailByConnection.get(row.id)?.pilot_enabled !== false,
       },

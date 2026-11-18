@@ -10,6 +10,7 @@ import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-
 import { useWhatsAppLabels } from './whatsapp-labels'
 import { OpenWAPilotControls } from './openwa-pilot-controls'
 import { OpenWAReconciliation } from './openwa-reconciliation'
+import { OpenWAOutboundReview } from './openwa-outbound-review'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,6 +29,7 @@ interface OpenWAConnection {
   gateway_base_url?: string | null
   webhook_url?: string | null
   guardrail?: { manual_paused: boolean; pilot_enabled: boolean }
+  outbound_review?: { unreviewed_count: number; reviewed_uncertain_count: number }
   provider_metadata?: {
     onboarding_stage?: string
     onboarding_failure_code?: string
@@ -442,6 +444,10 @@ export function OpenWAConnections() {
             <Trash2 className="mr-2 h-4 w-4" />{w('removeFromWacrm')}
           </Button>
         </div>
+        {pilotDevMode && <OpenWAOutboundReview key={connection.id} connectionId={connection.id}
+          unsettled={connection.outbound_review?.unreviewed_count ?? 0}
+          reviewed={connection.outbound_review?.reviewed_uncertain_count ?? 0}
+          onReviewed={() => { void load() }} />}
         <OpenWAReconciliation key={connection.id} connectionId={connection.id} />
         {qr?.connectionId === connection.id && <div className="rounded-md border p-4">
           <p className="mb-3 text-sm font-medium">{w('qrPayload')}</p>

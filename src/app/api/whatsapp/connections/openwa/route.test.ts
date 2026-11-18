@@ -146,15 +146,26 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     }
     const userFrom = vi.fn(() => connQuery)
     const adminFrom = vi.fn((table: string) => table === 'whatsapp_connection_credentials' ? gatewayQuery : guardrailQuery)
-    h.requireAdmin.mockResolvedValue({ accountId: 'acct-1', userDb: { from: userFrom }, adminDb: { from: adminFrom } })
+    const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      if (name !== 'list_openwa_outbound_review_counts' || args.p_account_id !== 'acct-1') {
+        return { data: null, error: { code: 'invalid_scope' } }
+      }
+      return { data: [
+        { connection_id: 'conn-1', unreviewed_count: 2, reviewed_uncertain_count: 1 },
+        { connection_id: 'conn-2', unreviewed_count: 0, reviewed_uncertain_count: 0 },
+        { connection_id: 'conn-3', unreviewed_count: 0, reviewed_uncertain_count: 0 },
+      ], error: null }
+    })
+    h.requireAdmin.mockResolvedValue({ accountId: 'acct-1', userDb: { from: userFrom },
+      adminDb: { from: adminFrom, rpc } })
     const response = await GET()
     expect(response.status).toBe(200)
     const payload = await response.json()
     expect(payload).toEqual({
       connections: [
-        { id: 'conn-1', status: 'ready', provider: 'openwa', gateway_base_url: 'https://gateway.example.com', webhook_url: 'https://crm.example.com/api/whatsapp/openwa/webhook', guardrail: { manual_paused: true, pilot_enabled: false } },
-        { id: 'conn-2', status: 'ready', provider: 'openwa', gateway_base_url: null, webhook_url: null, guardrail: { manual_paused: true, pilot_enabled: true } },
-        { id: 'conn-3', status: 'ready', provider: 'openwa', gateway_base_url: null, webhook_url: null, guardrail: { manual_paused: true, pilot_enabled: true } },
+        { id: 'conn-1', status: 'ready', provider: 'openwa', gateway_base_url: 'https://gateway.example.com', webhook_url: 'https://crm.example.com/api/whatsapp/openwa/webhook', outbound_review: { unreviewed_count: 2, reviewed_uncertain_count: 1 }, guardrail: { manual_paused: true, pilot_enabled: false } },
+        { id: 'conn-2', status: 'ready', provider: 'openwa', gateway_base_url: null, webhook_url: null, outbound_review: { unreviewed_count: 0, reviewed_uncertain_count: 0 }, guardrail: { manual_paused: true, pilot_enabled: true } },
+        { id: 'conn-3', status: 'ready', provider: 'openwa', gateway_base_url: null, webhook_url: null, outbound_review: { unreviewed_count: 0, reviewed_uncertain_count: 0 }, guardrail: { manual_paused: true, pilot_enabled: true } },
       ],
       gateway_settings: { rotation_allowed: process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://pqirsnfupofhulmewakq.supabase.co' },
       pilot: { enforced: process.env.OPENWA_PILOT_MODE === 'enforce' ||
@@ -167,6 +178,8 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     expect(guardrailFilters).toContainEqual(['account_id', 'acct-1'])
     expect(adminFrom).toHaveBeenCalledWith('whatsapp_connection_guardrails')
     expect(adminFrom).toHaveBeenCalledWith('whatsapp_connection_credentials')
+    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(rpc).toHaveBeenCalledWith('list_openwa_outbound_review_counts', { p_account_id: 'acct-1' })
     expect(gatewayFilters).toContainEqual(['account_id', 'acct-1'])
     expect(gatewayFilters).toContainEqual(['provider', 'openwa'])
     expect(JSON.stringify(payload)).not.toContain('api_key')
@@ -189,7 +202,7 @@ describe('OW-13 admin-only emergency stop visibility', () => {
     h.requireAdmin.mockResolvedValue({
       accountId: 'acct-1',
       userDb: { from: () => connQuery },
-      adminDb: { from: () => guardrailQuery },
+      adminDb: { from: () => guardrailQuery, rpc: vi.fn() },
     })
     const response = await GET()
     expect(response.status).toBe(502)

@@ -26,12 +26,12 @@ type ReviewQueue = Record<string, unknown> & {
 }
 
 export function OpenWAOutboundReview({
-  connectionId, unsettled, reviewed, onReviewed,
+  connectionId, unsettled = 0, reviewed = 0, onReviewed,
 }: {
   connectionId: string
-  unsettled: number
-  reviewed: number
-  onReviewed: () => void
+  unsettled?: number
+  reviewed?: number
+  onReviewed?: () => void
 }) {
   const ar = useLocale().startsWith('ar')
   const [open, setOpen] = useState(false)
@@ -46,6 +46,10 @@ export function OpenWAOutboundReview({
   const [notice, setNotice] = useState<string | null>(null)
   const endpoint = `/api/whatsapp/connections/openwa/${connectionId}/outbound-review`
   const selected = queue?.items.find(item => item.message_id === selectedId) ?? null
+  // A fresh, connection-scoped read wins over initial counts from the parent
+  // session list. Never conflate this session with another OpenWA connection.
+  const displayedUnsettled = queue?.unreviewed_count ?? unsettled
+  const displayedReviewed = queue?.reviewed_uncertain_count ?? reviewed
 
   async function load() {
     setLoading(true)
@@ -95,7 +99,7 @@ export function OpenWAOutboundReview({
       setNotice(ar
         ? 'حُفظت المراجعة في سجل تدقيق دائم، دون إرسال أو تغيير نتيجة الرسالة. يمكن إكمال إعدادات Pilot بعد استيفاء باقي الضوابط.'
         : 'Review audited. Delivery remains uncertain. No send or retry was performed.')
-      onReviewed()
+      onReviewed?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'تعذّر تسجيل المراجعة')
     } finally {
@@ -113,11 +117,11 @@ export function OpenWAOutboundReview({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge variant={unsettled > 0 ? 'destructive' : 'outline'}>
-            {ar ? 'تحتاج مراجعة' : 'Needs review'}: {unsettled}
+          <Badge variant={displayedUnsettled > 0 ? 'destructive' : 'outline'}>
+            {ar ? 'تحتاج مراجعة' : 'Needs review'}: {displayedUnsettled}
           </Badge>
-          {reviewed > 0 && <Badge variant="secondary">
-            {ar ? 'مراجعة دون إثبات التسليم' : 'Audited, unconfirmed'}: {reviewed}
+          {displayedReviewed > 0 && <Badge variant="secondary">
+            {ar ? 'مراجعة دون إثبات التسليم' : 'Audited, unconfirmed'}: {displayedReviewed}
           </Badge>}
         </div>
       </div>

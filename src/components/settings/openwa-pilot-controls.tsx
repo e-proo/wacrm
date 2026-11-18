@@ -13,7 +13,6 @@ import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-
 import { normalizeTestRecipient } from '@/lib/whatsapp/transport/openwa/pilot-recipient-input'
 import { missingPilotCohortCaps, suggestedPilotCohortCaps, OPENWA_TEST_PILOT_DEFAULT_MESSAGES_PER_RECIPIENT, OPENWA_TEST_PILOT_MAX_MESSAGES_PER_RECIPIENT, OPENWA_TEST_PILOT_MAX_HOURLY, OPENWA_TEST_PILOT_MAX_DAILY, OPENWA_TEST_PILOT_MAX_FIRST_TOUCH, OPENWA_TEST_PILOT_MIN_INTERVAL_MS, type PilotCohortWorkload } from '@/lib/whatsapp/transport/openwa/pilot-cohort-caps'
 import { useWhatsAppLabels } from './whatsapp-labels'
-import { OpenWAOutboundReview } from './openwa-outbound-review'
 
 interface PilotState extends Record<string, unknown> {
   connectionId: string
@@ -355,17 +354,11 @@ export function OpenWAPilotControls({
         </AlertDescription>
       </Alert>}
 
-      {state && ((state.unsettled_outbound ?? 0) > 0 || (state.reviewed_uncertain_outbound ?? 0) > 0) &&
-        <OpenWAOutboundReview connectionId={connectionId}
-          unsettled={state.unsettled_outbound}
-          reviewed={state.reviewed_uncertain_outbound ?? 0}
-          onReviewed={() => { void load() }} />}
-
       {state && state.unsettled_outbound > 0 && <Alert variant="destructive">
         <AlertCircle className="size-4" />
         <AlertTitle>توجد {state.unsettled_outbound} رسالة إرسال غير محسومة</AlertTitle>
         <AlertDescription className="space-y-2">
-          <p>لا يمكن استئناف الإرسال العادي حتى تتأكد من نتائج الرسائل المعلقة. يمكنك تعطيل Pilot بأمان طالما الإرسال موقوف، ولن تتم أي إعادة إرسال تلقائية.</p>
+          <p>لا يمكن استئناف الإرسال العادي حتى تراجع النتائج المعلقة. افتح «مراجعة الرسائل» داخل بطاقة هذه الجلسة أدناه، حتى لو كان وضع Pilot معطلًا؛ لن تتم إعادة إرسال تلقائية.</p>
           <Button type="button" size="sm" variant="outline" disabled={running} onClick={() => void load()}>
             <RefreshCw className="me-2 size-3" /> تحديث الفحص
           </Button>
