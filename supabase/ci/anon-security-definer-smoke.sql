@@ -59,7 +59,11 @@ begin
     end if;
     inspected:=inspected+1;
   end loop;
-  if inspected<>21 then raise exception 'Expected 21 restricted functions, got %',inspected; end if;
+  -- Hosted TEST may provide rls_auto_enable(), but local clean replay
+  -- does not necessarily include this hosted database event trigger.
+  if inspected <> 20 + case when to_regprocedure('public.rls_auto_enable()') is null then 0 else 1 end then
+    raise exception 'Missing unexpected restricted function, inspected %',inspected;
+  end if;
 
   if not has_function_privilege('authenticated','public.redeem_invitation(text)','EXECUTE')
       or not has_function_privilege('authenticated','public.touch_presence(text)','EXECUTE')
