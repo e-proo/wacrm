@@ -68,7 +68,7 @@ begin
   -- Supabase-hosted TEST has the optional public.rls_auto_enable()
   -- event-trigger function. Clean local schema replay may not install it.
   -- Every other one of the 20 routines MUST exist in both environments.
-  if touched <> 20 + case when to_regprocedure('public.rls_auto_enable()') is null then 0 else 1 end then
+  if touched <> (20 + case when to_regprocedure('public.rls_auto_enable()') is null then 0 else 1 end) then
     raise exception 'Missing unexpected privileged RPC; observed %',touched;
   end if;
 end;
