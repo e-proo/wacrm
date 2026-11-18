@@ -61,7 +61,7 @@ begin
   end loop;
   -- Hosted TEST may provide rls_auto_enable(), but local clean replay
   -- does not necessarily include this hosted database event trigger.
-  if inspected <> 20 + case when to_regprocedure('public.rls_auto_enable()') is null then 0 else 1 end then
+  if inspected <> (20 + case when to_regprocedure('public.rls_auto_enable()') is null then 0 else 1 end) then
     raise exception 'Missing unexpected restricted function, inspected %',inspected;
   end if;
 
