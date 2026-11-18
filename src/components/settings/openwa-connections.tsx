@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
-import { Loader2, LogOut, Pause, Play, QrCode, RefreshCw, RotateCcw, Settings2, Trash2, Webhook } from 'lucide-react'
+import { useLocale } from 'next-intl'
+import { Loader2, LogOut, Pause, Play, QrCode, RefreshCw, RotateCcw, Settings2, ShieldAlert, Trash2, Webhook } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useAuth } from '@/hooks/use-auth'
@@ -10,7 +11,7 @@ import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-
 import { useWhatsAppLabels } from './whatsapp-labels'
 import { OpenWAPilotControls } from './openwa-pilot-controls'
 import { OpenWAReconciliation } from './openwa-reconciliation'
-import { OpenWAOutboundReview } from './openwa-outbound-review'
+import { OpenWAOutboundReviewHub } from './openwa-outbound-review-hub'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -56,12 +57,16 @@ interface OpenWAApiPayload extends Record<string, unknown> {
 export function OpenWAConnections() {
   const { canEditSettings } = useAuth()
   const w = useWhatsAppLabels()
+  const ar = useLocale().startsWith('ar')
   const [connections, setConnections] = useState<OpenWAConnection[]>([])
   const [pilotEnforced, setPilotEnforced] = useState<boolean | null>(null)
   const [pilotDevMode, setPilotDevMode] = useState(false)
   const [gatewayRotationAllowed, setGatewayRotationAllowed] = useState(false)
   const [selectedPilotId, setSelectedPilotId] = useState('')
   const pilotSectionRef = useRef<HTMLDivElement>(null)
+  const reviewSectionRef = useRef<HTMLDivElement>(null)
+  const [reviewExpanded, setReviewExpanded] = useState(false)
+  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -92,6 +97,7 @@ export function OpenWAConnections() {
       if (!response.ok) throw new Error(data.error || w('loadOpenwa'))
       const available = data.connections ?? []
       setConnections(available)
+      setSelectedReviewId(current => available.some(c => c.id === current) ? current : null)
       setSelectedPilotId((current) => available.some((c) => c.id === current) ? current
         : (available.find((c) => ['ready', 'connected'].includes(c.status))?.id ?? available[0]?.id ?? ''))
       setPilotEnforced(typeof data.pilot?.enforced === 'boolean' ? data.pilot.enforced : null)
@@ -115,6 +121,12 @@ export function OpenWAConnections() {
   function focusPilot(connectionId: string) {
     setSelectedPilotId(connectionId)
     pilotSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  function focusReview(connectionId: string) {
+    setSelectedReviewId(connectionId)
+    setReviewExpanded(true)
+    reviewSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   function openSessionSettings(connection: OpenWAConnection) {
@@ -392,6 +404,15 @@ export function OpenWAConnections() {
         onPilotChange={() => { void load() }} />}
     </div>}
 
+    {pilotDevMode && connections.length > 0 && <div ref={reviewSectionRef}
+      className="scroll-mt-6">
+      <OpenWAOutboundReviewHub connections={connections} expanded={reviewExpanded}
+        selectedConnectionId={selectedReviewId}
+        onToggle={() => setReviewExpanded(previous => !previous)}
+        onSelectConnection={setSelectedReviewId}
+        onReviewed={() => { void load() }} />
+    </div>}
+
     {connections.map((connection) => <Card key={connection.id}>
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -425,6 +446,11 @@ export function OpenWAConnections() {
           {pilotDevMode && <Button variant="outline" size="sm" onClick={() => focusPilot(connection.id)}>
             {w('devPilotManageThisConnection')}
           </Button>}
+          {pilotDevMode && (connection.outbound_review?.unreviewed_count ?? 0) > 0 &&
+            <Button variant="outline" size="sm" onClick={() => focusReview(connection.id)}>
+              <ShieldAlert className="me-2 size-4 text-amber-600" aria-hidden="true" />
+              {connection.outbound_review?.unreviewed_count} {ar ? 'تحتاج مراجعة' : 'Needs review'}
+            </Button>}
           <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => openSessionSettings(connection)}>
             <Settings2 className="mr-2 h-4 w-4" />{w('editSessionSettings')}
           </Button>
@@ -444,10 +470,6 @@ export function OpenWAConnections() {
             <Trash2 className="mr-2 h-4 w-4" />{w('removeFromWacrm')}
           </Button>
         </div>
-        {pilotDevMode && <OpenWAOutboundReview key={connection.id} connectionId={connection.id}
-          unsettled={connection.outbound_review?.unreviewed_count ?? 0}
-          reviewed={connection.outbound_review?.reviewed_uncertain_count ?? 0}
-          onReviewed={() => { void load() }} />}
         <OpenWAReconciliation key={connection.id} connectionId={connection.id} />
         {qr?.connectionId === connection.id && <div className="rounded-md border p-4">
           <p className="mb-3 text-sm font-medium">{w('qrPayload')}</p>
