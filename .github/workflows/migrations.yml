@@ -73,6 +73,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-outbound-operator-review-smoke.sql
       - name: Verify all current and future OpenWA sessions review counts and account scope
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-outbound-review-all-connections-smoke.sql
+      - name: Verify TEST Pilot resumes only after scoped outbound reviews
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-pilot-mode-operator-review-gate-smoke.sql
       - name: Verify Agent Task platform behavior
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/agent-task-platform-smoke.sql
       - name: Verify Agent Task orchestrator behavior
