@@ -17,7 +17,7 @@ type ReviewRow = {
   sender_type: string
   content_type: string
 }
-type ReviewQueue = {
+type ReviewQueue = Record<string, unknown> & {
   items: ReviewRow[]
   unreviewed_count: number
   reviewed_uncertain_count: number
