@@ -28,6 +28,8 @@ type Catalog = {
   maxPendingPerAccount: number
   taskWorkerEnabled: boolean
   enableAllowedInTest: boolean
+  schedulerTestGateConfigured: boolean
+  testProjectVerified: boolean
 }
 type Preview = { mode: string; nextFireAt: string | null; intervalMinutes: number | null; notice: string }
 type ScheduleHealth = {
@@ -594,6 +596,9 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
         {catalog?.rules.length === 0 && <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">لا توجد قواعد. أنشئ قاعدة موقوفة ثم راجعها قبل التمكين.</p>}
         {catalog?.rules.map(rule => {
           const agent = catalog.agents.find(a => a.id === rule.agentId)
+          const overdue = rule.triggerKind === 'schedule' &&
+            (!rule.nextFireAt || !Number.isFinite(Date.parse(rule.nextFireAt)) ||
+              Date.parse(rule.nextFireAt) <= Date.now() + 60_000)
           return (
             <article key={rule.id} className="rounded-xl border bg-card p-4 shadow-sm sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -623,12 +628,26 @@ export function AgentTaskSchedulesPanel({ onOpenTasks }: { onOpenTasks?: () => v
                     <PauseCircle className="me-1.5 h-4 w-4" /> إيقاف
                   </Button>}
                   {rule.status === 'paused' && <Button variant="outline" size="sm"
-                    disabled={busy !== null || !catalog.enableAllowedInTest}
+                    disabled={busy !== null || !catalog.enableAllowedInTest || overdue}
                     onClick={() => void changeStatus(rule, 'enabled')}>
                     <PlayCircle className="me-1.5 h-4 w-4" /> تمكين TEST
                   </Button>}
                 </div>
               </div>
+              {rule.status === 'paused' && !catalog.enableAllowedInTest && (
+                <p role="status" className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                  {!catalog.testProjectVerified
+                    ? 'تمكين TEST محظور: الخادم لا يثبت اتصاله بقاعدة Supabase TEST المعتمدة. راجع NEXT_PUBLIC_SUPABASE_URL وأعد التشغيل.'
+                    : !catalog.schedulerTestGateConfigured
+                      ? 'تمكين TEST متوقف: أضف WACRM_AGENT_TASK_SCHEDULING_ENABLE_TEST=1 إلى .env.local، أعد تشغيل WACRM ثم اضغط تحديث.'
+                      : 'التمكين مقيد بإعدادات الخادم على TEST؛ راجع الإعدادات وأعد تحميل الصفحة.'}
+                </p>
+              )}
+              {rule.status === 'paused' && overdue && (
+                <p role="status" className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                  انتهى موعد الجدولة. اضغط «تعديل» واختر موعدًا مستقبليًا يتجاوز دقيقة، ثم احفظ وأعد التمكين.
+                </p>
+              )}
               <p className="mt-2 text-xs text-muted-foreground">المصدر: {rule.subjectId?.slice(0, 12) ?? 'مُحدد بفلتر الحدث'} · معرّف القاعدة: {rule.id.slice(0, 12)}
               {rule.cancelledAt ? ' · أُلغيت: ' + displayTime(rule.cancelledAt) : ''}
               </p>
