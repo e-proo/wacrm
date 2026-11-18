@@ -117,14 +117,22 @@ begin
     raise exception 'Anonymous user gained account membership';
   end if;
   -- Existing public RLS policies must quietly deny rows, not throw 42501.
-  if (select count(*) from public.accounts)>0 then
-    raise exception 'Anon can read tenant accounts';
+  -- CI's clean schema may revoke anonymous table SELECT entirely.
+  -- If it is granted (as on hosted TEST), RLS must return zero rows.
+  if has_table_privilege('anon','public.accounts','SELECT') then
+    if (select count(*) from public.accounts)>0 then
+      raise exception 'Anon can read tenant accounts';
+    end if;
   end if;
-  if (select count(*) from public.profiles)>0 then
-    raise exception 'Anon can read tenant profiles';
+  if has_table_privilege('anon','public.profiles','SELECT') then
+    if (select count(*) from public.profiles)>0 then
+      raise exception 'Anon can read tenant profiles';
+    end if;
   end if;
-  if (select count(*) from public.account_invitations)>0 then
-    raise exception 'Anon can read invitations';
+  if has_table_privilege('anon','public.account_invitations','SELECT') then
+    if (select count(*) from public.account_invitations)>0 then
+      raise exception 'Anon can read invitations';
+    end if;
   end if;
 end;
 $anon$;
