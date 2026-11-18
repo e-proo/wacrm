@@ -7,7 +7,7 @@ import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
 
 export const runtime = 'nodejs'
 const noStore = { 'Cache-Control': 'private, no-store, max-age=0' }
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 type Context = { params: Promise<{ connectionId: string }> }
 type ReviewFinding = 'seen_on_whatsapp' | 'not_seen_on_whatsapp' | 'still_uncertain'
 
