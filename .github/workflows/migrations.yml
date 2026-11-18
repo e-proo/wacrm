@@ -37,6 +37,8 @@ jobs:
         run: supabase db reset --local --no-seed
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
+      - name: NOTE-001 anonymous SECURITY DEFINER / RLS safety smoke
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/anon-security-definer-smoke.sql
       - name: Verify provider-neutral broadcast durable settlement schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/whatsapp-broadcast-settlement-smoke.sql
       - name: Verify durable broadcast queue grants, lease RPCs and reservation schema
