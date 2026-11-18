@@ -74,8 +74,11 @@ export async function POST(request: Request) {
       )
     }
 
+    // The account scope was verified by requireRole('agent'). Knowledge
+    // retrieval invokes a service-only semantic RPC; do not give the
+    // authenticated browser client direct EXECUTE rights on that RPC.
     const knowledge = await retrieveKnowledge(
-      supabase,
+      supabaseAdmin(),
       accountId,
       config,
       latestUserMessage(messages),
