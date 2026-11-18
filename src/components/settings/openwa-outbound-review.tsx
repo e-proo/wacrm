@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useLocale } from 'next-intl'
 import { AlertCircle, CheckCircle2, RefreshCw, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -26,15 +26,16 @@ type ReviewQueue = Record<string, unknown> & {
 }
 
 export function OpenWAOutboundReview({
-  connectionId, unsettled = 0, reviewed = 0, onReviewed,
+  connectionId, unsettled = 0, reviewed = 0, embedded = false, onReviewed,
 }: {
   connectionId: string
   unsettled?: number
   reviewed?: number
+  embedded?: boolean
   onReviewed?: () => void
 }) {
   const ar = useLocale().startsWith('ar')
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(embedded)
   const [queue, setQueue] = useState<ReviewQueue | null>(null)
   const [loading, setLoading] = useState(false)
   const [reviewing, setReviewing] = useState(false)
@@ -51,7 +52,7 @@ export function OpenWAOutboundReview({
   const displayedUnsettled = queue?.unreviewed_count ?? unsettled
   const displayedReviewed = queue?.reviewed_uncertain_count ?? reviewed
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -68,7 +69,11 @@ export function OpenWAOutboundReview({
     } finally {
       setLoading(false)
     }
-  }
+  }, [endpoint])
+
+  useEffect(() => {
+    if (embedded) void load()
+  }, [embedded, load])
 
   async function submitReview() {
     if (!selected || !acknowledged || note.trim().length < 12 || note.trim().length > 500 ||
@@ -107,8 +112,10 @@ export function OpenWAOutboundReview({
     }
   }
 
-  return <section className="space-y-3 rounded-lg border border-amber-300/60 p-4 dark:border-amber-700/60">
-    <div className="flex flex-wrap items-center justify-between gap-3">
+  return <section className={embedded
+    ? 'space-y-3 rounded-md border bg-muted/10 p-3'
+    : 'space-y-3 rounded-lg border border-amber-300/60 p-4 dark:border-amber-700/60'}>
+    {!embedded && <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="space-y-1">
         <div className="flex items-center gap-2">
           <ShieldAlert className="size-4 text-amber-600" />
@@ -133,7 +140,7 @@ export function OpenWAOutboundReview({
         <RefreshCw className="me-2 size-3" />
         {open ? (ar ? 'إخفاء التفاصيل' : 'Hide details') : (ar ? 'مراجعة الرسائل' : 'Review messages')}
       </Button>
-    </div>
+    </div>}
 
     <p className="text-xs text-muted-foreground">
       {ar
