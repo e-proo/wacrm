@@ -91,8 +91,11 @@ export async function POST(request: Request) {
 
     // Ground the draft in the account's knowledge base (best-effort —
     // returns [] when there's no KB or retrieval fails).
+    // The account scope was verified by requireRole('agent'). Knowledge
+    // retrieval invokes a service-only semantic RPC; do not give the
+    // authenticated browser client direct EXECUTE rights on that RPC.
     const knowledge = await retrieveKnowledge(
-      supabase,
+      supabaseAdmin(),
       accountId,
       config,
       latestUserMessage(messages),
