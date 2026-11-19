@@ -1318,10 +1318,17 @@ begin
   end if;
 
   select pg_get_functiondef(
-    'public.publish_ai_agent_revision_atomic(uuid,uuid,uuid,bigint,uuid)'::regprocedure
+    'wacrm_internal.publish_ai_agent_revision_atomic(uuid,uuid,uuid,bigint,uuid)'::regprocedure
   ) into v_def;
   if position('IS_ACCOUNT_MEMBER(P_ACCOUNT_ID, ''ADMIN'')' in upper(v_def))=0 then
     raise exception 'Atomic publish lost its internal admin authorization';
+  end if;
+  -- NOTE-001: elevated body must be private; public RPC is invoker-only.
+  if (select prosecdef from pg_proc where oid=
+       'public.publish_ai_agent_revision_atomic(uuid,uuid,uuid,bigint,uuid)'::regprocedure)
+     or not (select prosecdef from pg_proc where oid=
+       'wacrm_internal.publish_ai_agent_revision_atomic(uuid,uuid,uuid,bigint,uuid)'::regprocedure) then
+    raise exception 'Atomic publish must expose only an invoker facade';
   end if;
 
   if has_function_privilege(
@@ -1338,10 +1345,16 @@ begin
   end if;
 
   select pg_get_functiondef(
-    'public.replace_ai_agent_knowledge_base_assignments(uuid,uuid,jsonb,uuid)'::regprocedure
+    'wacrm_internal.replace_ai_agent_knowledge_base_assignments(uuid,uuid,jsonb,uuid)'::regprocedure
   ) into v_def;
   if position('IS_ACCOUNT_MEMBER(P_ACCOUNT_ID, ''ADMIN'')' in upper(v_def))=0 then
     raise exception 'KB assignment replacement lost its internal admin authorization';
+  end if;
+  if (select prosecdef from pg_proc where oid=
+       'public.replace_ai_agent_knowledge_base_assignments(uuid,uuid,jsonb,uuid)'::regprocedure)
+     or not (select prosecdef from pg_proc where oid=
+       'wacrm_internal.replace_ai_agent_knowledge_base_assignments(uuid,uuid,jsonb,uuid)'::regprocedure) then
+    raise exception 'KB assignment RPC must expose only an invoker facade';
   end if;
 
   if has_function_privilege(
