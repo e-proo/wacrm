@@ -1,0 +1,43 @@
+# Hostinger VPS: WACRM only. Preserve existing OpenWA container and volumes.
+name: wacrm-hostinger
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?set NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:?set NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?set NEXT_PUBLIC_SITE_URL}
+        NEXT_PUBLIC_APP_LOCALE: ${NEXT_PUBLIC_APP_LOCALE:-ar}
+    image: wacrm-hostinger:local
+    env_file:
+      - ../../.env.local
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+    ports:
+      - '127.0.0.1:${WACRM_HOST_PORT:-3100}:3000'
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status>=200&&r.status<500?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 15s
+      retries: 4
+      start_period: 60s
+    logging:
+      driver: local
+      options:
+        max-size: '10m'
+        max-file: '5'

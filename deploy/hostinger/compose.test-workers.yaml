@@ -1,0 +1,35 @@
+# TEST-only opt-in overlay. Do NOT use for Production.
+# Disable Windows/GitHub SCH-4 schedulers before enabling this.
+services:
+  scheduler:
+    image: node:20-alpine
+    user: '10001:10001'
+    init: true
+    working_dir: /worker
+    read_only: true
+    env_file:
+      - ../../.env.worker
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?TEST URL required}
+    volumes:
+      - type: bind
+        source: ../../scripts/selfhost-test-scheduler.mjs
+        target: /worker/scheduler.mjs
+        read_only: true
+    command: ['node', '/worker/scheduler.mjs']
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: 'on-failure:5'
+    stop_grace_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 192m
+    logging:
+      driver: local
+      options:
+        max-size: '5m'
+        max-file: '3'
