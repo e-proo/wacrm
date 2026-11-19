@@ -97,6 +97,8 @@ docker compose --env-file .env.local \
   -f deploy/hostinger/compose.test-workers.yaml ps
 ~~~
 
+The sidecar uses Docker `restart: unless-stopped` so an **already-authorized and running TEST scheduler** resumes automatically when the VPS/Docker daemon restarts; a manually stopped scheduler remains stopped. An invalid TEST target, missing acknowledgement, or missing secrets still fails closed (Docker may retry the container without allowing dispatch). Keep the worker overlay off on Production and deliberately review queued sends before first activation.
+
 The sidecar invokes the **existing authenticated WACRM endpoints**, not OpenWA directly: TEST agent tasks, broadcasts and deferred receipts (15-second intervals, no overlapping requests per job); general agent recovery and automations (60 seconds); stale flows (5 minutes). Endpoint authorization, account scope, idempotency, provider policy and Pilot remain owned by WACRM. Logs contain job/status only, no response bodies.
 
 To stop it separately from the WACRM app:

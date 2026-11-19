@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { isPinnedTestProject, validateEnvironment, JOBS } from './selfhost-test-scheduler.mjs'
 
 const testEnv = {
@@ -38,4 +39,11 @@ test('six independent jobs use fixed authentication contracts', () => {
     assert.ok(['CRON_SECRET', 'AUTOMATION_CRON_SECRET'].includes(job.secret))
     assert.equal(job.secret === 'AUTOMATION_CRON_SECRET', job.method === 'GET')
   }
+})
+
+test('self-host TEST scheduler restarts after VPS restart without exposing a network port', () => {
+  const compose = readFileSync(new URL('../deploy/hostinger/compose.test-workers.yaml', import.meta.url), 'utf8')
+  assert.match(compose, /restart: unless-stopped/)
+  assert.doesNotMatch(compose, /(?:^|\n)\s+ports:/)
+  assert.match(compose, /\.env\.worker/)
 })

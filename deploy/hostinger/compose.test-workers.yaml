@@ -20,7 +20,9 @@ services:
     depends_on:
       app:
         condition: service_healthy
-    restart: 'on-failure:5'
+    # Keep the authorized TEST scheduler running after VPS/Docker restarts.
+    # Manual docker compose stop keeps it stopped; invalid config fails closed.
+    restart: unless-stopped
     stop_grace_period: 30s
     cap_drop:
       - ALL
