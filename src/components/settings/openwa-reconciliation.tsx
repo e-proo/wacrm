@@ -37,6 +37,9 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
   const [loading, setLoading] = useState(false)
   const [retrying, setRetrying] = useState<string | null>(null)
   const [phoneInputs, setPhoneInputs] = useState<Record<string, string>>({})
+  const [nativeInspecting, setNativeInspecting] = useState<string | null>(null)
+  const [nativeEvidence, setNativeEvidence] = useState<Record<string,
+    { code: string; archive_status: string | null; whatsapp_delivery_confirmed: false }>>({})
   const endpoint = `/api/whatsapp/connections/openwa/${connectionId}/reconciliation`
 
   async function refresh() {
@@ -94,6 +97,61 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
     } finally {
       setRetrying(null)
     }
+  }
+
+  // Explicit, read-only on-demand operator action. No WhatsApp sends or DB writes.
+  async function inspectNativeAck(jobId: string) {
+    if (nativeInspecting !== null) return
+    setNativeInspecting(jobId)
+    try {
+      const response = await fetch(
+        endpoint + '/' + encodeURIComponent(jobId) + '/native-evidence',
+        { cache: 'no-store' },
+      )
+      const payload = await response.json() as {
+        code?: string
+        archive_status?: string | null
+        whatsapp_delivery_confirmed?: false
+      }
+      if (!payload || typeof payload.code !== 'string') {
+        throw new Error('unverifiable_response')
+      }
+      setNativeEvidence(previous => ({ ...previous, [jobId]: {
+        code: payload.code!,
+        archive_status: payload.archive_status ?? null,
+        whatsapp_delivery_confirmed: false,
+      } }))
+      if (!response.ok && response.status >= 500) {
+        toast.error(ar ? 'تعذّر الاتصال بأرشيف OpenWA؛ النتيجة غير مؤكدة' :
+          'Unable to query OpenWA archive; outcome remains uncertain')
+      }
+    } catch {
+      setNativeEvidence(previous => ({ ...previous, [jobId]: {
+        code: 'gateway_unavailable', archive_status: null,
+        whatsapp_delivery_confirmed: false,
+      } }))
+      toast.error(ar ? 'تعذّر فحص الدليل الأصلي' : 'Native evidence inspection failed')
+    } finally {
+      setNativeInspecting(null)
+    }
+  }
+
+  const evidenceLabel = (code: string, status: string | null) => {
+    if (code === 'archive_outbound_found')
+      return ar
+        ? 'سجل صادر مطابق في OpenWA' + (status ? ' · حالة الأرشيف: ' + status : '') + ' (ليس إثبات تسليم)'
+        : 'Matching outgoing OpenWA archive row' + (status ? ' · stored: ' + status : '') + ' (not delivery proof)'
+    if (code === 'not_in_gateway_archive')
+      return ar ? 'لا يوجد سجل في أرشيف Gateway؛ لا يعني عدم الإرسال' :
+        'Not in gateway archive; does not mean no send occurred'
+    if (code === 'session_identity_unverified')
+      return ar ? 'جلسة OpenWA غير مطابقة أو غير موثقة؛ لم يُعتمد الدليل' :
+        'Gateway session identity not verified'
+    if (code === 'native_reference_unsupported')
+      return ar ? 'صيغة المعرّف غير مدعومة للفحص الأصلي' : 'Native reference unsupported'
+    if (code === 'ambiguous_gateway_archive')
+      return ar ? 'أكثر من سجل مطابق؛ تحتاج مراجعة' : 'Ambiguous provider archive rows'
+    return ar ? 'لم يمكن إثبات حالة الأرشيف؛ تحتاج مراجعة' : 'Archive outcome unverified'
   }
 
   const pending = Object.entries(data?.counts ?? {}).reduce((n, [k, v]) =>
@@ -171,11 +229,23 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
                           ? (ar ? 'مطابقة مع رسالة واردة فقط' : 'Inbound-only local row')
                           : (ar ? 'مطابقة محلية متعارضة؛ تحتاج مراجعة' : 'Ambiguous local records')}
                 </p>}
+                {item.event_kind === 'unmatched_status' && nativeEvidence[item.id] && <p role="status" className="text-xs text-blue-700 dark:text-blue-400">
+                  {evidenceLabel(nativeEvidence[item.id].code, nativeEvidence[item.id].archive_status)}
+                </p>}
                 <p className="text-muted-foreground">
                   {item.state} · {ar ? 'المحاولات' : 'attempts'}: {item.attempt_count}
                   {item.last_error_code ? ` · ${item.last_error_code}` : ''}
                 </p>
               </div>
+              {data?.may_retry && item.event_kind === 'unmatched_status' &&
+                (item.state === 'pending' || item.state === 'review') && <Button type="button"
+                  variant="outline" size="sm" disabled={nativeInspecting !== null || retrying !== null}
+                  onClick={() => void inspectNativeAck(item.id)}>
+                  <RefreshCw className="me-1 h-3 w-3" />
+                  {nativeInspecting === item.id
+                    ? (ar ? 'فحص الأرشيف…' : 'Checking archive…')
+                    : (ar ? 'فحص سجل OpenWA' : 'Check OpenWA archive')}
+                </Button>}
               {data?.may_retry && (item.state === 'pending' || item.state === 'review') && <div className="flex flex-wrap items-center gap-2">
                 {item.event_kind === 'unresolved_identity' && <>
                   <Input type="tel" inputMode="tel"
