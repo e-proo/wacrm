@@ -40,8 +40,9 @@ beforeEach(() => {
   stubs.from.mockImplementation((name: string) => ({
     select() { return this },
     eq(key: string,value: string) {
-      expect(key).toBe('account_id')
-      expect(value).toBe(accountId)
+      if (key === 'account_id') expect(value).toBe(accountId)
+      else if (key === 'run_mode') expect(value).toBe('outbound')
+      else throw new Error('Unexpected query scope')
       return this
     },
     maybeSingle() { return Promise.resolve({data:{task_worker_enabled:true},error:null}) },
