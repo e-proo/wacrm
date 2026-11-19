@@ -60,9 +60,8 @@ BEGIN
  IF NOT public.is_account_member(a,'owner') OR public.is_account_member(gen_random_uuid(),'viewer')
  THEN RAISE EXCEPTION 'Membership isolation regressed'; END IF;
  PERFORM public.touch_presence('online');
- IF NOT EXISTS(SELECT 1 FROM public.member_presence
-   WHERE account_id=a AND user_id=auth.uid() AND status='online')
- THEN RAISE EXCEPTION 'Signed-in presence RPC failed'; END IF;
+ -- A clean DB intentionally may not grant SELECT on member_presence to
+ -- authenticated; assert the write as postgres after RESET ROLE instead.
  BEGIN
    PERFORM public.redeem_invitation('note001-invalid-invitation');
    RAISE EXCEPTION 'Invalid invitation redeemed';
@@ -80,6 +79,15 @@ BEGIN
  END;
 END $authenticated$;
 RESET ROLE;
+DO $presence_assert$
+BEGIN
+ IF NOT EXISTS(
+   SELECT 1 FROM public.member_presence
+   WHERE account_id=current_setting('note001.account')::uuid
+     AND user_id=current_setting('note001.uid')::uuid
+     AND status='online'
+ ) THEN RAISE EXCEPTION 'Signed-in presence RPC failed'; END IF;
+END $presence_assert$;
 SET LOCAL ROLE anon;
 SELECT set_config('request.jwt.claim.sub','',true);
 SELECT set_config('request.jwt.claim.role','anon',true);
