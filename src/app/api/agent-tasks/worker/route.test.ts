@@ -92,6 +92,18 @@ describe('OW14-W04 tenant-safe worker status', () => {
     expect(body.scheduler.state).toBe('stopped')
     expect(stubs.rpc).not.toHaveBeenCalledWith('begin_agent_task_scheduler_tick',expect.anything())
   })
+  it('does not block the admin STOP control when only the heartbeat read fails', async () => {
+    stubs.rpc.mockImplementation((name: string) => name === 'inspect_agent_task_schedule_health'
+      ? Promise.resolve({data:null,error:new Error('database monitor read failed')})
+      : Promise.resolve({data:{updated:true},error:null}))
+    const result = await POST(new Request('http://localhost/api/agent-tasks/worker',{
+      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'stop'}),
+    }))
+    expect(result.status).toBe(200)
+    const body = await result.json()
+    expect(body.schedulerUnavailable).toBe(true)
+    expect(body.scheduler.state).toBe('missing')
+  })
   it('preserves account-scoped STOP with the existing RPC', async () => {
     const response = await POST(new Request('http://localhost/api/agent-tasks/worker',{
       method:'POST',headers:{'content-type':'application/json'},

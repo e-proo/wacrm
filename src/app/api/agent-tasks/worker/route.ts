@@ -33,10 +33,10 @@ async function status(accountId: string) {
     // global TEST heartbeat. Never query another account's task rows.
     db.rpc('inspect_agent_task_schedule_health', { p_account_id: accountId }),
   ])
-  if (pe || te || re || he) throw pe ?? te ?? re ?? he
-  if (!health || typeof health !== 'object' || Array.isArray(health)) {
-    throw new Error('SCHEDULER_HEALTH_UNAVAILABLE')
-  }
+  if (pe || te || re) throw pe ?? te ?? re
+  // A heartbeat read failure must not prevent an admin from stopping new
+  // work for this account. Report unknown rather than a stale green signal.
+  const schedulerUnavailable = Boolean(he || !health || typeof health !== 'object' || Array.isArray(health))
   const counts = { queued: 0, running: 0, paused: 0, scheduled: 0, validating: 0 }
   for (const task of tasks ?? []) {
     const key = task.status as keyof typeof counts
@@ -44,7 +44,8 @@ async function status(accountId: string) {
   }
   return {
     enabled: policy?.task_worker_enabled !== false,
-    scheduler: evaluateSchedulerPulse(health),
+    scheduler: evaluateSchedulerPulse(schedulerUnavailable ? null : health),
+    schedulerUnavailable,
     tasks: counts,
     outbound: {
       queued: (outbound ?? []).filter(row => row.status === 'queued').length,

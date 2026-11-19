@@ -62,6 +62,7 @@ interface ResponseData {
 interface WorkerStatus {
   enabled: boolean
   scheduler: SchedulerPulse
+  schedulerUnavailable: boolean
   tasks: { queued: number; running: number; paused: number; scheduled: number; validating: number }
   outbound: { queued: number; inFlight: number }
   scannedAt: string
@@ -663,7 +664,9 @@ export function AgentTasksPanel() {
                 <div role="alert" className="flex gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-300">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                   <span>
-                    {workerStatus.scheduler.state === 'stopped'
+                    {workerStatus.schedulerUnavailable
+                      ? 'تعذّر قراءة نبضات قاعدة البيانات. حالة العامل غير مؤكدة؛ افحص اتصال WACRM مع Supabase.'
+                      : workerStatus.scheduler.state === 'stopped'
                       ? 'لم تنجح دورة جدولة خلال آخر 3 دقائق أو أكثر. افحص حاوية scheduler وسجلاتها على VPS.'
                       : workerStatus.scheduler.state === 'delayed'
                         ? 'نبضات جدولة المهام متأخرة أو توجد إخفاقات متتالية. راجع العامل قبل الاعتماد على التنفيذ التلقائي.'
