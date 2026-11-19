@@ -18,6 +18,17 @@ BEGIN
  AND p.proname=ANY(ARRAY['create_message_template_revision','publish_ai_agent_revision_atomic','publish_message_template_revision','redeem_invitation','remove_account_member','replace_ai_agent_knowledge_base_assignments','set_member_role','set_trusted_admin_capabilities','touch_presence','transfer_account_ownership','unpublish_message_template'])
  AND NOT has_function_privilege('anon',p.oid,'EXECUTE');
  IF n<>11 THEN RAISE EXCEPTION 'Expected 11 protected private implementations, got %',n; END IF;
+ -- The three private template engines must also reject missing actor JWTs:
+ -- the public facades alone must never be the only security boundary.
+ SELECT count(*) INTO n FROM pg_proc p JOIN pg_namespace s ON s.oid=p.pronamespace
+ WHERE s.nspname='wacrm_internal' AND p.prosecdef
+   AND p.proname=ANY(ARRAY[
+     'create_message_template_revision',
+     'publish_message_template_revision',
+     'unpublish_message_template'
+   ])
+   AND position('MESSAGE_TEMPLATE_AUTH_REQUIRED' in pg_get_functiondef(p.oid))>0;
+ IF n<>3 THEN RAISE EXCEPTION 'Internal template actor guards missing: %',n; END IF;
  IF has_schema_privilege('anon','wacrm_internal','USAGE')
     OR has_function_privilege('anon','wacrm_internal.touch_presence(text)','EXECUTE') THEN
    RAISE EXCEPTION 'Anonymous internal schema exposure'; END IF;
