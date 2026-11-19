@@ -93,4 +93,10 @@ RESET ROLE;
 SELECT count(*) AS semantic_parse_works
  FROM public.match_ai_knowledge_semantic(
  gen_random_uuid(),'['||array_to_string(array_fill(0,ARRAY[1536]),',')||']',1,null);
+-- V2 knowledge search must also retain its ::vector and <=> operators.
+SELECT count(*) AS v2_semantic_parse_works
+ FROM public.match_ai_knowledge_v2_semantic(
+ gen_random_uuid(),gen_random_uuid(),
+ '['||array_to_string(array_fill(0,ARRAY[1536]),',')||']',
+ 1,null,null,null);
 ROLLBACK;
