@@ -8,8 +8,7 @@ DO $internal_template_auth$
 DECLARE
   rec record;
   v_definition text;
-  v_needle text :=
-    'if auth.uid() is not null and not public.is_account_member(p_account_id, ''admin''::public.account_role_enum) then';
+  v_updated text;
   v_guard text :=
     'if auth.uid() is null' || E'\n' ||
     '     and coalesce(auth.role(), '''') <> ''service_role''' || E'\n' ||
@@ -31,10 +30,20 @@ BEGIN
       RAISE EXCEPTION 'Expected internal definer for %',rec.proname;
     END IF;
     v_definition:=pg_get_functiondef(rec.oid);
-    IF strpos(v_definition,v_needle)=0 THEN
+    -- Recognize either one-line or multi-line legacy membership IF.
+    IF strpos(lower(v_definition),'if auth.uid() is not null')=0 THEN
       RAISE EXCEPTION 'Message-template authorization code changed: %',rec.proname;
     END IF;
-    EXECUTE replace(v_definition,v_needle,v_guard || v_needle);
+    v_updated:=regexp_replace(
+      v_definition,
+      E'(?im)^[ \\t]*begin[ \\t]*$',
+      'begin' || chr(10) || '  ' || v_guard,
+      'i'
+    );
+    IF v_updated=v_definition THEN
+      RAISE EXCEPTION 'No top-level BEGIN found for %',rec.proname;
+    END IF;
+    EXECUTE v_updated;
     v_count:=v_count+1;
   END LOOP;
   IF v_count<>3 THEN
