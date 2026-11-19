@@ -56,3 +56,7 @@ Observe WACRM Tasks → worker control card while scheduler is running, stopped,
 ## Scope limitations / remaining SOF-51 DoD
 
 This implementation supplies an account-controlled in-app alert and a private outside-monitor probe. No offsite paging service, alert recipient/backup, synthetic page delivery, full OpenWA webhook/ACK/media/capacity dashboard, host resource metric pipeline, verified recovery drill or production stop rehearsal has been configured by code. Record these as **PENDING**; do not close SOF-51 or call OW-14 production ready. NOTE-001 Auth warning and OW-12/13 live gates are independent.
+
+## Operator decision — deferred broader monitoring program (2026-11-20)
+
+The owner deliberately **deferred external Telegram/email paging and synthetic alert delivery** until a unified, multi-service monitoring system is designed (WACRM, OpenWA, agents/automation/broadcast workers, Meta, Supabase and VPS/container resources). See `PROJECT_NOTES.md` **NOTE-019**. Do not configure an alert provider or claim any external notification is active. Keep this W04 work **open**; only the in-app heartbeat monitor and optional disabled-by-default probe are implemented. Proceed to OW14-W05 / SOF-52 in parallel; do not waive W04 Production gates.
