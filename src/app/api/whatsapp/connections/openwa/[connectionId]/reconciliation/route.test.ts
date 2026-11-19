@@ -125,6 +125,65 @@ describe('OpenWA deferred reconciliation admin boundary', () => {
     expect((await POST(request({ action: 'verify_phone', job_id: JOB, phone: '123456789012345' }), context)).status).toBe(409)
     expect(h.upstream).not.toHaveBeenCalled()
   })
+  it('classifies a bounded exact native-ID sample without exposing native identities', async () => {
+    const native = 'true_123@lid_NATIVE'
+    const queries: Array<{ table: string; filters: Record<string, unknown> }> = []
+    const from = vi.fn((table: string) => {
+      const filters: Record<string, unknown> = {}
+      const q = {
+        select: () => q,
+        eq: (key: string, value: unknown) => { filters[key] = value; return q },
+        is: () => q,
+        in: (key: string, values: unknown[]) => { filters[key] = values; return q },
+        order: () => q,
+        limit: () => q,
+        maybeSingle: async () => ({ data: { id: CONNECTION }, error: null }),
+        then: (resolve: (result: unknown) => void) => {
+          queries.push({ table, filters: { ...filters } })
+          const rows = table === 'openwa_deferred_events'
+            ? 'event_kind' in filters
+              ? []
+              : ('provider_message_id' in filters ? [] : [
+                {id:JOB,event_kind:'unmatched_status',state:'pending',attempt_count:3,
+                 last_error_code:'native_message_not_found',created_at:'2026-11-19T00:00:00Z',
+                 updated_at:'2026-11-19T00:00:00Z',provider_message_id:native},
+              ])
+            : table === 'messages'
+              ? [{provider_message_id:native,sender_type:'agent'}] : []
+          return Promise.resolve(resolve({ data: rows, error: null }))
+        },
+      }
+      return q
+    })
+    h.auth.mockResolvedValue({ accountId: ACCOUNT, adminDb: { from } })
+    const response = await GET(new Request(ENDPOINT), context)
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.sample[0].ack_correlation).toBe('candidate_outbound_message')
+    expect(body.ack_triage).toMatchObject({
+      sampled:1,provider_verified:false,categories:{candidate_outbound_message:1},
+    })
+    expect(JSON.stringify(body)).not.toContain(native)
+    for (const table of ['messages','broadcast_recipients']) {
+      expect(queries).toContainEqual({
+        table, filters:{connection_id:CONNECTION,provider:'openwa',provider_message_id:[native]},
+      })
+    }
+  })
+  it('does not run global native-ID queries when there are no unresolved ACKs', async () => {
+    const fixture = db()
+    h.auth.mockResolvedValue({ accountId: ACCOUNT, adminDb: fixture })
+    const response = await GET(new Request(ENDPOINT), context)
+    expect(response.status).toBe(200)
+    expect(fixture.from).not.toHaveBeenCalledWith('messages')
+    expect(fixture.from).not.toHaveBeenCalledWith('broadcast_recipients')
+  })
+  it('refuses all diagnostic rows to non-admins before any service query', async () => {
+    h.auth.mockRejectedValueOnce(new Error('Unauthorized'))
+    const response = await GET(new Request(ENDPOINT), context)
+    expect(response.status).toBe(403)
+    expect(h.resolveClient).not.toHaveBeenCalled()
+  })
   it('reads safe diagnostics only from the scoped account and connection', async () => {
     const fixture = db()
     h.auth.mockResolvedValue({ accountId: ACCOUNT, adminDb: fixture })

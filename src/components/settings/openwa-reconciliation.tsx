@@ -15,11 +15,19 @@ type Row = {
   attempt_count: number
   last_error_code: string | null
   created_at: string
+  ack_correlation?: 'needs_native_review' | 'candidate_outbound_message' |
+    'candidate_broadcast_recipient' | 'inbound_only' | 'ambiguous_local_rows' | null
 }
 type Summary = {
   counts: Record<string, number>
   sample: Row[]
   may_retry: boolean
+  ack_triage?: {
+    sampled: number
+    scope: 'sample_only'
+    provider_verified: false
+    categories: Record<string, number>
+  }
 }
 export function OpenWAReconciliation({ connectionId }: { connectionId: string }) {
   const locale = useLocale()
@@ -120,6 +128,26 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
           <RefreshCw className="me-1 h-3 w-3" />{ar ? 'تحديث' : 'Refresh'}
         </Button>
       </div>
+      {(data?.ack_triage?.sampled ?? 0) > 0 && <div className="rounded-md border bg-muted/20 p-3 text-xs space-y-1">
+        <p className="font-medium">
+          {ar ? 'فحص مطابقة إيصالات ACK المحلية (قراءة فقط)' : 'Local ACK correlation (read-only)'}
+        </p>
+        <p className="text-muted-foreground">
+          {ar ? 'الإيصالات المفحوصة في العينة:' : 'Sampled ACKs:'} {data?.ack_triage?.sampled ?? 0}
+          {' · '}{ar ? 'لا توجد مطابقة محلية:' : 'No local match:'} {data?.ack_triage?.categories?.needs_native_review ?? 0}
+          {' · '}{ar ? 'مطابقة محتملة:' : 'Local candidates:'} {
+            (data?.ack_triage?.categories?.candidate_outbound_message ?? 0) +
+            (data?.ack_triage?.categories?.candidate_broadcast_recipient ?? 0)}
+          {' · '}{ar ? 'تعارض/وارد:' : 'Ambiguous/inbound:'} {
+            (data?.ack_triage?.categories?.ambiguous_local_rows ?? 0) +
+            (data?.ack_triage?.categories?.inbound_only ?? 0)}
+        </p>
+        <p className="text-muted-foreground">
+          {ar
+            ? 'المطابقة المحلية لا تثبت تسليم واتساب. الحالات غير المطابقة تحتاج مراجعة الدليل الأصلي لدى OpenWA، ولا تتم إعادة الإرسال.'
+            : 'Local identity matches are not WhatsApp delivery proof. Unmatched events require native OpenWA review; never resend blindly.'}
+        </p>
+      </div>}
       {outstanding.length === 0
         ? <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <CheckCircle2 className="h-4 w-4" />
@@ -132,6 +160,17 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
                 <p className="font-medium">{item.event_kind === 'unresolved_identity'
                   ? (ar ? 'رقم مرسل غير محسوم' : 'Unresolved sender')
                   : (ar ? 'إيصال تسليم غير مطابق' : 'Unmatched delivery ACK')}</p>
+                {item.event_kind === 'unmatched_status' && item.ack_correlation && <p className="text-amber-700 dark:text-amber-400">
+                  {item.ack_correlation === 'needs_native_review'
+                    ? (ar ? 'لا توجد مطابقة محلية؛ تتطلب مراجعة OpenWA' : 'No local match; review OpenWA evidence')
+                    : item.ack_correlation === 'candidate_outbound_message'
+                      ? (ar ? 'مطابقة محتملة مع رسالة صادرة' : 'Candidate local outbound match')
+                      : item.ack_correlation === 'candidate_broadcast_recipient'
+                        ? (ar ? 'مطابقة محتملة مع مستلم بث' : 'Candidate broadcast recipient')
+                        : item.ack_correlation === 'inbound_only'
+                          ? (ar ? 'مطابقة مع رسالة واردة فقط' : 'Inbound-only local row')
+                          : (ar ? 'مطابقة محلية متعارضة؛ تحتاج مراجعة' : 'Ambiguous local records')}
+                </p>}
                 <p className="text-muted-foreground">
                   {item.state} · {ar ? 'المحاولات' : 'attempts'}: {item.attempt_count}
                   {item.last_error_code ? ` · ${item.last_error_code}` : ''}
