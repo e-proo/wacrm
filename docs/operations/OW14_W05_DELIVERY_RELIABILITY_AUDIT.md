@@ -72,3 +72,14 @@ group by 1;
 - Full W05 `TEST verified`, `live acceptance complete` and `production ready`: **NOT claimed**.
 
 Deferred external paging belongs to `PROJECT_NOTES.md` NOTE-019 / SOF-51, not this W05 critical path.
+
+## 5. OW14-W05 P1 — safe local ACK correlation triage (implementation)
+
+- The existing **session-admin-only** `GET /api/whatsapp/connections/openwa/[connectionId]/reconciliation` now inspects a **bounded 50-row sample** of deferred ACKs, extracting native provider IDs server-side exclusively. The WACRM message and broadcast-recipient lookups are **exact** on `provider='openwa' + connection_id + provider_message_id`; no cross-account/connection broad search, no fuzzy/time-based matching and no provider lookup endpoint invented.
+- The browser receives only an `ack_correlation` **category**, e.g. `needs_native_review`, `candidate_outbound_message`, `candidate_broadcast_recipient`, `inbound_only`, `ambiguous_local_rows`. It never receives native IDs, phone numbers, message bodies, QR or credentials. The Settings reconciliation panel displays a sampled aggregate and individual safe badges. An exact local match is **not delivery proof**.
+- The endpoint remains **GET-only** for correlation: no message status updates, no queue state changes, no physical sends or speculative replay. Existing separate TEST-only identity verification/recheck controls keep their authorization guards. Diagnostic backend failure responds HTTP 503 rather than silently returning an apparently healthy count.
+- The sample is not the entire queue; do not treat sample totals as complete population counts.
+- Pure classifier tests cover exact IDs, no match, mixed/duplicate records, inbound-only, unrecognized/null sender type; session API tests cover admin access, scoped message+recipient lookups and redaction.
+- **Independent read-only TEST SQL check:** 23 pending unmatched ACKs, 0 exact matches in local outbound messages, 0 local inbound-only matches and 0 broadcast recipients as of 2026-11-20. Consequently all 23 need bounded **native/provider evidence review** before any conclusion; the application cannot automatically reconcile these from existing WACRM rows.
+- Future live gateway archive/evidence reconciliation (same linked session/instance, exact native provider message identity) and formal case disposition **remain pending**. No blind resend or fabricated native lookup.
+

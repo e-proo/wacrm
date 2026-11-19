@@ -21,6 +21,12 @@ describe('OW14-W05 exact local ACK correlation (read-only)', () => {
     expect(classifyAckLocalCorrelation(id,[{provider_message_id:id,sender_type:'customer'}],[]))
       .toBe('inbound_only')
   })
+  it('treats missing/unrecognized sender types as ambiguous, not outbound proof', () => {
+    expect(classifyAckLocalCorrelation(id,[{provider_message_id:id,sender_type:null}],[]))
+      .toBe('ambiguous_local_rows')
+    expect(classifyAckLocalCorrelation(id,[{provider_message_id:id,sender_type:'unrecognized'}],[]))
+      .toBe('ambiguous_local_rows')
+  })
   it('marks duplicate local rows and mixed inbound/outbound identities ambiguous', () => {
     expect(classifyAckLocalCorrelation(id,[{provider_message_id:id,sender_type:'bot'}],[{provider_message_id:id}]))
       .toBe('ambiguous_local_rows')

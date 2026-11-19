@@ -84,7 +84,8 @@ export async function GET(_request: Request, context: Context) {
     })
     return NextResponse.json({
       counts, sample, sample_limit: 50, count_limit: 5000,
-      ack_triage: { sampled: ids.length, categories: triageCounts, scope: 'sample_only',
+      ack_triage: { sampled: Object.values(triageCounts).reduce((total, n) => total + n, 0),
+        categories: triageCounts, scope: 'sample_only',
         provider_verified: false },
       may_retry: isOpenWATestProject(),
     }, { headers: noStore })

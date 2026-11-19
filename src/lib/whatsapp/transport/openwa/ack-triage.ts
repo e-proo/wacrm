@@ -21,12 +21,14 @@ export function classifyAckLocalCorrelation(
   if (!nativeMessageId) return 'needs_native_review'
   const exactMessages = messages.filter(row => row.provider_message_id === nativeMessageId)
   const exactRecipients = recipients.filter(row => row.provider_message_id === nativeMessageId)
-  const outbound = exactMessages.filter(row => row.sender_type !== 'customer')
-  const inbound = exactMessages.length - outbound.length
+  const outbound = exactMessages.filter(row => row.sender_type === 'agent' || row.sender_type === 'bot')
+  const inbound = exactMessages.filter(row => row.sender_type === 'customer')
   // Multiple rows or inbound+outbound claims are not conclusive evidence.
   if (exactMessages.length + exactRecipients.length > 1) return 'ambiguous_local_rows'
   if (outbound.length === 1) return 'candidate_outbound_message'
   if (exactRecipients.length === 1) return 'candidate_broadcast_recipient'
-  if (inbound === 1) return 'inbound_only'
+  if (inbound.length === 1) return 'inbound_only'
+  // Unknown sender types are not proof that a message was outbound.
+  if (exactMessages.length > 0) return 'ambiguous_local_rows'
   return 'needs_native_review'
 }
