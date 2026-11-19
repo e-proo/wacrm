@@ -11,6 +11,16 @@ This file is the canonical place for important findings that are **outside the s
 
 ## Open notes
 
+### NOTE-019 — Unified multi-service monitoring and external alert delivery deferred (2026-11-20)
+
+- **Status:** deferred by project owner; do not configure an external alert destination or send a synthetic page at this time.
+- **Origin:** [SOF-51 / OW14-W04](https://linear.app/eproo/issue/SOF-51) after user-verified TEST VPS scheduler dashboard and recent database heartbeat. In-app worker status, 30-second read-only refresh, and separate-secret HTTP watchdog probe are implemented and CI verified on commit `63b8b12e83150bbe8d0e5c13a28d20fad1cdf339`; they are **not** equivalent to configured offsite paging.
+- **Explicit user decision:** postpone choosing Telegram/email or configuring a monitoring provider. Build a **more capable shared monitoring and alert platform** later rather than a single-service worker notification.
+- **Future scope:** unified health/event ingestion for WACRM web/API and cron/agent/broadcast/deferred workers; OpenWA gateway/session/reconnect/ACK/reconciliation; Meta transport regressions; Supabase availability/queue backlog; host/container CPU, memory, disk and certificates. Provide per-tenant and per-connection visibility, actionable severity rules, incident dedup/silence/escalation, main and backup on-call routing, multiple destinations (e.g. Telegram/email), recovery notifications, audit and repeatable synthetic delivery drills. Exclude phone/JID/message body, QR, credentials and secrets from alerts; keep monitoring read-only, tenant-scoped and independent of message dispatch.
+- **Why deferred:** owner prefers coherent, multi-service architecture and configuration after core reliability work rather than premature, fragmented provider setup.
+- **Future return criteria:** dedicated plan with approval of channels and owners, external observer outside the VPS, consent/security review, threshold calibration from bounded OW-13 metrics, TEST delivery/stop/recovery drills and on-call backup proof. Existing `WACRM_MONITOR_SECRET` and `GET /api/internal/agent-task-scheduler-health` remain **optional/inactive unless explicitly configured**.
+- **Impact:** OW14-W04/SOF-51 **remain open**; no synthetic external delivery, no W04 DoD closure and no production-ready/GO claim. Proceed in parallel with **OW14-W05/SOF-52** reliability work and keep OW-12/13 and NOTE-001 gates unchanged.
+
 ### NOTE-001 — Supabase project-wide security advisor findings
 
 - **Status:** open / database hardening TEST verified; hosted Auth setting and production gates pending
