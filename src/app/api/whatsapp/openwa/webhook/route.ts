@@ -21,14 +21,33 @@ export async function POST(request: Request) {
   try {
     reservation = await verifyAndReserveOpenWAWebhook(adminDb(), { rawBody, signature })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Invalid OpenWA webhook'
-    const status = message.includes('signature') ? 401 : message.includes('Unknown') ? 404 : 400
-    // Log only a fixed reason code. Never log webhook bodies, HMAC values, credentials, or untrusted errors.
-    console.warn('[openwa-webhook] intake rejected', {
+    // A missing/busy receipt store is NOT an invalid signed event: ask the
+    // gateway to retry the SAME idempotent delivery after a short delay.
+    // Never echo arbitrary DB/provider exception messages to the caller.
+    const reason = classifyOpenWAWebhookRejection(error)
+    const retryable = new Set([
+      'receipt_reservation_failed',
+      'unexpected_error',
+      'server_db_configuration_missing',
+      'missing_webhook_secret',
+      'missing_credentials',
+      'credential_decryption_failed',
+      'credential_scope_mismatch',
+    ]).has(reason)
+    const status = reason === 'invalid_signature' ? 401
+      : reason === 'unknown_session' ? 404
+        : retryable ? 503 : 400
+    const clientCode = retryable ? 'intake_unavailable' : reason
+    console.warn('[openwa-webhook] intake rejected', { status, reason })
+    return NextResponse.json({
+      error: 'OpenWA webhook intake rejected',
+      code: clientCode,
+    }, {
       status,
-      reason: classifyOpenWAWebhookRejection(error),
+      headers: retryable
+        ? { 'Retry-After': '5', 'Cache-Control': 'no-store' }
+        : { 'Cache-Control': 'no-store' },
     })
-    return NextResponse.json({ error: message }, { status })
   }
   if (reservation.duplicate) return NextResponse.json({ ok: true, duplicate: true })
   // Concurrent delivery cannot be acknowledged before its existing handler

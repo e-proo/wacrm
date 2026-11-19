@@ -18,7 +18,14 @@ vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn(() => h.db) }))
 vi.mock('@/lib/whatsapp/transport/openwa/webhook', () => ({
   verifyAndReserveOpenWAWebhook: h.verify,
   markOpenWAWebhookProcessed: h.markProcessed,
-  classifyOpenWAWebhookRejection: vi.fn(() => 'unexpected_error'),
+  classifyOpenWAWebhookRejection: vi.fn((error: unknown) => {
+    const message = error instanceof Error ? error.message : ''
+    if (message === 'Invalid OpenWA webhook signature') return 'invalid_signature'
+    if (message === 'Unknown OpenWA session') return 'unknown_session'
+    if (message === 'Invalid OpenWA webhook JSON') return 'invalid_json'
+    if (message === 'OpenWA webhook receipt could not be reserved') return 'receipt_reservation_failed'
+    return 'unexpected_error'
+  }),
 }))
 vi.mock('@/lib/whatsapp/inbound-normalization', () => ({
   normalizeOpenWAInboundMessage: h.normalizeInbound,
@@ -73,6 +80,36 @@ beforeEach(() => {
   query.select.mockReturnValue(query)
   query.eq.mockReturnValue(query)
   h.db.from.mockReturnValue(query)
+})
+
+describe('OW14-W05: signed webhook intake rejection contract', () => {
+  it.each([
+    ['Invalid OpenWA webhook signature', 401, 'invalid_signature', null],
+    ['Unknown OpenWA session', 404, 'unknown_session', null],
+    ['Invalid OpenWA webhook JSON', 400, 'invalid_json', null],
+    ['OpenWA webhook receipt could not be reserved', 503, 'intake_unavailable', '5'],
+    ['secret=PRIVATE_TOKEN provider=db exception', 503, 'intake_unavailable', '5'],
+  ])('returns bounded non-PII status for %s', async (reason, expectedStatus, expectedCode, retryAfter) => {
+    h.verify.mockRejectedValueOnce(new Error(reason))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const res = await POST(request())
+      expect(res.status).toBe(expectedStatus)
+      expect(res.headers.get('Retry-After')).toBe(retryAfter)
+      expect(res.headers.get('Cache-Control')).toContain('no-store')
+      const body = await res.json()
+      expect(body).toEqual({
+        error: 'OpenWA webhook intake rejected',
+        code: expectedCode,
+      })
+      expect(JSON.stringify(body)).not.toContain('PRIVATE_TOKEN')
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('PRIVATE_TOKEN')
+      expect(h.processInbound).not.toHaveBeenCalled()
+      expect(h.markProcessed).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })
 
 describe('OpenWA webhook completion acknowledgement', () => {
