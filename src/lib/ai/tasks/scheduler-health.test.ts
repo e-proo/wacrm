@@ -22,6 +22,7 @@ describe('OW14-W04 worker heartbeat classification', () => {
     expect(evaluateSchedulerPulse(row(SCHEDULER_DELAY_SECONDS), now).state).toBe('delayed')
     expect(evaluateSchedulerPulse(row(SCHEDULER_STOP_SECONDS), now).state).toBe('stopped')
     expect(evaluateSchedulerPulse(row(99999), now).state).toBe('stopped')
+    expect(evaluateSchedulerPulse({runnerLastSucceededAt:new Date(now-600000).toISOString()},now).state).toBe('stopped')
   })
   it('warns on failed ticks even with recent success', () => {
     expect(evaluateSchedulerPulse(row(5, {runnerLastResult:'failed',runnerConsecutiveFailures:1}), now))

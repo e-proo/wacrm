@@ -64,7 +64,9 @@ export function evaluateSchedulerPulse(input: SchedulerPulseInput | null, nowMs 
     stopAfterSeconds: SCHEDULER_STOP_SECONDS,
   }
   if (!Number.isFinite(nowMs)) return {...base, state: 'unknown', reason: 'clock_invalid'}
-  if (!input || (ticks === 0 && lastStarted === null)) {
+  // Legacy/partial heartbeat projections may omit tick_count and started_at;
+  // a valid success timestamp is still authoritative.
+  if (!input || (ticks === 0 && lastStarted === null && lastSuccess === null)) {
     return {...base, state: 'missing', reason: 'no_ticks'}
   }
   if (lastSuccess === null) {
