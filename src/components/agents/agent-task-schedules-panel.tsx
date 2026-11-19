@@ -51,7 +51,9 @@ const healthAlertNames: Record<string, string> = {
   BACKLOG_NEAR_CAP: 'اقتربت قائمة الانتظار من حد الحساب',
   SCHEDULER_LAG: 'تأخر تنفيذ الجدولة عن الاستحقاق',
   WORKER_ERRORS: 'فشل سابق في تشغيل العامل',
-  WORKER_HEARTBEAT_STALE: 'لم تُسجل نبضة تشغيل ناجحة حديثًا',
+  WORKER_HEARTBEAT_STALE: 'توقف أو تأخر تسجيل نبضات العامل أكثر من 3 دقائق',
+  WORKER_HEARTBEAT_DELAYED: 'تأخرت نبضات العامل أو توجد إخفاقات متتالية',
+  WORKER_HEARTBEAT_UNVERIFIED: 'تعذّر إثبات نبضات العامل الحالية',
 }
 type PromotionPreview = {
   previewOnly: boolean; readyForApproval: boolean; fingerprint: string; reviewedAt: string

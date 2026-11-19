@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
+import { evaluateSchedulerPulse } from '@/lib/ai/tasks/scheduler-health'
 
 export const runtime = 'nodejs'
 const headers = { 'Cache-Control': 'private, no-store, max-age=0' }
@@ -34,9 +35,7 @@ export async function GET() {
     const health = data as Metrics
     const active = Boolean(health.taskWorkerEnabled) &&
       (numeric(health.enabledSchedules) > 0 || numeric(health.backlog) > 0)
-    const age = health.runnerLastSucceededAt
-      ? Date.parse(health.observedAt) - Date.parse(health.runnerLastSucceededAt)
-      : Number.POSITIVE_INFINITY
+    const pulse = evaluateSchedulerPulse(health)
     const alerts: string[] = []
     if (numeric(health.staleClaims) > 0) alerts.push('STALE_CLAIMS')
     if (numeric(health.dead) > 0) alerts.push('DEAD_FIRINGS')
@@ -47,9 +46,10 @@ export async function GET() {
     if (numeric(health.dueLagSeconds) > 300 ||
         numeric(health.backlogLagSeconds) > 300) alerts.push('SCHEDULER_LAG')
     if (numeric(health.runnerConsecutiveFailures) > 0) alerts.push('WORKER_ERRORS')
-    if (active && (!Number.isFinite(age) || age > 15 * 60_000)) {
-      alerts.push('WORKER_HEARTBEAT_STALE')
-    }
+    if (active && pulse.state === 'stopped') alerts.push('WORKER_HEARTBEAT_STALE')
+    if (active && pulse.state === 'delayed') alerts.push('WORKER_HEARTBEAT_DELAYED')
+    if (active && (pulse.state === 'missing' || pulse.state === 'unknown'))
+      alerts.push('WORKER_HEARTBEAT_UNVERIFIED')
     return NextResponse.json({health,alerts}, {headers})
   } catch (error) { return toErrorResponse(error) }
 }
