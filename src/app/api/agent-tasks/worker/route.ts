@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireAgentCapability, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
+import { evaluateSchedulerPulse } from '@/lib/ai/tasks/scheduler-health'
 
 export const runtime = 'nodejs'
 const noStore = { 'Cache-Control': 'private, no-store, max-age=0' }
@@ -16,6 +17,7 @@ async function status(accountId: string) {
     { data: policy, error: pe },
     { data: tasks, error: te },
     { data: outbound, error: re },
+    { data: health, error: he },
   ] = await Promise.all([
     db.from('ai_runtime_policies').select('task_worker_enabled')
       .eq('account_id', accountId).maybeSingle(),
@@ -27,8 +29,14 @@ async function status(accountId: string) {
       .eq('account_id', accountId).eq('run_mode', 'outbound')
       .in('status', ['queued', 'claimed', 'running'])
       .limit(1000),
+    // Existing SCH-4 RPC: tenant-scoped schedule metrics + one redacted
+    // global TEST heartbeat. Never query another account's task rows.
+    db.rpc('inspect_agent_task_schedule_health', { p_account_id: accountId }),
   ])
-  if (pe || te || re) throw pe ?? te ?? re
+  if (pe || te || re || he) throw pe ?? te ?? re ?? he
+  if (!health || typeof health !== 'object' || Array.isArray(health)) {
+    throw new Error('SCHEDULER_HEALTH_UNAVAILABLE')
+  }
   const counts = { queued: 0, running: 0, paused: 0, scheduled: 0, validating: 0 }
   for (const task of tasks ?? []) {
     const key = task.status as keyof typeof counts
@@ -36,8 +44,7 @@ async function status(accountId: string) {
   }
   return {
     enabled: policy?.task_worker_enabled !== false,
-    localRunnerAvailable: process.env.NODE_ENV === 'development' &&
-      process.env.WACRM_DEV_AGENT_TASK_WORKER_ACTIVE === '1',
+    scheduler: evaluateSchedulerPulse(health),
     tasks: counts,
     outbound: {
       queued: (outbound ?? []).filter(row => row.status === 'queued').length,

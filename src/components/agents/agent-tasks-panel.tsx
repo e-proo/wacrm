@@ -1,12 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { RefreshCw, ShieldAlert, Send, Settings2, Square, Play, CheckCircle2, XCircle, ScanSearch } from 'lucide-react'
+import { RefreshCw, ShieldAlert, Send, Settings2, Square, Play, CheckCircle2, XCircle, ScanSearch, Activity, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { AgentTaskMultiContactPicker } from './agent-task-contact-picker'
 import { AgentTaskCutoverControls } from './agent-task-cutover-controls'
+import type { SchedulerPulse } from '@/lib/ai/tasks/scheduler-health'
 
 interface Connection {
   id: string
@@ -60,7 +61,7 @@ interface ResponseData {
 }
 interface WorkerStatus {
   enabled: boolean
-  localRunnerAvailable: boolean
+  scheduler: SchedulerPulse
   tasks: { queued: number; running: number; paused: number; scheduled: number; validating: number }
   outbound: { queued: number; inFlight: number }
   scannedAt: string
@@ -214,6 +215,7 @@ export function AgentTasksPanel() {
   const [workerStatus, setWorkerStatus] = useState<WorkerStatus | null>(null)
   const [workerBusy, setWorkerBusy] = useState(false)
   const [workerError, setWorkerError] = useState<string | null>(null)
+  const workerScanInFlight = useRef(false)
 
   const reload = useCallback(async (): Promise<ResponseData | null> => {
     setLoading(true)
@@ -234,19 +236,40 @@ export function AgentTasksPanel() {
 
   useEffect(() => { void reload() }, [reload])
 
-  const scanWorker = useCallback(async () => {
-    setWorkerBusy(true)
-    setWorkerError(null)
+  const scanWorker = useCallback(async (silent = false) => {
+    if (workerScanInFlight.current) return
+    workerScanInFlight.current = true
+    if (!silent) setWorkerBusy(true)
     try {
       const snapshot = await loadResponse<WorkerStatus>(
         await fetch('/api/agent-tasks/worker', { cache: 'no-store' }),
       )
       setWorkerStatus(snapshot)
+      setWorkerError(null)
     } catch (cause) {
+      // Never retain a previous green status as if a failed poll is live.
+      setWorkerStatus(null)
       setWorkerError(cause instanceof Error ? cause.message : 'تعذّر فحص العامل.')
-    } finally { setWorkerBusy(false) }
+    } finally {
+      workerScanInFlight.current = false
+      if (!silent) setWorkerBusy(false)
+    }
   }, [])
-  useEffect(() => { void scanWorker() }, [scanWorker])
+  useEffect(() => {
+    void scanWorker()
+    // Monitor independently of the Task list; silence routine polls.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void scanWorker(true)
+    }, 30_000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void scanWorker(true)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [scanWorker])
 
   async function toggleWorker() {
     if (!workerStatus || workerBusy) return
@@ -611,13 +634,66 @@ export function AgentTasksPanel() {
             إيقاف العامل يمنع التقاط أعمال جديدة لهذا الحساب، ولا يوقف جلسة واتساب أو يلغي رسالة
             بدأ المزوّد إرسالها. الإرسال غير المؤكد يتطلب مطابقة.
           </p>
-          {workerError && <p role="alert" className="text-sm text-destructive">{workerError}</p>}
+          {workerError && <p role="alert" className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
+            تعذّر تحديث حالة المراقبة: {workerError}. لا يمكن تأكيد نشاط العامل حتى يعود الفحص.
+          </p>}
           {workerStatus ? (
-            <div className="space-y-2">
-              <p role="status" className="text-sm font-medium">
-                حالة الحساب: {workerStatus.enabled ? 'مسموح بالتشغيل' : 'موقوف'} ·
-                عامل npm run dev: {workerStatus.localRunnerAvailable ? 'متاح' : 'غير مفعّل محليًا'}
-              </p>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/20 p-3">
+                <div className="flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                  <span className="text-sm font-medium">نبضات جدولة TEST</span>
+                </div>
+                <span role="status" className={
+                  'rounded-full px-3 py-1 text-xs font-medium ' +
+                  (workerStatus.scheduler.state === 'healthy'
+                    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                    : workerStatus.scheduler.state === 'stopped'
+                      ? 'bg-destructive/10 text-destructive'
+                      : 'bg-amber-500/10 text-amber-700 dark:text-amber-400')
+                }>
+                  {workerStatus.scheduler.state === 'healthy' ? 'نشاط حديث'
+                    : workerStatus.scheduler.state === 'delayed' ? 'تنبيه: تأخر أو تعثر'
+                    : workerStatus.scheduler.state === 'stopped' ? 'تحذير: توقفت النبضات'
+                    : workerStatus.scheduler.state === 'missing' ? 'لم تُسجل نبضات'
+                    : 'الحالة غير مؤكدة'}
+                </span>
+              </div>
+              {workerStatus.enabled && workerStatus.scheduler.state !== 'healthy' && (
+                <div role="alert" className="flex gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>
+                    {workerStatus.scheduler.state === 'stopped'
+                      ? 'لم تنجح دورة جدولة خلال آخر 3 دقائق أو أكثر. افحص حاوية scheduler وسجلاتها على VPS.'
+                      : workerStatus.scheduler.state === 'delayed'
+                        ? 'نبضات جدولة المهام متأخرة أو توجد إخفاقات متتالية. راجع العامل قبل الاعتماد على التنفيذ التلقائي.'
+                        : 'لا يمكن إثبات تشغيل الجدولة من قاعدة البيانات حاليًا. راجع خدمة scheduler وإعداد TEST.'}
+                    {' '}هذا تنبيه مراقبة فقط؛ لا يرسل رسائل أو يعيد إرسال نتائج غير مؤكدة.
+                  </span>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                <div className="rounded-md border p-2">
+                  <p className="text-muted-foreground">آخر نجاح</p>
+                  <p className="mt-1 font-medium">{workerStatus.scheduler.secondsSinceSuccess === null
+                    ? 'غير متاح'
+                    : workerStatus.scheduler.secondsSinceSuccess < 60
+                      ? String(workerStatus.scheduler.secondsSinceSuccess) + ' ثانية'
+                      : String(Math.floor(workerStatus.scheduler.secondsSinceSuccess / 60)) + ' دقيقة'}</p>
+                </div>
+                <div className="rounded-md border p-2">
+                  <p className="text-muted-foreground">الدورات المسجلة</p>
+                  <p className="mt-1 font-medium" dir="ltr">{workerStatus.scheduler.tickCount}</p>
+                </div>
+                <div className="rounded-md border p-2">
+                  <p className="text-muted-foreground">إخفاقات متتالية</p>
+                  <p className="mt-1 font-medium" dir="ltr">{workerStatus.scheduler.consecutiveFailures}</p>
+                </div>
+                <div className="rounded-md border p-2">
+                  <p className="text-muted-foreground">صلاحية الحساب</p>
+                  <p className="mt-1 font-medium">{workerStatus.enabled ? 'مسموح' : 'موقوف'}</p>
+                </div>
+              </div>
               <p className="text-xs text-muted-foreground">
                 انتظار: {workerStatus.tasks.queued} · تنفيذ: {workerStatus.tasks.running} ·
                 توقف مؤقت: {workerStatus.tasks.paused} · جدولة: {workerStatus.tasks.scheduled} ·
@@ -626,11 +702,14 @@ export function AgentTasksPanel() {
               </p>
               <p className="text-xs text-muted-foreground">
                 آخر فحص: {new Date(workerStatus.scannedAt).toLocaleTimeString('ar')}
-                {!workerStatus.localRunnerAvailable && workerStatus.enabled
-                  ? ' · التشغيل التلقائي يتطلب npm run dev مع WACRM_DEV_AGENT_TASK_WORKER=on.' : ''}
+                {' · '}تحديث تلقائي كل 30 ثانية أثناء فتح الصفحة.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                المصدر: نبضات TEST المشتركة في قاعدة البيانات؛ لا تحدد ما إذا كان المنفذ Docker أو Windows أو GitHub.
+                زر التشغيل/الإيقاف يخص هذا الحساب ولا يوقف حاوية Docker.
               </p>
             </div>
-          ) : <p className="text-xs text-muted-foreground">جارٍ التحقق من حالة العامل...</p>}
+          ) : !workerError ? <p className="text-xs text-muted-foreground">جارٍ التحقق من حالة العامل...</p> : null}
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" variant={workerStatus?.enabled ? 'destructive' : 'default'}
               disabled={workerBusy || !workerStatus} onClick={() => void toggleWorker()}>
@@ -660,8 +739,11 @@ export function AgentTasksPanel() {
                 {hasPendingTasks ? ' · تحديث تلقائي كل 15 ثانية' : ''}
               </p>
               <p className="text-xs text-muted-foreground">
-                حالة تنفيذ العامل: {workerStatus?.enabled === false ? 'موقوف من لوحة التحكم'
-                  : data?.devTaskWorkerActive ? 'مهيأ على TEST' : 'التشغيل المحلي يحتاج تفعيل npm run dev'}
+                حالة جدولة TEST: {workerStatus?.enabled === false ? 'موقوفة لهذا الحساب'
+                  : workerStatus?.scheduler.state === 'healthy' ? 'نبضات ناجحة حديثًا'
+                  : workerStatus?.scheduler.state === 'stopped' ? 'تنبيه: تأخر النبضات'
+                  : workerStatus?.scheduler.state === 'delayed' ? 'تنبيه: تأخر أو تعثر'
+                  : 'حالة النبضات غير مؤكدة'}
               </p>
             </div>
             <Button type="button" size="sm" variant="outline" disabled={loading || busy}
