@@ -65,6 +65,44 @@ describe('OW-10 OpenWA guardrail transport', () => {
     await expect(guarded.send(request)).rejects.toBe(providerError)
     expect(rpc).toHaveBeenNthCalledWith(2, 'record_openwa_guardrail_outcome', expect.objectContaining({ p_success: false, p_reason: 'connection_restricted' }))
   })
+  it('does not turn a provider-accepted send into a failed send when post-dispatch audit network throws', async () => {
+    const providerResult: WhatsAppTransportSendResult =
+      { provider: 'openwa', connectionId: request.connectionId, providerMessageId: 'p-accepted' }
+    const rpc = vi.fn().mockResolvedValueOnce({
+      data: { allowed: true, wait_ms: 0 }, error: null,
+    }).mockRejectedValueOnce(new Error('AUDIT-PRIVATE-URL-AND-TOKEN'))
+    const db = { rpc } as unknown as SupabaseClient
+    const inner: WhatsAppTransport = { provider: 'openwa', send: vi.fn(async () => providerResult) }
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      await expect(new GuardedOpenWATransport(db, inner).send(request)).resolves.toEqual(providerResult)
+      expect(inner.send).toHaveBeenCalledTimes(1)
+      expect(rpc).toHaveBeenNthCalledWith(2, 'record_openwa_guardrail_outcome', expect.objectContaining({
+        p_success: true,
+      }))
+      expect(JSON.stringify(log.mock.calls)).not.toContain('AUDIT-PRIVATE-URL-AND-TOKEN')
+      expect(JSON.stringify(log.mock.calls)).not.toContain(request.connectionId)
+      expect(JSON.stringify(log.mock.calls)).not.toContain(request.recipient)
+    } finally { log.mockRestore() }
+  })
+  it('does not overwrite the provider error when post-dispatch failure audit also throws', async () => {
+    const original = new WhatsAppTransportError('ambiguous_outcome', 'Provider request outcome unknown')
+    const rpc = vi.fn().mockResolvedValueOnce({
+      data: { allowed: true, wait_ms: 0 }, error: null,
+    }).mockRejectedValueOnce(new Error('PRIVATE-AUDIT-FAILED'))
+    const db = { rpc } as unknown as SupabaseClient
+    const inner: WhatsAppTransport = { provider: 'openwa', send: vi.fn(async () => { throw original }) }
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      await expect(new GuardedOpenWATransport(db, inner).send(request)).rejects.toBe(original)
+      expect(inner.send).toHaveBeenCalledTimes(1)
+      expect(rpc).toHaveBeenNthCalledWith(2, 'record_openwa_guardrail_outcome', expect.objectContaining({
+        p_success: false, p_reason: 'ambiguous_outcome',
+      }))
+      expect(JSON.stringify(log.mock.calls)).not.toContain('PRIVATE-AUDIT-FAILED')
+      expect(JSON.stringify(log.mock.calls)).not.toContain(request.connectionId)
+    } finally { log.mockRestore() }
+  })
   it('fails closed if guardrail reservation cannot be persisted', async () => {
     const db = { rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'db unavailable' } }) } as unknown as SupabaseClient
     const inner: WhatsAppTransport = { provider: 'openwa', send: vi.fn() }

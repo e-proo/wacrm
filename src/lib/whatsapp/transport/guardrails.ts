@@ -194,14 +194,24 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
   }
 
   private async record(request: WhatsAppTransportSendRequest, hash: string, success: boolean, reason?: string) {
-    const { error } = await this.db.rpc('record_openwa_guardrail_outcome', {
-      p_account_id: request.accountId,
-      p_connection_id: request.connectionId,
-      p_recipient_hash: hash,
-      p_workload: request.workload ?? 'manual',
-      p_success: success,
-      p_reason: reason ?? null,
-    })
-    if (error) console.error('[openwa-guardrail] outcome audit failed', { connectionId: request.connectionId, success })
+    // This audit is post-dispatch best-effort. A network exception here must
+    // NEVER turn a provider-accepted send into an apparent transport failure
+    // (and thereby tempt a duplicate retry), or mask the provider's original
+    // ambiguous/failure result. The guardrail *reservation* above stays
+    // mandatory and fail-closed BEFORE dispatch.
+    try {
+      const { error } = await this.db.rpc('record_openwa_guardrail_outcome', {
+        p_account_id: request.accountId,
+        p_connection_id: request.connectionId,
+        p_recipient_hash: hash,
+        p_workload: request.workload ?? 'manual',
+        p_success: success,
+        p_reason: reason ?? null,
+      })
+      if (error) console.error('[openwa-guardrail] post-dispatch audit unavailable')
+    } catch {
+      // No raw error, connection ID, key, recipient, JID or provider result in logs.
+      console.error('[openwa-guardrail] post-dispatch audit unavailable')
+    }
   }
 }
