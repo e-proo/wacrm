@@ -249,17 +249,17 @@ export function WhatsAppConfig() {
 
       {canEditSettings && <>
         <TabsContent value="sessions">
-          <OpenWAConnections view="sessions" onNavigate={(next, connectionId) =>
-            openTab(next === 'delivery' ? 'reviews' : next, connectionId)} />
+          {activeTab === 'sessions' && <OpenWAConnections view="sessions" onNavigate={(next, connectionId) =>
+            openTab(next === 'delivery' ? 'reviews' : next, connectionId)} />}
         </TabsContent>
         <TabsContent value="pilot">
-          <OpenWAConnections view="pilot" requestedConnectionId={requestedConnectionId} />
+          {activeTab === 'pilot' && <OpenWAConnections view="pilot" requestedConnectionId={requestedConnectionId} />}
         </TabsContent>
         <TabsContent value="governance">
-          <OpenWAOperationalControlCenter />
+          {activeTab === 'governance' && <OpenWAOperationalControlCenter />}
         </TabsContent>
         <TabsContent value="reviews">
-          <OpenWAConnections view="delivery" requestedConnectionId={requestedConnectionId} />
+          {activeTab === 'reviews' && <OpenWAConnections view="delivery" requestedConnectionId={requestedConnectionId} />}
         </TabsContent>
       </>}
     </Tabs>
