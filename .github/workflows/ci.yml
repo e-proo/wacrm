@@ -54,6 +54,9 @@ jobs:
       - name: Hostinger TEST scheduler fail-closed checks
         run: node --test scripts/selfhost-test-scheduler.test.mjs
 
+      - name: OW14-W06 Hostinger read-only capacity inventory security checks
+        run: node --test scripts/hostinger-capacity-baseline.test.mjs
+
       - name: OW-4 session/QR onboarding + Meta regression gate
         run: |
           npx vitest run \

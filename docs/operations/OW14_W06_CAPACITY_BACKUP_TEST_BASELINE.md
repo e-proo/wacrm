@@ -43,3 +43,15 @@ Do not paste complete `docker inspect` or `docker compose config` outputs in pub
 - Backup manifest: what was backed up, encryption method, object retention, secure owner/backup owner, key custody, consistency point, off-VPS copy, restore compatibility.
 - Restore drill: isolated TEST target, profile compatibility, DB integrity, WACRM login, scheduler health, OpenWA session readiness or documented QR, signed webhook idempotency, no blind resend. Record actual RTO and RPO.
 - **Not yet completed:** real VPS metrics, encrypted backups, restore drill, measured RTO/RPO or production GO decision. Keep SOF-53 In Progress and OW-14 production NO-GO pending verification.
+
+## 5. Repeatable host capacity snapshots
+
+New read-only Node 20+ script: scripts/hostinger-capacity-baseline.mjs. From the VPS WACRM directory run:
+
+    node scripts/hostinger-capacity-baseline.mjs
+
+The output contains aggregate container CPU/memory grouped as WACRM / OpenWA / scheduler / other, CPU/RAM/root disk metrics and *counts* of OpenWA persistent mounts, plus an image hash prefix. It deliberately never outputs secret environment variables, volume source paths, WhatsApp profiles, phone numbers, container names or credentials; it does not start/stop containers, send messages, create backups or edit data.
+
+Run a baseline at idle first; only schedule a one-task snapshot and bounded multi-target/media load during a separately approved TEST send window. A single point-in-time reading is **not** peak resource headroom, session capacity, backup validation or measured RTO/RPO. An unrecognized gateway name is counted as OTHER, so validate classification locally. If Docker access fails the script reports unavailable, never 'all healthy'.
+
+Tests: node --test scripts/hostinger-capacity-baseline.test.mjs. These check read-only command allowlist, Docker unit handling and no output of secrets, container identities, or mount paths.
