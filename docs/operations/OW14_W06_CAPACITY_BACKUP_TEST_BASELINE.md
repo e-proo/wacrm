@@ -80,3 +80,9 @@ The role classifier is name/image-heuristic based; the 2 OpenWA containers are n
 **Complete return-to-VPS operations guide:** [HOSTINGER_TEST_VPS_OPERATIONS_AND_RELEASE_RUNBOOK.md](../deploy/HOSTINGER_TEST_VPS_OPERATIONS_AND_RELEASE_RUNBOOK.md). It covers current topology, source/Compose/worker file contract, Windows local workflow, read-only SSH re-entry, reviewed Git fetch, image backup/tag, app build/recreate, TEST worker pause/resume, conditional app-only rollback, OpenWA isolation, secret ownership, gaps and release checklist.
 
 **Evidence level:** real one-time host snapshot received and documented; backup consistency, off-VPS encrypted copies, isolated restore, measured RTO/RPO, peak session density and production readiness all remain **PENDING**. Keep SOF-53 **In Progress**.
+
+## 7. Owner pause decision after capacity baseline — 2026-11-20
+
+**W06 P1 paused / deferred** by owner while preparing the more comprehensive backup/DR design. The single observed Hostinger TEST snapshot in section 6 is preserved as evidence; encrypted off-VPS backups, session persistence proof, isolated restore, peak-load tests and measured RTO/RPO are still pending. No W06 Definition of Done closure or Production readiness is claimed.
+
+Local Windows development and preparation shift to **OW14-W07 / SOF-54** using [14_OW14_W07_PROVIDER_CHOICE_CONSENT_AND_SUPPORT_IMPLEMENTATION_PLAN.md](../../plans/WhatsApp%20Multi-Provider%20OpenWA%20Integration/14_OW14_W07_PROVIDER_CHOICE_CONSENT_AND_SUPPORT_IMPLEMENTATION_PLAN.md). W06 returns before W09 production GO; VPS remote changes remain paused until separately authorized. Preserve any existing OpenWA session volumes and operator audit data; never claim the VPS scheduler stopped without direct SSH verification.

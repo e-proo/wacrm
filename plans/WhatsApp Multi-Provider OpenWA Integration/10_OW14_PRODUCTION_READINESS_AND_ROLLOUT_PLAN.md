@@ -146,10 +146,17 @@ Planning coordination: [SOF-58](https://linear.app/eproo/issue/SOF-58). Implemen
 | W03 Security, NOTE-001, rotation | [SOF-50](https://linear.app/eproo/issue/SOF-50) | Todo |
 | W04 Observability and on-call | [SOF-51](https://linear.app/eproo/issue/SOF-51) | Todo |
 | W05 Delivery/ACK/reconciliation | [SOF-52](https://linear.app/eproo/issue/SOF-52) | Todo; live acceptance deferred |
-| W06 Capacity, backup/restore | [SOF-53](https://linear.app/eproo/issue/SOF-53) | Todo |
-| W07 Opt-in and policy warning | [SOF-54](https://linear.app/eproo/issue/SOF-54) | Todo |
+| W06 Capacity, backup/restore | [SOF-53](https://linear.app/eproo/issue/SOF-53) | Deferred by owner 2026-11-20; one TEST VPS snapshot recorded; encrypted backup/restore pending |
+| W07 Opt-in and policy warning | [SOF-54](https://linear.app/eproo/issue/SOF-54) | P0 implementation plan drafted; local Windows first, runtime not yet implemented |
 | W08 Release/CI/migrations | [SOF-55](https://linear.app/eproo/issue/SOF-55) | Todo |
 | W09 Independent release GO/NO-GO | [SOF-56](https://linear.app/eproo/issue/SOF-56) | Todo; blocked by SOF-41, SOF-43, SOF-44 and W01–W08 |
 | W10 Controlled Production waves | [SOF-57](https://linear.app/eproo/issue/SOF-57) | Todo; blocked by W09 and prior live phase gates |
 
 No separate Linear project or duplicate OW-14 milestone was created. W01–W08 can progress on documentation/design independently; runtime work is separately authorized, and Production decisions remain blocked until all required proofs exist.
+
+### 2026-11-20 — Owner-directed reordering (W06 pause, W07 planning)
+
+- **W06/SOF-53 temporarily deferred**, NOT closed. The operator-supplied 2026-11-20 read-only VPS snapshot is preserved in [docs/operations/OW14_W06_CAPACITY_BACKUP_TEST_BASELINE.md](../../docs/operations/OW14_W06_CAPACITY_BACKUP_TEST_BASELINE.md); backup/DR testing and actual RTO/RPO remain pending and block W09 GO.
+- **W07/SOF-54 is the active planning workstream**. Full design, package sequence, security and QA gates: [14_OW14_W07_PROVIDER_CHOICE_CONSENT_AND_SUPPORT_IMPLEMENTATION_PLAN.md](14_OW14_W07_PROVIDER_CHOICE_CONSENT_AND_SUPPORT_IMPLEMENTATION_PLAN.md).
+- All engineering is local **Windows first**; no new VPS deployment, remote TEST schema change or provider-backed live test is authorized by this plan. Meta stays official/default; production OpenWA opt-in is separate from existing TEST Pilot.
+- W07 plan drafted **does not** mean implementation complete, TEST verified, live acceptance or Production GO. W05/W04/W03/OW12/OW13 and NOTE-001 independent gates remain intact.
