@@ -2292,3 +2292,16 @@ Recovery
 - `166_openwa_agent_phone_call_consent.sql` يضيف السماح المنتهي الصلاحية والمربوط بالحساب والجلسة والرقم و`workload='agent'`. الاستثناء في SQL يقتصر على OpenWA TEST مع جلسة جاهزة وغير موقوفة وموافقة فعالة؛ يحتفظ Meta بقواعد نافذة المحادثة والقوالب.
 - شروط `DoD`: نجاح lint/typecheck/tests/build والـMigrations clean replay، تطبيق وفحص TEST للأعمدة والدوال وصلاحياتها، اختبارات رفض غير المصرح لهم والرسائل دون opt-in، ثم **قبول حي منفصل** لمهمة واحدة مع 2–3 أرقام مصرح بها (بما فيها رقم جديد)، تحقق هوية المرسل والمستقبل والردود وعدم التكرار وPause/Stop وrollback/reconciliation.
 - لا يعني التطبيق البنيوي ولا نجاح CI اكتمال `live acceptance` أو `production ready`. تبقى `SOF-66` وPhase 18 مفتوحتين حتى الدليل الحي. `NOTE-001` ما زالت حاجز الجاهزية الإنتاجية.
+
+
+## 2026-11-20 — Change of priority: Coverage/Scheduling → Builder staged release → Cleanup
+
+**Product direction:** Phase 12 / SOF-17 and Phase 20 / SOF-25 (Service Promotion) are deliberately **deferred**, NOT completed. Preserve existing service promotion code and published/historical revision behavior, and never start a promotion pilot or automatic schedule as part of the changed priority.
+
+**Priority A:** close Phase 13 / SOF-18 (SCH-6 operator acceptance) and consolidated SOF-66, Phase 18 / SOF-23, Phase 19 / SOF-24 based on the still-missing independent live negative/recovery/rollback/human-takeover evidence. The previous one/two-target successful Coverage cycles and SCH-5 SQL are valid partial evidence but **not sufficient DoD**. As of a read-only TEST check, migration 193 exists, 0 enabled and 2 paused triggers, 0 unsettled firings and 0 active Agent Tasks; no worker, Cutover or Pilot was changed. See [the acceptance-to-release plan](26_SOF18_23_24_66_TO_PHASE21_22_EXECUTION_PLAN.md) and [read-only evidence](../../docs/operations/AGENT_TASK_SCH6_COVERAGE_PHASE21_22_READINESS_2026_11_20.md).
+
+**Priority B / Phase 21 P21-00:** start **non-operational** rollout policy contract and tests now, with stages `disabled → internal → owner → selected_accounts → capability_admins → general_availability` and initial task-scope `coverage.sourcing@2` **only**. Actual launch is not authorized until signatures/evidence for scheduling, Coverage, Meta/OpenWA policy, security, incident rollback and manual Builder review exist. Pure policy source `src/lib/ai/tasks/builder-release-policy.ts` does **not** grant sending or change current server routes. Owner/admin rollout must be server-authoritative, not a frontend toggle. React/inbound Builder stays untouched. Phase 21 may be coverage-only for a bounded cohort; it must not claim full V1 GA while Promotion remains deferred.
+
+**Priority C / Phase 22 P22-00:** start a safe read-only cleanup inventory, preserving applied migrations, Service Platform compatibility, inbound Agent Runtime, Meta default/optional OpenWA adapters, ACK and LID reconciliation, historical Task Type V1, rollback and Scheduler worker. Deletion and GA cleanup require staged release stability and explicit independent acceptance.
+
+**Closure:** SOF-18/SOF-23/SOF-24/SOF-66 remain open pending real signed DoD; SOF-17/SOF-25 are deferred; SOF-26 preparation does not mean launched; SOF-27 inventory does not mean removed. NOTE-001 and separate OW14 release/backup gates remain for Production.
