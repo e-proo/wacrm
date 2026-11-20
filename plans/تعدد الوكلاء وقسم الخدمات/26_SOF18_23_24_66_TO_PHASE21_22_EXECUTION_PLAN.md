@@ -133,3 +133,15 @@ Promotion Phase 12/20 remains **deferred, separate**, and its absence must block
 3. Close SOF-18, SOF-23, SOF-24, SOF-66 **individually** only after recorded PASS on their respective DoD.
 4. Implement P21-01 durable gate + P21-02 UX and validate with exact-code CI, TEST migrations and manual accessibility. Advance internal only with signoff.
 5. Continue P21 staged release after metrics, then P22 safe actual cleanup; defer full GA if Promotion remains unverified.
+
+## 2026-11-20 uploaded operator acceptance pack and new TEST proof
+
+The operator supplied an annotated 17 Nov AC-01..13 TEST pack (new “جاهز” marks and an AC-11 no-offer partial-completion note). It is **not** a signed PASS sheet. We independently checked the current TEST DB and CI, and linked the results into:
+- [Detailed source/TEST crosswalk](27_SOF66_PHASE18_PHASE19_2026_11_20_USER_TEST_RECONCILIATION.md)
+- [Formal acceptance register addendum](23_SOF66_PHASE18_PHASE19_ACCEPTANCE_EVIDENCE_REGISTER.md)
+
+New corroboration: Task A dated 17 Nov paused/resumed then had two unique initial provider sends and two successful inbound Runs, while also recording one `SUPPLIER_WORKFLOW_FAILED` inbound Run. Its alternate-route review-only Change Request created **zero** offers; another Target's ordinary approval produced a separate offer. One Target has genuine Inbox staff takeover + `paused_for_human`. Task B dated 20 Nov ended automatically `partially_completed` without an originating offer, but its human pause lacks an Inbox assignee and inbound Run — investigate before treating it as a completed decline/handoff.
+
+Current TEST CUTOVER read-only: `pilot`, ready with no nonterminal Tasks/sending/reconciliation, outbound enabled. Thus **AC-12 rollback and AC-13 inbound after rollback remain OPEN**, as do AC-04 process restart, AC-06 explicit decline, AC-09 opt-out and selected negative/human signoffs. **SCH-6 remains separate and open.**
+
+**Next operational order:** no-send investigation/signoff of Task A failed inbound Run and Task B handoff; only needed bounded AC-06/09 with approved TEST recipients; then explicit operator-controlled AC-12 disable and AC-13 ordinary inbound; SCH-6 independent acceptance; only then SOF-66/23/24/18 closure and Phase21 coverage-only internal rollout. No additional outbound, CUTOVER or worker toggle was done in this documentation step.

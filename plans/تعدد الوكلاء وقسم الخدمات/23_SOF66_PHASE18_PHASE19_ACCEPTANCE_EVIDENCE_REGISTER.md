@@ -50,3 +50,28 @@ Record sign-off fields here once actually observed:
 | Production readiness | NOT CLAIMED — independent security/release gates, including NOTE-001 | Pending |
 
 **No additional WhatsApp send, task/pilot toggle, migration deployment or Production change occurred as part of this documentation.** This register may be updated only from actual, scope-correct TEST/CI artifacts.
+
+## 2026-11-20 user-annotated pack / independent hosted TEST evidence addendum
+
+**Source:** user-uploaded `WACRM_SOF66_PHASE18_PHASE19_TEST_ACCEPTANCE_PACK(2).md`, SHA-256 `6dcf2a1051fb3095063cf8f01e42bb3c0f9a558eb83ee0ba4cd0bcfafca222e2`. Markers “جاهز” on AC-01/02/03/04/05/07/08 and an AC-11 partial-completion narrative are **not** timestamps, Task-scoped test results or signed PASS. Original source is left unchanged. For full record and safely bounded evidence details, see [27_SOF66_PHASE18_PHASE19_2026_11_20_USER_TEST_RECONCILIATION.md](27_SOF66_PHASE18_PHASE19_2026_11_20_USER_TEST_RECONCILIATION.md).
+
+**Technical proof added by read-only Supabase TEST SQL** on 20 November:
+- Task `bb649931-a6a3-4e2f-a9a8-5490bbb83a1e`: pause 20:42:27Z / resume 20:45:03Z, two first-send reservations and sent/provider IDs after resume, two distinct idempotency keys and targets; **two successful inbound Runs plus one failed `SUPPLIER_WORKFLOW_FAILED`**. One executed `coverage.supplier_counteroffer.review` had **zero** linked offers; a **different** target had an executed `coverage.offer.create` with **one** linked offer. One Target `paused_for_human` with auto-reply disabled and staff assigned in Inbox.
+- Task `83e0f33b-7554-4f39-b2e4-66ac8bceb9b2` (20 November): **automatic `partially_completed`**, manual closure null, one `paused_for_human` Target; zero Task-linked Change Requests and Offers. Its associated Inbox had **no** staff assignment/auto-reply disable and no inbound Agent Run. Do **not** equate this with verified supplier refusal/human handoff.
+- Current TEST cutover `pilot`, `ready=true`, zero nonterminal Tasks, zero sending/reconciliation, zero blocking conditions, outbound scope enabled: **latest AC-12/13 have not been demonstrated**.
+- Current code snapshot `98d167cde0895a87462e893c1664454aefcf8949`; [CI 44784835449](https://github.com/e-proo/wacrm/actions/runs/44784835449) completed/success. This is *CI*, not live sign-off. No SQL writes/worker/provider send performed in inspection.
+
+| Case grouping | 20 Nov classification | What still prevents full PASS |
+| --- | --- | --- |
+| AC-01/02/03 | **Corroborated in part** by two-target pause/resume and independently sent first messages | Worker stopped at creation, two tick windows, operator cohort/UTC and screenshot signoff |
+| AC-04 | **Operator marked ready; not independently verified** | Actual restart/process ownership + before/after ID evidence |
+| AC-05 | **Two target-linked inbound successes; one failed Run** | Investigate `SUPPLIER_WORKFLOW_FAILED` and approve correlation evidence |
+| AC-06 | **OPEN** | Explicit supplier decline and terminal refusal record |
+| AC-07 | **Review-only outcome corroborated** | Source route snapshot and independent operator signoff |
+| AC-08 | **Inbox takeover + Target human-pause corroborated** for Task A | Signoff that no continuation/duplicate Task send; Task B pause is not an Inbox takeover |
+| AC-09 | **OPEN** | Actual opt-out and suppression verification |
+| AC-10 | **CI/idempotency evidence only** | Exact replay test linkage and accepted CI equivalence, or safe authorized replay |
+| AC-11 | **Partial/no-offer outcome corroborated** for Task B | Explain human pause with no Inbox assignment/inbound Run and confirm refusal/no-offer policy |
+| AC-12/13 | **OPEN**; account still in Pilot | Controlled final cutover disable + clean inbound-after-rollback proof |
+
+**Decision:** SOF-66, SOF-23 and SOF-24 remain **In Progress**, as does the separate scheduling SOF-18. No final operator signatures in uploaded pack. The first next work is **no-send review** of failed inbound / partial human pause, then remaining bounded AC-06/09 and final AC-12→13. Keep deferred Promotion and Phase21 rollout gates unchanged.
