@@ -273,3 +273,13 @@ AND existingRecipientConsentAndMessagingPolicyPass (where applicable)
 - CI-only synthetic SQL smoke in supabase/ci/openwa-operational-consent-activation-smoke.sql verifies RLS/grants, no live policy, privilege/tenant negatives, actor roles, cross-account FK, stale revision, retry and re-accept state. Wired to GitHub Migrations clean replay.
 - Detail: docs/architecture/OW14_W07_02_CONSENT_AUDIT_SCHEMA_AND_API_HANDOFF.md.
 - W07-03 Next.js APIs and W07-04 real provider send-time enforcement are NOT yet implemented. Existing W07-01 preview remains read-only. No hosted Supabase TEST migration or VPS deployment was authorized. Exact-HEAD Migrations CI completed/success is still required before calling this CI verified.
+
+## 2026-11-20 — W07-02 verified local clean-replay after least-privilege corrections
+
+- Migration: supabase/migrations/204_openwa_operational_consent_activation.sql (no seed; no hosted Supabase TEST application).
+- SQL smoke: supabase/ci/openwa-operational-consent-activation-smoke.sql, added to the existing Migrations workflow; synthetic fixture is rolled back and never contacts WhatsApp.
+- GitHub Migrations clean replay **completed/success** for code HEAD **f7d7eb47637b31d91d5e6f342a1e59ec756a6d1d**: https://github.com/e-proo/wacrm/actions/runs/44661783357
+- Security test feedback corrected by granting only the three required profile membership columns and six read-only connection columns to service_role; neither authenticated nor anon got new privileges. W07 account advisory transaction lock replaces an accounts row UPDATE lock. Rechecks still verify tenant and actor in SQL.
+- Model and API handoff: docs/architecture/OW14_W07_02_CONSENT_AUDIT_SCHEMA_AND_API_HANDOFF.md
+- **Evidence level:** W07-02 implementation complete + **clean migration CI verified**. Application CI result, Supabase TEST application, API auth/tenant tests, live acceptance and Product/Legal approval are separate gates; no Production or VPS change.
+- **Next:** W07-03 owner/admin authenticated APIs, then W07-04 shared OpenWA outbound enforcement, then W07-05 functional UI. Current W07-01 preview remains a non-mutating draft.

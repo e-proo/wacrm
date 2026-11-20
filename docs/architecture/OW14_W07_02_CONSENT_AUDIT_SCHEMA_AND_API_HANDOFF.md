@@ -15,7 +15,7 @@ The existing provider-neutral connection registry, Meta default, OpenWA transpor
 4. **whatsapp_openwa_activation_audit** — append-only per-connection admin/owner enable/disable/suspend with scoped actor, request UUID, revision and bound acceptance event.
 5. **whatsapp_openwa_activation_state** — per-account/per-connection requested state. Default (missing row) is disabled; enabled requires a current approved owner acceptance and an eligible same-account OpenWA session.
 
-Every table has RLS enabled; anon and authenticated have no direct privileges. Audit tables allow service_role SELECT/INSERT only, not UPDATE/DELETE/TRUNCATE. New connection activation tables have composite account_id + connection_id FKs backed by a unique index on whatsapp_connections. No keys, QR, phone numbers, chat bodies, provider message IDs or transport secrets enter audit rows.
+Every new table has RLS enabled; anon and authenticated have no direct privileges. Audit tables allow service_role SELECT/INSERT only, not UPDATE/DELETE/TRUNCATE. New connection activation tables have composite account_id + connection_id FKs backed by a unique index on whatsapp_connections. The invoker RPCs have least-privilege service_role SELECT only on profiles(user_id,account_id,account_role) and whatsapp_connections(id,account_id,provider,archived_at,status,session_id), rather than broad UPDATE/SELECT access. No keys, QR, phone numbers, chat bodies, provider message IDs or transport secrets enter audit rows.
 
 ## Server-only RPC contract
 
@@ -25,14 +25,14 @@ Parameters: p_account_id, p_actor, p_action, p_policy_version, p_policy_digest, 
 
 - Only current account owner via profiles.account_role may accept or revoke. Admin/agent/viewer and outside-account identities denied in SQL even when using service_role.
 - Accept requires exact version+digest of the one currently approved policy. W07 draft copy is not approved; no row exists after migration.
-- Revoke requires a previously accepted current decision. Transaction locks the account row; stale expected revision fails. Each request UUID is idempotent within account; conflicting reuse fails.
+- Revoke requires a previously accepted current decision. Transaction takes a W07-specific account-keyed advisory lock (without UPDATE permission on accounts); stale expected revision fails. Each request UUID is idempotent within account; conflicting reuse fails.
 - The new acceptance event ID changes when an owner revokes and later reaccepts, even the same wording/version. Existing connection activation bound to the old acceptance is stale.
 
 ### set_openwa_operational_activation
 
 Parameters: p_account_id, p_connection_id, p_actor, p_status, p_expected_revision, p_request_id.
 
-- Owner/Admin only. Account row locked before connection, then the exact provider=openwa, nonarchived connection is checked. Enable also requires ready/connected session and current approved owner acceptance.
+- Owner/Admin only. The same account-keyed advisory transaction lock serializes consent and activation decisions. A limited-column read validates the exact provider=openwa, nonarchived connection without taking an UPDATE lock on existing session rows. Enable also requires ready/connected session and current approved owner acceptance.
 - Per-connection revision + idempotency UUID guard duplicate, stale or conflicting requests. Disable and suspend remain possible without current consent.
 - Enable stores the exact accepted_event_id from the owner's currently accepted policy. Reacceptance does not automatically revive old activation. Any future send gate MUST compare current acceptance event ID against the activation's event ID.
 - No RPC sends WhatsApp, schedules a worker, creates a session, switches Meta or changes TEST Pilot.
