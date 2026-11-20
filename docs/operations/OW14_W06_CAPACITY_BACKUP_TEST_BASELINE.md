@@ -55,3 +55,28 @@ The output contains aggregate container CPU/memory grouped as WACRM / OpenWA / s
 Run a baseline at idle first; only schedule a one-task snapshot and bounded multi-target/media load during a separately approved TEST send window. A single point-in-time reading is **not** peak resource headroom, session capacity, backup validation or measured RTO/RPO. An unrecognized gateway name is counted as OTHER, so validate classification locally. If Docker access fails the script reports unavailable, never 'all healthy'.
 
 Tests: node --test scripts/hostinger-capacity-baseline.test.mjs. These check read-only command allowlist, Docker unit handling and no output of secrets, container identities, or mount paths.
+
+## 6. Actual VPS read-only snapshot and pause decision — 2026-11-20
+
+The owner ran \`node scripts/hostinger-capacity-baseline.mjs\` on the TEST VPS and supplied the read-only JSON output. Measurement timestamp: **2026-11-20T01:05:14.301Z**. This supersedes the older owner-reported 12 GB RAM / 100 GB disk plan estimate, but does not establish peak capacity.
+
+| Metric | Observed |
+| --- | ---: |
+| Logical CPUs | 4 |
+| RAM total / available | 15,992 / 10,943 MiB |
+| Load 1m | 0.74 |
+| Root filesystem total / available | 192.7 / 163 GiB |
+| WACRM role | 1 container; 12.49% CPU; 67.9 MiB |
+| Scheduler role | 1 container; 0.23% CPU; 11.7 MiB |
+| OpenWA-classified role | 2 containers; 4.53% CPU; 1,247.2 MiB |
+| OTHER role | 1 container; 0.18% CPU; 435.7 MiB |
+| OpenWA aggregate persistent mount count | 2, inspection complete |
+| OpenWA image hash prefixes | sha256:86ab1d9f8526; sha256:1f5038b54f06 |
+
+The role classifier is name/image-heuristic based; the 2 OpenWA containers are not guaranteed to represent 2 independently recoverable sessions, nor do 2 mounts prove durable/consistent session backups. No private host mount paths, credentials, QR, container names or message identifiers were provided.
+
+**Owner decision:** pause VPS experimentation and continue WACRM engineering + non-live tests on local Windows until the system is sufficiently prepared. **No remote service was stopped, updated, backed up or restored during this documentation work.** OpenWA live session preservation and single-worker ownership remain mandatory when future testing resumes.
+
+**Complete return-to-VPS operations guide:** [HOSTINGER_TEST_VPS_OPERATIONS_AND_RELEASE_RUNBOOK.md](../deploy/HOSTINGER_TEST_VPS_OPERATIONS_AND_RELEASE_RUNBOOK.md). It covers current topology, source/Compose/worker file contract, Windows local workflow, read-only SSH re-entry, reviewed Git fetch, image backup/tag, app build/recreate, TEST worker pause/resume, conditional app-only rollback, OpenWA isolation, secret ownership, gaps and release checklist.
+
+**Evidence level:** real one-time host snapshot received and documented; backup consistency, off-VPS encrypted copies, isolated restore, measured RTO/RPO, peak session density and production readiness all remain **PENDING**. Keep SOF-53 **In Progress**.
