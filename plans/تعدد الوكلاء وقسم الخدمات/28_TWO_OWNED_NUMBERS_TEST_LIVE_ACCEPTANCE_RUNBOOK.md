@@ -4,7 +4,7 @@
 **Project:** Agent Task Platform / Coverage Sourcing + Scheduler
 **GitHub source:** e-proo/wacrm branch `refactor/service-platform-v2` (verify fresh HEAD at execution)
 **Links:** SOF-66, SOF-23 (Phase18), SOF-24 (Phase19), SOF-18 (SCH-6); initial coverage-only Builder P21 remains HOLD.
-**State:** PREPARED / PHONE & LIVE-EXECUTION PREREQUISITES MISSING. NO live WhatsApp sends have been initiated by this plan.
+**State:** A/B supplied privately by operator; exact same-session CRM contact + native LID Pilot approvals and admin identity VERIFIED read-only. LIVE SEND NOT EXECUTED. Actual single worker ownership, authenticated UI action and fresh-time gate remain REQUIRED.
 
 ## Scope and exact ownership
 
@@ -24,7 +24,7 @@ As of 2026-11-20, authorized Supabase `wacrm test` was inspected via account-sco
 - Account-wide `inspect_ai_agent_task_test_cutover_readiness`: `mode=pilot`, `ready=true`, `blockers=[]`, `sending_messages=0`, `reconciliation_messages=0`, `nonterminal_tasks=0`, `nonterminal_trigger_firings=0`, `open_whatsapp_circuits=0`, `outbound_task_delivery_enabled=true`, `whatsapp_scope.enabled=true`. NOT evidence of immediate provider reachability or approved target cohort.
 - Exactly **one unarchived OpenWA connection with status=ready**, short identifier prefix `67ca97ea`, existing Session ID, Pilot enabled and **5 active agent Pilot grants**. These existing grants DO NOT prove either NEW A or B is included. There is also another unarchived OpenWA session `logged_out` with Pilot enabled and **0 active agent grants**; never select that as ready. Official Meta connection has status `connected`, and is a separate provider with different admission.
 - Existing coverage schedules: 2 paused, 1 completed, 0 enabled. Do not automatically unpause to start this test.
-- TEST user has not yet specified A/B international numbers, selected channel and consent/cohort mapping, or demonstrated access to the actual Windows running Next.js + single worker. These are hard **pre-send prerequisites**.
+- A/B numbers were supplied in the private conversation; the exact TEST account/contact/native chat and grants were verified without storing raw numbers in this file. The provider selection is the unarchived READY OpenWA session. Actual single Windows/VPS worker ownership, operator UI access, safe source Coverage Request and bounded live scenario still require verification before sending.
 - We can inspect GitHub/CI and hosted TEST SQL through available connected tools, but **this conversation cannot click the user's Windows-local WACRM UI or the Cloudflared tunnel, start a Windows worker, or read the target phones from an unspecified message**. SQL service_role writes that bypass authenticated WACRM API are forbidden as test orchestration.
 
 
@@ -37,6 +37,35 @@ For an OpenWA supplier-originated proposal, the one-time admin approval notifica
 A 20 Nov TEST **read-only** query found **one eligible trusted admin approval identity**, **one live `api` grant on the ready OpenWA connection**, and **five live `agent` grants**. These numbers DO NOT establish that the newly supplied B/A phones match any grant or identity. Check the actual identity and consent in the private WACRM administrative UI before sending; no SQL identity/grant change should be made.
 
 If a supplier simply declines with no Change Request, it is normal for no admin approval PIN notice to be generated. Test admin delivery only as the outcome of a separately approved, genuine review-required proposal; never manufacture a secret-bearing message to trigger a notification.
+
+
+## 2026-11-20 follow-up after the operator supplied A/B phone numbers
+
+The two personally controlled phone numbers were provided **privately in conversation**, and this public planning artifact intentionally contains only aliases A/B. Source-of-truth source code hash: `openWAPilotRecipientHash(accountId, connectionId, nativeChat)`, using `openwa-pilot:v1` salted by account/connection scope. We computed it only for scoped, authenticated native inbound chat identities **in read-only TEST SQL**; there was no application-level recipient transformation based on digits from an LID.
+
+| Pre-send proof | Supplier A (`agent` workload) | Trusted Admin B (`api` workload) |
+| --- | --- | --- |
+| Exactly one account contact matches supplied phone | **YES** | **YES** |
+| Exactly one same-session verified native conversation identity | **YES** (`@lid`) | **YES** (`@lid`) |
+| Exact active/valid workload Pilot hash grant for that native chat | **YES: 1** | **YES: 1** |
+| Grant has documented consent basis and attestation | **YES** | **YES** |
+| Trusted active identity with `change_requests.approve` matching phone | Not required / no match expected | **YES: 1** |
+| Grant configured message-per-recipient parameter | 100 | 1 |
+| Recorded grant expiry (UTC, snapshot at read time) | **2026-11-20 22:48:46 UTC** | **2026-11-20 22:50:13 UTC** |
+
+Provider/scoping checks at this snapshot: one unarchived OpenWA `ready` connection; Pilot ON; guardrail `manual_paused=false`; no currently open circuit; 24-hour reserved total 12 events across all workloads; 3 distinct reservation identities against the configured first-touch allowance 5; warmup effective hourly/day cap 500. These are **not** a promise of remaining capacity at dispatch or of provider availability. Admin B's configured allowance of 1 needs care: do not send a rehearsal PIN or unsolicited synthetic alert; only a genuine approved Change Request may trigger it.
+
+Latest account-side TEST Cutover is `pilot`, readiness `true`, zero nonterminal Task, zero `sending`/`requires_reconciliation`/trigger-firing backlog according to the bounded account readiness RPC. TEST scheduling triggers remain 2 paused + 1 completed; not automatically started.
+
+**Decision:** Account-scoped identity and Pilot recipient authorization = **VERIFIED** for *both* roles. Actual live operation = **HOLD** until WACRM operator proves exactly one worker owner (Windows or VPS), fresh grant expiry, correct session, approved Coverage Request, max-one first-touch test and click-through from WACRM's authenticated UI. This chat's Browser integration is **read-only** and cannot click the operator's open localhost WACRM tab; never bypass server auth using Supabase service-role writes. A user can perform the authenticated action in their WACRM app or switch into ChatGPT Work mode to enable authorized browser control; the next read-only TEST check can independently verify events and outcome.
+
+### Next controlled operator action
+
+1. On the local **WACRM → Agents → Agent Tasks** page, use worker STATUS and **Stop** (if enabled), then refresh. A stopped account worker is not proof a VPS poller is inactive; confirm actual runtime owner separately. Keep scheduled triggers paused.
+2. In the existing Coverage module confirm/create the proper approved SOURCE request, distinct from supplier A. In Agent Tasks choose **Coverage**, select only Supplier A and the exact ready OpenWA session; cap at **one first contact**. Preserve contact consent and published Agent revision. Inspect and confirm the new Task with worker stopped, then **Pause** the task before delivery.
+3. After recording an actual no-send/pause observation, allow exactly one authorized worker cycle and Resume the Task. Observe a single first-send reservation/provider identity before supplier A replies. Never retry unknown/ambiguous outcomes.
+4. Supplier A answers explicitly that it **cannot provide coverage**; inspect inbound/Task state, no fabricated offer, and actual final disposition. Admin B is a separately trusted review recipient: **no approval-PIN message is expected for a refusal alone**.
+5. Only if a distinct real review-required proposal is authorized, verify B's exact trusted-admin notification through the existing WACRM workflow. Later test STOP and final Cutover rollback + ordinary inbound, with fresh grant checks at each send.
 
 ## 0. STOP / GO before any actual WhatsApp message
 
