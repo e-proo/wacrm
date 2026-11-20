@@ -283,3 +283,15 @@ AND existingRecipientConsentAndMessagingPolicyPass (where applicable)
 - Model and API handoff: docs/architecture/OW14_W07_02_CONSENT_AUDIT_SCHEMA_AND_API_HANDOFF.md
 - **Evidence level:** W07-02 implementation complete + **clean migration CI verified**. Application CI result, Supabase TEST application, API auth/tenant tests, live acceptance and Product/Legal approval are separate gates; no Production or VPS change.
 - **Next:** W07-03 owner/admin authenticated APIs, then W07-04 shared OpenWA outbound enforcement, then W07-05 functional UI. Current W07-01 preview remains a non-mutating draft.
+
+## 2026-11-20 — W07-03 authenticated control APIs (implementation checkpoint)
+
+- Source: src/lib/whatsapp/transport/openwa/operational-control-api.ts and two admin-only API routes:
+  - GET/POST /api/whatsapp/connections/openwa/operational-policy
+  - POST /api/whatsapp/connections/openwa/{connectionId}/operational-activation
+- Server-only requireRole('owner') for account policy accept/revoke; requireRole('admin') for connection enable/disable/suspend and read-only state. Context comes from Supabase auth.getUser() and RLS-scoped profiles/account, NEVER client-supplied actor_id or account_id. Existing service-role-only W07-02 SECURITY INVOKER RPCs recheck membership/connection scope atomically.
+- Strict 4 KiB JSON payload, exact permitted keys, UUID request id + expected revision, mandatory trusted same-origin header, no-store, redacted error and audit responses, stable safe reason codes and HTTP statuses, idempotent retry semantics.
+- **Default closed:** WACRM_W07_CONTROL_WRITES_ENABLED is off; accept and enable are blocked until later deliberate rollout after W07-04 and reviewed policy. Owner revoke, admin/owner disable and suspend remain safe containment operations. No policy is pre-approved/seeded.
+- GET always reports operational_gate=pending_w07_04 and production_send_authorized=false, even if a requested activation row says enabled. Activation never starts sessions, dispatches queued messages, bypasses TEST Pilot, retries provider outcomes or switches Meta.
+- Unit and route tests cover roles, cross-tenant scoped calls, request spoofing, origin, oversized payload, draft rejection, DB failure, conflict/retry and safe output. New detail: docs/architecture/OW14_W07_03_AUTHENTICATED_CONTROL_API_AND_SECURITY_EVIDENCE.md.
+- W07-04 shared provider pre-send enforcement and W07-05 functional UI are still required. No VPS or hosted Supabase mutation, no live WhatsApp testing and no Production GO is implied.
