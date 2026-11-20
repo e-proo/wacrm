@@ -282,7 +282,8 @@ export function searchOpenWASupport(
     // Cross-language lookup so common codes/symptoms remain discoverable
     // even when the operator uses the other UI locale.
     const haystack = [item.id, item.title.ar, item.title.en, item.symptom.ar,
-      item.symptom.en, ...item.steps.flatMap(step => [step.ar, step.en])]
+      item.symptom.en, item.avoid.ar, item.avoid.en, item.escalate.ar, item.escalate.en,
+      ...item.steps.flatMap(step => [step.ar, step.en])]
       .join(' ').toLocaleLowerCase()
     return haystack.includes(normalized)
   })
