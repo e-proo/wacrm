@@ -55,6 +55,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-chat-identity-smoke.sql
       - name: Verify OpenWA deferred identity and native ACK recovery SQL contracts
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-deferred-recovery-smoke.sql
+      - name: OW14-W05 terminal ACK disposition and actor/RLS smoke
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-ack-disposition-smoke.sql
       - name: Verify OW-10 OpenWA safety guardrails
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-guardrails-smoke.sql
       - name: Verify OW-13 pilot allowlist and tenant isolation
