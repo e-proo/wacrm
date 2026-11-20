@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 
 type Row = {
   id: string
@@ -15,6 +16,10 @@ type Row = {
   attempt_count: number
   last_error_code: string | null
   created_at: string
+  disposition_at?: string | null
+  disposition_source?: 'admin_review' | 'owner_requested_test' | null
+  disposition_code?: string | null
+  disposition_gateway_status?: string | null
   ack_correlation?: 'needs_native_review' | 'candidate_outbound_message' |
     'candidate_broadcast_recipient' | 'inbound_only' | 'ambiguous_local_rows' | null
 }
@@ -39,6 +44,8 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
   const [phoneInputs, setPhoneInputs] = useState<Record<string, string>>({})
   const [nativeInspecting, setNativeInspecting] = useState<string | null>(null)
   const [closingAck, setClosingAck] = useState<string | null>(null)
+  const [selectedAckIds, setSelectedAckIds] = useState<string[]>([])
+  const [bulkClosing, setBulkClosing] = useState(false)
   const [nativeEvidence, setNativeEvidence] = useState<Record<string,
     { code: string; archive_status: string | null; whatsapp_delivery_confirmed: false }>>({})
   const endpoint = `/api/whatsapp/connections/openwa/${connectionId}/reconciliation`
@@ -51,6 +58,11 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
       const payload = await res.json() as Summary
       if (!payload || !Array.isArray(payload.sample)) throw new Error('invalid_response')
       setData(payload)
+      const selectable = new Set(payload.sample
+        .filter(item => item.event_kind === 'unmatched_status' &&
+          (item.state === 'pending' || item.state === 'review'))
+        .map(item => item.id))
+      setSelectedAckIds(current => current.filter(id => selectable.has(id)))
     } catch {
       toast.error(ar ? 'تعذر تحميل حالة الرسائل والإيصالات المؤجلة' : 'Unable to load deferred event diagnostics')
     } finally {
@@ -137,6 +149,62 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
     }
   }
 
+  async function closeSelectedUnverified() {
+    if (bulkClosing || closingAck !== null || nativeInspecting !== null ||
+        retrying !== null) return
+    const selected = selectedAckIds.filter(id => data?.sample.some(item => item.id === id &&
+      item.event_kind === 'unmatched_status' &&
+      (item.state === 'pending' || item.state === 'review'))).slice(0,25)
+    if (selected.length < 1) return
+    const confirmed = window.confirm(ar
+      ? 'هل تريد إغلاق ' + selected.length + ' إيصالًا محددًا كغير مؤكد؟\n' +
+        'كل حالة تُفحص بشكل مستقل حسب الحساب والاتصال، ولن يتم إرسال أي رسالة أو تغيير حالة التسليم. ' +
+        'قد تنجح بعض الحالات وتُرفض أخرى، وستعرض الواجهة النتائج.'
+      : 'Close ' + selected.length + ' selected ACKs as UNVERIFIED?\n' +
+        'Each case is independently scoped and reviewed. No message will be resent or marked delivered/failed. ' +
+        'Some cases may be refused; individual outcomes will be shown.')
+    if (!confirmed) return
+    setBulkClosing(true)
+    try {
+      const response = await fetch(endpoint + '/bulk-disposition', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action:'close_selected_unverified',
+          job_ids: selected, confirm_no_resend:true }),
+      })
+      if (!response.ok) throw Error('bulk_rejected')
+      const payload = await response.json() as {
+        requested?: number
+        closed?: number
+        not_closed?: number
+        results?: Array<{ job_id: string; result: string }>
+      }
+      if (payload.requested !== selected.length ||
+          typeof payload.closed !== 'number' ||
+          typeof payload.not_closed !== 'number' ||
+          payload.closed + payload.not_closed !== selected.length ||
+          !Array.isArray(payload.results) || payload.results.length !== selected.length) {
+        throw Error('invalid_bulk_result')
+      }
+      const unclosed = payload.results
+        .filter(item => item.result !== 'closed_unverified').map(item => item.job_id)
+      setSelectedAckIds(unclosed)
+      await refresh()
+      if (payload.closed > 0) {
+        toast.success(ar
+          ? 'أُغلقت ' + payload.closed + ' حالة إداريًا دون إعادة إرسال أو تغيير حالة التسليم'
+          : payload.closed + ' cases closed as unverified without resend or delivery status change')
+      }
+      if (payload.not_closed > 0) {
+        toast.warning(ar
+          ? 'بقيت ' + payload.not_closed + ' حالة دون إغلاق؛ راجع المطابقة أو حالة العامل'
+          : payload.not_closed + ' cases were not closed; inspect local matches or job state')
+      }
+    } catch {
+      toast.error(ar ? 'تعذّر تنفيذ التسوية الجماعية؛ لم يُؤكد إغلاق الحالات. حدّث القائمة.'
+        : 'Bulk disposition was not confirmed; refresh the list before retrying.')
+    } finally { setBulkClosing(false) }
+  }
+
   const evidenceLabel = (code: string, status: string | null) => {
     if (code === 'archive_outbound_found')
       return ar
@@ -201,6 +269,9 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
     (item.state === 'closed_unverified' || item.state === 'closed_archive_observed')) ?? []
   const outstanding = data?.sample.filter(item => item.state === 'pending' ||
     item.state === 'leased' || item.state === 'review') ?? []
+  const selectableAckIds = outstanding.filter(item => item.event_kind === 'unmatched_status' &&
+    (item.state === 'pending' || item.state === 'review')).map(item => item.id)
+  const selectedInSample = selectedAckIds.filter(id => selectableAckIds.includes(id))
 
   return <section className="space-y-3 rounded-md border p-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -229,6 +300,30 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
           <RefreshCw className="me-1 h-3 w-3" />{ar ? 'تحديث' : 'Refresh'}
         </Button>
       </div>
+      {data?.may_retry && selectableAckIds.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-md border p-3 text-xs">
+        <Checkbox checked={selectedInSample.length > 0 &&
+          selectedInSample.length === Math.min(25, selectableAckIds.length)}
+          onCheckedChange={checked => setSelectedAckIds(
+            checked ? selectableAckIds.slice(0,25) : [])}
+          aria-label={ar ? 'تحديد الحالات القابلة للإغلاق من هذه الصفحة' :
+            'Select closable ACKs from this page'} disabled={bulkClosing || closingAck !== null} />
+        <span className="flex-1">
+          {ar ? 'تحديد إيصالات ACK من النتائج المعروضة فقط' : 'Select ACKs from this visible sample only'}
+          {' · '}{ar ? 'المحدد' : 'Selected'}: {selectedInSample.length}/25
+        </span>
+        <Button type="button" size="sm" variant="outline"
+          disabled={selectedInSample.length === 0 || bulkClosing || closingAck !== null ||
+            retrying !== null || nativeInspecting !== null}
+          onClick={() => void closeSelectedUnverified()}>
+          {bulkClosing ? (ar ? 'جارٍ تسجيل التسوية…' : 'Recording dispositions…') :
+            (ar ? 'إغلاق المحدد كغير مؤكد' : 'Close selected as unverified')}
+        </Button>
+        <p className="basis-full text-muted-foreground">
+          {ar
+            ? 'حد أقصى 25 حالة لكل دفعة، لكل حالة تدقيق مستقل. لا يثبت الإغلاق نجاح الإرسال أو فشله.'
+            : 'Up to 25 cases per batch, independently audited. Closure does not prove delivery or failure.'}
+        </p>
+      </div>}
       {(data?.ack_triage?.sampled ?? 0) > 0 && <div className="rounded-md border bg-muted/20 p-3 text-xs space-y-1">
         <p className="font-medium">
           {ar ? 'فحص مطابقة إيصالات ACK المحلية (قراءة فقط)' : 'Local ACK correlation (read-only)'}
@@ -257,6 +352,17 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
         : <div className="space-y-2">
             {outstanding.map(item => <div key={item.id}
               className="flex flex-wrap items-center justify-between gap-2 rounded border px-3 py-2 text-xs">
+              <div className="flex items-start gap-2">
+                {data?.may_retry && item.event_kind === 'unmatched_status' &&
+                  (item.state === 'pending' || item.state === 'review') && <Checkbox
+                  checked={selectedAckIds.includes(item.id)}
+                  onCheckedChange={checked => setSelectedAckIds(current =>
+                    checked
+                      ? current.includes(item.id) ? current :
+                        current.length >= 25 ? current : [...current,item.id]
+                      : current.filter(id => id !== item.id))}
+                  aria-label={ar ? 'تحديد إيصال ACK للتسوية' : 'Select ACK for disposition'}
+                  disabled={bulkClosing || closingAck !== null || retrying !== null} />}
               <div className="space-y-1">
                 <p className="font-medium">{item.event_kind === 'unresolved_identity'
                   ? (ar ? 'رقم مرسل غير محسوم' : 'Unresolved sender')
@@ -279,6 +385,7 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
                   {item.state} · {ar ? 'المحاولات' : 'attempts'}: {item.attempt_count}
                   {item.last_error_code ? ` · ${item.last_error_code}` : ''}
                 </p>
+              </div>
               </div>
               {data?.may_retry && item.event_kind === 'unmatched_status' &&
                 (item.state === 'pending' || item.state === 'review') && <Button type="button"
@@ -334,6 +441,17 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
             : 'These are operational closures only. Original delivery state was not changed. Unverified does not mean failed.'}
         </p>
         <p>{ar ? 'عدد السجلات المعروضة:' : 'Displayed records:'} {recentClosed.length}</p>
+        <div className="max-h-56 space-y-1 overflow-auto">
+          {recentClosed.map(item => <div key={item.id} className="flex flex-wrap justify-between gap-2 rounded border p-2">
+            <span>{item.state === 'closed_unverified'
+              ? (ar ? 'غير مؤكدة' : 'Unverified') : (ar ? 'سجل OpenWA' : 'Gateway archive')}</span>
+            <span className="text-muted-foreground">{item.disposition_source === 'owner_requested_test'
+              ? (ar ? 'إغلاق TEST بتفويض المالك' : 'TEST owner-authorized closure')
+              : (ar ? 'مراجعة مسؤول' : 'Admin review')}</span>
+            <span className="text-muted-foreground">{item.disposition_at
+              ? new Date(item.disposition_at).toLocaleString(ar ? 'ar' : 'en') : ''}</span>
+          </div>)}
+        </div>
       </div>}
       <p className="text-xs text-muted-foreground">
         {ar ? 'إعادة الفحص لا تتجاوز ضوابط التحقق من الهوية، ولا تعيد إرسال الرسائل الصادرة.' :
