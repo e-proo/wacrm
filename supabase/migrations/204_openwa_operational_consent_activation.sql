@@ -119,6 +119,10 @@ REVOKE ALL ON TABLE public.whatsapp_openwa_policy_versions,
 -- profiles. Grant ONLY the three membership columns needed by the invoker
 -- RPCs, never a whole-table read or any client privilege.
 GRANT SELECT (user_id,account_id,account_role) ON public.profiles TO service_role;
+-- A connection status check is read-only; never grant W07 UPDATE rights on
+-- existing WhatsApp connection rows just to take a FOR UPDATE lock.
+GRANT SELECT (id,account_id,provider,archived_at,status,session_id)
+  ON public.whatsapp_connections TO service_role;
 
 GRANT SELECT ON public.whatsapp_openwa_policy_versions TO service_role;
 GRANT SELECT,INSERT ON public.whatsapp_openwa_consent_audit,
@@ -276,7 +280,7 @@ CREATE FUNCTION public.set_openwa_operational_activation(
 LANGUAGE plpgsql SECURITY INVOKER SET search_path=''
 AS $fn$
 DECLARE
-  v_connection public.whatsapp_connections%ROWTYPE;
+  v_connection record;
   v_current public.whatsapp_openwa_activation_state%ROWTYPE;
   v_existing public.whatsapp_openwa_activation_audit%ROWTYPE;
   v_consent public.whatsapp_openwa_consent_state%ROWTYPE;
@@ -298,9 +302,10 @@ BEGIN
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtext('w07-operational:'||p_account_id::text));
 
-  SELECT * INTO v_connection FROM public.whatsapp_connections
-    WHERE id=p_connection_id AND account_id=p_account_id
-      AND provider='openwa' AND archived_at IS NULL FOR UPDATE;
+  SELECT c.status,c.session_id INTO v_connection
+    FROM public.whatsapp_connections c
+    WHERE c.id=p_connection_id AND c.account_id=p_account_id
+      AND c.provider='openwa' AND c.archived_at IS NULL;
   IF NOT FOUND THEN
     RETURN pg_catalog.jsonb_build_object('updated',false,'reason','connection_scope_mismatch');
   END IF;
