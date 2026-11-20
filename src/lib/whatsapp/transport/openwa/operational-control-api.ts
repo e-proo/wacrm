@@ -14,7 +14,7 @@ export const OPENWA_CONTROL_NO_STORE = {
 } as const
 
 export const OPENWA_CONTROL_STAGE_ENV = 'WACRM_W07_CONTROL_WRITES_ENABLED'
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DIGEST = /^[a-f0-9]{64}$/
 const MAX_REVISION = Number.MAX_SAFE_INTEGER
 
