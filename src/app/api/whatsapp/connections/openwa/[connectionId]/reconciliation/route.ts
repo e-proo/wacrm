@@ -31,7 +31,7 @@ export async function GET(_request: Request, context: Context) {
   if (!state) return NextResponse.json({ error: 'OpenWA connection not found' }, { status: 404, headers: noStore })
   try {
     const { data, error } = await state.db.from('openwa_deferred_events')
-      .select('id,event_kind,state,attempt_count,last_error_code,created_at,updated_at,provider_message_id')
+      .select('id,event_kind,state,attempt_count,last_error_code,created_at,updated_at,provider_message_id,disposition_at,disposition_source,disposition_code,disposition_gateway_status')
       .eq('account_id', state.accountId).eq('connection_id', state.connectionId)
       .order('created_at', { ascending: false }).limit(50)
     if (error) throw new Error('Deferred diagnostics unavailable')
