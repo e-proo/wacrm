@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { useAuth } from '@/hooks/use-auth'
 import { parseOpenWAApiResponse } from '@/lib/whatsapp/transport/openwa/browser-api-response'
 import { useWhatsAppLabels } from './whatsapp-labels'
+import { getWhatsAppAdminCopy, type OpenWAAdminView } from './whatsapp-admin-copy'
 import { OpenWAPilotControls } from './openwa-pilot-controls'
 import { OpenWAReconciliation } from './openwa-reconciliation'
 import { OpenWAOutboundReviewHub } from './openwa-outbound-review-hub'
@@ -54,19 +55,27 @@ interface OpenWAApiPayload extends Record<string, unknown> {
   removed?: boolean
 }
 
-export function OpenWAConnections() {
+export function OpenWAConnections({
+  view = 'sessions', requestedConnectionId, onNavigate,
+}: {
+  view?: OpenWAAdminView
+  requestedConnectionId?: string | null
+  onNavigate?: (view: 'pilot' | 'delivery', connectionId: string) => void
+}) {
   const { canEditSettings } = useAuth()
   const w = useWhatsAppLabels()
-  const ar = useLocale().startsWith('ar')
+  const locale = useLocale()
+  const ar = locale.startsWith('ar')
+  const dashboardCopy = getWhatsAppAdminCopy(locale).sessions
   const [connections, setConnections] = useState<OpenWAConnection[]>([])
   const [pilotEnforced, setPilotEnforced] = useState<boolean | null>(null)
   const [pilotDevMode, setPilotDevMode] = useState(false)
   const [gatewayRotationAllowed, setGatewayRotationAllowed] = useState(false)
-  const [selectedPilotId, setSelectedPilotId] = useState('')
+  const [selectedPilotId, setSelectedPilotId] = useState(requestedConnectionId ?? '')
   const pilotSectionRef = useRef<HTMLDivElement>(null)
   const reviewSectionRef = useRef<HTMLDivElement>(null)
   const [reviewExpanded, setReviewExpanded] = useState(false)
-  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null)
+  const [selectedReviewId, setSelectedReviewId] = useState<string | null>(requestedConnectionId ?? null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -118,15 +127,24 @@ export function OpenWAConnections() {
 
   useEffect(() => { void load() }, [load])
 
+  useEffect(() => {
+    if (!requestedConnectionId) return
+    setSelectedPilotId(requestedConnectionId)
+    setSelectedReviewId(requestedConnectionId)
+    if (view === 'delivery') setReviewExpanded(true)
+  }, [requestedConnectionId, view])
+
   function focusPilot(connectionId: string) {
     setSelectedPilotId(connectionId)
-    pilotSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (onNavigate) onNavigate('pilot', connectionId)
+    else pilotSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   function focusReview(connectionId: string) {
     setSelectedReviewId(connectionId)
     setReviewExpanded(true)
-    reviewSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (onNavigate) onNavigate('delivery', connectionId)
+    else reviewSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   function openSessionSettings(connection: OpenWAConnection) {
@@ -353,6 +371,18 @@ export function OpenWAConnections() {
   }
 
   return <div id="wacrm-openwa-provider" className="mt-6 scroll-mt-6 space-y-4">
+
+    {view === 'sessions' && <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-lg font-semibold tracking-tight">{dashboardCopy.title}</h3>
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{dashboardCopy.subtitle}</p>
+        </div>
+        <Button type="button" variant="outline" size="sm" disabled={busy !== null}
+          onClick={() => { setLoading(true); void load() }}>
+          <RefreshCw className="me-2 size-4" aria-hidden="true" />{w('refresh')}
+        </Button>
+      </div>
     <Card>
       <CardHeader><CardTitle>WhatsApp Web (OpenWA)</CardTitle><CardDescription>{w('openwaDesc')}</CardDescription></CardHeader>
       <CardContent className="space-y-4">
@@ -379,40 +409,10 @@ export function OpenWAConnections() {
       </CardContent>
     </Card>
 
-    {pilotDevMode && connections.length > 0 && <div ref={pilotSectionRef} className="space-y-3 scroll-mt-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{w('devPilotHubTitle')}</CardTitle>
-          <CardDescription>{w('devPilotHubHint')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Label htmlFor="openwa-pilot-selector">{w('devPilotChooseConnection')}</Label>
-          <select id="openwa-pilot-selector" className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            value={selectedPilotId} onChange={(e) => setSelectedPilotId(e.target.value)}>
-            {connections.map((c) => <option key={c.id} value={c.id}>
-              {c.display_name || 'WhatsApp Web'} · {c.status} · {c.id.slice(0, 8)}
-            </option>)}
-          </select>
-          {selectedPilotId && <p className="break-all text-xs text-muted-foreground">
-            {w('connectionReference')}: {selectedPilotId}
-            {' · '}{w('devPilotState')}: {connections.find((c) => c.id === selectedPilotId)?.status ?? 'unknown'}
-          </p>}
-        </CardContent>
-      </Card>
-      {selectedPilotId && <OpenWAPilotControls key={selectedPilotId}
-        connectionId={selectedPilotId} relatedConnections={relatedPilotConnections}
-        onPilotChange={() => { void load() }} />}
-    </div>}
 
-    {pilotDevMode && connections.length > 0 && <div ref={reviewSectionRef}
-      className="scroll-mt-6">
-      <OpenWAOutboundReviewHub connections={connections} expanded={reviewExpanded}
-        selectedConnectionId={selectedReviewId}
-        onToggle={() => setReviewExpanded(previous => !previous)}
-        onSelectConnection={setSelectedReviewId}
-        onReviewed={() => { void load() }} />
-    </div>}
-
+      {connections.length === 0 && <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
+        {dashboardCopy.empty}
+      </div>}
     {connections.map((connection) => <Card key={connection.id}>
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -470,7 +470,6 @@ export function OpenWAConnections() {
             <Trash2 className="mr-2 h-4 w-4" />{w('removeFromWacrm')}
           </Button>
         </div>
-        <OpenWAReconciliation key={connection.id} connectionId={connection.id} />
         {qr?.connectionId === connection.id && <div className="rounded-md border p-4">
           <p className="mb-3 text-sm font-medium">{w('qrPayload')}</p>
           <Image src={qr.value} alt={w('qrPayload')} width={256} height={256} unoptimized className="rounded bg-white p-2" />
@@ -478,6 +477,99 @@ export function OpenWAConnections() {
         </div>}
       </CardContent>
     </Card>)}
+
+    </div>}
+
+    {view === 'pilot' && <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-lg font-semibold tracking-tight">{dashboardCopy.pilotTitle}</h3>
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{dashboardCopy.pilotDesc}</p>
+        </div>
+        <Button type="button" variant="outline" size="sm" disabled={busy !== null}
+          onClick={() => { setLoading(true); void load() }}>
+          <RefreshCw className="me-2 size-4" aria-hidden="true" />{w('refresh')}
+        </Button>
+      </div>
+      {pilotEnforced !== null && <Alert variant={pilotEnforced ? 'default' : 'destructive'}>
+        <AlertTitle>{w(pilotDevMode ? 'devPilotPerSessionTitle' : pilotEnforced ? 'pilotEnforceOn' : 'pilotEnforceOff')}</AlertTitle>
+        <AlertDescription>{w(pilotDevMode ? 'devPilotAutoEnforceHint' : pilotEnforced ? 'pilotEnforceOnHint' : 'pilotEnforceOffHint')}</AlertDescription>
+      </Alert>}
+      {!pilotDevMode && <Alert><AlertDescription>{dashboardCopy.pilotUnavailable}</AlertDescription></Alert>}
+    {pilotDevMode && connections.length > 0 && <div ref={pilotSectionRef} className="space-y-3 scroll-mt-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{w('devPilotHubTitle')}</CardTitle>
+          <CardDescription>{w('devPilotHubHint')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Label htmlFor="openwa-pilot-selector">{w('devPilotChooseConnection')}</Label>
+          <select id="openwa-pilot-selector" className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={selectedPilotId} onChange={(e) => setSelectedPilotId(e.target.value)}>
+            {connections.map((c) => <option key={c.id} value={c.id}>
+              {c.display_name || 'WhatsApp Web'} · {c.status} · {c.id.slice(0, 8)}
+            </option>)}
+          </select>
+          {selectedPilotId && <p className="break-all text-xs text-muted-foreground">
+            {w('connectionReference')}: {selectedPilotId}
+            {' · '}{w('devPilotState')}: {connections.find((c) => c.id === selectedPilotId)?.status ?? 'unknown'}
+          </p>}
+        </CardContent>
+      </Card>
+      {selectedPilotId && <OpenWAPilotControls key={selectedPilotId}
+        connectionId={selectedPilotId} relatedConnections={relatedPilotConnections}
+        onPilotChange={() => { void load() }} />}
+    </div>}
+
+
+    </div>}
+
+    {view === 'delivery' && <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-lg font-semibold tracking-tight">{dashboardCopy.deliveryTitle}</h3>
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{dashboardCopy.deliveryDesc}</p>
+        </div>
+        <Button type="button" variant="outline" size="sm" disabled={busy !== null}
+          onClick={() => { setLoading(true); void load() }}>
+          <RefreshCw className="me-2 size-4" aria-hidden="true" />{w('refresh')}
+        </Button>
+      </div>
+      {!pilotDevMode && <Alert><AlertDescription>{dashboardCopy.reviewUnavailable}</AlertDescription></Alert>}
+    {pilotDevMode && connections.length > 0 && <div ref={reviewSectionRef}
+      className="scroll-mt-6">
+      <OpenWAOutboundReviewHub connections={connections} expanded={reviewExpanded}
+        selectedConnectionId={selectedReviewId}
+        onToggle={() => setReviewExpanded(previous => !previous)}
+        onSelectConnection={setSelectedReviewId}
+        onReviewed={() => { void load() }} />
+    </div>}
+
+
+      <Card className="border-border/70">
+        <CardHeader>
+          <CardTitle className="text-base">{w('reconciliationTitle')}</CardTitle>
+          <CardDescription>{dashboardCopy.deliveryDesc}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {connections.length > 0 ? <>
+            <Label htmlFor="openwa-delivery-selector">{dashboardCopy.select}</Label>
+            <select id="openwa-delivery-selector"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={selectedReviewId || connections[0].id}
+              onChange={event => setSelectedReviewId(event.target.value)}>
+              {connections.map(connection => <option key={connection.id} value={connection.id}>
+                {connection.display_name || 'WhatsApp Web'} · {connection.status}
+              </option>)}
+            </select>
+            <OpenWAReconciliation key={selectedReviewId || connections[0].id}
+              connectionId={selectedReviewId || connections[0].id} />
+          </> : <p className="text-sm text-muted-foreground">{dashboardCopy.deliveryEmpty}</p>}
+        </CardContent>
+      </Card>
+    </div>}
+
+    {view === 'sessions' && <>
     <Dialog open={editingConnection !== null} onOpenChange={(open) => {
       if (!open && busy === null) { setEditingConnection(null); setEditApiKey('') }
     }}>
@@ -563,5 +655,6 @@ export function OpenWAConnections() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </>}
   </div>
 }

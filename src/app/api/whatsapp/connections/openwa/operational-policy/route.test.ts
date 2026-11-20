@@ -5,6 +5,7 @@ const h = vi.hoisted(() => ({
   dbFrom: vi.fn(),
   userFrom: vi.fn(),
   rpc: vi.fn(),
+  approvedTerms: vi.fn(),
 }))
 vi.mock('@/lib/auth/account', () => {
   class UnauthorizedError extends Error {}
@@ -13,6 +14,9 @@ vi.mock('@/lib/auth/account', () => {
 })
 vi.mock('@/lib/flows/admin-client', () => ({
   supabaseAdmin: () => ({ from: h.dbFrom, rpc: h.rpc }),
+}))
+vi.mock('@/lib/whatsapp/transport/openwa/approved-policy-catalog', () => ({
+  getApprovedOpenWATerms: h.approvedTerms,
 }))
 
 import { ForbiddenError, UnauthorizedError } from '@/lib/auth/account'
@@ -70,6 +74,7 @@ beforeEach(() => {
   consentAudit = []
   activationAudit = []
   databaseError = null
+  h.approvedTerms.mockReturnValue({ ar: 'Approved Arabic disclosure', en: 'Approved English disclosure' })
   h.requireRole.mockResolvedValue({
     accountId: ACCOUNT, userId: USER, role: 'owner', supabase: { from: h.userFrom },
   })
@@ -171,6 +176,29 @@ describe('W07-03 tenant/owner policy API', () => {
     expect((await POST(request(accept({ acknowledge_risks: false })))).status).toBe(400)
     expect((await POST(request(accept(), 'https://attacker.example'))).status).toBe(403)
     expect(h.rpc).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when a DB-approved digest has no matching published legal wording', async () => {
+    vi.stubEnv('WACRM_W07_CONTROL_WRITES_ENABLED', 'true')
+    h.approvedTerms.mockReturnValue(null)
+    const result = await POST(request(accept()))
+    expect(result.status).toBe(409)
+    expect(await result.json()).toMatchObject({ code: 'policy_terms_unavailable' })
+    expect(h.rpc).not.toHaveBeenCalled()
+  })
+
+  it('only returns approved disclosure wording after catalog version/digest verification', async () => {
+    policy = { version: VERSION, digest: DIGEST, approved_at: new Date().toISOString() }
+    h.approvedTerms.mockReturnValueOnce(null)
+    const noText = await (await GET()).json()
+    expect(noText.policy).toMatchObject({ approved: true, terms: null })
+    expect(noText.mutation_stage.owner_accept_available).toBe(false)
+    vi.stubEnv('WACRM_W07_CONTROL_WRITES_ENABLED', 'true')
+    const reviewed = await (await GET()).json()
+    expect(reviewed.policy.terms).toEqual({
+      ar: 'Approved Arabic disclosure', en: 'Approved English disclosure',
+    })
+    expect(reviewed.mutation_stage.owner_accept_available).toBe(true)
   })
 
   it('keeps accept closed by default, but permits independently owner-scoped revocation', async () => {

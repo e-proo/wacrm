@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { ForbiddenError, UnauthorizedError, requireRole } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { getApprovedOpenWATerms } from '@/lib/whatsapp/transport/openwa/approved-policy-catalog'
 import { openWAOperationalGateMode } from '@/lib/whatsapp/transport/openwa/operational-consent-gate'
 import {
   OPENWA_CONTROL_NO_STORE, canWriteOpenWAControl,
@@ -63,6 +64,7 @@ export async function GET() {
     const releaseEnabled = gateMode !== 'enforce_release' ||
       process.env.WACRM_OPENWA_PRODUCTION_RELEASE_ENABLED === 'true'
     const current = policy.data
+    const reviewed = getApprovedOpenWATerms(current?.version, current?.digest)
     const accepted = consent.data?.status === 'accepted'
     const policyCurrent = Boolean(current && accepted &&
       consent.data?.policy_version === current.version &&
@@ -105,12 +107,17 @@ export async function GET() {
       // This read-only summary is NOT the recipient/workload-specific send gate.
       production_send_authorized: false,
       mutation_stage: {
-        owner_accept_available: role === 'owner' && canWriteOpenWAControl('accept'),
+        owner_accept_available: role === 'owner' && Boolean(reviewed) && canWriteOpenWAControl('accept'),
         connection_enable_available: canWriteOpenWAControl('enable'),
       },
       policy: current
-        ? { approved: true, version: current.version, digest: current.digest }
-        : { approved: false, version: null, digest: null },
+        ? {
+          approved: true, version: current.version, digest: current.digest,
+          // Full locally published approved text is provided only if its
+          // SHA-256 matches the independently approved DB registry.
+          terms: reviewed ? { ar: reviewed.ar, en: reviewed.en } : null,
+        }
+        : { approved: false, version: null, digest: null, terms: null },
       consent: {
         status: consent.data?.status ?? 'missing',
         current: policyCurrent,
@@ -146,6 +153,11 @@ export async function POST(request: Request) {
     const body = parsed.value
     if (!canWriteOpenWAControl(body.action)) {
       return reply({ code: 'control_stage_not_ready', error: 'Policy acceptance is not available yet' }, 409)
+    }
+    if (body.action === 'accept' &&
+        !getApprovedOpenWATerms(body.policy_version, body.policy_digest)) {
+      return reply({ code: 'policy_terms_unavailable',
+        error: 'Approved policy wording is unavailable for review' }, 409)
     }
     const { data, error } = await supabaseAdmin().rpc('set_openwa_operational_consent', {
       p_account_id: accountId,

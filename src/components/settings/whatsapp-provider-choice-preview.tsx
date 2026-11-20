@@ -10,7 +10,11 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { getOpenWAPolicyDraftCopy, OPENWA_POLICY_DRAFT } from '@/lib/whatsapp/transport/openwa/operational-policy-draft'
 
 /** W07-01 preview only. No API calls, write, persisted consent or activation. */
-export function WhatsAppProviderChoicePreview() {
+export function WhatsAppProviderChoicePreview({
+  onNavigate,
+}: {
+  onNavigate?: (view: 'meta' | 'sessions') => void
+}) {
   const copy = getOpenWAPolicyDraftCopy(useLocale())
   const [open, setOpen] = useState(false)
   return (
@@ -38,9 +42,9 @@ export function WhatsAppProviderChoicePreview() {
             <h4 className="text-sm font-semibold">{copy.meta.name}</h4>
             <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{copy.meta.body}</p>
           </div>
-          <a href="#wacrm-meta-provider" className="inline-flex w-fit items-center gap-1.5 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+          <button type="button" onClick={() => onNavigate?.('meta')} className="inline-flex w-fit items-center gap-1.5 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
             {copy.meta.link}<ArrowUpRight className="size-4 rtl:-scale-x-100" aria-hidden="true" />
-          </a>
+          </button>
         </article>
 
         <article className="flex min-w-0 flex-col justify-between gap-4 rounded-xl border bg-background p-4">
@@ -54,9 +58,9 @@ export function WhatsAppProviderChoicePreview() {
             <h4 className="text-sm font-semibold">{copy.openwa.name}</h4>
             <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{copy.openwa.body}</p>
           </div>
-          <a href="#wacrm-openwa-provider" className="inline-flex w-fit items-center gap-1.5 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+          <button type="button" onClick={() => onNavigate?.('sessions')} className="inline-flex w-fit items-center gap-1.5 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
             {copy.openwa.link}<ArrowUpRight className="size-4 rtl:-scale-x-100" aria-hidden="true" />
-          </a>
+          </button>
         </article>
       </div>
 
