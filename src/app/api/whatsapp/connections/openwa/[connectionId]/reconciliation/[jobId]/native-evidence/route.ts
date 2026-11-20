@@ -6,10 +6,8 @@
 import { NextResponse } from 'next/server'
 import { isOpenWATestProject } from '@/lib/whatsapp/transport/guardrails'
 import { requireOpenWASessionAdmin } from '@/lib/whatsapp/transport/openwa/session-auth'
-import { resolveOpenWAClient } from '@/lib/whatsapp/transport/openwa/credentials'
-import {
-  parseNativeArchive, safeEvidence, validGatewayReference, verifiedGatewaySession,
-} from '@/lib/whatsapp/transport/openwa/native-ack-evidence'
+import { safeEvidence } from '@/lib/whatsapp/transport/openwa/native-ack-evidence'
+import { inspectOpenWANativeAck } from '@/lib/whatsapp/transport/openwa/native-ack-provider'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -54,30 +52,12 @@ export async function GET(_request: Request, context: Context) {
     if (!connection || !job) {
       return NextResponse.json({error:'Connection or pending ACK not found'}, {status:404,headers})
     }
-    if (!['ready','connected'].includes(connection.status) ||
-        job.session_id !== connection.session_id ||
-        job.own_phone_identity !== connection.phone_identity ||
-        job.instance_id !== connection.instance_id) {
-      return NextResponse.json(safeEvidence('session_identity_unverified'), {status:409,headers})
-    }
-    if (!validGatewayReference(job.provider_message_id)) {
-      return NextResponse.json(safeEvidence('native_reference_unsupported'), {status:422,headers})
-    }
-
-    const { client } = await resolveOpenWAClient(db,accountId,connectionId,{timeoutMs:7000})
-    const gateway = await client.getSessionStatus(job.session_id)
-    if (!verifiedGatewaySession(gateway,job.session_id,job.own_phone_identity)) {
-      return NextResponse.json(safeEvidence('session_identity_unverified'), {status:409,headers})
-    }
-
-    // Verified upstream OpenWA message-list API; exact reference, no chat-wide scan,
-    // no inline media and outgoing only. GET never triggers a WhatsApp send.
-    const path = '/api/sessions/' + encodeURIComponent(job.session_id) +
-      '/messages?messageId=' + encodeURIComponent(job.provider_message_id) +
-      '&direction=outgoing&limit=2&inlineMedia=false'
-    const archive = await client.request<unknown>(path,{timeoutMs:7000})
-    const evidence = parseNativeArchive(archive,job.provider_message_id,job.session_id)
-    return NextResponse.json(evidence,{status:200,headers})
+    const evidence = await inspectOpenWANativeAck(
+      db, accountId, connectionId, connection, job,
+    )
+    const resultStatus = evidence.code === 'session_identity_unverified' ? 409
+      : evidence.code === 'native_reference_unsupported' ? 422 : 200
+    return NextResponse.json(evidence,{status:resultStatus,headers})
   } catch {
     // No raw upstream error/URL, message, token, sender or native ID in JSON/logs.
     return NextResponse.json(safeEvidence('gateway_unavailable'),{status:503,headers})
