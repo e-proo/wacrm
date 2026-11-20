@@ -341,4 +341,12 @@ AND existingRecipientConsentAndMessagingPolicyPass (where applicable)
 - **Formal operations document:** docs/operations/OW14_W07_06_OPENWA_SUPPORT_INCIDENT_OPERATIONS_RUNBOOK.md defines roles/RACI, P0..P3, incident taxonomy, no-resend and QR/privacy principles, step-by-step human recovery, safe support status contract and tabletop checklists.
 - **W07-07 handoff PREPARED, not executed/closed:** docs/operations/OW14_W07_07_PRE_ACCEPTANCE_REGRESSION_AND_TABLETOP_MATRIX.md lists 18 automated/security/role/Meta/TEST cases and 10 tabletop scenarios, exact-HEAD CI, TEST evidence and independent reviewer signatures required before W07-08 live acceptance.
 - **Verification required:** unique and complete Arabic/English entries, pure diagnostic sanitizer adversarial tests, source UI tests for no support POST or hidden fetch and seven tabs, full CI Lint/TS/Vitest/Meta regressions/Build on exact implementation HEAD.
-- **Stage until verified:** W07-06 code implementation in progress; CI and owner tabletop pending. No hosted TEST migration 204 application, no Product/Legal sign-off, no VPS/Production changes and no real WhatsApp sends. W06 remains deferred and NOTE-001 Production debt remains.
+- **Stage at initial implementation:** W07-06 code prepared; see the exact-HEAD CI verification record below; owner tabletop remains pending. No hosted TEST migration 204 application, no Product/Legal sign-off, no VPS/Production changes and no real WhatsApp sends. W06 remains deferred and NOTE-001 Production debt remains.
+
+
+## 2026-11-20 — W07-06 exact-HEAD CI verification and W07-07 handoff
+
+- Implementation + bilingual support catalog + privacy-preserving diagnostics + seventh WhatsApp Help tab SHA **4e9623067802eeb39fed91a036b34604038bf84c** (initial e1822072dd1ba7cf0dfc24e66703f9bf638ac262; corrected search indexing of @lid safety warnings).
+- CI run https://github.com/e-proo/wacrm/actions/runs/44757632706 **completed/success on exact implementation SHA**: Lint, TypeScript, 2500+ regression tests including W07-06 and Meta/OW-4 gate, secure Hostinger TEST scheduler checks, Next.js Build.
+- **Level: W07-06 implementation complete + CI verified.** The operations support handbook and W07-07 independent regression/tabletop matrix are committed and linked above.
+- **Pending separate gates:** Security/Product/Legal/Support human walkthroughs, manual Windows Arabic RTL/mobile/English/keyboard acceptance, hosted Supabase TEST migration 204, W07-07 independent full regression audit, W07-08 bounded live TEST and W09 GO. No VPS/Production/hosted DB work or live WhatsApp sends; W06 stays deferred and NOTE-001 unresolved for production readiness.

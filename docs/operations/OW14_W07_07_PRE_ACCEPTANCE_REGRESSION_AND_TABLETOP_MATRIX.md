@@ -56,3 +56,8 @@ A **separate** result must include:
 - W06 deferred and NOTE-001 security debt explicit; neither green CI nor W07 support UI equals Production ready.
 
 **No changes to VPS, hosted Supabase, real WhatsApp recipients or Production are part of this matrix preparation.**
+
+
+## 2026-11-20 W07-06 technical prerequisite reference
+
+W07-06 code was CI-verified at 4e9623067802eeb39fed91a036b34604038bf84c, https://github.com/e-proo/wacrm/actions/runs/44757632706 (completed/success). This establishes only the prerequisite operator UI, sanitized diagnostic snapshot and bilingual guide tests. It does NOT execute W07-07 threat, concurrency, SQL/TEST, human tabletop, real browser a11y, Legal or live acceptance checks. The checklist above remains open until a separate exact-HEAD W07-07 evidence review and sign-off.

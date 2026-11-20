@@ -125,12 +125,12 @@ All scenarios correspond to the **versioned, bilingual** in-app catalogue at src
 ## 7. W07-07 handoff and Production prerequisites
 
 **W07-06 technical acceptance checklist (do not pre-check before CI):**
-- [ ] Exact-HEAD CI completed/success for lint, TypeScript, Vitest, Meta/OW-4 regression, Next production Build.
-- [ ] Catalog has unique procedure IDs, 3+ human steps each, complete AR/EN, severity/owner/escalation/never-do.
-- [ ] Diagnostic sanitizer cannot leak injected credentials, URLs, phone numbers, account/session identifiers, audit actors or raw errors.
-- [ ] Missing/403/503/malformed API never becomes zero sessions/authorized; zero send/write endpoints called by Help.
-- [ ] Seven top-level tabs, four help panels, role-gated explicit diagnostics; correct tab deep links.
-- [ ] No schema change, hosted TEST DB, VPS/Production or live provider send in this stage.
+- [x] Exact-HEAD CI completed/success for lint, TypeScript, Vitest, Meta/OW-4 regression, Next production Build.
+- [x] Catalog has unique procedure IDs, 3+ human steps each, complete AR/EN, severity/owner/escalation/never-do.
+- [x] Diagnostic sanitizer cannot leak injected credentials, URLs, phone numbers, account/session identifiers, audit actors or raw errors.
+- [x] Missing/403/503/malformed API never becomes zero sessions/authorized; zero send/write endpoints called by Help.
+- [x] Seven top-level tabs, four help panels, role-gated explicit diagnostics; correct tab deep links.
+- [x] No schema change, hosted TEST DB, VPS/Production or live provider send in this stage.
 
 **Separate operational acceptance not proven by code:**
 - [ ] Operations/Support owner tabletop: P0 duplicate workers/credential leak, P1 ambiguous outcome/webhook, P2 QR/consent/ACK/LID.
@@ -141,3 +141,11 @@ All scenarios correspond to the **versioned, bilingual** in-app catalogue at src
 - [ ] Before Production: W06 isolated restore and backups, W08 release evidence, NOTE-001 debt, W09 GO/NO-GO, current Meta compatibility and live acceptance evidence.
 
 **Never claim:** implementation complete implies hosted TEST verified, customer policy signed, backup recovery proven, live delivery accepted or Production ready.
+
+
+## 2026-11-20 — implementation and CI record
+
+- Runtime/help/catalog/diagnostic implementation commit e1822072dd1ba7cf0dfc24e66703f9bf638ac262.
+- One first-run test failed: support search did not index the @lid token located in a safety warning, not the title. The corrective commit 4e9623067802eeb39fed91a036b34604038bf84c indexes avoid/escalation wording for both languages. No role/tenant protection or send gate was relaxed.
+- **Exact-implementation CI**: https://github.com/e-proo/wacrm/actions/runs/44757632706 — completed/success on SHA 4e9623067802eeb39fed91a036b34604038bf84c; Lint, Typecheck, full Vitest including new W07 sanitizer/search/7-tab source contracts, Meta/OW-4 regression and Next.js Build passed.
+- **Stage:** W07-06 implementation complete + CI verified. Product/Legal and Security/Support human signoffs, TEST hosted migration 204 and tabletop/live acceptance are NOT yet verified. W07-07 independent audit remains NEXT. W06 deferred; Production W09 GO not granted.
