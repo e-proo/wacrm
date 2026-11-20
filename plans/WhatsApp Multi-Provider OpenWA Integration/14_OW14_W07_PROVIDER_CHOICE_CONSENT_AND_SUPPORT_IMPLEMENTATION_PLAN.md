@@ -265,3 +265,11 @@ AND existingRecipientConsentAndMessagingPolicyPass (where applicable)
 - **Tests:** src/lib/whatsapp/transport/openwa/operational-policy-draft.test.ts asserts no default production enablement, role boundaries, localization and risk disclosures. Latest exact-HEAD CI outcome remains an independent gate.
 - **Next packages:** W07-02 additive schema/audit, W07-03 real authorized APIs, W07-04 shared outbound enforcement and W07-05 effective-state UI. Do not claim W07 is operational or production-ready from a draft preview.
 - **Environment:** Windows-first development; NO VPS/Production deployment, remote migration or live WhatsApp send for this checkpoint. W06 remains deferred.
+
+## 2026-11-20 — W07-02 implementation checkpoint (schema, NOT hosted TEST)
+
+- Additive migration 204_openwa_operational_consent_activation.sql creates server-only approved policy version registry (empty), account consent state and append-only audit, per-connection activation state and append-only audit, and tenant-composite FK. No seed, no operational send, no session modification.
+- Account-owner only accept/revoke RPC and admin+ connection enable/disable/suspend RPC use SECURITY INVOKER, service_role EXECUTE only, actor membership verification, account-first locks, optimistic revision and scoped request UUID idempotency. Activation binds to exact accepted_event_id, so revocation/reacceptance cannot silently re-enable prior approval.
+- CI-only synthetic SQL smoke in supabase/ci/openwa-operational-consent-activation-smoke.sql verifies RLS/grants, no live policy, privilege/tenant negatives, actor roles, cross-account FK, stale revision, retry and re-accept state. Wired to GitHub Migrations clean replay.
+- Detail: docs/architecture/OW14_W07_02_CONSENT_AUDIT_SCHEMA_AND_API_HANDOFF.md.
+- W07-03 Next.js APIs and W07-04 real provider send-time enforcement are NOT yet implemented. Existing W07-01 preview remains read-only. No hosted Supabase TEST migration or VPS deployment was authorized. Exact-HEAD Migrations CI completed/success is still required before calling this CI verified.
