@@ -115,6 +115,11 @@ REVOKE ALL ON TABLE public.whatsapp_openwa_policy_versions,
   public.whatsapp_openwa_activation_state
   FROM PUBLIC,anon,authenticated,service_role;
 
+-- NOTE-001 ACL hardening means service_role does not have broad SELECT on
+-- profiles. Grant ONLY the three membership columns needed by the invoker
+-- RPCs, never a whole-table read or any client privilege.
+GRANT SELECT (user_id,account_id,account_role) ON public.profiles TO service_role;
+
 GRANT SELECT ON public.whatsapp_openwa_policy_versions TO service_role;
 GRANT SELECT,INSERT ON public.whatsapp_openwa_consent_audit,
   public.whatsapp_openwa_activation_audit TO service_role;
@@ -165,7 +170,6 @@ CREATE FUNCTION public.set_openwa_operational_consent(
 LANGUAGE plpgsql SECURITY INVOKER SET search_path=''
 AS $fn$
 DECLARE
-  v_account uuid;
   v_current public.whatsapp_openwa_consent_state%ROWTYPE;
   v_existing public.whatsapp_openwa_consent_audit%ROWTYPE;
   v_revision bigint;
@@ -189,11 +193,9 @@ BEGIN
   THEN RETURN pg_catalog.jsonb_build_object('updated',false,'reason','actor_forbidden'); END IF;
 
   -- Serializes ALL policy changes and activation decisions for this account.
-  SELECT a.id INTO v_account FROM public.accounts a
-    WHERE a.id=p_account_id FOR UPDATE;
-  IF NOT FOUND THEN
-    RETURN pg_catalog.jsonb_build_object('updated',false,'reason','account_not_found');
-  END IF;
+  -- Narrow serialization: never require service_role UPDATE rights on accounts.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext('w07-operational:'||p_account_id::text));
 
   SELECT * INTO v_existing FROM public.whatsapp_openwa_consent_audit
     WHERE account_id=p_account_id AND request_id=p_request_id;
@@ -274,7 +276,6 @@ CREATE FUNCTION public.set_openwa_operational_activation(
 LANGUAGE plpgsql SECURITY INVOKER SET search_path=''
 AS $fn$
 DECLARE
-  v_account uuid;
   v_connection public.whatsapp_connections%ROWTYPE;
   v_current public.whatsapp_openwa_activation_state%ROWTYPE;
   v_existing public.whatsapp_openwa_activation_audit%ROWTYPE;
@@ -293,10 +294,9 @@ BEGIN
   THEN RETURN pg_catalog.jsonb_build_object('updated',false,'reason','actor_forbidden'); END IF;
 
   -- Match lock order of set_openwa_operational_consent: account first.
-  SELECT a.id INTO v_account FROM public.accounts a WHERE a.id=p_account_id FOR UPDATE;
-  IF NOT FOUND THEN
-    RETURN pg_catalog.jsonb_build_object('updated',false,'reason','account_not_found');
-  END IF;
+  -- Same account-level lock as consent; no broad UPDATE grant on accounts.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext('w07-operational:'||p_account_id::text));
 
   SELECT * INTO v_connection FROM public.whatsapp_connections
     WHERE id=p_connection_id AND account_id=p_account_id
