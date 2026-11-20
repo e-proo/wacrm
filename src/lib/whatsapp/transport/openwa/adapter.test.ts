@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveOpenWATransport } from './adapter'
 import { resolveOpenWAClient } from './credentials'
+
+// W07-04 admission is covered with real DB evidence in its own tests.
+// These legacy test fixtures intentionally isolate existing Pilot/router behavior.
+vi.mock('./operational-consent-gate', () => ({
+  assertOpenWAOperationalSendAllowed: vi.fn(async () => undefined),
+  openWAOperationalGateMode: vi.fn(() => 'legacy_test'),
+}))
 vi.mock('./credentials', () => ({ resolveOpenWAClient: vi.fn() }))
 function connectionDb(row: Record<string, unknown> | null): SupabaseClient { return { from() { const b: Record<string, unknown> = { select: () => b, eq: () => b, is: () => b, maybeSingle: async () => ({ data: row, error: null }) }; return b } } as unknown as SupabaseClient }
 

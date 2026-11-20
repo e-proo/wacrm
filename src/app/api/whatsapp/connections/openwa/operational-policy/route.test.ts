@@ -99,7 +99,7 @@ describe('W07-03 tenant/owner policy API', () => {
     expect(res.headers.get('cache-control')).toContain('no-store')
     const json = await res.json()
     expect(json.meta_remains_default).toBe(true)
-    expect(json.operational_gate).toBe('pending_w07_04')
+    expect(json.operational_gate).toBe('enforce_release')
     expect(json.production_send_authorized).toBe(false)
     expect(json.policy.approved).toBe(false)
     expect(json.consent.revision).toBe(0)
@@ -126,11 +126,27 @@ describe('W07-03 tenant/owner policy API', () => {
     const body = await res.json()
     expect(body.consent.current).toBe(true)
     expect(body.connections[0]).toMatchObject({
-      requested_activation: 'enabled', reason: 'runtime_gate_pending',
+      requested_activation: 'enabled', reason: 'deployment_release_disabled',
       send_authorized: false,
     })
     expect(body.production_send_authorized).toBe(false)
     expect(JSON.stringify(body)).not.toContain(EVENT)
+  })
+
+  it('distinguishes an installed W07 admission gate from an actual per-message send permission', async () => {
+    policy = { version: VERSION, digest: DIGEST, approved_at: new Date().toISOString() }
+    consent = { status: 'accepted', policy_version: VERSION, policy_digest: DIGEST,
+      accepted_event_id: EVENT, revision: 1, updated_at: new Date().toISOString() }
+    connectionState = [{ connection_id: CONNECTION, status: 'enabled', consent_event_id: EVENT,
+      revision: 1, updated_at: new Date().toISOString() }]
+    vi.stubEnv('WACRM_OPENWA_PRODUCTION_RELEASE_ENABLED', 'true')
+    const res = await GET()
+    const body = await res.json()
+    expect(body).toMatchObject({ operational_gate: 'enforce_release',
+      deployment_release_enabled: true, production_send_authorized: false })
+    expect(body.connections[0]).toMatchObject({
+      reason: 'request_admission_required', send_authorized: false })
+    expect(JSON.stringify(body)).not.toContain('private-session-id-not-for-client')
   })
 
   it('protects account details from nonadmin/unauthenticated callers', async () => {

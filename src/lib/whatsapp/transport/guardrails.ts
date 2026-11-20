@@ -1,4 +1,9 @@
 import { createHash } from 'node:crypto'
+import { OpenWAPreDispatchDenied } from './openwa/pre-dispatch-denied'
+import { isOpenWATestProject } from './openwa/environment'
+import { assertOpenWAOperationalSendAllowed, openWAOperationalGateMode } from './openwa/operational-consent-gate'
+export { OpenWAPreDispatchDenied } from './openwa/pre-dispatch-denied'
+export { isOpenWATestProject } from './openwa/environment'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { WhatsAppTransportError, type WhatsAppTransport, type WhatsAppTransportSendRequest, type WhatsAppTransportSendResult } from './types'
 
@@ -8,15 +13,6 @@ import { WhatsAppTransportError, type WhatsAppTransport, type WhatsAppTransportS
  * for this invocation. Automation may finalize its reserved local 'sending'
  * identity as failed without risking an ambiguous provider outcome.
  */
-export class OpenWAPreDispatchDenied extends WhatsAppTransportError {
-  readonly providerDispatchAttempted = false
-  /** A safe internal policy reason, not a provider error or a recipient ID. */
-  readonly denialReason: string | null
-  constructor(message: string, denialReason: string | null = null) {
-    super('connection_restricted', message)
-    this.denialReason = denialReason
-  }
-}
 
 interface Reservation { allowed?: boolean; reason?: string; wait_ms?: number }
 interface Admission { allowed?: boolean; reason?: string }
@@ -53,16 +49,6 @@ export function openWAPilotRecipientHash(accountId: string, connectionId: string
  * without editing .env.local. Production and other environments preserve their
  * existing OPENWA_PILOT_MODE behavior.
  */
-export function isOpenWATestProject(url = process.env.NEXT_PUBLIC_SUPABASE_URL): boolean {
-  try {
-    const parsed = new URL(url ?? '')
-    return parsed.protocol === 'https:' &&
-      parsed.hostname === 'pqirsnfupofhulmewakq.supabase.co' &&
-      (parsed.port === '' || parsed.port === '443')
-  } catch {
-    return false
-  }
-}
 
 export function openWAPilotEnforcementEnabled(
   mode = process.env.OPENWA_PILOT_MODE,
@@ -96,6 +82,9 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
   }
 
   async send(request: WhatsAppTransportSendRequest): Promise<WhatsAppTransportSendResult> {
+    // W07-04: current consent and exact connection activation are checked
+    // before any guardrail reservation, for every outbound workload.
+    await assertOpenWAOperationalSendAllowed(this.db, request.accountId, request.connectionId)
     const workload = request.workload ?? 'manual'
     const hash = recipientHash(request.accountId, request.connectionId, request.recipient)
     const pilotEnforced = await this.pilotEnforcedFor(request)
@@ -121,7 +110,10 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
     // A pause or allowlist revocation during pacing must be observed before
     // provider dispatch. A POST already in flight cannot be retroactively
     // cancelled; ambiguous outcomes still require reconciliation.
-    if (pilotEnforced || waitMs > 0 || isOpenWATestProject()) {
+    // For production (or explicitly gated TEST), always recheck emergency
+    // stop at the last guarded boundary even if pacing wait was zero.
+    if (pilotEnforced || waitMs > 0 || isOpenWATestProject() ||
+        openWAOperationalGateMode() !== 'legacy_test') {
       await this.assertNotPaused(request)
       // If TEST mode was changed during pacing/reservation, do not dispatch
       // under the old admission assumption.
@@ -136,6 +128,9 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
       await this.record(request, hash, true)
       return result
     } catch (error) {
+      // A W07 refusal is proven local; do not log it as a provider failure
+      // or mistake it for an ambiguous OpenWA response requiring a resend.
+      if (error instanceof OpenWAPreDispatchDenied) throw error
       await this.record(request, hash, false, error instanceof WhatsAppTransportError ? error.code : 'provider_failure')
       throw error
     }

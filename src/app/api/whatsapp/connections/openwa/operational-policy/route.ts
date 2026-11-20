@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { ForbiddenError, UnauthorizedError, requireRole } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { openWAOperationalGateMode } from '@/lib/whatsapp/transport/openwa/operational-consent-gate'
 import {
   OPENWA_CONTROL_NO_STORE, canWriteOpenWAControl,
   isOpenWAControlSameOrigin, mapOpenWAControlOutcome,
@@ -56,6 +57,11 @@ export async function GET() {
         !Array.isArray(consentEvents.data) || !Array.isArray(activationEvents.data)) {
       return reply({ code: 'control_unavailable', error: 'OpenWA policy state cannot be verified' }, 503)
     }
+    // The W07-04 pre-dispatch gate is now installed. This is a configuration
+    // summary only: no admin GET can promise a recipient-specific send.
+    const gateMode = openWAOperationalGateMode()
+    const releaseEnabled = gateMode !== 'enforce_release' ||
+      process.env.WACRM_OPENWA_PRODUCTION_RELEASE_ENABLED === 'true'
     const current = policy.data
     const accepted = consent.data?.status === 'accepted'
     const policyCurrent = Boolean(current && accepted &&
@@ -75,7 +81,8 @@ export async function GET() {
         : requested.status === 'suspended' ? 'connection_suspended'
         : !matchingAcceptance ? 'consent_changed'
         : !ready ? 'session_not_ready'
-        : 'runtime_gate_pending'
+        : !releaseEnabled ? 'deployment_release_disabled'
+        : 'request_admission_required'
       return {
         connection_id: connection.id,
         display_name: connection.display_name || 'OpenWA',
@@ -93,7 +100,9 @@ export async function GET() {
     return reply({
       provider: 'openwa',
       meta_remains_default: true,
-      operational_gate: 'pending_w07_04',
+      operational_gate: gateMode,
+      deployment_release_enabled: gateMode === 'enforce_release' && releaseEnabled,
+      // This read-only summary is NOT the recipient/workload-specific send gate.
       production_send_authorized: false,
       mutation_stage: {
         owner_accept_available: role === 'owner' && canWriteOpenWAControl('accept'),

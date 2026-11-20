@@ -3,6 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GuardedOpenWATransport, canonicalOpenWAPilotRecipient, isOpenWATestProject, openWAPilotEnforcementEnabled, openWAPilotRecipientHash } from './guardrails'
 import { WhatsAppTransportError, type WhatsAppTransport, type WhatsAppTransportSendResult } from './types'
 
+// W07-04 admission is covered with real DB evidence in its own tests.
+// These legacy test fixtures intentionally isolate existing Pilot/router behavior.
+vi.mock('./openwa/operational-consent-gate', () => ({
+  assertOpenWAOperationalSendAllowed: vi.fn(async () => undefined),
+  openWAOperationalGateMode: vi.fn(() => 'legacy_test'),
+}))
+
 const request = { accountId: 'acc-1', connectionId: 'conn-1', recipient: '967700000001', content: { kind: 'text' as const, text: 'hi' }, idempotencyKey: 'idem-1' }
 
 afterEach(() => vi.unstubAllEnvs())

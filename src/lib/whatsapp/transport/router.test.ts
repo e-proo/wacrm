@@ -6,6 +6,13 @@ import { resolveMetaTransport } from './meta-adapter'
 import { resolveOpenWATransport } from './openwa/adapter'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 
+// W07-04 admission is covered with real DB evidence in its own tests.
+// These legacy test fixtures intentionally isolate existing Pilot/router behavior.
+vi.mock('./openwa/operational-consent-gate', () => ({
+  assertOpenWAOperationalSendAllowed: vi.fn(async () => undefined),
+  openWAOperationalGateMode: vi.fn(() => 'legacy_test'),
+}))
+
 vi.mock('./meta-adapter', () => ({ resolveMetaTransport: vi.fn() }))
 vi.mock('./openwa/adapter', () => ({ resolveOpenWATransport: vi.fn() }))
 vi.mock('@/lib/flows/admin-client', () => ({ supabaseAdmin: vi.fn() }))
