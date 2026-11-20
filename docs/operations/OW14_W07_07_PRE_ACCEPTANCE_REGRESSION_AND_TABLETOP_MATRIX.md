@@ -1,7 +1,7 @@
 # OW14-W07-07 — Pre-acceptance regression and security audit matrix
 
 **Date:** 2026-11-20 · **Issue:** SOF-54 · **Branch:** refactor/service-platform-v2  
-**Status:** PREPARED / NOT EXECUTED as an independent W07-07 closure. No live acceptance is authorized.
+**Status:** TECHNICAL AUDIT EXECUTED/CI-verified on the commits below; human tabletop, hosted TEST and W07-08 live acceptance OPEN. No live acceptance is authorized.
 
 This is the **next technical phase after W07-06**. The presence of a green W07-06 CI run is NOT sufficient to close W07-07 or the W07 programme. Run this matrix against fresh HEAD, implementation, migrations, CI, TEST evidence, Definition of Done, PROJECT_NOTES and Linear. Report precise evidence level.
 
@@ -61,3 +61,12 @@ A **separate** result must include:
 ## 2026-11-20 W07-06 technical prerequisite reference
 
 W07-06 code was CI-verified at 4e9623067802eeb39fed91a036b34604038bf84c, https://github.com/e-proo/wacrm/actions/runs/44757632706 (completed/success). This establishes only the prerequisite operator UI, sanitized diagnostic snapshot and bilingual guide tests. It does NOT execute W07-07 threat, concurrency, SQL/TEST, human tabletop, real browser a11y, Legal or live acceptance checks. The checklist above remains open until a separate exact-HEAD W07-07 evidence review and sign-off.
+
+
+## W07-07 technical execution checkpoint — 2026-11-20
+
+- Code/SQL/role/security/identity audit commit 11c3ed9b16fa71fbd5dd2d9d2a0f1a4c72f0bf3a: CI https://github.com/e-proo/wacrm/actions/runs/44771991523 and migrations https://github.com/e-proo/wacrm/actions/runs/44771991558, **both completed/success**. The latter contains a clean local migration replay and real two-client consent/activation/revoke SQL races.
+- Provider outcome preservation regression fix 85a33aa43810e481827480857885d06d4c601115: CI https://github.com/e-proo/wacrm/actions/runs/44772761672 **completed/success**, including Lint, TypeScript, full Vitest, Meta/OW-4 regression and Build.
+- Hosted Supabase **wacrm test** read-only result: migration 204 policy/consent/activation tables and RPCs absent. Advisor: Auth leaked password protection warning; NOTE-001 remains open. No hosted migration or live send.
+- Detailed 18-row results, four implementation findings, human gaps and W07-08 HOLD decision: docs/operations/OW14_W07_07_EXECUTION_EVIDENCE_AND_RELEASE_GATES.md.
+- **Human tabletop cases 1–10 above have NOT been completed or signed**, and cannot be inferred from CI. W06 deferred.
