@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 type Row = {
   id: string
   event_kind: 'unresolved_identity' | 'unmatched_status'
-  state: 'pending' | 'leased' | 'completed' | 'review'
+  state: 'pending' | 'leased' | 'completed' | 'review' | 'closed_unverified' | 'closed_archive_observed'
   attempt_count: number
   last_error_code: string | null
   created_at: string
@@ -38,6 +38,7 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
   const [retrying, setRetrying] = useState<string | null>(null)
   const [phoneInputs, setPhoneInputs] = useState<Record<string, string>>({})
   const [nativeInspecting, setNativeInspecting] = useState<string | null>(null)
+  const [closingAck, setClosingAck] = useState<string | null>(null)
   const [nativeEvidence, setNativeEvidence] = useState<Record<string,
     { code: string; archive_status: string | null; whatsapp_delivery_confirmed: false }>>({})
   const endpoint = `/api/whatsapp/connections/openwa/${connectionId}/reconciliation`
@@ -154,10 +155,50 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
     return ar ? 'لم يمكن إثبات حالة الأرشيف؛ تحتاج مراجعة' : 'Archive outcome unverified'
   }
 
+  // Explicit admin disposition, never a delivery claim or permission to resend.
+  async function closeAck(jobId: string, mode: 'close_unverified'|'close_archive_observed') {
+    if (closingAck !== null || nativeInspecting !== null) return
+    const acknowledged = window.confirm(
+      mode === 'close_unverified'
+        ? (ar
+          ? 'إغلاق هذا الإيصال بأنه غير مؤكد؟ لن تُعدّل حالة الرسالة أو يُعاد إرسالها. قد يكون المزوّد قد أرسلها بالفعل.'
+          : 'Close this ACK as UNVERIFIED? Message status will not change, and no message will be resent. It may already have been sent.')
+        : (ar
+          ? 'اعتماد وجود سجل صادر فقط، وليس إثبات تسليم الرسالة؟ لن يحدث إرسال أو تحديث لحالة التسليم.'
+          : 'Record a verified outgoing gateway archive row only, NOT delivery proof? No message will be sent or marked delivered.')
+    )
+    if (!acknowledged) return
+    setClosingAck(jobId)
+    try {
+      const response = await fetch(endpoint+'/'+encodeURIComponent(jobId)+'/disposition',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:mode,confirm_no_resend:true}),
+      })
+      if (!response.ok) throw new Error('disposition_denied')
+      const payload = await response.json() as { updated?: boolean }
+      if (payload.updated !== true) throw new Error('not_closed')
+      setNativeEvidence(previous => {
+        const next={...previous}
+        delete next[jobId]
+        return next
+      })
+      toast.success(ar ? 'تم تسجيل التسوية التشغيلية دون ادعاء التسليم أو إعادة الإرسال'
+        : 'Operational disposition recorded without delivery claim or resend')
+      await refresh()
+    }catch {
+      toast.error(ar ? 'تعذّر الإغلاق؛ قد تغيرت الحالة أو ظهرت مطابقة محلية. راجع البيانات أولًا.'
+        : 'Disposition rejected: state changed, a local match exists, or service unavailable.')
+    } finally { setClosingAck(null) }
+  }
+
   const pending = Object.entries(data?.counts ?? {}).reduce((n, [k, v]) =>
     n + (k.endsWith(':pending') || k.endsWith(':leased') ? v : 0), 0)
   const review = Object.entries(data?.counts ?? {}).reduce((n, [k, v]) =>
     n + (k.endsWith(':review') ? v : 0), 0)
+  const closedUnverified = data?.counts?.['unmatched_status:closed_unverified'] ?? 0
+  const closedArchive = data?.counts?.['unmatched_status:closed_archive_observed'] ?? 0
+  const recentClosed = data?.sample.filter(item => item.event_kind === 'unmatched_status' &&
+    (item.state === 'closed_unverified' || item.state === 'closed_archive_observed')) ?? []
   const outstanding = data?.sample.filter(item => item.state === 'pending' ||
     item.state === 'leased' || item.state === 'review') ?? []
 
@@ -182,6 +223,8 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
         <Badge variant={review > 0 ? 'destructive' : 'outline'}>
           {ar ? 'تحتاج مراجعة' : 'Needs review'}: {review}
         </Badge>
+        <Badge variant="outline">{ar ? 'أُغلقت دون إثبات' : 'Closed unverified'}: {closedUnverified}</Badge>
+        <Badge variant="outline">{ar ? 'سجل أصلي فقط' : 'Archive observed'}: {closedArchive}</Badge>
         <Button variant="ghost" size="sm" disabled={loading} onClick={() => void refresh()}>
           <RefreshCw className="me-1 h-3 w-3" />{ar ? 'تحديث' : 'Refresh'}
         </Button>
@@ -246,6 +289,21 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
                     ? (ar ? 'فحص الأرشيف…' : 'Checking archive…')
                     : (ar ? 'فحص سجل OpenWA' : 'Check OpenWA archive')}
                 </Button>}
+              {data?.may_retry && item.event_kind === 'unmatched_status' &&
+                (item.state === 'pending' || item.state === 'review') && <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm"
+                    disabled={closingAck !== null || nativeInspecting !== null || retrying !== null}
+                    onClick={() => void closeAck(item.id,'close_unverified')}>
+                    {closingAck === item.id ? (ar ? 'جارٍ الإغلاق…' : 'Closing…') :
+                      (ar ? 'إغلاق غير مؤكد' : 'Close unverified')}
+                  </Button>
+                  {nativeEvidence[item.id]?.code === 'archive_outbound_found' &&
+                    <Button type="button" variant="outline" size="sm"
+                      disabled={closingAck !== null || nativeInspecting !== null || retrying !== null}
+                      onClick={() => void closeAck(item.id,'close_archive_observed')}>
+                      {ar ? 'توثيق سجل OpenWA' : 'Record OpenWA archive'}
+                    </Button>}
+                </div>}
               {data?.may_retry && (item.state === 'pending' || item.state === 'review') && <div className="flex flex-wrap items-center gap-2">
                 {item.event_kind === 'unresolved_identity' && <>
                   <Input type="tel" inputMode="tel"
@@ -268,6 +326,15 @@ export function OpenWAReconciliation({ connectionId }: { connectionId: string })
               </div>}
             </div>)}
           </div>}
+      {recentClosed.length > 0 && <div className="rounded-md border bg-muted/20 p-3 text-xs space-y-1">
+        <p className="font-semibold">{ar ? 'سجل الإغلاقات الأخيرة (العينة)' : 'Recently closed ACKs (sample)'}</p>
+        <p className="text-muted-foreground">
+          {ar
+            ? 'تظل الحالات مغلقة إداريًا فقط؛ حالة التسليم الأصلية لم تتغير. لا تعني مغلق/غير مؤكد أن الرسالة فشلت.'
+            : 'These are operational closures only. Original delivery state was not changed. Unverified does not mean failed.'}
+        </p>
+        <p>{ar ? 'عدد السجلات المعروضة:' : 'Displayed records:'} {recentClosed.length}</p>
+      </div>}
       <p className="text-xs text-muted-foreground">
         {ar ? 'إعادة الفحص لا تتجاوز ضوابط التحقق من الهوية، ولا تعيد إرسال الرسائل الصادرة.' :
           'Recheck does not bypass identity verification or resend outbound WhatsApp messages.'}
