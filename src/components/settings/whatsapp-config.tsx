@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { ArrowUpRight, CheckCircle2, ClipboardList, Cloud, LayoutDashboard, Loader2, ShieldCheck, SlidersHorizontal, Smartphone, AlertCircle } from 'lucide-react';
+import { ArrowUpRight, CheckCircle2, ClipboardList, Cloud, LayoutDashboard, LifeBuoy, Loader2, ShieldCheck, SlidersHorizontal, Smartphone, AlertCircle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { useLocale } from 'next-intl';
@@ -14,6 +14,7 @@ import { SettingsPanelHead } from './settings-panel-head';
 import { OpenWAConnections } from './openwa-connections';
 import { WhatsAppProviderChoicePreview } from './whatsapp-provider-choice-preview';
 import { OpenWAOperationalControlCenter } from './openwa-operational-control-center';
+import { OpenWASupportCenter } from './openwa-support-center';
 import { getWhatsAppAdminCopy, type WhatsAppDashboardTab } from './whatsapp-admin-copy';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -144,6 +145,9 @@ export function WhatsAppConfig() {
               <ClipboardList className="size-4" aria-hidden="true" />{ui.tabs.reviews}
             </TabsTrigger>
           </>}
+          <TabsTrigger value="support" className="min-h-10 gap-2 px-3 sm:px-4">
+            <LifeBuoy className="size-4" aria-hidden="true" />{ui.tabs.support}
+          </TabsTrigger>
         </TabsList>
       </div>
 
@@ -212,6 +216,20 @@ export function WhatsAppConfig() {
         {canEditSettings
           ? <WhatsAppProviderChoicePreview onNavigate={next => openTab(next)} />
           : <div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">{ui.overview.adminOnly}</div>}
+        <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <LifeBuoy className="size-5" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold">{ui.tabs.support}</p>
+              <p className="text-xs text-muted-foreground">{ui.overview.supportDesc}</p>
+            </div>
+          </div>
+          <Button type="button" size="sm" variant="outline" onClick={() => openTab('support')}>
+            {ui.overview.openTab}<ArrowUpRight className="ms-2 size-4 rtl:-scale-x-100" />
+          </Button>
+        </div>
       </TabsContent>
 
       <TabsContent value="meta" className="space-y-4">
@@ -262,6 +280,9 @@ export function WhatsAppConfig() {
           {activeTab === 'reviews' && <OpenWAConnections view="delivery" requestedConnectionId={requestedConnectionId} />}
         </TabsContent>
       </>}
+      <TabsContent value="support">
+        {activeTab === 'support' && <OpenWASupportCenter onNavigate={tab => openTab(tab)} />}
+      </TabsContent>
     </Tabs>
   </section>;
 }

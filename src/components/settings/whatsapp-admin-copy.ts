@@ -9,6 +9,7 @@ const ar = {
     pilot: 'Pilot والحدود',
     governance: 'الموافقات والرقابة',
     reviews: 'المراجعات والتسوية',
+    support: 'المساعدة والإجراءات',
   },
   overview: {
     title: 'المنصة في لمحة',
@@ -23,6 +24,7 @@ const ar = {
     approvalsDesc: 'تحقق من سياسة الحساب وتفعيل كل اتصال وسجل الإجراءات.',
     delivery: 'المراجعات والتسوية',
     deliveryDesc: 'عالج حالات التسليم غير المؤكدة دون إعادة إرسال عمياء.',
+    supportDesc: 'إجراءات الأعطال والاستعادة والتصعيد والفحص الآمن في مركز واحد.',
     adminOnly: 'إدارة الجلسات والموافقات متاحة للمالك والمسؤول فقط.',
     metaState: 'حالة Meta Cloud',
     unavailable: 'غير متاح',
@@ -164,6 +166,7 @@ const en = {
     pilot: 'Pilot & limits',
     governance: 'Consent & audit',
     reviews: 'Delivery review',
+    support: 'Help & procedures',
   },
   overview: {
     title: 'Platform at a glance',
@@ -178,6 +181,7 @@ const en = {
     approvalsDesc: 'Review owner acceptance, individual activation and audit history.',
     delivery: 'Review & reconciliation',
     deliveryDesc: 'Handle uncertain sends without blind retransmission.',
+    supportDesc: 'Incident, recovery, escalation and safe diagnostics in one place.',
     adminOnly: 'Session and policy controls require owner or admin access.',
     metaState: 'Meta Cloud status',
     unavailable: 'Unavailable',

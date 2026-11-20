@@ -12,7 +12,7 @@ describe('W07-05 operator administration UX', () => {
     const ar = getWhatsAppAdminCopy('ar-YE')
     const en = getWhatsAppAdminCopy('en')
     expect(keys(ar)).toEqual(keys(en))
-    expect(Object.values(ar.tabs)).toHaveLength(6)
+    expect(Object.values(ar.tabs)).toHaveLength(7)
     for (const dict of [ar, en]) {
       for (const value of Object.values(dict.ops.reasons)) expect(value.trim()).not.toBe('')
       for (const value of Object.values(dict.ops.errors)) expect(value.trim()).not.toBe('')
@@ -24,7 +24,7 @@ describe('W07-05 operator administration UX', () => {
   it('has navigable top-level tabs and separates OpenWA session/Pilot/delivery render regions', () => {
     const dashboard = readFileSync('src/components/settings/whatsapp-config.tsx', 'utf8')
     const connections = readFileSync('src/components/settings/openwa-connections.tsx', 'utf8')
-    for (const tab of ['overview','meta','sessions','pilot','governance','reviews']) {
+    for (const tab of ['overview','meta','sessions','pilot','governance','reviews','support']) {
       expect(dashboard).toContain('TabsTrigger value="' + tab + '"')
       expect(dashboard).toContain('TabsContent value="' + tab + '"')
     }
