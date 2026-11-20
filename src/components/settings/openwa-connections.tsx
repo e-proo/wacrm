@@ -352,7 +352,7 @@ export function OpenWAConnections() {
     </div>
   }
 
-  return <div className="mt-6 space-y-4">
+  return <div id="wacrm-openwa-provider" className="mt-6 scroll-mt-6 space-y-4">
     <Card>
       <CardHeader><CardTitle>WhatsApp Web (OpenWA)</CardTitle><CardDescription>{w('openwaDesc')}</CardDescription></CardHeader>
       <CardContent className="space-y-4">

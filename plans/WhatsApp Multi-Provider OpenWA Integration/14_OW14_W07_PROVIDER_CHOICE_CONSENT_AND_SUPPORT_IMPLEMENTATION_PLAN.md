@@ -255,3 +255,13 @@ AND existingRecipientConsentAndMessagingPolicyPass (where applicable)
 
 ---
 **مستوى هذه الوثيقة:** implementation plan authored + repository source audit؛ **W07 implementation not started**، TEST/Live/Production not verified.
+
+
+## 2026-11-20 — W07-00 / W07-01 implementation checkpoint
+
+- **W07-00 architecture and permission contract:** docs/architecture/OW14_W07_00_PROVIDER_CONSENT_AND_ACTIVATION_CONTRACT.md. Reuses the current tenant-scoped router, OpenWA guardrails/session administration, unified send engine and Meta default. Proposes owner-only policy acceptance/revocation and admin+ connection activation; TEST Pilot and recipient consent remain independent. Role proposal is unit-tested but does NOT enforce runtime authorization until W07-03.
+- **W07-01 bilingual draft policy:** docs/product/OW14_W07_01_PROVIDER_RISK_COPY_AND_SUPPORT_REVIEW.md and the versioned code catalogue src/lib/whatsapp/transport/openwa/operational-policy-draft.ts. This copy remains a **Product/Legal draft**, not signed customer terms.
+- **Informational UI:** src/components/settings/whatsapp-provider-choice-preview.tsx placed before existing provider settings; responsive Meta/OpenWA cards, localized risk review dialog, three clear future activation steps and support FAQ. Screen records NO consent and has NO activation action; existing Meta/OpenWA/TEST Pilot runtime is unchanged.
+- **Tests:** src/lib/whatsapp/transport/openwa/operational-policy-draft.test.ts asserts no default production enablement, role boundaries, localization and risk disclosures. Latest exact-HEAD CI outcome remains an independent gate.
+- **Next packages:** W07-02 additive schema/audit, W07-03 real authorized APIs, W07-04 shared outbound enforcement and W07-05 effective-state UI. Do not claim W07 is operational or production-ready from a draft preview.
+- **Environment:** Windows-first development; NO VPS/Production deployment, remote migration or live WhatsApp send for this checkpoint. W06 remains deferred.

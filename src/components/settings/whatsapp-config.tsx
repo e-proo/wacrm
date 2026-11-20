@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { SettingsPanelHead } from './settings-panel-head';
 import { OpenWAConnections } from './openwa-connections';
+import { WhatsAppProviderChoicePreview } from './whatsapp-provider-choice-preview';
 import { useWhatsAppLabels } from './whatsapp-labels';
 import type { WhatsAppConfig as WhatsAppConfigType } from '@/types';
 
@@ -96,7 +97,8 @@ export function WhatsAppConfig() {
 
   return <section className="animate-in fade-in-50 duration-200">
     <SettingsPanelHead title={t('title')} description={t('description')} />
-    <Card className="mt-6">
+    {canEditSettings && <WhatsAppProviderChoicePreview />}
+    <Card id="wacrm-meta-provider" className="mt-6 scroll-mt-6">
       <CardHeader><CardTitle>{w('metaTitle')}</CardTitle><CardDescription>{w('metaDesc')}</CardDescription></CardHeader>
       <CardContent className="space-y-4">
         <div className="text-sm">{w('connection')}<span className="font-medium">{w(connectionStatus)}</span></div>
@@ -107,7 +109,7 @@ export function WhatsAppConfig() {
           <div><Label htmlFor="verify-token">{w('verify')}</Label><Input id="verify-token" type="password" value={verifyToken} onChange={(e) => setVerifyToken(e.target.value)} disabled={!canEditSettings} /></div>
           <div><Label htmlFor="meta-pin">{w('pin')}</Label><Input id="meta-pin" value={pin} onChange={(e) => setPin(e.target.value)} disabled={!canEditSettings} /></div>
         </div>
-        <div className="flex gap-2"><Button onClick={handleSave} disabled={!canEditSettings || saving}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save Meta configuration</Button><Button variant="outline" onClick={handleTestConnection} disabled={testing}>{testing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Test Meta connection</Button></div>
+        <div className="flex gap-2"><Button onClick={handleSave} disabled={!canEditSettings || saving}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{w('save')}</Button><Button variant="outline" onClick={handleTestConnection} disabled={testing}>{testing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{w('test')}</Button></div>
         {config && <p className="text-xs text-muted-foreground">{w('scope')}</p>}
       </CardContent>
     </Card>
