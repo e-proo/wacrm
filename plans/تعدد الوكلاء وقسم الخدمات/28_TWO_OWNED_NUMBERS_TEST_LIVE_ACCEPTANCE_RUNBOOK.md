@@ -27,6 +27,17 @@ As of 2026-11-20, authorized Supabase `wacrm test` was inspected via account-sco
 - TEST user has not yet specified A/B international numbers, selected channel and consent/cohort mapping, or demonstrated access to the actual Windows running Next.js + single worker. These are hard **pre-send prerequisites**.
 - We can inspect GitHub/CI and hosted TEST SQL through available connected tools, but **this conversation cannot click the user's Windows-local WACRM UI or the Cloudflared tunnel, start a Windows worker, or read the target phones from an unspecified message**. SQL service_role writes that bypass authenticated WACRM API are forbidden as test orchestration.
 
+
+## Trusted admin approval notifications (read-only TEST and code evidence)
+
+The function in `src/lib/ai/runtime/business-notifications.ts` only notifies an ACTIVE, non-revoked WhatsApp `trusted_admin_identities` record with the `change_requests.approve` capability. An account phone setting alone is insufficient; a dashboard notification is a separate PIN-free fallback.
+
+For an OpenWA supplier-originated proposal, the one-time admin approval notification uses the EXACT selected connection and the `api` workload, **not** the supplier `agent` workload. Admin recipient B must have its OWN unexpired `api` Pilot grant; supplier A needs its own `agent` grant. No cross-provider fallback or blind resend after ambiguous outcome. Never paste the approval PIN into ChatGPT, the repo, CRM message logs or a support screenshot; use the authorized UI only.
+
+A 20 Nov TEST **read-only** query found **one eligible trusted admin approval identity**, **one live `api` grant on the ready OpenWA connection**, and **five live `agent` grants**. These numbers DO NOT establish that the newly supplied B/A phones match any grant or identity. Check the actual identity and consent in the private WACRM administrative UI before sending; no SQL identity/grant change should be made.
+
+If a supplier simply declines with no Change Request, it is normal for no admin approval PIN notice to be generated. Test admin delivery only as the outcome of a separately approved, genuine review-required proposal; never manufacture a secret-bearing message to trigger a notification.
+
 ## 0. STOP / GO before any actual WhatsApp message
 
 **GO only if ALL:**
