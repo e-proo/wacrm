@@ -72,7 +72,7 @@ export async function POST(request: Request, context: Context) {
   const { adminDb, accountId, user } = scope
   const results: CloseResult[] = []
   for (let i = 0; i < jobIds.length; i += 5) {
-    const group = await Promise.all(jobIds.slice(i, i + 5).map(async jobId: string): Promise<CloseResult> => {
+    const group = await Promise.all(jobIds.slice(i, i + 5).map(async (jobId: string): Promise<CloseResult> => {
       try {
         const { data, error } = await adminDb.rpc('close_openwa_unmatched_ack', {
           p_account_id: accountId,
