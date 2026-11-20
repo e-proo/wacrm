@@ -404,9 +404,9 @@ export function OpenWAOperationalControlCenter() {
         </Card>
         <div className="rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
           <p><Shield className="me-2 inline size-4" />{mainReason}</p>
-          <p className="mt-2">{copy.release}: {
+          {data.operational_gate === 'enforce_release' && <p className="mt-2">{copy.release}: {
             data.deployment_release_enabled ? copy.releaseOn : copy.releaseOff
-          }</p>
+          }</p>}
           <p className="mt-2">{copy.metaDefault}</p>
         </div>
       </TabsContent>
@@ -420,8 +420,8 @@ export function OpenWAOperationalControlCenter() {
           {data.connections.map(connection => {
             const canEnable = data.mutation_stage.connection_enable_available &&
               data.policy.approved && data.consent.current && connection.session_ready &&
-              !(connection.requested_activation === 'enabled' &&
-                connection.reason === 'request_admission_required')
+              (connection.requested_activation !== 'enabled' ||
+                connection.reason === 'consent_changed')
             const canSuspend = connection.requested_activation === 'enabled'
             const canDisable = connection.requested_activation !== 'disabled'
             return <Card key={connection.connection_id} className="min-w-0 border-border/70">

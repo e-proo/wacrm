@@ -30,6 +30,9 @@ describe('W07-05 operator administration UX', () => {
     }
     expect(dashboard).toContain('{canEditSettings && <>')
     expect(dashboard).toContain('<OpenWAOperationalControlCenter />')
+    for (const tab of ['sessions', 'pilot', 'governance', 'reviews']) {
+      expect(dashboard).toContain("activeTab === '" + tab + "'")
+    }
     expect(connections).toContain("view === 'sessions'")
     expect(connections).toContain("view === 'pilot'")
     expect(connections).toContain("view === 'delivery'")
@@ -44,6 +47,8 @@ describe('W07-05 operator administration UX', () => {
     expect(center).toContain('data.policy.approved && Boolean(data.policy.terms)')
     expect(center).toContain('data.mutation_stage.owner_accept_available')
     expect(center).toContain('data.mutation_stage.connection_enable_available')
+    expect(center).toContain("connection.reason === 'consent_changed'")
+    expect(center).toContain("data.operational_gate === 'enforce_release' &&")
     expect(center).toContain('send_authorized: false')
     expect(center).toContain('crypto.randomUUID()')
     expect(center).toContain('requestRecord.current')
