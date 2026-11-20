@@ -1,0 +1,78 @@
+# WACRM — Bounded LIVE TEST runbook: owner-controlled supplier + admin phone
+
+**Prepared:** 2026-11-20
+**Project:** Agent Task Platform / Coverage Sourcing + Scheduler
+**GitHub source:** e-proo/wacrm branch `refactor/service-platform-v2` (verify fresh HEAD at execution)
+**Links:** SOF-66, SOF-23 (Phase18), SOF-24 (Phase19), SOF-18 (SCH-6); initial coverage-only Builder P21 remains HOLD.
+**State:** PREPARED / PHONE & LIVE-EXECUTION PREREQUISITES MISSING. NO live WhatsApp sends have been initiated by this plan.
+
+## Scope and exact ownership
+
+**A = SUPPLIER_TEST_A**, a mobile number the operator personally owns, used to RECEIVE and ANSWER a supplier Coverage Sourcing Task. Must be explicit WhatsApp TEST-consented and be a current account-scoped contact (or newly created under current supported account-scoped selection), not the source Coverage Request's own contact. Use its international format **privately in WACRM UI only**, not in this public repo file.
+
+**B = ADMIN_TEST_B**, a DIFFERENT mobile number personally owned by the operator, used to RECEIVE authorized admin review/notification messages and send an ordinary inbound CRM message after outbound rollback. Admin phone is a notification *recipient*, NOT automatically a second supplier and does NOT automatically grant it Owner/Admin application role. Never assume the phone is a valid supplier target or count it toward multi-supplier acceptance without the user's additional explicit role/consent decision.
+
+Use only `coverage.sourcing@2`. **Service Promotion SOF-17/25 is deferred**, with all its automation and campaigns kept inactive. Meta remains official/default Production transport; OpenWA is optional TEST transport selected per actual connection. No blind resend, automatic cross-provider retry, bypass of Pilot, anti-abuse, cutover or account scope. Initial messages and any follow-ups require existing recipient permission and account/connection safeguards.
+
+**Important:** One supplier + one admin number cannot by themselves establish a fresh **2–3 supplier target** test. The historical independently verified two-supplier TEST Task is reusable as previous *positive* evidence if acceptance owners approve equivalence; otherwise request an additional expressly authorized supplier contact. Do not mislabel admin notifications as a second supplier Target.
+
+## Latest preflight observed (read-only snapshot; must recheck immediately before send)
+
+As of 2026-11-20, authorized Supabase `wacrm test` was inspected via account-scoped, read-only queries:
+
+- GitHub HEAD at the preflight: `33537d43e2fa2adb5871d2b58b8eebb840a401e6`, [CI 44790383706](https://github.com/e-proo/wacrm/actions/runs/44790383706) completed/success.
+- Account-wide `inspect_ai_agent_task_test_cutover_readiness`: `mode=pilot`, `ready=true`, `blockers=[]`, `sending_messages=0`, `reconciliation_messages=0`, `nonterminal_tasks=0`, `nonterminal_trigger_firings=0`, `open_whatsapp_circuits=0`, `outbound_task_delivery_enabled=true`, `whatsapp_scope.enabled=true`. NOT evidence of immediate provider reachability or approved target cohort.
+- Exactly **one unarchived OpenWA connection with status=ready**, short identifier prefix `67ca97ea`, existing Session ID, Pilot enabled and **5 active agent Pilot grants**. These existing grants DO NOT prove either NEW A or B is included. There is also another unarchived OpenWA session `logged_out` with Pilot enabled and **0 active agent grants**; never select that as ready. Official Meta connection has status `connected`, and is a separate provider with different admission.
+- Existing coverage schedules: 2 paused, 1 completed, 0 enabled. Do not automatically unpause to start this test.
+- TEST user has not yet specified A/B international numbers, selected channel and consent/cohort mapping, or demonstrated access to the actual Windows running Next.js + single worker. These are hard **pre-send prerequisites**.
+- We can inspect GitHub/CI and hosted TEST SQL through available connected tools, but **this conversation cannot click the user's Windows-local WACRM UI or the Cloudflared tunnel, start a Windows worker, or read the target phones from an unspecified message**. SQL service_role writes that bypass authenticated WACRM API are forbidden as test orchestration.
+
+## 0. STOP / GO before any actual WhatsApp message
+
+**GO only if ALL:**
+1. A and B supplied and individually confirmed as owned/controlled by operator, different, valid international phone numbers; their intended roles and any customer-to-provider contact relationship are unambiguous.
+2. Correct Supabase TEST project + account and non-Production URL confirmed by authenticated WACRM admin.
+3. Pin exact ready, nonarchived provider connection and live gateway state; never switch to a logged_out session, even if its Pilot says enabled. Session QR, key, tunnel URL must stay private.
+4. Active, unexpired exact recipient grants/WhatsApp consent under the **selected session/workload**; request owner/admin capability and no opt-out/suppression; allowed daily/hourly caps for at most one first touch per supplier Task and only required authorized replies. Account-level `pilot` is distinct from session-level OpenWA Agent Pilot.
+5. Worker **single runtime owner** (Windows or VPS), actual current state measured. Creating a Task while worker is already running may send immediately. Turn it off through the existing authorized operator UI BEFORE task creation as the test requires; do not mistake browser close for worker OFF.
+6. No nonterminal old Tasks, no ambiguous/unknown active provider sends or outstanding reconciliation for the selected connection. Readiness summary is a necessary but not sufficient check; verify provider ACK/review pane.
+7. Frozen source Coverage Request, account-scoped contacts, published agent version, target policy with `maxAttemptsPerTarget=1`, consent and cooldown. Admin notification destination verified separately. Existing Task/CRM Business Domain must remain source of truth.
+8. Operator has agreed the maximum count and types of messages and accepts the bounded TEST test cases; stop/rollback plan and named operator available. CI-only/negative tests should not send provider messages.
+
+Any unmet step = **HOLD; no WACRM API send, new Task creation or worker dispatch**.
+
+## 1. Execution order — minimize sends, avoid repeating proven happy path
+
+| Phase / cases | Operator action (authenticated WACRM TEST UI unless read-only evidence) | Pass evidence / deny |
+| --- | --- | --- |
+| P00 — no-send preflight | Record HEAD, CI, exact account/connection, A/B consent/role, operator, actual Windows/VPS worker owner, Pilot/caps, Task cutover and unknown outcomes | All gates valid, sign-off and UTC. No changes to old Tasks or settings |
+| P01 — technical negative inspection | Triage prior inbound Run `SUPPLIER_WORKFLOW_FAILED` and Task with `partially_completed/paused_for_human` without Inbox owner | Incident cause and existing reconciliation; safe code-only evidence; never guess message result |
+| P02 — task with paused worker | Create ONE new approved `coverage.sourcing@2` Task targeting A (not B unless separately approved as supplier), freeze contact/session and 1 first-touch attempt | New Task/Target IDs, 0 outbound while worker stopped; not a new 2-supplier pass |
+| P03 — pause/resume, bounded send | Pause Task before start, verify no reservations through two *actual* worker cycles; resume explicitly and allow one approved first message to A | One reservation, one idempotency key, correct OpenWA provider ID and Task/Target match; never retry ambiguous |
+| P04 — supplier refusal AC-06 | Operator answers from A with unambiguous “لا أستطيع توفير التغطية” | Real inbound linked to A, target terminal outcome, zero `coverage.offer.create`/approved supplier offer; final Task outcome honest |
+| P05 — admin outcome | If native Coverage workflow has an admin review/notification, verify it arrives to B with correct safe summary and approval state; capture redacted trace | Evidence of real notification via WACRM business flow, not a parallel ad-hoc send; if no notification should occur by policy, mark N/A with reason |
+| P06 — alternative-route AC-07 / takeover AC-08 | Prefer existing corroborated 17 Nov Task proof, signed by operator: alternative review was executed without offer, separate valid Target offer, human-staff Inbox assignment and `paused_for_human` | No new send merely to repeat evidence. If actual route/worker failure requires fix, retest separately with consent |
+| P07 — worker restart AC-04 | Only after all previous sends have settled, operator safely stops actual Windows worker and restarts Next.js. Read-only trace before/after restart | Same Task/Target/Run/Reservation IDs, no extra first send, resume only if allowed; never restart in-flight provider send |
+| P08 — scheduler SCH-6 | Use existing `ai_agent_task_triggers` with approved Coverage-only rule, verify once/recurring/event/skip/replay/cross-tenant/lease/recovery scenarios on TEST as separate checklist | Exact SCH-AC-01..11 records. Not implied by coverage Task. Do not unpause old triggers or run unrestricted interval |
+| P09 — Opt-out AC-09 LAST before rollback | A sends explicit STOP; verify scoped suppression and no further outgoing Task send (dry-run/admission denial), no arbitrary number substitution | Once opted out, **do not** use A for more outbound tests or automatically reauthorize it |
+| P10 — rollback AC-12 | After provider outcome reconciliation and scheduler admission stop, authenticated operator clicks Agent Task Cutover disabled + worker stop, checks readiness | `mode=disabled`, outbound Task delivery and WhatsApp Task scope disabled, zero sending/reconciliation, no new Task send |
+| P11 — post-rollback inbound AC-13 | B sends one ordinary incoming WhatsApp message (if B is an appropriate consenting test contact); verify unified WACRM CRM Inbox intake | Inbound received, no reactivation of old Tasks, no outbound Task. This is not automatically a supplier reply |
+
+**For final SOF-66 multi-target negative acceptance:** use previously attested 2-target happy path plus cases now tested (if DoD accepts equivalent), or run another authorized 2-supplier TEST task with a SECOND supplier distinct from B's admin role. Avoid conflating supplier and admin responsibilities.
+
+## 2. Record actual evidence, not "ready" labels
+
+Use the existing signed acceptance register `23_SOF66_PHASE18_PHASE19_ACCEPTANCE_EVIDENCE_REGISTER.md` and latest partial corroboration `27_SOF66_PHASE18_PHASE19_2026_11_20_USER_TEST_RECONCILIATION.md`.
+
+Per case enter: ID, UTC date/time, exact HEAD, TEST account internally, selected provider/connection ID (private), A/B aliases and private consent snapshot, Task/Target/Run/Reservation IDs, chosen agent revision, source Coverage Request, pre/post runtime state, expected vs observed result, safe reason code, provider reconciliation if unknown, evidence link, operator reviewer and `PASS/FAIL/BLOCKED`. Do not put phone numbers, messages, keys or raw webhooks in public repo or Linear comments.
+
+**Stop immediately** on wrong connection, unexpected third party, missing consent, wrong Target mapping, multiple first sends, fresh unknown send, human takeover followed by AI sending, unapproved offer, leaked QR/secret, non-TEST DB, or concurrent Windows/VPS workers. Preserve evidence and keep issues open.
+
+## 3. Exit decisions and rollback gates
+
+- SOF-24 = PASS only with real refusal, safe route review-only, effective human handoff and honest no-offer completion. Prior strong AC07/08/11 partial evidence may support but cannot replace operator sign-off.
+- SOF-66/SOF-23 = PASS only after bounded multi-target, appropriate no-duplicate/opt-out/restart/reconciliation, Cutover rollback to disabled and post-rollback inbound. Historic positive proof alone is insufficient.
+- SOF-18 = PASS only after independent signed SCH-6 operational matrix (once/recurrence/event/lease/backlog/security/rollback).
+- SOF-26 = **Builder staged rollout remains disabled** until corresponding signed proof, operator role/account gates and server-side release transition; Phase22 cleanup stays inventory-only.
+- Service Promotion SOF-17/25 deferred, W06 DR deferred, W07/W08/W09 and NOTE-001 independent Production blockers not waived.
+- This runbook is preparation only. **It does NOT claim or execute a WhatsApp send.**
