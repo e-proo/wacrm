@@ -92,8 +92,8 @@ export async function GET() {
         activation_revision: requested?.revision ?? 0,
         activation_updated_at: requested?.updated_at ?? null,
         reason,
-        // W07-04 has not installed the provider send gate; don't represent
-        // a requested state as an effective "safe to send" decision.
+        // W07-04 is active at dispatch; this summary cannot evaluate a
+        // specific recipient/workload, so it never grants send permission.
         send_authorized: false,
       }
     })

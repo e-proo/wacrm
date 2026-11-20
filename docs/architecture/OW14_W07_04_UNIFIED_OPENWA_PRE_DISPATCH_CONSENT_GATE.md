@@ -1,6 +1,6 @@
 # OW14-W07-04 — Shared OpenWA outbound operational consent gate
 
-**Date:** 2026-11-20. **Issue:** SOF-54. **Evidence level:** implementation, awaiting exact-HEAD CI.
+**Date:** 2026-11-20. **Issue:** SOF-54. **Evidence level:** implementation complete + exact-HEAD CI verified. Hosted TEST/live acceptance and Production readiness remain pending.
 **Branch:** refactor/service-platform-v2.
 **Dependencies:** W07-00 policy design, W07-01 copy, W07-02 migration 204 and W07-03 authenticated API.
 
@@ -67,10 +67,15 @@ No schema changes in W07-04; W07-02 additive migration 204 is prerequisite on ea
 
 ## Required acceptance
 
-- [ ] Exact-HEAD completed/success lint, TypeScript, full Vitest, Meta/OpenWA regression and Next.js Build.
+- [x] Exact-HEAD completed/success lint, TypeScript, full Vitest, Meta/OpenWA regression and Next.js Build — implementation SHA 561d49377525cad8d093d1767426aac02d16ca6d, run https://github.com/e-proo/wacrm/actions/runs/44745635876
 - [ ] Confirm W07-02 SQL clean replay remains successful; no new migration.
 - [ ] Later: authorized hosted TEST migration, Product/Legal-reviewed policy registry publication, account owner/API approval and W07 test-enforced lifecycle proof; live WhatsApp acceptance is explicitly deferred.
 - [ ] Later: W07-05 polished functional admin UI, W07-06 support, W07-07 broader gates, W07-08 bounded acceptance.
 - [ ] W06 backup/DR, NOTE-001 security debt and W09 Production GO remain separate blockers.
 
 **No VPS restart/deploy, hosted Supabase TEST/Production modification, worker relocation, OpenWA gateway change, or live WhatsApp send was authorized or executed in this code-only package.**
+
+
+## Verification record — 2026-11-20
+
+Runtime implementation SHA: 561d49377525cad8d093d1767426aac02d16ca6d. GitHub CI run 44745635876 completed/success on this exact SHA, including new W07 real-adapter tests, prior Meta/OW-4 gate, full Vitest suite, TypeScript, Lint, and Next.js Build. No hosted TEST migration/production/VPS side effects; no live acceptance. Any later documentation-only commit must not be mistaken for a runtime change.

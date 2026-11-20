@@ -306,3 +306,10 @@ AND existingRecipientConsentAndMessagingPolicyPass (where applicable)
 - Unit/integration tests: operational-consent-gate.test.ts and operational-consent-integration.test.ts; plus existing guardrail/router/adapter tests preserving Meta and Pilot behavior. Negative cases include cross-tenant, stale version/event, revoked consent, suspended state, missing DB, release OFF, session rotation/identity, emergency STOP, media and five workloads.
 - Engineering details and exact DoD: docs/architecture/OW14_W07_04_UNIFIED_OPENWA_PRE_DISPATCH_CONSENT_GATE.md.
 - **Status:** code prepared pending exact-HEAD CI; NOT hosted TEST verified, NOT live accepted, NOT Product/Legal signed, NOT Production ready. No VPS or hosted DB mutation, no real send. W07-05 remains functional management UX and W06 remains deferred.
+
+
+## 2026-11-20 — W07-04 exact-implementation CI verification
+
+- Implementation SHA 561d49377525cad8d093d1767426aac02d16ca6d, CI https://github.com/e-proo/wacrm/actions/runs/44745635876 **completed/success** on exact SHA; Lint, Typecheck, Vitest, Meta/OpenWA regression and Build passed. W07-04 status: **implementation complete + CI verified**.
+- Real hosted TEST application and live acceptance are NOT complete; W07-02 migration 204 is not applied to hosted TEST, legal policy is not published/approved, production release flag remains OFF, W07-05 polished functional UI pending, W06 deferred. No VPS/Production deployment.
+- See docs/architecture/OW14_W07_04_UNIFIED_OPENWA_PRE_DISPATCH_CONSENT_GATE.md for implementation proofs, TEST legacy separation, W09 release gate and rollback safety.
