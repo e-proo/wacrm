@@ -2,19 +2,28 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 describe('OpenWA outbound reviews across all current and future sessions', () => {
-  it('renders one account-level hub, never one full alert per session card', () => {
-    const connections = readFileSync(
-      'src/components/settings/openwa-connections.tsx', 'utf8')
-    const pilot = readFileSync(
-      'src/components/settings/openwa-pilot-controls.tsx', 'utf8')
-    const cardsAt = connections.indexOf('{connections.map((connection) => <Card')
-    expect(cardsAt).toBeGreaterThan(0)
-    const summary = connections.slice(0, cardsAt)
-    const cards = connections.slice(cardsAt)
-    expect(summary.match(/<OpenWAOutboundReviewHub /g)).toHaveLength(1)
-    expect(cards).not.toContain('<OpenWAOutboundReview ')
-    expect(cards).toContain('connection.outbound_review?.unreviewed_count')
-    expect(cards).toContain('focusReview(connection.id)')
+  it('keeps one account-wide review hub in the delivery tab, outside all session cards', () => {
+    const connections = readFileSync('src/components/settings/openwa-connections.tsx', 'utf8')
+    const pilot = readFileSync('src/components/settings/openwa-pilot-controls.tsx', 'utf8')
+    const sessionStart = connections.indexOf("{view === 'sessions' &&")
+    const pilotStart = connections.indexOf("{view === 'pilot' &&", sessionStart)
+    const deliveryStart = connections.indexOf("{view === 'delivery' &&", pilotStart)
+    const dialogsStart = connections.indexOf("{view === 'sessions' && <>", deliveryStart)
+    expect(sessionStart).toBeGreaterThan(0)
+    expect(pilotStart).toBeGreaterThan(sessionStart)
+    expect(deliveryStart).toBeGreaterThan(pilotStart)
+    expect(dialogsStart).toBeGreaterThan(deliveryStart)
+
+    const sessions = connections.slice(sessionStart, pilotStart)
+    const delivery = connections.slice(deliveryStart, dialogsStart)
+    expect(sessions).toContain('{connections.map((connection) => <Card')
+    expect(sessions).toContain('connection.outbound_review?.unreviewed_count')
+    expect(sessions).toContain('focusReview(connection.id)')
+    expect(sessions).not.toContain('<OpenWAOutboundReviewHub ')
+    expect(sessions).not.toContain('<OpenWAOutboundReview ')
+    expect(delivery.match(/<OpenWAOutboundReviewHub /g)).toHaveLength(1)
+    expect(delivery).not.toContain('{connections.map((connection) => <Card')
+    expect(delivery.match(/<OpenWAReconciliation /g)).toHaveLength(1)
     expect(pilot).not.toContain('<OpenWAOutboundReview')
   })
 
