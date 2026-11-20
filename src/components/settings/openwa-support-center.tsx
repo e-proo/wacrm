@@ -182,7 +182,7 @@ const enCopy: typeof arCopy = {
   workOwner: 'Determine severity and incident owner before any operator action',
   recovery: 'Never resume workers/sends after an incident without independent verified state and review.',
 }
-type UIState = { snapshot: SafeSupportSnapshot; checkedAt: Date }
+type UIState = { snapshot: SafeSupportSnapshot; checkedAt: Date; accountScope: string }
 
 function sourceFromResponse(status: number, value: unknown, contentType: string): SupportSource {
   if (status === 401) return { status: 'unauthorized' }
@@ -230,6 +230,10 @@ export function OpenWASupportCenter({
   const [checkedSteps, setCheckedSteps] = useState<Record<number, boolean>>({})
   const [result, setResult] = useState<UIState | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
+  // Prevent a one-frame stale aggregate leak across account/permission
+  // changes before React runs effect cleanup.
+  const visibleResult = result?.accountScope === (accountId || '') + ':' + canEditSettings
+    ? result : null
   const sequence = useRef(0)
   const controller = useRef<AbortController | null>(null)
 
@@ -276,6 +280,7 @@ export function OpenWASupportCenter({
       setResult({
         snapshot: deriveOpenWASupportSnapshot(operational, sessions),
         checkedAt: new Date(),
+        accountScope: accountId + ':' + canEditSettings,
       })
     } finally {
       clearTimeout(deadline)
@@ -287,11 +292,11 @@ export function OpenWASupportCenter({
   }
 
   async function copyHandoff() {
-    if (!result || !canEditSettings) return
+    if (!visibleResult || !canEditSettings) return
     try {
       // Direct user click. ONLY allowlisted metadata from the derived snapshot.
       await navigator.clipboard.writeText(
-        formatOpenWASupportHandoff(result.snapshot, result.checkedAt, locale),
+        formatOpenWASupportHandoff(visibleResult.snapshot, visibleResult.checkedAt, locale),
       )
       toast.success(copy.copied)
     } catch {
@@ -542,13 +547,13 @@ export function OpenWASupportCenter({
               {diagnosing ? copy.checking : copy.runCheck}
             </Button>
             {!canEditSettings && <p className="text-sm text-muted-foreground">{copy.diagOnlyAdmin}</p>}
-            {result === null ? <div aria-live="polite" className="rounded-lg border border-dashed px-4 py-5 text-sm text-muted-foreground">
+            {visibleResult === null ? <div aria-live="polite" className="rounded-lg border border-dashed px-4 py-5 text-sm text-muted-foreground">
               {copy.diagUnrun}
             </div> : <div aria-live="polite" className="space-y-4">
               <div className="rounded-xl border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-                {copy.checkedAt}: {result.checkedAt.toLocaleString(locale)} · {copy.noGuarantee}
+                {copy.checkedAt}: {visibleResult.checkedAt.toLocaleString(locale)} · {copy.noGuarantee}
               </div>
-              {result.snapshot.operationalRead !== 'ok' || result.snapshot.sessionsRead !== 'ok'
+              {visibleResult.snapshot.operationalRead !== 'ok' || visibleResult.snapshot.sessionsRead !== 'ok'
                 ? <Alert variant="destructive">
                   <AlertCircle className="size-4" /><AlertDescription>{copy.diagPartial}</AlertDescription>
                 </Alert>
@@ -556,53 +561,53 @@ export function OpenWASupportCenter({
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-xl border bg-card p-4">
                   <p className="text-xs text-muted-foreground">{copy.operational}</p>
-                  <p className="mt-1 font-semibold">{sourceLabel(result.snapshot.operationalRead)}</p>
+                  <p className="mt-1 font-semibold">{sourceLabel(visibleResult.snapshot.operationalRead)}</p>
                   <p className="mt-2 text-xs text-muted-foreground">{copy.policy}: {
-                    result.snapshot.policyApproved === null ? copy.unknown
-                    : result.snapshot.policyApproved ? copy.approved : copy.notApproved
+                    visibleResult.snapshot.policyApproved === null ? copy.unknown
+                    : visibleResult.snapshot.policyApproved ? copy.approved : copy.notApproved
                   }</p>
                 </div>
                 <div className="rounded-xl border bg-card p-4">
                   <p className="text-xs text-muted-foreground">{copy.consent}</p>
                   <p className="mt-1 font-semibold">
-                    {result.snapshot.consentCurrent === null ? copy.unknown
-                      : result.snapshot.consentCurrent ? copy.current : copy.notCurrent}
+                    {visibleResult.snapshot.consentCurrent === null ? copy.unknown
+                      : visibleResult.snapshot.consentCurrent ? copy.current : copy.notCurrent}
                   </p>
-                  <p className="mt-2 text-xs text-muted-foreground">{result.snapshot.consentStatus}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{visibleResult.snapshot.consentStatus}</p>
                 </div>
                 <div className="rounded-xl border bg-card p-4">
                   <p className="text-xs text-muted-foreground">{copy.transport}</p>
-                  <p className="mt-1 font-semibold">{sourceLabel(result.snapshot.sessionsRead)}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">{copy.sessions}: {formatCount(result.snapshot.connectionCount)}</p>
+                  <p className="mt-1 font-semibold">{sourceLabel(visibleResult.snapshot.sessionsRead)}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{copy.sessions}: {formatCount(visibleResult.snapshot.connectionCount)}</p>
                 </div>
                 <div className="rounded-xl border bg-card p-4">
                   <p className="text-xs text-muted-foreground">{copy.unreviewed}</p>
-                  <p className="mt-1 text-2xl font-semibold tabular-nums">{formatCount(result.snapshot.uncertainCount)}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">{copy.paused}: {formatCount(result.snapshot.pausedCount)}</p>
+                  <p className="mt-1 text-2xl font-semibold tabular-nums">{formatCount(visibleResult.snapshot.uncertainCount)}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{copy.paused}: {formatCount(visibleResult.snapshot.pausedCount)}</p>
                 </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-3 rounded-xl border bg-card p-4 text-sm">
                   <p className="font-semibold">{copy.sessions}</p>
-                  <p>{copy.ready}: {formatCount(result.snapshot.readyCount)}</p>
-                  <p>{copy.enabled}: {formatCount(result.snapshot.enabledRequestedCount)}</p>
-                  <p>{copy.gate}: {result.snapshot.gateMode}</p>
-                  {result.snapshot.gateMode === 'enforce_release' ?
-                    <p>{copy.release}: {result.snapshot.releaseConfigured ? copy.configured : copy.closed}</p> :
+                  <p>{copy.ready}: {formatCount(visibleResult.snapshot.readyCount)}</p>
+                  <p>{copy.enabled}: {formatCount(visibleResult.snapshot.enabledRequestedCount)}</p>
+                  <p>{copy.gate}: {visibleResult.snapshot.gateMode}</p>
+                  {visibleResult.snapshot.gateMode === 'enforce_release' ?
+                    <p>{copy.release}: {visibleResult.snapshot.releaseConfigured ? copy.configured : copy.closed}</p> :
                     <p className="text-muted-foreground">{copy.testMode}</p>}
-                  {result.snapshot.countsConsistent === false && <Alert variant="destructive">
+                  {visibleResult.snapshot.countsConsistent === false && <Alert variant="destructive">
                     <AlertCircle className="size-4" /><AlertDescription>{copy.discrepancy}</AlertDescription>
                   </Alert>}
                 </div>
                 <div className="space-y-3 rounded-xl border bg-card p-4 text-sm">
                   <p className="font-semibold">{copy.reasons}</p>
-                  {Object.entries(result.snapshot.blockingReasonCounts)
+                  {Object.entries(visibleResult.snapshot.blockingReasonCounts)
                     .filter(([, n]) => n > 0).map(([name,n]) =>
                       <div key={name} className="flex items-center justify-between gap-3">
                         <code className="min-w-0 break-all text-xs">{name}</code>
                         <Badge variant="outline">{n}</Badge>
                       </div>)}
-                  {Object.values(result.snapshot.blockingReasonCounts).every(value => value === 0)
+                  {Object.values(visibleResult.snapshot.blockingReasonCounts).every(value => value === 0)
                     && <p className="text-sm text-muted-foreground">{copy.unknown}</p>}
                 </div>
               </div>
@@ -610,7 +615,7 @@ export function OpenWASupportCenter({
                 <h5 className="font-semibold">{copy.suggested}</h5>
                 <p className="mt-1 text-xs text-muted-foreground">{copy.recommendations}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {result.snapshot.suggestedProcedures.map(id => {
+                  {visibleResult.snapshot.suggestedProcedures.map(id => {
                     const item = findOpenWASupportProcedure(id)
                     return item ? <Button type="button" key={id} variant="outline" size="sm"
                       onClick={() => openSuggested(id)}>

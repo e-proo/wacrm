@@ -79,25 +79,54 @@ export function deriveOpenWASupportSnapshot(
   const consentRecord = obj(policyBody?.consent)
   const operationalConnections = list(policyBody?.connections)
   const transportConnections = list(sessionBody?.connections)
+  // Never trust equality of list lengths: two tenant-scoped endpoint reads
+  // can contain different connection identities while reporting equal counts.
+  // Validate IDs and shape *inside memory only*; the report exports aggregate
+  // counts/known reason codes and NEVER exports these identifiers.
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  const operationalIds = operationalConnections?.map(row => row.connection_id)
+  const sessionIds = transportConnections?.map(row => row.id)
   const operationalValid = policyBody?.provider === 'openwa' &&
     policyBody.production_send_authorized === false &&
     policy !== null && typeof policy.approved === 'boolean' &&
     consentRecord !== null && typeof consentRecord.current === 'boolean' &&
-    operationalConnections !== null
-  const sessionValid = transportConnections !== null
+    operationalConnections !== null &&
+    operationalConnections.every(row =>
+      typeof row.connection_id === 'string' && UUID.test(row.connection_id) &&
+      typeof row.session_ready === 'boolean' &&
+      row.send_authorized === false &&
+      ['enabled', 'disabled', 'suspended'].includes(String(row.requested_activation))) &&
+    new Set(operationalIds).size === operationalIds?.length
+  const sessionValid = transportConnections !== null &&
+    transportConnections.every(row => {
+      const guardrail = obj(row.guardrail)
+      const review = obj(row.outbound_review)
+      return typeof row.id === 'string' && UUID.test(row.id) &&
+        guardrail !== null && typeof guardrail.manual_paused === 'boolean' &&
+        review !== null && count(review.unreviewed_count) !== null
+    }) &&
+    new Set(sessionIds).size === sessionIds?.length
   const operationalRead = operational.status === 'ok' && !operationalValid
     ? 'invalid' : operational.status
   const sessionsRead = sessions.status === 'ok' && !sessionValid
     ? 'invalid' : sessions.status
   const safeOperational = operationalRead === 'ok'
   const safeSessions = sessionsRead === 'ok'
-  const allowedOps = safeOperational ? operationalConnections! : []
-  const allowedSessions = safeSessions ? transportConnections! : []
+  const listsConsistent = safeOperational && safeSessions
+    ? operationalIds!.length === sessionIds!.length &&
+      operationalIds!.every(id => sessionIds!.includes(id)) : null
+  // If two simultaneously authenticated reads disagree about the actual
+  // connection identities, treat the entire aggregate as untrusted until an
+  // operator refreshes; never copy potential cross-tenant information.
+  const trustedOps = safeOperational && listsConsistent !== false
+  const trustedSessions = safeSessions && listsConsistent !== false
+  const allowedOps = trustedOps ? operationalConnections! : []
+  const allowedSessions = trustedSessions ? transportConnections! : []
   const blockingReasonCounts = emptyReasonCounts()
   for (const connection of allowedOps) blockingReasonCounts[reason(connection.reason)]++
-  const pausedCount = safeSessions
+  const pausedCount = trustedSessions
     ? allowedSessions.filter(connection => obj(connection.guardrail)?.manual_paused === true).length : null
-  let uncertainCount: number | null = safeSessions ? 0 : null
+  let uncertainCount: number | null = trustedSessions ? 0 : null
   for (const connection of allowedSessions) {
     const outbound = obj(connection.outbound_review)
     const c = count(outbound?.unreviewed_count)
@@ -118,25 +147,25 @@ export function deriveOpenWASupportSnapshot(
   }
   if (uncertainCount !== null && uncertainCount > 0) suggestedProcedures.add('ambiguous-outbound')
   if (!safeSessions) suggestedProcedures.add('session-disconnected')
+  if (listsConsistent === false) suggestedProcedures.add('account-isolation')
 
   return {
     version: 'w07-support-v1',
     operationalRead, sessionsRead,
     gateMode: safeOperational ? mode(policyBody?.operational_gate) : 'unknown',
-    policyApproved: safeOperational ? policy!.approved as boolean : null,
-    consentStatus: safeOperational ? consent(consentRecord?.status) : 'unknown',
-    consentCurrent: safeOperational ? consentRecord!.current as boolean : null,
-    releaseConfigured: safeOperational && mode(policyBody?.operational_gate) === 'enforce_release'
+    policyApproved: trustedOps ? policy!.approved as boolean : null,
+    consentStatus: trustedOps ? consent(consentRecord?.status) : 'unknown',
+    consentCurrent: trustedOps ? consentRecord!.current as boolean : null,
+    releaseConfigured: trustedOps && mode(policyBody?.operational_gate) === 'enforce_release'
       ? policyBody?.deployment_release_enabled === true : null,
-    connectionCount: safeOperational ? allowedOps.length : null,
-    readyCount: safeOperational ? allowedOps.filter(c => c.session_ready === true).length : null,
-    enabledRequestedCount: safeOperational
+    connectionCount: trustedOps ? allowedOps.length : null,
+    readyCount: trustedOps ? allowedOps.filter(c => c.session_ready === true).length : null,
+    enabledRequestedCount: trustedOps
       ? allowedOps.filter(c => c.requested_activation === 'enabled').length : null,
     blockingReasonCounts,
     pausedCount,
     uncertainCount,
-    countsConsistent: safeOperational && safeSessions
-      ? allowedOps.length === allowedSessions.length : null,
+    countsConsistent: listsConsistent,
     suggestedProcedures: [...suggestedProcedures],
   }
 }

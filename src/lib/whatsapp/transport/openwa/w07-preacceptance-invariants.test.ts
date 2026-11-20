@@ -1,0 +1,96 @@
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+
+const read = (path: string) => readFileSync(path,'utf8')
+
+describe('W07-07 pre-acceptance source and permission invariants', () => {
+  it('requires server roles, same-origin JSON and exact scoped SQL for mutations', () => {
+    const policy=read('src/app/api/whatsapp/connections/openwa/operational-policy/route.ts')
+    const activation=read('src/app/api/whatsapp/connections/openwa/[connectionId]/operational-activation/route.ts')
+    const api=read('src/lib/whatsapp/transport/openwa/operational-control-api.ts')
+    expect(policy).toContain("requireRole('owner')")
+    expect(policy).toContain("requireRole('admin')")
+    expect(activation).toContain("requireRole('admin')")
+    expect(policy).toContain('isOpenWAControlSameOrigin(request)')
+    expect(activation).toContain('isOpenWAControlSameOrigin(request)')
+    expect(policy).toContain('p_actor: userId')
+    expect(policy).toContain('p_account_id: accountId')
+    expect(activation).toContain('p_actor: userId')
+    expect(activation).toContain('p_account_id: accountId')
+    expect(activation).toContain('p_connection_id: connectionId')
+    expect(api).toContain('const MAX_BYTES = 4096')
+    expect(api).toContain("WACRM_W07_CONTROL_WRITES_ENABLED")
+    expect(api).toContain("if (action === 'revoke' || action === 'disable' || action === 'suspend') return true")
+    expect(api).toContain("process.env.NODE_ENV === 'production'")
+  })
+
+  it('keeps SQL invoker RPCs and tenant composite FK/RLS with no client grants', () => {
+    const migration=read('supabase/migrations/204_openwa_operational_consent_activation.sql')
+    const smoke=read('supabase/ci/openwa-operational-consent-activation-smoke.sql')
+    for(const table of [
+      'whatsapp_openwa_policy_versions','whatsapp_openwa_consent_state',
+      'whatsapp_openwa_consent_audit','whatsapp_openwa_activation_state',
+      'whatsapp_openwa_activation_audit',
+    ]) expect(migration).toContain('ALTER TABLE public.'+table+' ENABLE ROW LEVEL SECURITY')
+    expect(migration.match(/SECURITY INVOKER SET search_path=''/g)).toHaveLength(2)
+    expect(migration).toContain('FROM PUBLIC,anon,authenticated,service_role')
+    expect(migration).toContain('TO service_role')
+    expect(migration).toContain('openwa_activation_state_connection_fk')
+    expect(migration).toContain('openwa_activation_audit_account_connection_fk')
+    expect(migration).toContain("v_existing.actor_id=p_actor")
+    expect(migration).toContain('pg_advisory_xact_lock')
+    expect(smoke).toContain('ROLLBACK;')
+    expect(smoke).toContain('Cross-account activation escaped scoped lookup')
+    expect(smoke).toContain('Duplicate activation request was not idempotent')
+    expect(smoke).toContain('Reacceptance reused old consent event')
+  })
+
+  it('keeps Meta default and W07 OpenWA-only at guarded and raw provider boundaries', () => {
+    const router=read('src/lib/whatsapp/transport/router.ts')
+    const guarded=read('src/lib/whatsapp/transport/guardrails.ts')
+    const raw=read('src/lib/whatsapp/transport/openwa/adapter.ts')
+    const gate=read('src/lib/whatsapp/transport/openwa/operational-consent-gate.ts')
+    expect(router).toContain('if (!connectionId) return resolveMetaTransport(db, accountId)')
+    expect(router).toContain("connection.provider === 'openwa'")
+    expect(router).toContain('new GuardedOpenWATransport(serverDb, resolved.transport)')
+    expect(router).toContain("connection.provider === 'meta_cloud'")
+    expect(guarded).toContain('await assertOpenWAOperationalSendAllowed(')
+    expect(raw).toContain('await assertOpenWAOperationalSendAllowed(')
+    expect(raw).toContain('this.sessionId')
+    expect(gate).toContain('expectedSessionId !== undefined && live.session_id !== expectedSessionId')
+    expect(gate).toContain("process.env.WACRM_OPENWA_PRODUCTION_RELEASE_ENABLED !== 'true'")
+    expect(gate).toContain('consent_event_id !== accountConsent.accepted_event_id')
+    expect(guarded).toContain('await this.assertNotPaused(request)')
+    expect(guarded).toContain('if (error instanceof OpenWAPreDispatchDenied) throw error')
+    expect(gate).not.toContain('sendText(')
+  })
+
+  it('never equates UI approved/ready with actual permission and preserves unknown retry identity', () => {
+    const center=read('src/components/settings/openwa-operational-control-center.tsx')
+    const copy=read('src/components/settings/whatsapp-admin-copy.ts')
+    expect(center).toContain('production_send_authorized: false')
+    expect(center).toContain('send_authorized: false')
+    expect(center).toContain('data.mutation_stage.owner_accept_available')
+    expect(center).toContain('data.mutation_stage.connection_enable_available')
+    expect(center).toContain('if (pendingRetry && pendingRetry.fingerprint !== fingerprint)')
+    expect(center).toContain('if (!pendingRetry) requestRecord.current = null')
+    expect(center).toContain('setPendingRetry(requestRecord.current)')
+    expect(center).toContain('mutationLock.current = true')
+    expect(center).toContain('copy.noApprovedText')
+    expect(copy).toContain('المراجعات والتسوية')
+  })
+
+  it('preserves the separate local DB race-test gate without allowing hosted DB targeting', () => {
+    const sqlRace=read('supabase/ci/openwa-operational-concurrency-smoke.sh')
+    const workflow=read('.github/workflows/migrations.yml')
+    expect(sqlRace).toContain("127.0.0.1:54322/postgres")
+    expect(sqlRace).not.toContain('SUPABASE_DB_URL')
+    expect(sqlRace).not.toContain('NEXT_PUBLIC_SUPABASE_URL')
+    expect(sqlRace).toContain('consent accept 0')
+    expect(sqlRace).toContain('activation enabled 0')
+    expect(sqlRace).toContain('activation suspended 0')
+    expect(sqlRace).toContain('consent revoke 1')
+    expect(sqlRace).toContain('assert_one_success_one_conflict')
+    expect(workflow).toContain('bash supabase/ci/openwa-operational-concurrency-smoke.sh')
+  })
+})

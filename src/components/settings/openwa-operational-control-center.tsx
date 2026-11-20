@@ -176,8 +176,16 @@ export function OpenWAOperationalControlCenter() {
 
   function openConfirmation(value: Confirmation) {
     if (saving) return
-    requestRecord.current = null
-    setPendingRetry(null)
+    // An unknown POST may already have committed on the server. Do NOT lose
+    // its idempotency key when an operator closes/reopens the dialog.
+    // Block a DIFFERENT decision until the uncertain one is reconciled.
+    const fingerprint = [accountId, value.action, value.connectionId || 'account',
+      value.revision, data?.policy.version || 'no-version'].join(':')
+    if (pendingRetry && pendingRetry.fingerprint !== fingerprint) {
+      toast.error(copy.failed)
+      return
+    }
+    if (!pendingRetry) requestRecord.current = null
     setMutationError(null)
     setAcknowledged(false)
     setConfirmation(value)
@@ -191,6 +199,12 @@ export function OpenWAOperationalControlCenter() {
     const { action, connectionId, revision } = confirmation
     const fingerprint = [accountId, action, connectionId || 'account', revision,
       data?.policy.version || 'no-version'].join(':')
+    if (pendingRetry && pendingRetry.fingerprint !== fingerprint) {
+      setMutationError(copy.failed)
+      mutationLock.current = false
+      setSaving(false)
+      return
+    }
     // If the previous network outcome was unknown, reuse exactly the same
     // request ID and revision. Never issue a blind second distinct mutation.
     if (requestRecord.current?.fingerprint !== fingerprint) {
@@ -515,8 +529,8 @@ export function OpenWAOperationalControlCenter() {
     <Dialog open={confirmation !== null} onOpenChange={open => {
       if (!open && !saving) {
         setConfirmation(null); setAcknowledged(false)
-        setMutationError(null); setPendingRetry(null)
-        requestRecord.current = null
+        setMutationError(null)
+        if (!pendingRetry) requestRecord.current = null
       }
     }}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
@@ -546,8 +560,8 @@ export function OpenWAOperationalControlCenter() {
         <DialogFooter className="gap-2">
           <Button type="button" variant="outline" disabled={saving} onClick={() => {
             setConfirmation(null); setAcknowledged(false)
-            setMutationError(null); setPendingRetry(null)
-            requestRecord.current = null
+            setMutationError(null)
+            if (!pendingRetry) requestRecord.current = null
           }}>{copy.cancel}</Button>
           <Button type="button" disabled={!acknowledged || saving} onClick={() => void commit()}
             variant={confirmation?.action === 'revoke' || confirmation?.action === 'disable' ? 'destructive' : 'default'}>

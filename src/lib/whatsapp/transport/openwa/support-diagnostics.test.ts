@@ -9,6 +9,8 @@ const PHONE = '967700111222'
 const URL = 'https://secret-openwa.example.test/hidden-key'
 const ACCOUNT = '88888888-8888-4888-8888-888888888888'
 const EVENT = '77777777-7777-4777-8777-777777777777'
+const SECOND = '66666666-6666-4666-8666-666666666666'
+const FOREIGN = '55555555-5555-4555-8555-555555555555'
 const unsafe = {
   provider: 'openwa', production_send_authorized: false, operational_gate: 'enforce_release',
   deployment_release_enabled: false,
@@ -19,8 +21,8 @@ const unsafe = {
   connections: [
     { connection_id: ACCOUNT, display_name: 'Patient ' + PHONE, phone_identity: PHONE,
       gateway_base_url: URL, session_id: 'PRIVATE_SESSION_ID',
-      session_ready: false, requested_activation: 'disabled', reason: 'consent_required' },
-    { connection_id: 'b', display_name: SECRET, session_ready: true,
+      session_ready: false, send_authorized: false, requested_activation: 'disabled', reason: 'consent_required' },
+    { connection_id: SECOND, display_name: SECRET, session_ready: true, send_authorized: false,
       requested_activation: 'enabled', reason: 'request_admission_required' },
   ],
   audit: {consent:[{ actor_id: ACCOUNT, raw_text: 'TEXTSECRET' }], activation:[]},
@@ -30,7 +32,7 @@ const rawConnections = {
     { id: ACCOUNT, display_name: PHONE, session_id: SECRET, gateway_base_url: URL,
       guardrail: { manual_paused: true },
       outbound_review: { unreviewed_count: 2, reviewed_uncertain_count: 100 } },
-    { id: 'b', display_name: SECRET, session_id: EVENT,
+    { id: SECOND, display_name: SECRET, session_id: EVENT,
       guardrail: { manual_paused: false },
       outbound_review: { unreviewed_count: 3, reviewed_uncertain_count: 0 } },
   ],
@@ -87,20 +89,60 @@ describe('W07-06 support diagnostic privacy and truthfulness', () => {
       rawConnections.connections[1]]}
     const s = deriveOpenWASupportSnapshot(ok(policy),ok(sessions))
     expect(s.connectionCount).toBe(1)
-    expect(s.countsConsistent).toBe(false)
+    expect(s.sessionsRead).toBe('invalid')
+    expect(s.countsConsistent).toBeNull()
     expect(s.uncertainCount).toBeNull()
     expect(s.blockingReasonCounts.unknown).toBe(1)
     expect(formatOpenWASupportHandoff(s,new Date('bad'),'en'))
       .not.toContain(SECRET)
+  })
+  it('detects different connection identities even when both endpoints return the same count', () => {
+    const transport = { connections: [
+      {...rawConnections.connections[0]},
+      {...rawConnections.connections[1], id: FOREIGN},
+    ]}
+    const s = deriveOpenWASupportSnapshot(ok(unsafe), ok(transport))
+    expect(s.operationalRead).toBe('ok')
+    expect(s.sessionsRead).toBe('ok')
+    expect(s.countsConsistent).toBe(false)
+    expect(s.connectionCount).toBeNull()
+    expect(s.readyCount).toBeNull()
+    expect(s.pausedCount).toBeNull()
+    expect(s.uncertainCount).toBeNull()
+    expect(s.policyApproved).toBeNull()
+    expect(s.suggestedProcedures).toContain('account-isolation')
+    const report = formatOpenWASupportHandoff(s, new Date('2026-11-20T12:00:00Z'), 'en')
+    for (const sensitive of [SECRET,PHONE,URL,ACCOUNT,EVENT,SECOND,FOREIGN]) {
+      expect(report).not.toContain(sensitive)
+    }
+    expect(report).toContain('connection_counts_consistent=false')
+    expect(report).toContain('connection_count=unavailable')
+  })
+  it('treats duplicate identities or forged authorization/guardrail shape as invalid', () => {
+    const duplicate = deriveOpenWASupportSnapshot(ok(unsafe),ok({
+      connections:[rawConnections.connections[0],rawConnections.connections[0]],
+    }))
+    expect(duplicate.sessionsRead).toBe('invalid')
+    const forged = deriveOpenWASupportSnapshot(ok({
+      ...unsafe,
+      connections:[{...unsafe.connections[0], send_authorized: true}],
+    }),ok(rawConnections))
+    expect(forged.operationalRead).toBe('invalid')
+    expect(forged.connectionCount).toBeNull()
+    const badGuardrail = deriveOpenWASupportSnapshot(ok(unsafe),ok({
+      connections:[{...rawConnections.connections[0], guardrail:null}, rawConnections.connections[1]],
+    }))
+    expect(badGuardrail.sessionsRead).toBe('invalid')
+    expect(badGuardrail.pausedCount).toBeNull()
   })
   it('never equates TEST Pilot or a ready session with production send permission', () => {
     const test = deriveOpenWASupportSnapshot(ok({
       ...unsafe, operational_gate:'legacy_test',
       deployment_release_enabled: true,
       policy:{approved:true}, consent:{status:'accepted',current:true},
-      connections:[{session_ready:true,requested_activation:'enabled',
+      connections:[{connection_id:ACCOUNT,session_ready:true,send_authorized:false,requested_activation:'enabled',
         reason:'request_admission_required'}],
-    }),ok({connections:[{guardrail:{manual_paused:false},
+    }),ok({connections:[{id:ACCOUNT,guardrail:{manual_paused:false},
       outbound_review:{unreviewed_count:0}}]}))
     expect(test.gateMode).toBe('legacy_test')
     expect(test.releaseConfigured).toBeNull()
