@@ -65,3 +65,10 @@ Migration 204 intentionally seeds **no approved version** and the current W07-01
 - Manual visual/keyboard/mobile RTL/English browser QA remains a separate acceptance gate; build and unit tests alone are not live TEST verified.
 
 **DoD evidence level at implementation:** code + exact-HEAD CI if and only if the workflow finishes success. Never claim Product/Legal approval, hosted TEST migration, live acceptance or Production ready from UI code alone. W06 backup/DR and NOTE-001 security debt remain separate OW14 blockers.
+
+## Verification record — 2026-11-20
+
+- **Initial candidate:** 7a7c30e0d0fa3f52882520b3467bd871f6fd45de; first GitHub CI 44750555997 failed exactly one historical source-layout assertion in openwa-outbound-review-sessions.source.test.ts because it expected the outbound review hub before the connection cards within a single long screen.
+- **Correction:** de565eeed141080e14fda6e5b660f3c5b5edfa53 updates that source test to assert the new, stronger contract: one review hub in the Delivery tab, session cards only in Sessions, and one selected-session reconciliation panel. No runtime authorization was weakened to pass the test.
+- **Exact-HEAD CI:** https://github.com/e-proo/wacrm/actions/runs/44751162269 — completed/success on de565eeed141080e14fda6e5b660f3c5b5edfa53. Passed Lint, TypeScript, Hostinger TEST scheduler checks, W06 inventory checks, OW-4/Meta session regression, full Vitest suite and Next.js production Build.
+- **Result:** W07-05 implementation complete + CI verified on ephemeral GitHub runner. Manual Windows-browser RTL/mobile/keyboard QA, hosted Supabase TEST migration 204, Product/Legal policy publication and bounded live acceptance remain **PENDING**. Do not claim those levels as passed or alter VPS/Production.

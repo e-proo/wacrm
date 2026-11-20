@@ -324,3 +324,10 @@ AND existingRecipientConsentAndMessagingPolicyPass (where applicable)
 - **Scope and evidence:** no new migration, no hosted Supabase TEST application, no VPS/Production changes, no WhatsApp live test. UI tests/source contract, bilingual copy parity and approved catalog/API authorization tests plus full exact-HEAD CI required; Product/Legal and manual visual/keyboard RTL QA are independent acceptance gates.
 - **Design and rollout details:** docs/architecture/OW14_W07_05_WHATSAPP_ADMIN_TABBED_CONTROL_CENTER.md.
 - **NEXT:** W07-06 support/help documentation and W07-07 broader regression/role audit, then W07-08 bounded TEST acceptance. W06 remains deferred; NOTE-001 and W09 release blockers remain.
+
+## 2026-11-20 — W07-05 exact-HEAD verification and handoff
+
+- Runtime and UI implementation: 7a7c30e0d0fa3f52882520b3467bd871f6fd45de, updated layout regression test commit de565eeed141080e14fda6e5b660f3c5b5edfa53.
+- https://github.com/e-proo/wacrm/actions/runs/44751162269 **completed/success** on de565eeed141080e14fda6e5b660f3c5b5edfa53. Lint, Typecheck, full Vitest and Build passed; Meta/OW-4 regression and TEST scheduler safety checks passed.
+- Regression test updated to verify the new six-tab layout and that there remains exactly one account-level outbound review hub and one selected-session reconciliation panel. No provider, credential, RLS or tenant isolation changes.
+- **Stage:** W07-05 implementation complete + CI verified. **Not** hosted TEST applied/verified, manual visual acceptance, Legal/Product signed, live acceptance complete or production ready. W07-06 support operations runbook is next, with W07-07 regression and W07-08 bounded acceptance later. W06 deferred.
