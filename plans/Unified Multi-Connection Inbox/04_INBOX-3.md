@@ -17,3 +17,7 @@ Meta: window open, expired/no inbound, exact boundary, new inbound same connecti
 - TEST فقط؛ لا تعديل Production ولا تشغيل إرسال حي بلا تفويض منفصل. لا تعديل migration قديمة، لا توسيع grants ولا تعطيل RLS أو guardrails لإمرار اختبار.
 - سجل commit, CI run, migrations ledger, smoke output, risks, screenshots إن لزم. فرّق implementation complete / CI verified / TEST verified / live acceptance / production ready.
 - لا إغلاق المهمة أو المرحلة قبل DoD المحدد؛ إذا كان CI قيد التشغيل فالبوابة مفتوحة.
+
+
+## 2026-11-21 — Owner-approved channel identity amendment (normative)
+[ADR-INBOX-002](14_INBOX0_CHANNEL_ADR.md) supersedes any earlier per-connection thread key or contradictory wording. Bind explicit sender connection + immutable membership epoch within selected channel; default primary, selection explicit when unavailable, no implicit failover. Cross-session reply/read only verified native route, no arbitrary JID reuse. Aggregate channel limits cannot be bypassed by selecting secondary. Existing task/broadcast reservations stay frozen. Meta separate window, OpenWA no Meta checks. Canonical ingress dedup and verified aliases before fanout; uncertain ID/attempt reviewed, no blind resend.

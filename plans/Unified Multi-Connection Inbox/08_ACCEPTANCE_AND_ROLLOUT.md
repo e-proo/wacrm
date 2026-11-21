@@ -2,7 +2,7 @@
 Status: planned, no tests executed for this new feature. Technical tests first, live cases last. Use fixture data, rollback transactions, authorized owned numbers for live only. Evidence per row: baseline HEAD, environment, role, alias of connection, test case, expected/actual, PASS/FAIL/BLOCKED, log/test/CI reference, sanitized evidence, issue.
 | ID | Scenario | Required result | Gate |
 |---|---|---|---|
-| A01 | same contact Meta, OW-A, OW-B | all shows three exact threads, one CRM contact; no mixed previews/history | 1/2 |
+| A01 | same contact Meta, OW-A, OW-B | two channel threads if OW A/B share verified identity; three if different; one CRM contact; no mixed channel previews/history | 1/2 |
 | A02 | outbound-only verified thread | explicit connection, no default to wrong provider | 1/3 |
 | A03 | null/mismatched/archived legacy identity | historical or unknown read-only, no guessed route; count conservation | 1 |
 | A04 | cross-tenant UUID / read / cursor / send / attachment | denied, zero leaked data and provider calls | 1/3/5 |
@@ -43,3 +43,18 @@ Status: planned, no tests executed for this new feature. Technical tests first, 
 - A26: migration 204 ledger/schema and correct authorized W07 mode verified; legacy TEST mode never cited as activation/consent readiness. Archived ready not eligible, unknown native ID not guessed. 
 - A27: immutable provider/connection binding, existing legacy unique collision and exact reply/echo/ACK dedup; no changes to external CRM IDs, no synthesized broadcasts.
 - A28: explicit outbound-only thread and stale sender no latest-inbound/Meta fallback; no partner/CRM action leakage.
+
+
+## 2026-11-21 — Owner-approved channel identity amendment (normative)
+[ADR-INBOX-002](14_INBOX0_CHANNEL_ADR.md) supersedes any earlier per-connection thread key or contradictory wording. A01 same contact Meta and two OpenWA sessions of same verified number => two channel threads, one CRM parent; if different OpenWA numbers three threads. A06 channel read clears only same channel; A10 other channel inbound cannot open Meta window. Add cases below.
+
+| ID | Additional mandatory case | Expected | Gate |
+|---|---|---|---|
+| A29 | two verified sessions same number, concurrent duplicate native event | one logical message, thread, unread and idempotent fanout; two authenticated observations (when actually delivered) | 1/2/5 |
+| A30 | same native ID on different verified channels; same body on distinct strong IDs | never collapse different messages/channels; scoped dedup | 1/5 |
+| A31 | event-only ID or different engine aliases without proof | durable unresolved/review; no guessed merge, auto-response or replay | 1/3/5 |
+| A32 | session replacement/re-pair different number or stale identity | stable verified same channel history; different identity new epoch/channel; no history remap | 1/2/3 |
+| A33 | selected secondary, stale primary and ambiguous outbound | explicit eligible exact session; frozen intent/epoch; no blind resend or silent fallback | 3/5 |
+| A34 | switch session to bypass consent/cap, forged cross-account membership | deny; aggregate channel caps and scoped authorization | 3/5 |
+| A35 | same channel read/ACK/reply with native identity missing | CRM read once; provider action only proven exact route, no sibling channel effects | 3/5 |
+| L05 | owned same number with two ready sessions and second distinct channel | actual native ID/receipt behavior confirmed, one canonical effect, separate other channel; no fake pass if unavailable | 6 |

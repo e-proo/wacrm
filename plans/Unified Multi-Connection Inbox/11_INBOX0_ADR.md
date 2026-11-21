@@ -1,3 +1,5 @@
+> **Superseded in part by [ADR-INBOX-002](14_INBOX0_CHANNEL_ADR.md), owner accepted 2026-11-21.** Connection-keyed thread identity, same-phone recovery creating a new thread, connection-level history/filter/count and old backfill allocation are historical decisions replaced by channel identity. Nonconflicting CRM/security/transaction/cutover contracts remain.
+
 # ADR-INBOX-001 — Connection-scoped operational projection
 Date 2026-11-21 | Technical decision: ACCEPTED for design, not activation | SOF-82 | Baseline 0fd459f. 
 ## Decision

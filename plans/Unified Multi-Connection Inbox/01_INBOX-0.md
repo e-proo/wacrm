@@ -1,5 +1,5 @@
 # INBOX-0 — Baseline & architecture contract (SOF-68)
-Goal: freeze factual contracts before schema or runtime edits. Status In Review — baseline verified and ADR technically accepted; full reference census completeness gate pending. Blocks INBOX-1.
+Goal: freeze factual contracts before schema or runtime edits. Status In Review — baseline verified and channel ADR owner accepted; full reference census completeness gate pending. Blocks INBOX-1.
 ## Work packages
 ### 0.1 Workspace inventory
 - Recheck branch HEAD, read AGENTS.md, PROJECT_NOTES.md, OW master and Agent Task plan. Enumerate all paths reading/writing conversations/messages (including SQL functions/triggers, service role, API v1 and MCP, inbound webhook/echo, broadcast worker, manual/contact sends, task workers, automation/flows/AI, dashboard, notifications/deals, reactions/media).
@@ -23,3 +23,7 @@ ADR reviewed, data contract and actual TEST aggregate/ledger evidence recorded, 
 
 ## 2026-11-21 INBOX-0 execution checkpoint
 Technical ADR accepted; read-only TEST baseline verified (725 messages, 32 verified pairs, 5 mixed parents, 117 archived messages, 16 mixed-parent unallocated unread). [Baseline](09_INBOX0_TEST_BASELINE.md) · [dependency inventory](10_INBOX0_DEPENDENCY_INVENTORY.md) · [accepted ADR](11_INBOX0_ADR.md) · [reproducible SQL](12_INBOX0_READ_ONLY_BASELINE.sql). No runtime changes. SOF-68 remains In Review until exhaustive exact-ref reader/writer census and review; browser unavailable. SEC-INBOX-01 (broad grants/provider provenance) and DEP-INBOX-01 (204 not applied in TEST) tracked as prerequisites for activation; do not apply out-of-scope or bypass. New data model chosen: additive durable inbox_threads with exact per-connection scope, unallocated legacy unread bucket, trusted inbound provenance and transactional maintenance. No live/production acceptance.
+
+
+## 2026-11-21 — Owner-approved channel identity amendment (normative)
+[ADR-INBOX-002](14_INBOX0_CHANNEL_ADR.md) supersedes any earlier per-connection thread key or contradictory wording. Owner decision accepted ADR-INBOX-002; augment census with identity refresh/re-pair, receipt fallback, echo/ACK, dedup/business side effects and caps across sessions. Baseline 20 candidate channels scoped threads, not actual verified groups. CI prior successful; remaining full census/review and new CI gate.
