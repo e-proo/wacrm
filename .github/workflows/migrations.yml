@@ -39,6 +39,10 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-channel-foundation-smoke.sql
       - name: INBOX-1 verified enrollment and historical evidence smoke
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-verified-enrollment-smoke.sql
+      - name: INBOX-1 audit and mutable source consistency smoke
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-source-integrity-smoke.sql
+      - name: INBOX-1 parallel evidence backfill race
+        run: bash supabase/ci/inbox-backfill-concurrency-smoke.sh
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
       - name: NOTE-001 anonymous SECURITY DEFINER / RLS safety smoke
