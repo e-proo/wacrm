@@ -27,3 +27,6 @@ Technical ADR accepted; read-only TEST baseline verified (725 messages, 32 verif
 
 ## 2026-11-21 — Owner-approved channel identity amendment (normative)
 [ADR-INBOX-002](14_INBOX0_CHANNEL_ADR.md) supersedes any earlier per-connection thread key or contradictory wording. Owner decision accepted ADR-INBOX-002; augment census with identity refresh/re-pair, receipt fallback, echo/ACK, dedup/business side effects and caps across sessions. Baseline 20 candidate channels scoped threads, not actual verified groups. CI prior successful; remaining full census/review and new CI gate.
+
+## Exact-ref census evidence — 2026-11-21
+[Full census and impact review](15_INBOX0_CENSUS_EVIDENCE.md): at `c8c30f0eb58569c91633258d58fb9ac5e50edaf9`, [census run 44937975928](https://github.com/e-proo/wacrm/actions/runs/44937975928) completed/success (1,297 files scanned, 393 candidate paths), [full CI 44937975891](https://github.com/e-proo/wacrm/actions/runs/44937975891) completed/success. Source census scan completeness verified, additional targeted code boundary review documented. Owner accepted ADR-002. No runtime/TEST changes. New documentation finalization CI must complete before formal phase closure. Dynamic/indirect affected caller verification and regression remain mandatory in INBOX-1/3. Conditional browser snapshot unavailable, deferred; not a runtime acceptance claim.
