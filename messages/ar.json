@@ -212,7 +212,20 @@
       "reply": "رد على رسالة",
       "replyNotLoaded": "الرسالة المقتبسة غير محملة",
       "openMedia": "فتح المرفق",
-      "mediaUnavailable": "المرفق غير متاح في هذا النطاق"
+      "mediaUnavailable": "المرفق غير متاح في هذا النطاق",
+      "policyTitle": "سياسة المزود",
+      "policyChecking": "جارٍ التحقق من سياسة الإرسال…",
+      "policyUnavailable": "تعذّر التحقق من السياسة؛ الإرسال غير مصرح به.",
+      "policyNoWindow": "لا تنطبق نافذة Meta على OpenWA",
+      "policyWindowOpen": "نافذة Meta · {time}",
+      "policyWindowClosed": "نافذة Meta مغلقة",
+      "policyText": "نص",
+      "policyMedia": "وسائط",
+      "policyTemplate": "قوالب معتمدة",
+      "policyInteractive": "تفاعلية",
+      "policyReaction": "تفاعلات",
+      "policyDenied": "الإرسال محظور",
+      "policyPreviewOnly": "هذه معاينة للسياسة فقط. يظل الإرسال معطلًا حتى تفعيل إجراءات المرسل المحدد."
     },
     "page": {
       "whatsappNotConnected": "واتساب® غير متصل. انتقل إلى الإعدادات لربط حسابك."

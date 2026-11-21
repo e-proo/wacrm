@@ -212,7 +212,20 @@
       "reply": "Reply to message",
       "replyNotLoaded": "Quoted message is not loaded",
       "openMedia": "Open attachment",
-      "mediaUnavailable": "Attachment is unavailable in this scope"
+      "mediaUnavailable": "Attachment is unavailable in this scope",
+      "policyTitle": "Provider policy",
+      "policyChecking": "Checking sender policy…",
+      "policyUnavailable": "Policy unavailable; no send is authorized.",
+      "policyNoWindow": "No Meta 24-hour window",
+      "policyWindowOpen": "Meta window · {time}",
+      "policyWindowClosed": "Meta window closed",
+      "policyText": "Text",
+      "policyMedia": "Media",
+      "policyTemplate": "Approved templates",
+      "policyInteractive": "Interactive",
+      "policyReaction": "Reactions",
+      "policyDenied": "Send blocked",
+      "policyPreviewOnly": "Policy preview only. Sending remains disabled until explicit sender actions are enabled."
     },
     "page": {
       "whatsappNotConnected": "WhatsApp® is not connected. Go to Settings to connect your account."

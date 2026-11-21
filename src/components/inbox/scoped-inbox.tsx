@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import { useInboxPages,useInboxCounts } from '@/lib/inbox/use-scoped-list'
 import { useScopedInboxRealtime } from '@/lib/inbox/use-scoped-realtime'
 import { ScopedHistoryPane } from './scoped-history-pane'
+import { ScopedPolicyPane } from './scoped-policy-pane'
 import { defaultFilters, listQuery, parseLocation, preferenceKey, readPreference, sameScope, selectExact, selectionHref, type Channel,type Connection,type Counts,type InboxContext,type InboxFilters,type InboxScope,type InboxSelection,type ScopedRow } from '@/lib/inbox/scoped-list-model'
 
 const control='h-9 min-w-0 rounded-lg border border-border bg-background px-2.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -139,6 +140,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
  const t=useTranslations('Inbox.scoped'),{status}=useLabels()
  return <div className="flex h-full min-h-0 min-w-0 flex-col">
   <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card p-4"><Button variant="ghost" size="icon-lg" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button><div className="min-w-0 flex-1"><h2 className="truncate font-semibold" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}</p></div><ProviderLabel provider={row.provider}/></div>
+  <ScopedPolicyPane key={row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision}/>
   <ScopedHistoryPane key={row.scope+':'+row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}/>
  </div>
 }

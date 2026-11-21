@@ -212,7 +212,20 @@
       "reply": "메시지 답장",
       "replyNotLoaded": "인용 메시지가 아직 로드되지 않았습니다",
       "openMedia": "첨부 파일 열기",
-      "mediaUnavailable": "이 범위에서 첨부 파일을 사용할 수 없습니다"
+      "mediaUnavailable": "이 범위에서 첨부 파일을 사용할 수 없습니다",
+      "policyTitle": "공급자 정책",
+      "policyChecking": "발신 정책 확인 중…",
+      "policyUnavailable": "정책 확인 불가. 발송이 승인되지 않았습니다.",
+      "policyNoWindow": "Meta 24시간 창 적용 안 됨",
+      "policyWindowOpen": "Meta 창 · {time}",
+      "policyWindowClosed": "Meta 창 닫힘",
+      "policyText": "텍스트",
+      "policyMedia": "미디어",
+      "policyTemplate": "승인된 템플릿",
+      "policyInteractive": "대화형 메시지",
+      "policyReaction": "반응",
+      "policyDenied": "발송 차단",
+      "policyPreviewOnly": "정책 미리보기입니다. 명시적 발신 기능이 활성화될 때까지 발송은 비활성화됩니다."
     },
     "page": {
       "whatsappNotConnected": "WhatsApp®이 연결되어 있지 않습니다. 설정으로 이동해 계정을 연결하세요."
