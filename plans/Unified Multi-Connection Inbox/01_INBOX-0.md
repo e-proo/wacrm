@@ -1,5 +1,5 @@
 # INBOX-0 — Baseline & architecture contract (SOF-68)
-Goal: freeze factual contracts before schema or runtime edits. Status In Review — baseline verified and channel ADR owner accepted; full reference census completeness gate pending. Blocks INBOX-1.
+Goal: freeze factual contracts before schema or runtime edits. Status COMPLETE (architecture and baseline).
 ## Work packages
 ### 0.1 Workspace inventory
 - Recheck branch HEAD, read AGENTS.md, PROJECT_NOTES.md, OW master and Agent Task plan. Enumerate all paths reading/writing conversations/messages (including SQL functions/triggers, service role, API v1 and MCP, inbound webhook/echo, broadcast worker, manual/contact sends, task workers, automation/flows/AI, dashboard, notifications/deals, reactions/media).
@@ -30,3 +30,7 @@ Technical ADR accepted; read-only TEST baseline verified (725 messages, 32 verif
 
 ## Exact-ref census evidence — 2026-11-21
 [Full census and impact review](15_INBOX0_CENSUS_EVIDENCE.md): at `c8c30f0eb58569c91633258d58fb9ac5e50edaf9`, [census run 44937975928](https://github.com/e-proo/wacrm/actions/runs/44937975928) completed/success (1,297 files scanned, 393 candidate paths), [full CI 44937975891](https://github.com/e-proo/wacrm/actions/runs/44937975891) completed/success. Source census scan completeness verified, additional targeted code boundary review documented. Owner accepted ADR-002. No runtime/TEST changes. New documentation finalization CI must complete before formal phase closure. Dynamic/indirect affected caller verification and regression remain mandatory in INBOX-1/3. Conditional browser snapshot unavailable, deferred; not a runtime acceptance claim.
+
+
+## INBOX-0 closure — 2026-11-21
+**COMPLETE (architecture/baseline only).** Final HEAD f809b51d99a1ff35bc000135c7c9ec720ef313f9; [CI 44938450673](https://github.com/e-proo/wacrm/actions/runs/44938450673) completed/success; SOF-68, SOF-75 and SOF-82 Done. INBOX-1 started. SEC-INBOX-01 and DEP-INBOX-01 remain activation prerequisites. No runtime acceptance or production readiness implied.

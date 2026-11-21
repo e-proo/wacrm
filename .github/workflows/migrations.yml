@@ -35,6 +35,8 @@ jobs:
         run: supabase db start
       - name: Replay every migration from scratch
         run: supabase db reset --local --no-seed
+      - name: INBOX-1 channel foundation shadow schema and tenant safety
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-channel-foundation-smoke.sql
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
       - name: NOTE-001 anonymous SECURITY DEFINER / RLS safety smoke

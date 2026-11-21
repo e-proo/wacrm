@@ -26,3 +26,7 @@ Read [ADR-INBOX-001](11_INBOX0_ADR.md) and [baseline](09_INBOX0_TEST_BASELINE.md
 
 ## INBOX-1 execution dependencies after channel ADR
 SOF-76 -> [SOF-89](https://linear.app/eproo/issue/SOF-89/inbox-103-multi-session-canonical-message-dedup-and-observations) canonical multi-session ingest, observations and dedup -> SOF-83. SOF-89 is phase 1.03 executed before 1.02 API to ensure correctness; no activation until final gates. Read [census evidence](15_INBOX0_CENSUS_EVIDENCE.md) and [ADR-002](14_INBOX0_CHANNEL_ADR.md).
+
+
+## SOF-76 implementation checkpoint — shadow foundation
+Migration 205_inbox_channel_foundation.sql and rollback smoke establish server-only channels, immutable membership epochs, channel threads, source-message memberships and legacy unread inventory, and revoke unnecessary legacy browser TRUNCATE. No identity seeded from mutable historical phone_identity, no existing source data rewritten, no runtime integration or feature enablement. Enrollment, verified evidence backfill and maintenance/reconciliation, full source provenance and canonical dedup (SOF-89), APIs (SOF-83), clean replay and TEST ledger/smoke are pending. TEST ledger verified through 203; 204 consent/activation still absent; coordinate dependency rather than silently apply it. CLI unavailable in current container; checked-in migration follows AGENTS.md numbered convention and must pass clean CI replay before TEST apply.
