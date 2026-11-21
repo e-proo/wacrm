@@ -88,8 +88,8 @@ GRANT EXECUTE ON FUNCTION public.inbox_record_meta_signed_ingress(uuid,uuid,uuid
 -- Read-only server context. Explicit connection or declared ready primary;
 -- no default to latest inbound, sibling session, or legacy CRM provider.
 CREATE FUNCTION public.inbox_policy_context(p_account uuid,p_actor uuid,p_thread uuid,p_channel uuid,p_connection uuid DEFAULT NULL)
-RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
-DECLARE t public.inbox_threads%ROWTYPE; ep public.whatsapp_channel_memberships%ROWTYPE; actor_role text; phone text; inbound record; ready boolean:=false; verified_recipient text; last_inbound timestamptz; v_now timestamptz:=statement_timestamp();
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,public AS $
+DECLARE t public.inbox_threads%ROWTYPE; ep public.whatsapp_channel_memberships%ROWTYPE; actor_role text; phone text; inbound record; ready boolean:=false; verified_recipient text; last_inbound timestamptz; v_now timestamptz:=clock_timestamp();
 BEGIN
  SELECT account_role::text INTO actor_role FROM public.profiles WHERE account_id=p_account AND user_id=p_actor;
  IF NOT FOUND THEN RAISE EXCEPTION 'INBOX_POLICY_ACTOR' USING ERRCODE='42501'; END IF;
