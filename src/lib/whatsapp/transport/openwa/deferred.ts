@@ -69,6 +69,11 @@ export function compactOpenWAInbound(inbound: NormalizedInbound): NormalizedInbo
     id: m.id, provider: 'openwa', connectionId: m.connectionId,
     providerMessageId: m.providerMessageId,
     ...(m.providerEventId ? { providerEventId: m.providerEventId } : {}),
+    ...(m.providerMessageIdentityKind ? { providerMessageIdentityKind: m.providerMessageIdentityKind } : {}),
+    ...(typeof m.providerMetadata?.sessionId === 'string' ? { providerMetadata: {
+      sessionId: m.providerMetadata.sessionId,
+      ...(typeof m.providerMetadata.instanceId === 'string' ? { instanceId: m.providerMetadata.instanceId } : {}),
+    } } : {}),
     ...(m.providerChatId ? { providerChatId: m.providerChatId } : {}),
     from: m.from, timestamp: m.timestamp, type: m.type,
     ...(m.recipient ? { recipient: m.recipient } : {}),

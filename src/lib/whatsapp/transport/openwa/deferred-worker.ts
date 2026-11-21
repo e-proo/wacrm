@@ -6,7 +6,7 @@
  * customer/agent/automation pipeline used by ordinary signed webhooks.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { canonicalInboxTestMode } from '@/lib/inbox/canonical-ingress'
+import { canonicalInboxTestMode, canonicalReceiptOutcome } from '@/lib/inbox/canonical-ingress'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
 import { applyWhatsAppStatus } from '@/lib/whatsapp/status-lifecycle'
 import { preflightOpenWAInboundIdentity, readDeferredInbound, readDeferredStatus } from './deferred'
@@ -71,7 +71,6 @@ async function processDeferredJob(db: SupabaseClient, job: DeferredJob): Promise
     return outcome === 'unknown' ? retry('native_message_not_found') : COMPLETE
   }
 
-  if (canonicalInboxTestMode() && job.event_kind === 'unresolved_identity') return review('canonical_receipt_reconciliation_required')
   if (job.event_kind !== 'unresolved_identity' || !job.native_chat_id) {
     return review('unsupported_deferred_event')
   }
@@ -111,6 +110,19 @@ async function processDeferredJob(db: SupabaseClient, job: DeferredJob): Promise
   const { data: account, error: ownerError } = await db.from('accounts')
     .select('owner_user_id').eq('id', job.account_id).maybeSingle()
   if (ownerError || !account?.owner_user_id) return retry('account_owner_unavailable')
+
+  if (canonicalInboxTestMode()) {
+    const message = inbound.message
+    if (message.providerMessageIdentityKind !== 'native' || !message.providerEventId ||
+        message.providerMetadata?.sessionId !== job.session_id ||
+        (message.providerMetadata?.instanceId ?? null) !== job.instance_id) return review('canonical_receipt_reconciliation_required')
+    // The processed signed receipt is not reopened. SQL accepts only this
+    // exact durable job lease and the original receipt under its valid epoch.
+    const receipt = { eventId: message.providerEventId, token: job.lease_token, sessionId: job.session_id, instanceId: job.instance_id }
+    await processNormalizedInboundMessage(message, inbound.contact, job.account_id, job.connection_id, account.owner_user_id, '', true, undefined, receipt)
+    const result = await canonicalReceiptOutcome(db, job.account_id, message, receipt)
+    return result.state === 'completed' ? COMPLETE : result.state === 'pending' ? retry('canonical_effect_pending') : review('canonical_effect_review')
+  }
 
   await processNormalizedInboundMessage(
     inbound.message, inbound.contact, job.account_id, job.connection_id,

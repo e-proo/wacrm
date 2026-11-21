@@ -20,7 +20,7 @@ import { handleAdminChangeCommand } from '@/lib/ai/runtime/admin-change-commands
 import { engineSendText } from '@/lib/automations/meta-send'
 import { correlateInboundTaskReply } from '@/lib/ai/tasks/reply-correlation'
 import type { NormalizedInboundMessage } from '@/lib/whatsapp/inbound-normalization'
-import { commitAndClaimCanonicalInbound, finishCanonicalDispatch, type CanonicalDispatch, type CanonicalReceipt } from '@/lib/inbox/canonical-ingress'
+import { canonicalReceiptOutcome, commitAndClaimCanonicalInbound, finishCanonicalDispatch, type CanonicalDispatch, type CanonicalReceipt } from '@/lib/inbox/canonical-ingress'
 
 let _adminClient: ReturnType<typeof createClient> | null = null
 function supabaseAdmin() {
@@ -309,7 +309,20 @@ export async function processNormalizedInboundMessage(
       contentType, contentText, mediaType, contactCreated, conversationCreated: convResult.created,
     })
     // A durable review or a duplicate observation cannot reach any business effect.
-    if (!canonicalRun) return
+    if (!canonicalRun) {
+      // Exact original signed observation may safely repair absent media
+      // even after effects have already been claimed or returned.
+      if (mirrorMedia && ['image','video','audio','document'].includes(message.type)) {
+        const outcome = await canonicalReceiptOutcome(supabaseAdmin(), accountId, message, canonicalReceipt)
+        if (outcome.messageId && outcome.conversationId === conversation.id) {
+          try {
+            await hydrateOpenWAInboundMessageMedia({ db: supabaseAdmin(), storage: supabaseAdmin().storage, accountId,
+              conversationId: conversation.id, inboundMessageId: outcome.messageId, message, signedInlineMedia })
+          } catch { console.warn('[openwa-media] scoped canonical retry unavailable') }
+        }
+      }
+      return
+    }
     inboundMessageId = canonicalRun.messageId
     replyToInternalId = canonicalRun.replyToMessageId
     isFirstInboundMessage = canonicalRun.firstInbound

@@ -61,3 +61,12 @@ export async function finishCanonicalDispatch(db: SupabaseClient, accountId: str
   const { data, error } = await db.rpc('inbox_finish_canonical_effect', { p_account: accountId, p_canonical: run.canonicalId, p_claim: run.claim, p_returned: returned })
   if (error || data !== true) throw new Error('Canonical effect outcome unconfirmed')
 }
+
+export async function canonicalReceiptOutcome(db: SupabaseClient, accountId: string, message: NormalizedInboundMessage, receipt: CanonicalReceipt): Promise<{ state: 'completed' | 'pending' | 'review'; messageId?: string; conversationId?: string }> {
+  const { data, error } = await db.rpc('inbox_canonical_receipt_outcome', {
+    p_account: accountId, p_connection: message.connectionId, p_event: receipt.eventId, p_token: receipt.token, p_native: message.providerMessageId,
+  })
+  if (error || !data || !['completed','pending','review'].includes(data.state)) throw new Error('Canonical receipt outcome unavailable')
+  return { state: data.state, messageId: typeof data.messageId === 'string' ? data.messageId : undefined,
+    conversationId: typeof data.conversationId === 'string' ? data.conversationId : undefined }
+}
