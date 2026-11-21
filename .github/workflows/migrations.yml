@@ -65,6 +65,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-read-api-smoke.sql
       - name: INBOX-2 exact channel list filters and server counts
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-scoped-list-smoke.sql
+      - name: INBOX-2 scoped history, reactions and atomic read watermark
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-scoped-history-read-smoke.sql
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
       - name: NOTE-001 anonymous SECURITY DEFINER / RLS safety smoke
