@@ -42,6 +42,8 @@ export interface WhatsAppTransportSendRequest {
   idempotencyKey?: string
   /** Used only by provider safety policy. Business callers never choose an OpenWA engine. */
   workload?: WhatsAppSendWorkload
+  /** Internal server fence, invoked immediately before provider I/O. Never accepted from HTTP JSON. */
+  beforeProviderDispatch?: () => Promise<void>
 }
 
 export interface WhatsAppTransportSendResult {

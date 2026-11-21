@@ -25,6 +25,7 @@ class OpenWAWhatsAppTransport implements WhatsAppTransport {
     // observes revocation, policy upgrades, stop or disconnect during pacing.
     await assertOpenWAOperationalSendAllowed(this.db, request.accountId, request.connectionId, this.sessionId)
 
+    await request.beforeProviderDispatch?.()
     const result = request.content.kind === 'text'
       ? await this.client.sendText({ sessionId: this.sessionId, to: request.recipient, text: request.content.text, replyToProviderMessageId: request.replyToProviderMessageId, idempotencyKey: request.idempotencyKey }, request.idempotencyKey)
       : await this.client.sendMedia({ sessionId: this.sessionId, to: request.recipient, kind: request.content.mediaKind, link: request.content.link, caption: request.content.caption, filename: request.content.filename, replyToProviderMessageId: request.replyToProviderMessageId, idempotencyKey: request.idempotencyKey }, request.idempotencyKey)

@@ -57,6 +57,7 @@ class MetaWhatsAppTransport implements WhatsAppTransport {
     }
 
     const attempt = async (recipient: string): Promise<string> => {
+      await request.beforeProviderDispatch?.()
       const contextMessageId = request.replyToProviderMessageId
       const content = request.content
       if (content.kind === 'template') {
@@ -132,7 +133,7 @@ class MetaWhatsAppTransport implements WhatsAppTransport {
     let providerMessageId = ''
     let workingRecipient = request.recipient
     let lastError: unknown = null
-    for (const variant of phoneVariants(request.recipient)) {
+    for (const variant of request.beforeProviderDispatch ? [request.recipient] : phoneVariants(request.recipient)) {
       try {
         providerMessageId = await attempt(variant)
         workingRecipient = variant

@@ -14,7 +14,11 @@ import { validId } from './scoped-list-model'
 export type PolicySelection={accountId:string;userId:string;threadId:string;channelId:string;connectionId:string|null}
 type Guard={manual_paused:boolean;pilot_enabled:boolean;circuit_open_until:string|null;hourly_cap:number;daily_cap:number;first_touch_daily_cap:number;warmup_until:string|null;warmup_hourly_cap:number;warmup_daily_cap:number;pilot_manual_hourly_cap:number|null;pilot_manual_daily_cap:number|null}
 const caps=['channel_hourly_cap','channel_daily_cap','channel_first_touch_cap','channel_policy_unavailable'] as const
-const contextError=()=>new WhatsAppTransportError('connection_restricted','Inbox policy context unavailable')
+export class ScopedInboxPolicyDenied extends WhatsAppTransportError {
+ readonly providerDispatchAttempted=false as const
+ constructor(){super('connection_restricted','Inbox policy does not authorize the selected sender or message; refresh the conversation')}
+}
+const contextError=()=>new ScopedInboxPolicyDenied()
 export async function loadPolicyContext(db:SupabaseClient,s:PolicySelection):Promise<PolicyContext|null>{
  if(![s.accountId,s.userId,s.threadId,s.channelId].every(validId)||(s.connectionId!==null&&!validId(s.connectionId)))throw contextError()
  const {data,error}=await db.rpc('inbox_policy_context',{p_account:s.accountId,p_actor:s.userId,p_thread:s.threadId,p_channel:s.channelId,p_connection:s.connectionId})
@@ -26,7 +30,7 @@ export async function loadPolicyContext(db:SupabaseClient,s:PolicySelection):Pro
 }
 // Read-only preview. No Pilot audit event, cap reservation, network dispatch,
 // credential serialization or mutation. The existing transport checks again.
-async function inspectOpenWAPolicy(db:SupabaseClient,s:PolicySelection,c:PolicyContext):Promise<PolicyReason|null>{
+async function inspectOpenWAPolicy(db:SupabaseClient,s:PolicySelection,c:PolicyContext,afterReservation=false):Promise<PolicyReason|null>{
  const conn=c.connection_id,recipient=c.recipient
  if(!conn||!recipient)return 'recipient_unverified'
  try{
@@ -48,6 +52,7 @@ async function inspectOpenWAPolicy(db:SupabaseClient,s:PolicySelection,c:PolicyC
   if(grantError)return 'policy_unavailable'
   if(!grant)return 'pilot_recipient_not_allowlisted'
  }
+ if(afterReservation)return null // Existing atomic reservations already counted this send.
  const rawHash=createHash('sha256').update(s.accountId+':'+conn+':'+recipient).digest('hex')
  const {data:reason,error:capError}=await db.rpc('inbox_openwa_channel_cap_reason',{p_account:s.accountId,p_channel:s.channelId,p_connection:conn,p_hash:rawHash})
  if(capError||reason!==null&&!caps.includes(reason))return 'policy_unavailable'
@@ -73,8 +78,8 @@ export async function evaluateInboxPolicy(db:SupabaseClient,s:PolicySelection,op
  if(!c)return null
  const initial=deriveInboxCapabilities(c)
  let denial:PolicyReason|null=null
- if(c.provider==='openwa'&&initial.blocked_reason===null&&!options.afterReservation){
-  try{denial=await inspectOpenWAPolicy(db,s,c)}catch{denial='policy_unavailable'}
+ if(c.provider==='openwa'&&initial.blocked_reason===null){
+  try{denial=await inspectOpenWAPolicy(db,s,c,options.afterReservation)}catch{denial='policy_unavailable'}
  }
  return {context:c,capabilities:deriveInboxCapabilities(c,denial)}
 }
@@ -82,6 +87,7 @@ export async function evaluateInboxPolicy(db:SupabaseClient,s:PolicySelection,op
 // transport remains the admission and reservation authority.
 export async function assertInboxSendPolicy(db:SupabaseClient,s:PolicySelection,expected:{conversationId:string;provider:string;connectionId:string;membershipId:string;recipient:string;kind:string},afterReservation=false):Promise<void>{
  if(!scopedInboxEnabled()||s.connectionId!==expected.connectionId)throw contextError()
- const result=await evaluateInboxPolicy(db,s,{afterReservation})
+ let result:Awaited<ReturnType<typeof evaluateInboxPolicy>>
+ try{result=await evaluateInboxPolicy(db,s,{afterReservation})}catch{throw contextError()}
  if(!result||result.context.conversation_id!==expected.conversationId||result.context.provider!==expected.provider||result.context.connection_id!==expected.connectionId||result.context.membership_id!==expected.membershipId||result.context.recipient!==expected.recipient||!allowsContent(result.capabilities,expected.kind))throw contextError()
 }
