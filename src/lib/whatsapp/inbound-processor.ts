@@ -1,3 +1,4 @@
+import { scopedInboxEnabled } from '@/lib/inbox/scoped-ui-gate'
 import { createClient } from '@supabase/supabase-js'
 import { getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { mirrorInboundMedia } from '@/lib/whatsapp/mirror-inbound-media'
@@ -188,6 +189,7 @@ export async function processNormalizedInboundMessage(
   // these bytes in NormalizedInboundMessage sent to agents/automations.
   signedInlineMedia?: string,
   canonicalReceipt?: CanonicalReceipt,
+  signedMetaPhoneNumberId?: string,
 ) {
   if (canonicalReceipt && !hasExplicitCanonicalPeer(message)) throw new Error('Canonical inbound requires explicit verified peer identity')
   const openWAIdentity = message.provider === 'openwa'
@@ -426,6 +428,19 @@ export async function processNormalizedInboundMessage(
   }
   if (!persistedInboundMessageId) return
   const inboundMessageId = persistedInboundMessageId
+  // Fresh signed Meta events only; never elevate historical/replayed CRM
+  // rows to a trusted 24h window. The existing fanout/idempotency stays intact.
+  if (signedMetaPhoneNumberId && message.provider === 'meta_cloud' && !isInboundReplay && scopedInboxEnabled()) {
+    try {
+      const {error}=await supabaseAdmin().rpc('inbox_record_meta_signed_ingress',{
+        p_account:accountId,p_connection:message.connectionId,p_conversation:conversation.id,
+        p_message:inboundMessageId,p_native:message.providerMessageId,p_external:signedMetaPhoneNumberId,
+        p_sender:message.from,p_at:new Date(parseInt(message.timestamp)*1000).toISOString()
+      })
+      if(error) console.warn('[inbox] signed Meta evidence unavailable; scoped window stays closed')
+    } catch { console.warn('[inbox] signed Meta evidence unavailable; scoped window stays closed') }
+  }
+
 
   let returned = true
   const runEffect = <T>(stage: string, fn: () => Promise<T>): Promise<T> => canonicalRun

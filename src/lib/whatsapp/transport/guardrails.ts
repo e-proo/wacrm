@@ -103,6 +103,9 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
       p_recipient_hash: hash,
       p_workload: workload,
     })
+    if(error?.code==='P0001'&&/^INBOX_CHANNEL_CAP:(channel_hourly_cap|channel_daily_cap|channel_first_touch_cap|channel_policy_unavailable)$/.test(error.message)) {
+      throw new OpenWAPreDispatchDenied('OpenWA channel capacity does not permit this send',error.message.split(':')[1])
+    }
     if (error) throw new WhatsAppTransportError('retryable_provider_failure', 'Could not reserve OpenWA guardrail capacity', error)
     const reservation = (data ?? {}) as Reservation
     if (!reservation.allowed) throw new OpenWAPreDispatchDenied(`OpenWA send blocked by WACRM guardrail: ${reservation.reason ?? 'policy'}`)
