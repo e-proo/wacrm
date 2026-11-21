@@ -44,7 +44,7 @@ describe('scoped inbox selection and fetch boundary',()=>{
   expect(mock).toHaveBeenCalledWith('/api/inbox/threads?scope=active',expect.objectContaining({method:'GET',cache:'no-store',headers:{'x-wacrm-inbox-account':a,'x-wacrm-inbox-actor':b}}))
  })
  it('fails closed if either flag is absent or project differs',()=>{
-  const env={NEXT_PUBLIC_SUPABASE_URL:'https://pqirsnfupofhulmewakq.supabase.co',WACRM_INBOX_READ_API:'test_only',WACRM_INBOX_SCOPED_UI:'test_only'} as NodeJS.ProcessEnv
+  const env: NodeJS.ProcessEnv={NODE_ENV:'test',NEXT_PUBLIC_SUPABASE_URL:'https://pqirsnfupofhulmewakq.supabase.co',WACRM_INBOX_READ_API:'test_only',WACRM_INBOX_SCOPED_UI:'test_only'}
   expect(scopedInboxEnabled(env)).toBe(true)
   expect(scopedInboxEnabled({...env,WACRM_INBOX_SCOPED_UI:'off'})).toBe(false)
   expect(scopedInboxEnabled({...env,WACRM_INBOX_READ_API:'off'})).toBe(false)
