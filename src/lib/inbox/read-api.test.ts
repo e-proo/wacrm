@@ -1,4 +1,4 @@
-import { describe,it,expect,vi,beforeEach } from 'vitest'
+import { describe,it,expect,vi,beforeEach,afterEach } from 'vitest'
 const h=vi.hoisted(()=>({role:vi.fn(),rpc:vi.fn(),isTest:vi.fn()}))
 vi.mock('@/lib/auth/account',()=>({requireRole:h.role,UnauthorizedError:class extends Error{},ForbiddenError:class extends Error{}}))
 vi.mock('@/lib/automations/admin-client',()=>({supabaseAdmin:()=>({rpc:h.rpc})}))
@@ -7,6 +7,7 @@ import { inboxRead,parseInboxRead,encodeInboxCursor,decodeInboxCursor,safeInboxM
 const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222',c='33333333-3333-4333-8333-333333333333'
 const req=(query='')=>new Request('https://example.test/api/inbox/threads'+query)
 beforeEach(()=>{vi.clearAllMocks();h.role.mockResolvedValue({accountId:a,userId:b,role:'viewer'});h.isTest.mockReturnValue(true);vi.stubEnv('WACRM_INBOX_READ_API','test_only');vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY','test-key');h.rpc.mockResolvedValue({data:{rows:[]},error:null})})
+afterEach(()=>vi.unstubAllEnvs())
 describe('inbox read API',()=>{
  it('rejects account override, duplicate filters, oversized limits and malformed scope',async()=>{
   for(const q of ['?account_id='+c,'?limit=101','?limit=0','?scope=invalid','?scope=unknown&channel_id='+c,'?limit=2&limit=3','?cursor=bogus'])
