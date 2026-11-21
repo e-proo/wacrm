@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
     priorCustomerMsgCount: 0,
     /** Row `lookupInternalIdByMetaId` resolves for a `context.id`. */
     replyContextParent: null as { id: string } | null,
+    replyLookupFilters: [] as Record<string, unknown>[],
     conversation: { id: 'conv-1', unread_count: 0, account_id: 'acc-1' },
     upsertCalls: [] as { row: Record<string, unknown>; options: unknown }[],
     rpcCalls: [] as { name: string; args: Record<string, unknown> }[],
@@ -156,18 +157,20 @@ vi.mock('@supabase/supabase-js', () => ({
                         }),
                     }),
                   }
-                : // lookupInternalIdByMetaId: select('id').eq().eq().maybeSingle()
-                  {
-                    eq: () => ({
-                      eq: () => ({
-                        maybeSingle: () =>
-                          Promise.resolve({
-                            data: h.state.replyContextParent,
-                            error: null,
-                          }),
-                      }),
-                    }),
-                  },
+                : (() => {
+                    const filters: Record<string, unknown> = {}
+                    const builder = {
+                      eq: (column: string, value: unknown) => { filters[column] = value; return builder },
+                      is: (column: string, value: unknown) => { filters[column] = value; return builder },
+                      maybeSingle: () => {
+                        h.state.replyLookupFilters.push({ ...filters })
+                        const scoped = filters.provider === 'meta_cloud' && filters.connection_id === 'meta-connection-1'
+                          && filters.conversation_id === 'conv-1' && typeof filters.provider_message_id === 'string'
+                        return Promise.resolve({ data: scoped ? h.state.replyContextParent : null, error: null })
+                      },
+                    }
+                    return builder
+                  })(),
             // Idempotent insert: upsert(...).select('id')
             upsert: (row: Record<string, unknown>, options: unknown) => {
               h.state.upsertCalls.push({ row, options })
@@ -295,6 +298,7 @@ beforeEach(() => {
   h.state.messageUpsertResult = [{ id: 'msg-1' }]
   h.state.priorCustomerMsgCount = 0
   h.state.replyContextParent = null
+  h.state.replyLookupFilters = []
   h.state.conversation = { id: 'conv-1', unread_count: 0, account_id: 'acc-1' }
   h.state.upsertCalls = []
   h.state.rpcCalls = []

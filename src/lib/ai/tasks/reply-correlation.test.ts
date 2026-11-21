@@ -100,7 +100,10 @@ describe('Task reply integration boundaries', () => {
       'utf8',
     )
 
-    expect(source).toContain('const isInboundReplay =')
+    expect(source).toMatch(/(?:let|const) isInboundReplay =/)
+    expect(source).toContain('isInboundReplay = !insertedRows || insertedRows.length === 0')
+    expect(source).toContain(".eq('provider_message_id', message.providerMessageId)")
+    expect(source).toContain(".eq('connection_id', message.connectionId)")
     expect(source).toContain("workerId: isInboundReplay ? 'webhook-task-replay'")
     expect(source).toContain('if (isInboundReplay) return')
 
