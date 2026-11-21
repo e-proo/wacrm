@@ -17,6 +17,8 @@ export interface NormalizedInboundMessage {
   connectionId: string
   providerMessageId: string
   providerEventId?: string
+  /** Distinguish a provider-native message identifier from delivery-only fallback. */
+  providerMessageIdentityKind?: 'native' | 'event_fallback'
   /** Provider-native 1:1 chat destination, separate from the CRM phone identity. */
   providerChatId?: string
   from: string
@@ -64,6 +66,7 @@ export function normalizeMetaInboundMessage(
       provider: 'meta_cloud',
       connectionId,
       providerMessageId: message.id,
+      providerMessageIdentityKind: 'native',
     },
     contact,
   }
@@ -145,7 +148,8 @@ export function normalizeOpenWAInboundMessage(
   const nested = record(data.message)
   const message = nested ?? data
 
-  const providerMessageId = stringValue(message.id) ?? stringValue(message.messageId) ?? stringValue(message.message_id) ?? envelope.eventId
+  const nativeMessageId = stringValue(message.id) ?? stringValue(message.messageId) ?? stringValue(message.message_id)
+  const providerMessageId = nativeMessageId ?? envelope.eventId
   const providerSender = stringValue(message.from) ?? stringValue(message.sender) ?? stringValue(message.senderId) ?? stringValue(message.sender_id)
   const rawFrom = stringValue(message.senderPhone) ?? providerSender
   const from = rawFrom?.endsWith('@c.us') ? rawFrom.slice(0, -5) : rawFrom
@@ -181,6 +185,7 @@ export function normalizeOpenWAInboundMessage(
     connectionId,
     providerMessageId,
     providerEventId: envelope.eventId,
+    providerMessageIdentityKind: nativeMessageId ? 'native' : 'event_fallback',
     ...(providerChatId ? { providerChatId } : {}),
     from,
     recipient: stringValue(message.to) ?? stringValue(message.recipient),
