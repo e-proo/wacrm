@@ -80,19 +80,31 @@ async function flagBroadcastReplyIfAny(accountId: string, contactId: string) {
  */
 async function lookupInternalIdByMetaId(
   metaId: string,
-  conversationId: string
+  conversationId: string,
+  route: Pick<NormalizedInboundMessage, 'provider' | 'connectionId'>,
 ): Promise<string | null> {
+  // Native ID alone is not a transport identity. A provider-neutral row
+  // may have no legacy message_id after a proven inter-channel collision.
   const { data, error } = await supabaseAdmin()
     .from('messages')
     .select('id')
-    .eq('message_id', metaId)
+    .eq('provider_message_id', metaId)
     .eq('conversation_id', conversationId)
+    .eq('provider', route.provider)
+    .eq('connection_id', route.connectionId)
     .maybeSingle()
   if (error) {
-    console.error('[webhook] lookupInternalIdByMetaId failed:', error.message)
+    console.error('[webhook] scoped message lookup failed:', error.code)
     return null
   }
-  return data?.id ?? null
+  if (data?.id) return data.id
+  // Preserve only the pre-provider Meta historical fallback. OpenWA cannot
+  // authorize a native reply/reaction against a missing transport identity.
+  if (route.provider !== 'meta_cloud') return null
+  const { data: historical, error: historicalError } = await supabaseAdmin().from('messages').select('id')
+    .eq('conversation_id',conversationId).eq('message_id',metaId)
+    .is('provider',null).is('connection_id',null).maybeSingle()
+  return historicalError ? null : historical?.id ?? null
 }
 
 /**
@@ -113,7 +125,8 @@ async function handleReaction(
 
   const targetInternalId = await lookupInternalIdByMetaId(
     reaction.message_id,
-    conversationId
+    conversationId,
+    message,
   )
   if (!targetInternalId) {
     console.warn(
@@ -241,7 +254,8 @@ export async function processNormalizedInboundMessage(
   if (message.context?.id) {
     replyToInternalId = await lookupInternalIdByMetaId(
       message.context.id,
-      conversation.id
+      conversation.id,
+      message,
     )
     if (!replyToInternalId) {
       console.warn(
@@ -366,7 +380,9 @@ export async function processNormalizedInboundMessage(
           .from('messages')
           .select('id')
           .eq('conversation_id', conversation.id)
-          .eq('message_id', message.id)
+          .eq('provider_message_id', message.providerMessageId)
+          .eq('provider', message.provider)
+          .eq('connection_id', message.connectionId)
           .maybeSingle()
 
       if (persistedInboundError || !persistedInbound?.id) {
@@ -377,6 +393,14 @@ export async function processNormalizedInboundMessage(
         return
       }
       inboundMessageId = persistedInbound.id as string
+      if (message.provider === 'openwa') {
+        // Rolling back the feature flag cannot re-run an admitted canonical
+        // source (including an interrupted/held effect) via legacy Task replay.
+        const { data: canonicalMembership, error: membershipError } = await supabaseAdmin().from('inbox_message_memberships')
+          .select('message_id').eq('account_id', accountId).eq('message_id', inboundMessageId)
+          .eq('evidence_kind', 'verified_current_ingress').maybeSingle()
+        if (canonicalMembership || (membershipError && !['42P01','PGRST205'].includes(membershipError.code))) return
+      }
     }
 
     if (!inboundMessageId) {

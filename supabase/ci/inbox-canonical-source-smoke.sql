@@ -20,7 +20,7 @@ BEGIN
  VALUES(a,'openwa',ch,s1,ep1,'synthetic-shared','fixture'),(a,'openwa',ch,s2,ep2,'synthetic-shared','fixture'),(a,'openwa',ch2,s3,ep3,'synthetic-shared','fixture');
  FOR i IN 1..4 LOOP
   x=CASE WHEN i=2 THEN s2 WHEN i=3 THEN s3 ELSE s1 END; session=CASE WHEN i=2 THEN 'inbox209-2' WHEN i=3 THEN 'inbox209-3' ELSE 'inbox209-1' END;
-  nid=CASE WHEN i=4 THEN 'distinct-native' ELSE 'same-native' END;expected=CASE WHEN i=2 THEN 'duplicate' WHEN i=3 THEN 'review' ELSE 'inserted' END;
+  nid=CASE WHEN i=4 THEN 'distinct-native' ELSE 'same-native' END;expected=CASE WHEN i=2 THEN 'duplicate' ELSE 'inserted' END;
   token=gen_random_uuid();ev='inbox209-event-'||i;
   INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,processing_token,processing_started_at)
   VALUES(a,x,'openwa',ev,clock_timestamp(),token,clock_timestamp());
@@ -31,18 +31,20 @@ BEGIN
   ELSIF i=2 THEN
    IF (v->>'messageId')::uuid<>m OR public.inbox_claim_canonical_effect(a,canon,s2,ev,token) IS NOT NULL THEN RAISE EXCEPTION 'secondary dispatched'; END IF;
   ELSIF i=3 THEN
-   IF v->>'reason'<>'legacy_collision' OR (v->>'canonicalId')::uuid=canon THEN RAISE EXCEPTION 'cross-channel alias'; END IF;
+   IF (v->>'canonicalId')::uuid=canon OR (v->>'messageId')::uuid=m THEN RAISE EXCEPTION 'cross-channel alias'; END IF;
   END IF;
  END LOOP;
  claim=public.inbox_claim_canonical_effect(a,canon,s1,'inbox209-event-1',token1);
  IF claim IS NULL OR public.inbox_claim_canonical_effect(a,canon,s1,'inbox209-event-1',token1) IS NOT NULL THEN RAISE EXCEPTION 'claim not single-use'; END IF;
  IF NOT public.inbox_finish_canonical_effect(a,canon,claim,true) OR public.inbox_finish_canonical_effect(a,canon,claim,true) THEN RAISE EXCEPTION 'finish not single-use'; END IF;
- IF (SELECT count(*) FROM public.messages WHERE conversation_id=c)<>2
- OR (SELECT count(*) FROM public.inbox_message_memberships WHERE account_id=a AND evidence_kind='verified_current_ingress')<>2
- OR (SELECT unread_count FROM public.conversations WHERE id=c)<>4
- OR (SELECT sum(unread_count_known) FROM public.inbox_threads WHERE account_id=a)<>2
+ IF (SELECT count(*) FROM public.messages WHERE conversation_id=c)<>3
+ OR (SELECT count(*) FROM public.inbox_message_memberships WHERE account_id=a AND evidence_kind='verified_current_ingress')<>3
+ OR (SELECT unread_count FROM public.conversations WHERE id=c)<>5
+ OR (SELECT sum(unread_count_known) FROM public.inbox_threads WHERE account_id=a)<>3
  OR (SELECT unread_count FROM public.inbox_legacy_unread WHERE account_id=a AND conversation_id=c)<>2
- OR (SELECT count(*) FROM public.inbox_canonical_intake_review WHERE account_id=a AND reason='legacy_collision')<>1
+ OR (SELECT count(*) FROM public.inbox_canonical_intake_review WHERE account_id=a AND reason='legacy_collision')<>0
+ OR (SELECT count(*) FROM public.messages WHERE conversation_id=c AND provider_message_id='same-native')<>2
+ OR (SELECT count(*) FROM public.messages WHERE conversation_id=c AND provider_message_id='same-native' AND message_id IS NULL)<>1
  THEN RAISE EXCEPTION 'atomic unread/source invariant'; END IF;
 END $fixture$;
 SET CONSTRAINTS ALL IMMEDIATE;
