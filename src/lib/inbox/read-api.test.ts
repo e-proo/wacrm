@@ -30,9 +30,9 @@ describe('inbox read API',()=>{
   const r=await inboxRead(req('?limit=1'),'threads');const body=await r.json()
   expect(r.status).toBe(200);expect(r.headers.get('cache-control')).toContain('no-store')
   expect(body.items).toEqual([{id:c}]);expect(body.next_cursor).toBeTruthy()
-  expect(h.rpc).toHaveBeenCalledWith('inbox_read_page',expect.objectContaining({p_account:a,p_actor:b,p_limit:1,p_scope:'active'}))
+  expect(h.rpc).toHaveBeenCalledWith('inbox_read_filtered_page',expect.objectContaining({p_account:a,p_actor:b,p_limit:1,p_scope:'active'}))
   await inboxRead(req('?limit=1&cursor='+body.next_cursor),'threads')
-  expect(h.rpc).toHaveBeenLastCalledWith('inbox_read_page',expect.objectContaining({p_before_id:c,p_before_at:null}))
+  expect(h.rpc).toHaveBeenLastCalledWith('inbox_read_filtered_page',expect.objectContaining({p_before_id:c,p_before_at:null}))
  })
  it('gates disabled flag and rejects cross-account/unknown IDs without revealing details',async()=>{
   h.isTest.mockReturnValue(false);expect((await inboxRead(req(),'threads')).status).toBe(403);expect(h.rpc).not.toHaveBeenCalled()
@@ -54,6 +54,15 @@ describe('inbox read API',()=>{
   const token=encodeInboxCursor({at:'2026-11-21T22:00:00+00:00',id:c},a,b,input,'key')
   expect(()=>decodeInboxCursor(token,a,b,{...input,message:b},'key')).toThrow()
   expect(()=>parseInboxRead(req('?scope=unknown'),'observations',{thread:b,message:c})).toThrow()
+ })
+ it('binds all advanced filters to cursors and refuses account context mismatch',async()=>{
+  const {input}=parseInboxRead(req('?unread=true&assignment=mine&company=ACME&tags='+c+'&thread_id='+b),'threads')
+  expect(input).toMatchObject({unread:true,assignment:'mine',company:'ACME',tags:[c],exact:b})
+  const token=encodeInboxCursor({at:null,id:c},a,b,input,'key')
+  expect(()=>decodeInboxCursor(token,a,b,{...input,unread:false},'key')).toThrow()
+  expect(()=>parseInboxRead(req('?tags='+c+','+c),'threads')).toThrow()
+  expect((await inboxRead(new Request(req().url,{headers:{'x-wacrm-inbox-account':c,'x-wacrm-inbox-actor':b}}),'threads')).status).toBe(403)
+  expect(h.rpc).not.toHaveBeenCalled()
  })
  it('never returns arbitrary provider links, foreign storage paths or URL tokens',()=>{
   const base='https://test.supabase.co',url=base+'/storage/v1/object/public/chat-media/account-'+a+'/x.png'
