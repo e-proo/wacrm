@@ -1,3 +1,8 @@
+-- Explicit backend registry access for a clean database, not inherited TEST grants.
+-- UPDATE(status) is the minimum update privilege required for row-share locks.
+-- No browser grant, no credential-table exposure, no RLS changes.
+GRANT SELECT, UPDATE(status) ON public.whatsapp_connections TO service_role;
+
 -- Preserve causal source identity across deletion/correction; never fall back
 -- to a different connection for an already canonical queued reply.
 ALTER TABLE public.inbox_canonical_messages ADD COLUMN first_source_message_id uuid;

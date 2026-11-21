@@ -60,3 +60,5 @@ Scope-aware Meta test mock and replay assertions updated in 4d34f89. Migration 2
 
 ### SOF-89.08 final queued-run and media fence
 216 preserves first source UUID after deletion/correction, refuses missing/foreign or tombstoned queued run scope and retains scope through guarded dispatch. Media retries revalidate both observing and original epochs. 208–215 TEST ledger applied after clean migration run 44955067651, ten applied-schema rollback smokes passed, 725 messages/82 unread retained; full CI 44955067668 had 2531 passing tests and one old static outbound resolver assertion. Final closure requires green CI and applied 216. No provider dispatch or activation.
+
+Clean replay 44955628459 uncovered a fresh-schema registry grant gap, masked by inherited TEST service-role access. Before applying 216, add explicit server-only `SELECT, UPDATE(status)` for row-share locks on `whatsapp_connections`; tested by revoking inherited registry privileges in a rollback transaction and re-running causal scope. No browser ACL or RLS change. 

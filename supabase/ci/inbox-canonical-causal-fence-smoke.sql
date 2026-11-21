@@ -20,6 +20,7 @@ BEGIN
  INSERT INTO public.ai_agents(account_id,slug,name) VALUES(a,'inbox216','Fixture') RETURNING id INTO ag;
  INSERT INTO public.ai_agent_revisions(account_id,agent_id,revision_number,provider_connection_id,model) VALUES(a,ag,1,ap,'fixture') RETURNING id INTO rev;
  INSERT INTO public.ai_agent_runs(account_id,conversation_id,ai_agent_id,agent_revision_id,provider_connection_id,plane,idempotency_key,run_mode,inbound_message_id) VALUES(a,c,ag,rev,ap,'customer','inbox216-run','inbound',mid) RETURNING id INTO run;
+ IF NOT has_table_privilege('service_role','public.whatsapp_connections','SELECT') OR NOT has_column_privilege('service_role','public.whatsapp_connections','status','UPDATE') THEN RAISE EXCEPTION 'missing clean registry service grants'; END IF;
  EXECUTE 'SET LOCAL ROLE service_role';
  scope=public.inbox_canonical_agent_run_scope(a,c,run);
  IF scope->>'messageId' IS DISTINCT FROM mid::text OR scope->>'connectionId' IS DISTINCT FROM s::text THEN RAISE EXCEPTION 'queued causal scope'; END IF;
