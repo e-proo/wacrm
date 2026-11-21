@@ -20,6 +20,7 @@ import { handleAdminChangeCommand } from '@/lib/ai/runtime/admin-change-commands
 import { engineSendText } from '@/lib/automations/meta-send'
 import { correlateInboundTaskReply } from '@/lib/ai/tasks/reply-correlation'
 import type { NormalizedInboundMessage } from '@/lib/whatsapp/inbound-normalization'
+import { commitAndClaimCanonicalInbound, finishCanonicalDispatch, type CanonicalDispatch, type CanonicalReceipt } from '@/lib/inbox/canonical-ingress'
 
 let _adminClient: ReturnType<typeof createClient> | null = null
 function supabaseAdmin() {
@@ -172,6 +173,7 @@ export async function processNormalizedInboundMessage(
   // Signed OpenWA webhook may carry small inline media bytes. Never include
   // these bytes in NormalizedInboundMessage sent to agents/automations.
   signedInlineMedia?: string,
+  canonicalReceipt?: CanonicalReceipt,
 ) {
   const openWAIdentity = message.provider === 'openwa'
     ? await resolveOpenWAInboundContactIdentity(supabaseAdmin(), {
@@ -210,7 +212,7 @@ export async function processNormalizedInboundMessage(
   // the reaction short-circuit below — so a conversation first opened by
   // a reaction still fires the event, and a subscriber always sees the
   // thread open before its first message.received.
-  if (convResult.created) {
+  if (convResult.created && !canonicalReceipt) {
     await dispatchWebhookEvent(supabaseAdmin(), accountId, 'conversation.created', {
       conversation_id: conversation.id,
       contact_id: contactRecord.id,
@@ -281,92 +283,117 @@ export async function processNormalizedInboundMessage(
     .select('id', { count: 'exact', head: true })
     .eq('conversation_id', conversation.id)
     .eq('sender_type', 'customer')
-  const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
+  let isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
+  let contactCreated = contactOutcome.wasCreated
+  let canonicalRun: CanonicalDispatch | null = null
+  let isInboundReplay = false
+  let inboundMessageId: string | null = null
 
-  // Idempotent insert. Meta retries webhook deliveries (a slow ack, a
-  // transient 5xx), and each retry replays the exact same message.id. The
-  // unique index on (conversation_id, message_id) added in migration 037
-  // makes a replay conflict; `ignoreDuplicates` turns that into an ON
-  // CONFLICT DO NOTHING, and the `.select()` then returns the inserted row
-  // ONLY on a genuine first insert — an empty result means this delivery
-  // was a replay. This is the single idempotency boundary that must sit
-  // BEFORE the unread bump and all downstream fan-out below (issue #367).
-  const { data: insertedRows, error: msgError } = await supabaseAdmin()
-    .from('messages')
-    .upsert(
-      {
-        conversation_id: conversation.id,
-        sender_type: 'customer',
-        content_type: contentType,
-        content_text: contentText,
-        media_url: mediaUrl,
-        // Meta's MIME type for the attachment (migration 039). Was
-        // discarded before, which forced the download path to guess an
-        // extension from the fetched blob — impossible to do until the
-        // bytes had already been fetched successfully.
-        media_type: mediaType,
-        message_id: message.providerMessageId,
-        provider: message.provider,
-        connection_id: message.connectionId,
-        provider_message_id: message.providerMessageId,
-        // OpenWA @lid is a privacy/chat JID, not a phone. Persist the signed
-        // gateway chat identity alongside the provider-scoped inbound row.
-        ...(message.provider === 'openwa' ? { provider_chat_id: message.providerChatId ?? null } : {}),
-        status: 'delivered',
-        created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
-        reply_to_message_id: replyToInternalId,
-        // Only populated for content_type='interactive'. Migration 010 added
-        // the column; null for every other content_type so existing inserts
-        // behave identically.
-        interactive_reply_id: interactiveReplyId,
-      },
-      { onConflict: 'conversation_id,message_id', ignoreDuplicates: true }
-    )
-    .select('id')
-
-  if (msgError) {
-    console.error('Error inserting message:', msgError)
-    return
-  }
-
-  // Replayed delivery remains a no-op for unread counts, flows,
-  // automations, public webhook fan-out, and ordinary AI handling. We retain
-  // the persisted message id long enough to recover one durable Task-reply
-  // correlation if a previous invocation crashed after INSERT but before the
-  // correlation RPC. That RPC is itself idempotent on inbound_message_id.
-  const isInboundReplay = !insertedRows || insertedRows.length === 0
-  let inboundMessageId: string | null =
-    insertedRows?.[0]?.id ?? null
-
-  if (isInboundReplay) {
-    console.info(
-      '[webhook] duplicate inbound message seen (idempotent replay):',
-      message.id,
-    )
-
-    const { data: persistedInbound, error: persistedInboundError } =
-      await supabaseAdmin()
-        .from('messages')
-        .select('id')
-        .eq('conversation_id', conversation.id)
-        .eq('message_id', message.id)
-        .maybeSingle()
-
-    if (persistedInboundError || !persistedInbound?.id) {
-      console.error(
-        '[webhook] duplicate inbound message could not be reloaded:',
-        persistedInboundError,
+  if (canonicalReceipt) {
+    canonicalRun = await commitAndClaimCanonicalInbound(supabaseAdmin(), {
+      accountId, conversationId: conversation.id, message, receipt: canonicalReceipt,
+      contentType, contentText, mediaType, contactCreated, conversationCreated: convResult.created,
+    })
+    // A durable review or a duplicate observation cannot reach any business effect.
+    if (!canonicalRun) return
+    inboundMessageId = canonicalRun.messageId
+    replyToInternalId = canonicalRun.replyToMessageId
+    isFirstInboundMessage = canonicalRun.firstInbound
+    contactCreated = canonicalRun.contactCreated
+  } else {
+    // Idempotent insert. Meta retries webhook deliveries (a slow ack, a
+    // transient 5xx), and each retry replays the exact same message.id. The
+    // unique index on (conversation_id, message_id) added in migration 037
+    // makes a replay conflict; `ignoreDuplicates` turns that into an ON
+    // CONFLICT DO NOTHING, and the `.select()` then returns the inserted row
+    // ONLY on a genuine first insert — an empty result means this delivery
+    // was a replay. This is the single idempotency boundary that must sit
+    // BEFORE the unread bump and all downstream fan-out below (issue #367).
+    const { data: insertedRows, error: msgError } = await supabaseAdmin()
+      .from('messages')
+      .upsert(
+        {
+          conversation_id: conversation.id,
+          sender_type: 'customer',
+          content_type: contentType,
+          content_text: contentText,
+          media_url: mediaUrl,
+          // Meta's MIME type for the attachment (migration 039). Was
+          // discarded before, which forced the download path to guess an
+          // extension from the fetched blob — impossible to do until the
+          // bytes had already been fetched successfully.
+          media_type: mediaType,
+          message_id: message.providerMessageId,
+          provider: message.provider,
+          connection_id: message.connectionId,
+          provider_message_id: message.providerMessageId,
+          // OpenWA @lid is a privacy/chat JID, not a phone. Persist the signed
+          // gateway chat identity alongside the provider-scoped inbound row.
+          ...(message.provider === 'openwa' ? { provider_chat_id: message.providerChatId ?? null } : {}),
+          status: 'delivered',
+          created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
+          reply_to_message_id: replyToInternalId,
+          // Only populated for content_type='interactive'. Migration 010 added
+          // the column; null for every other content_type so existing inserts
+          // behave identically.
+          interactive_reply_id: interactiveReplyId,
+        },
+        { onConflict: 'conversation_id,message_id', ignoreDuplicates: true }
       )
+      .select('id')
+
+    if (msgError) {
+      console.error('Error inserting message:', msgError)
       return
     }
-    inboundMessageId = persistedInbound.id as string
-  }
 
-  if (!inboundMessageId) {
-    console.error('[webhook] inbound message id missing after persistence')
-    return
-  }
+    // Replayed delivery remains a no-op for unread counts, flows,
+    // automations, public webhook fan-out, and ordinary AI handling. We retain
+    // the persisted message id long enough to recover one durable Task-reply
+    // correlation if a previous invocation crashed after INSERT but before the
+    // correlation RPC. That RPC is itself idempotent on inbound_message_id.
+    isInboundReplay = !insertedRows || insertedRows.length === 0
+    inboundMessageId = insertedRows?.[0]?.id ?? null
 
+    if (isInboundReplay) {
+      console.info(
+        '[webhook] duplicate inbound message seen (idempotent replay):',
+        message.id,
+      )
+
+      const { data: persistedInbound, error: persistedInboundError } =
+        await supabaseAdmin()
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', conversation.id)
+          .eq('message_id', message.id)
+          .maybeSingle()
+
+      if (persistedInboundError || !persistedInbound?.id) {
+        console.error(
+          '[webhook] duplicate inbound message could not be reloaded:',
+          persistedInboundError,
+        )
+        return
+      }
+      inboundMessageId = persistedInbound.id as string
+    }
+
+    if (!inboundMessageId) {
+      console.error('[webhook] inbound message id missing after persistence')
+      return
+    }
+
+  }
+  if (!inboundMessageId) return
+
+  let returned = true
+  try {
+    if (canonicalRun?.conversationCreated) {
+      await dispatchWebhookEvent(supabaseAdmin(), accountId, 'conversation.created', {
+        conversation_id: conversation.id, contact_id: contactRecord.id,
+      })
+    }
   // OpenWA media must NEVER block the initial message INSERT. The gateway may
   // be slow to archive a video/document, or may mark the bytes unavailable.
   // Persist the message first, then hydrate its media URL. A redelivery of the
@@ -400,6 +427,7 @@ export async function processNormalizedInboundMessage(
   // (issue #369). The RPC increments in a single UPDATE and refreshes the
   // last-message summary in the same statement.
   if (!isInboundReplay) {
+    if (!canonicalRun) {
     const { error: convError } = await supabaseAdmin().rpc(
       'bump_conversation_on_inbound',
       {
@@ -410,6 +438,7 @@ export async function processNormalizedInboundMessage(
 
     if (convError) {
       console.error('Error updating conversation:', convError)
+    }
     }
 
     // A customer writing again re-opens the thread (issue #409).
@@ -684,7 +713,7 @@ export async function processNormalizedInboundMessage(
   // manually-imported contacts sending for the first time. We dispatch both
   // so users can pick whichever semantic they want; an automation that
   // listens to only one trigger runs only when that trigger matches.
-  if (contactOutcome.wasCreated) automationTriggers.unshift('new_contact_created')
+  if (contactCreated) automationTriggers.unshift('new_contact_created')
   if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
   // Awaited — not fire-and-forget. We're inside the route's `after()`
   // block, which only keeps the function alive for promises it can see, so
@@ -790,6 +819,12 @@ export async function processNormalizedInboundMessage(
     content_type: contentType,
     text: contentText,
   })
+  } catch (error) {
+    returned = false
+    throw error
+  } finally {
+    if (canonicalRun) await finishCanonicalDispatch(supabaseAdmin(), accountId, canonicalRun, returned)
+  }
 }
 
 async function parseMessageContent(

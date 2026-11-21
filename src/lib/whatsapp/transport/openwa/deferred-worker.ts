@@ -6,6 +6,7 @@
  * customer/agent/automation pipeline used by ordinary signed webhooks.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { canonicalInboxTestMode } from '@/lib/inbox/canonical-ingress'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
 import { applyWhatsAppStatus } from '@/lib/whatsapp/status-lifecycle'
 import { preflightOpenWAInboundIdentity, readDeferredInbound, readDeferredStatus } from './deferred'
@@ -70,6 +71,7 @@ async function processDeferredJob(db: SupabaseClient, job: DeferredJob): Promise
     return outcome === 'unknown' ? retry('native_message_not_found') : COMPLETE
   }
 
+  if (canonicalInboxTestMode() && job.event_kind === 'unresolved_identity') return review('canonical_receipt_reconciliation_required')
   if (job.event_kind !== 'unresolved_identity' || !job.native_chat_id) {
     return review('unsupported_deferred_event')
   }

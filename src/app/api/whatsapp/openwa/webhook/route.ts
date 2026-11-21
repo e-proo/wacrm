@@ -10,6 +10,7 @@ import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processo
 import { applyOpenWAStatusWithRetry, parseOpenWAStatusEvent } from '@/lib/whatsapp/status-lifecycle'
 import { classifyOpenWAWebhookRejection, markOpenWAWebhookProcessed, verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
 import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
+import { canonicalInboxTestMode, holdCanonicalReview } from '@/lib/inbox/canonical-ingress'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
 export const maxDuration = 60
@@ -71,6 +72,9 @@ export async function POST(request: Request) {
   // return 503 and an expired lease can be resumed on signed redelivery.
   try {
     const db = adminDb()
+    const canonicalReceipt = canonicalInboxTestMode()
+      ? { eventId: envelope.eventId, token: processingToken, sessionId: envelope.sessionId, instanceId: envelope.instanceId ?? null }
+      : null
       const event = envelope.event.toLowerCase().replace(/[\s_-]+/g, '.')
       if (['session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'].includes(event)) {
         await refreshOpenWAConnectionStatus(db, accountId, connectionId)
@@ -96,7 +100,9 @@ export async function POST(request: Request) {
         }
       } else if (event === 'message.sent') {
         const ownSent = normalizeOpenWAOwnSentMessage(envelope, connectionId)
-        if (ownSent && !isSensitiveOpenWAAdminOwnSentEcho(ownSent)) {
+        if (ownSent && !isSensitiveOpenWAAdminOwnSentEcho(ownSent) && canonicalReceipt) {
+          await holdCanonicalReview(db, accountId, ownSent, canonicalReceipt, 'outbound_echo_unproven')
+        } else if (ownSent && !isSensitiveOpenWAAdminOwnSentEcho(ownSent)) {
           const { data: account, error: accountError } = await db.from('accounts')
             .select('owner_user_id').eq('id', accountId).maybeSingle()
           if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
@@ -109,6 +115,11 @@ export async function POST(request: Request) {
       } else {
         const normalized = normalizeOpenWAInboundMessage(envelope, connectionId)
         if (normalized) {
+          if (canonicalReceipt && normalized.message.type === 'reaction') {
+            await holdCanonicalReview(db, accountId, normalized.message, canonicalReceipt, 'reaction_unproven')
+            await markOpenWAWebhookProcessed(db, accountId, connectionId, envelope.eventId, processingToken)
+            return NextResponse.json({ ok: true, deferred: 'canonical_review' }, { status: 202 })
+          }
           // Identity preflight runs BEFORE any CRM/AI side effect.
           // Unknown native LIDs must be stored durably, never guessed.
           const identity = await preflightOpenWAInboundIdentity(db, {
@@ -125,7 +136,8 @@ export async function POST(request: Request) {
           }
           const { data: account, error: accountError } = await db.from('accounts').select('owner_user_id').eq('id', accountId).maybeSingle()
           if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
-          await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true, extractOpenWASignedInlineMedia(envelope))
+          if (canonicalReceipt) await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true, extractOpenWASignedInlineMedia(envelope), canonicalReceipt)
+          else await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true, extractOpenWASignedInlineMedia(envelope))
         }
       }
     await markOpenWAWebhookProcessed(db, accountId, connectionId, envelope.eventId, processingToken)

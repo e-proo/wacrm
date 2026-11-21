@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { normalizeMetaInboundMessage, normalizeOpenWAInboundMessage, normalizeOpenWAOwnSentMessage } from './inbound-normalization'
 
 describe('provider-neutral inbound normalization', () => {
+  it('never treats a delivery event fallback as a native message identity', () => {
+    const envelope = { timestamp: '2026-10-26T18:00:00.000Z', eventId: 'delivery-1', sessionId: 's', event: 'message.received' }
+    expect(normalizeOpenWAInboundMessage({ ...envelope, data: { from: '123', text: 'a' } }, 'c')?.message).toMatchObject({ providerMessageIdentityKind: 'event_fallback', providerMessageId: 'delivery-1' })
+    expect(normalizeOpenWAInboundMessage({ ...envelope, data: { id: 'native-1', from: '123', text: 'a' } }, 'c')?.message).toMatchObject({ providerMessageIdentityKind: 'native', providerMessageId: 'native-1' })
+  })
   it('normalizes equivalent Meta and OpenWA text into equivalent business fields', () => {
     const meta = normalizeMetaInboundMessage({ id: 'm-1', from: '967700000001', timestamp: '1792950000', type: 'text', text: { body: 'hello' } }, { profile: { name: 'Customer' }, wa_id: '967700000001' }, 'meta-connection')
     const openwa = normalizeOpenWAInboundMessage({ timestamp: '2026-10-26T18:00:00.000Z', eventId: 'evt-1', sessionId: 'session-1', event: 'message.received', data: { id: 'w-1', from: '967700000001', timestamp: '1792950000', text: 'hello', pushName: 'Customer' } }, 'openwa-connection')
