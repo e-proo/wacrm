@@ -10,6 +10,7 @@ import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processo
 import { applyOpenWAStatusWithRetry, parseOpenWAStatusEvent } from '@/lib/whatsapp/status-lifecycle'
 import { classifyOpenWAWebhookRejection, markOpenWAWebhookProcessed, verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
 import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
+import { reconcileCanonicalAck, reconcileCanonicalEcho } from '@/lib/inbox/canonical-outbound'
 import { canonicalInboxTestMode, holdCanonicalReview } from '@/lib/inbox/canonical-ingress'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
@@ -81,7 +82,9 @@ export async function POST(request: Request) {
       } else if (['status', 'message.status', 'message.ack', 'message.receipt', 'message.failed', 'ack', 'delivery', 'receipt'].includes(event)) {
         const status = parseOpenWAStatusEvent(envelope.data)
         if (status) {
-          const result = await applyOpenWAStatusWithRetry(db, { provider: 'openwa', accountId, connectionId, ...status })
+          const result = canonicalReceipt
+            ? await reconcileCanonicalAck(db, { provider: 'openwa', accountId, connectionId, ...status }, canonicalReceipt)
+            : await applyOpenWAStatusWithRetry(db, { provider: 'openwa', accountId, connectionId, ...status })
           if (result === 'unknown') {
             // No provider payload, recipient or message contents in logs.
             // Long-running ambiguous sends must be reconciled, not resent.
@@ -101,7 +104,10 @@ export async function POST(request: Request) {
       } else if (event === 'message.sent') {
         const ownSent = normalizeOpenWAOwnSentMessage(envelope, connectionId)
         if (ownSent && !isSensitiveOpenWAAdminOwnSentEcho(ownSent) && canonicalReceipt) {
-          await holdCanonicalReview(db, accountId, ownSent, canonicalReceipt, 'outbound_echo_unproven')
+          const { data: account, error: accountError } = await db.from('accounts').select('owner_user_id').eq('id', accountId).maybeSingle()
+          if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
+          await reconcileCanonicalEcho({ db, storage: db.storage, accountId, ownerUserId: account.owner_user_id, message: ownSent,
+            receipt: canonicalReceipt, signedInlineMedia: extractOpenWASignedInlineMedia(envelope) })
         } else if (ownSent && !isSensitiveOpenWAAdminOwnSentEcho(ownSent)) {
           const { data: account, error: accountError } = await db.from('accounts')
             .select('owner_user_id').eq('id', accountId).maybeSingle()

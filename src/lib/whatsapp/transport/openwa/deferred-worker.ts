@@ -6,6 +6,7 @@
  * customer/agent/automation pipeline used by ordinary signed webhooks.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { reconcileCanonicalAck } from '@/lib/inbox/canonical-outbound'
 import { canonicalInboxTestMode, canonicalReceiptOutcome } from '@/lib/inbox/canonical-ingress'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
 import { applyWhatsAppStatus } from '@/lib/whatsapp/status-lifecycle'
@@ -62,12 +63,10 @@ async function processDeferredJob(db: SupabaseClient, job: DeferredJob): Promise
   if (job.event_kind === 'unmatched_status') {
     const status = readDeferredStatus(job.normalized_payload)
     if (!status) return review('invalid_deferred_status')
-    const outcome = await applyWhatsAppStatus(db, {
-      provider: 'openwa', accountId: job.account_id,
-      connectionId: job.connection_id,
-      providerMessageId: job.provider_message_id,
-      ...status,
-    })
+    const input = { provider: 'openwa' as const, accountId: job.account_id, connectionId: job.connection_id, providerMessageId: job.provider_message_id, ...status }
+    const outcome = canonicalInboxTestMode()
+      ? await reconcileCanonicalAck(db, input, { eventId: null, token: job.lease_token, sessionId: job.session_id, instanceId: job.instance_id, jobId: job.job_id })
+      : await applyWhatsAppStatus(db, input)
     return outcome === 'unknown' ? retry('native_message_not_found') : COMPLETE
   }
 

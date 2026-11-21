@@ -51,3 +51,6 @@ SOF-76 Done: exact HEAD 42c88e4, full CI 44942645322 and migrations 44942645332 
 
 ### SOF-89.06–07 checkpoint
 Scope-aware Meta test mock and replay assertions updated in 4d34f89. Migration 213 reuses the exact original signed receipt for durable deferred identity work under its valid queue lease (no reopening), retains each signed receipt observation, validates epoch/native provenance and preserves only safe gateway metadata. Existing same-route canonical media can be hydrated idempotently without a business claim; deferred worker settles only against durable receipt outcome. Older queue rows lacking native/epoch proof remain review. No activation. 
+
+### SOF-89.07 — outbound reconciliation
+214: signed exact own-send echo, canonical association and monotonic secondary ACK only with current membership/namespace proof. New device echo primary-only; ambiguous reserved sends and unverified routes held; existing exact-route accepted source plus signed peer evidence can be associated. Unknown ACK remains durable existing deferred queue, broadcast-only exact route retained. No send, unread bump or agent dispatch for echo. No activation.
