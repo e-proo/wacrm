@@ -49,6 +49,10 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-canonical-source-smoke.sql
       - name: INBOX-1 receipt-bound canonical dispatch context smoke
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-canonical-dispatch-smoke.sql
+      - name: INBOX-1 secondary-first primary origin safety
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-canonical-primary-smoke.sql
+      - name: INBOX-1 concurrent canonical receipt race
+        run: bash supabase/ci/inbox-canonical-concurrency-smoke.sh
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
       - name: NOTE-001 anonymous SECURITY DEFINER / RLS safety smoke
