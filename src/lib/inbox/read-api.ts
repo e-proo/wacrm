@@ -3,6 +3,9 @@ import { NextResponse } from 'next/server'
 import { requireRole, UnauthorizedError, ForbiddenError } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { isOpenWATestProject } from '@/lib/whatsapp/transport/openwa/environment'
+import { hasMinRole } from '@/lib/auth/roles'
+import { scopedInboxEnabled } from './scoped-ui-gate'
+import { signReadSnapshot,validWatermark } from './read-snapshot'
 
 type Op = 'channels'|'connections'|'threads'|'history'|'resolve'|'counts'|'observations'|'tags'
 type Scope = 'active'|'historical'|'unknown'|'all'
@@ -81,6 +84,8 @@ export async function inboxRead(request:Request,op:Op,ids:{thread?:string;parent
   const filtered=['threads','counts','tags'].includes(op)
   const {data,error}=filtered ? await supabaseAdmin().rpc('inbox_read_filtered_page',{
    p_account:ctx.accountId,p_actor:ctx.userId,p_op:op,p_scope:input.scope,p_channel:input.channel,p_status:input.status,p_search:input.search,p_unread:input.unread,p_assignment:input.assignment,p_tags:input.tags,p_company:input.company,p_exact:input.exact,p_limit:input.limit,p_before_at:anchor?.at??null,p_before_id:anchor?.id??null
+  }) : op==='history' ? await supabaseAdmin().rpc('inbox_read_history_with_reactions',{
+   p_account:ctx.accountId,p_actor:ctx.userId,p_scope:input.scope,p_channel:input.channel,p_parent:input.parent,p_thread:input.thread,p_limit:input.limit,p_before_at:anchor?.at??null,p_before_id:anchor?.id??null
   }) : await supabaseAdmin().rpc('inbox_read_page',{
    p_account:ctx.accountId,p_actor:ctx.userId,p_op:input.op,p_scope:input.scope,p_channel:input.channel,p_parent:input.parent,p_thread:input.thread,p_connection:input.connection,p_status:input.status,p_search:input.search,p_limit:input.limit,p_before_at:anchor?.at??null,p_before_id:anchor?.id??null,p_message:input.message
   })
@@ -91,7 +96,12 @@ export async function inboxRead(request:Request,op:Op,ids:{thread?:string;parent
   const rows=(data.rows as Row[]).slice(0,input.limit)
   const last=rows.at(-1)
   const items=rows.map(({payload})=>op==='history'?{...payload,media_url:safeInboxMedia(payload.media_url,ctx.accountId)}:payload)
-  return NextResponse.json({items,next_cursor:data.rows.length>input.limit&&last?encodeInboxCursor({at:last.sort_at,id:last.row_id},ctx.accountId,ctx.userId,input,key):null,read_only:true,...(op==='history'?{scope:data.scope,channel_id:data.channel_id,conversation_id:data.conversation_id,observed_highwater:data.observed_highwater,read_watermark:data.read_watermark}: {})},{headers})
+  // Only the initial active history page can authorize a bounded local read.
+  // The write endpoint also requires the exact account/actor and agent role.
+  const readToken=op==='history'&&input.scope==='active'&&input.thread&&anchor===null&&scopedInboxEnabled()&&hasMinRole(ctx.role,'agent')&&
+   typeof data.channel_id==='string'&&uuid.test(data.channel_id)&&validWatermark(data.observed_highwater)&&validWatermark(data.read_watermark)&&BigInt(data.observed_highwater)>BigInt(data.read_watermark)
+   ? signReadSnapshot({accountId:ctx.accountId,userId:ctx.userId,threadId:input.thread,channelId:data.channel_id,seen:data.observed_highwater},key):null
+  return NextResponse.json({items,next_cursor:data.rows.length>input.limit&&last?encodeInboxCursor({at:last.sort_at,id:last.row_id},ctx.accountId,ctx.userId,input,key):null,read_only:true,...(op==='history'?{scope:data.scope,channel_id:data.channel_id,conversation_id:data.conversation_id,observed_highwater:data.observed_highwater,read_watermark:data.read_watermark,read_token:readToken}: {})},{headers})
  }catch(e){
   const status=e instanceof InvalidRead?400:e instanceof UnauthorizedError?401:e instanceof ForbiddenError?403:500
   return NextResponse.json({error:status===400?'Invalid inbox request or cursor':status===401?'Unauthorized':status===403?'Forbidden':'Inbox read unavailable'},{status,headers})
