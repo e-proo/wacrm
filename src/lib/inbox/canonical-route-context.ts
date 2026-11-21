@@ -25,3 +25,11 @@ export async function getCanonicalAgentRunRoute(db: SupabaseClient, accountId: s
   if(requested&&requested!==data) throw unavailable()
   return data
 }
+
+export async function withCanonicalAgentRunRoute<T>(db: SupabaseClient, accountId: string, conversationId: string, runId: string, requested: string|null|undefined, fn: () => Promise<T>): Promise<T> {
+  const { data,error }=await db.rpc('inbox_canonical_agent_run_scope',{p_account:accountId,p_conversation:conversationId,p_run:runId})
+  if(error) throw unavailable()
+  if(data===null) return fn()
+  if(!data||typeof data.messageId!=='string'||typeof data.connectionId!=='string'||(requested&&requested!==data.connectionId)) throw unavailable()
+  return withCanonicalRoute({accountId,conversationId,messageId:data.messageId,connectionId:data.connectionId},fn)
+}

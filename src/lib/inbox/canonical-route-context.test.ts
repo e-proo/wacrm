@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { selectCanonicalRoute, withCanonicalRoute, assertCanonicalRoute, getCanonicalAgentRunRoute } from './canonical-route-context'
+import { selectCanonicalRoute, withCanonicalRoute, assertCanonicalRoute, getCanonicalAgentRunRoute, withCanonicalAgentRunRoute } from './canonical-route-context'
 const route={accountId:'account',conversationId:'parent',messageId:'message',connectionId:'origin'}
 const dbWith=(value:unknown,error:unknown=null)=>{const rpc=vi.fn().mockResolvedValue({data:value,error});return {rpc, db:{rpc} as unknown as SupabaseClient}}
 describe('causal canonical route',()=>{
@@ -29,4 +29,16 @@ describe('causal canonical route',()=>{
    const old=dbWith(null)
    expect(await getCanonicalAgentRunRoute(old.db,'account','parent','run','explicit')).toBe('explicit')
  })
+})
+
+it('retains the queued run scope through guarded send and refuses a changed epoch or missing run',async()=>{
+ const rpc=vi.fn().mockResolvedValueOnce({data:{messageId:'message',connectionId:'origin'},error:null}).mockResolvedValueOnce({data:false,error:null})
+ const db={rpc} as unknown as SupabaseClient
+ const send=vi.fn(async()=>assertCanonicalRoute(db,'account','origin'))
+ await expect(withCanonicalAgentRunRoute(db,'account','parent','run',undefined,send)).rejects.toThrow(/verified inbound/)
+ expect(send).toHaveBeenCalledTimes(1)
+ expect(rpc).toHaveBeenLastCalledWith('inbox_validate_canonical_route',{p_account:'account',p_conversation:'parent',p_message:'message',p_connection:'origin'})
+ const missing=dbWith(null,{code:'23514'})
+ await expect(withCanonicalAgentRunRoute(missing.db,'account','parent','run',undefined,send)).rejects.toThrow(/verified inbound/)
+ expect(send).toHaveBeenCalledTimes(1)
 })
