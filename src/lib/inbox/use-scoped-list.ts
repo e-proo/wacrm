@@ -2,7 +2,7 @@
 import { useEffect,useRef,useState } from 'react'
 import { fetchInbox,mergePage,pagePath,type InboxContext,type Page } from './scoped-list-model'
 type Snapshot<T>={key:string;items:T[];cursor:string|null;busy:boolean;error:boolean}
-export function useInboxPages<T extends {id:string}>(path:string,ctx:InboxContext,validate?:(row:T)=>boolean){
+export function useInboxPages<T extends {id:string}>(path:string,ctx:InboxContext,validate?:(row:T)=>boolean,revision=0){
  const key=ctx.accountId+':'+ctx.userId+':'+path
  const [snapshot,setSnapshot]=useState<Snapshot<T>>({key,items:[],cursor:null,busy:true,error:false})
  const current=useRef<{controller:AbortController;pending:boolean}|null>(null)
@@ -17,7 +17,7 @@ export function useInboxPages<T extends {id:string}>(path:string,ctx:InboxContex
    setSnapshot({key,items:mergePage([],body.items),cursor:body.next_cursor,busy:false,error:false})
   }).catch(()=>{if(!job.controller.signal.aborted)setSnapshot({key,items:[],cursor:null,busy:false,error:true})}).finally(()=>{job.pending=false})
   return ()=>{job.controller.abort();if(current.current===job)current.current=null}
- },[path,key,ctx.accountId,ctx.userId])
+ },[path,key,ctx.accountId,ctx.userId,revision])
  const visible=snapshot.key===key?snapshot:{key,items:[],cursor:null,busy:true,error:false}
  function more(){
   const job=current.current
@@ -33,13 +33,13 @@ export function useInboxPages<T extends {id:string}>(path:string,ctx:InboxContex
  }
  return {...visible,more}
 }
-export function useInboxCounts<T>(path:string,ctx:InboxContext){
+export function useInboxCounts<T>(path:string,ctx:InboxContext,revision=0){
  const key=ctx.accountId+':'+ctx.userId+':'+path
  const [state,setState]=useState<{key:string;value:T|null;error:boolean}>({key,value:null,error:false})
  useEffect(()=>{
   const controller=new AbortController()
   void fetchInbox<{counts:T}>(path,{accountId:ctx.accountId,userId:ctx.userId},controller.signal).then(b=>{if(!controller.signal.aborted)setState({key,value:b.counts,error:false})}).catch(()=>{if(!controller.signal.aborted)setState({key,value:null,error:true})})
   return ()=>controller.abort()
- },[path,key,ctx.accountId,ctx.userId])
+ },[path,key,ctx.accountId,ctx.userId,revision])
  return state.key===key?state:{key,value:null,error:false}
 }

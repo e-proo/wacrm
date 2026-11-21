@@ -200,7 +200,19 @@
       "selectThread": "대화 선택",
       "selectHelp": "확인된 채널 또는 미확인 범위를 선택한 뒤 대화를 열어 범위 정보를 확인하세요.",
       "refresh": "목록 새로고침",
-      "invalidLink": "받은 메시지함 링크가 잘못되었습니다. 활성 채널 목록으로 돌아가세요."
+      "invalidLink": "받은 메시지함 링크가 잘못되었습니다. 활성 채널 목록으로 돌아가세요.",
+      "noSending": "발송 비활성화 · TEST",
+      "markRead": "대화 읽음 처리",
+      "localReadNotice": "WACRM 내부 읽음만 처리하며 WhatsApp 영수증은 보내지 않습니다.",
+      "readFailed": "읽음 상태를 업데이트하지 못했습니다. 새로고침 후 다시 시도하세요.",
+      "olderMessages": "이전 메시지 불러오기",
+      "emptyHistory": "이 범위에 메시지가 없습니다.",
+      "incoming": "수신",
+      "outgoing": "발신",
+      "reply": "메시지 답장",
+      "replyNotLoaded": "인용 메시지가 아직 로드되지 않았습니다",
+      "openMedia": "첨부 파일 열기",
+      "mediaUnavailable": "이 범위에서 첨부 파일을 사용할 수 없습니다"
     },
     "page": {
       "whatsappNotConnected": "WhatsApp®이 연결되어 있지 않습니다. 설정으로 이동해 계정을 연결하세요."

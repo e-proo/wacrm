@@ -7,6 +7,8 @@ import { useAuth } from '@/hooks/use-auth'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useInboxPages,useInboxCounts } from '@/lib/inbox/use-scoped-list'
+import { useScopedInboxRealtime } from '@/lib/inbox/use-scoped-realtime'
+import { ScopedHistoryPane } from './scoped-history-pane'
 import { defaultFilters, listQuery, parseLocation, preferenceKey, readPreference, sameScope, selectExact, selectionHref, type Channel,type Connection,type Counts,type InboxContext,type InboxFilters,type InboxScope,type InboxSelection,type ScopedRow } from '@/lib/inbox/scoped-list-model'
 
 const control='h-9 min-w-0 rounded-lg border border-border bg-background px-2.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -49,11 +51,11 @@ export function ScopedThreadCard({row,selected,onSelect}:{row:ScopedRow;selected
   </div>
  </button>
 }
-function ChannelSelector({ctx,loc,onChange,onRetry}:{ctx:InboxContext;loc:InboxSelection;onChange:(scope:InboxScope,channel:string|null)=>void;onRetry:()=>void}){
+function ChannelSelector({ctx,loc,revision,onChange,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;onChange:(scope:InboxScope,channel:string|null)=>void;onRetry:()=>void}){
  const t=useTranslations('Inbox.scoped')
  const scope=loc.scope==='unknown'?'active':loc.scope
- const catalog=useInboxPages<Channel>('channels?scope='+scope+'&limit=30',ctx,c=>c.scope===scope)
- const exact=useInboxPages<Channel>('channels?scope=all&limit=1'+(loc.channel?'&channel_id='+loc.channel:''),ctx)
+ const catalog=useInboxPages<Channel>('channels?scope='+scope+'&limit=30',ctx,c=>c.scope===scope,revision)
+ const exact=useInboxPages<Channel>('channels?scope=all&limit=1'+(loc.channel?'&channel_id='+loc.channel:''),ctx,undefined,revision)
  const selected=loc.channel?catalog.items.find(c=>c.id===loc.channel)||exact.items.find(c=>c.id===loc.channel):undefined
  const [expanded,setExpanded]=useState(false)
  const ready=selected?.scope===scope
@@ -76,14 +78,14 @@ function ChannelSelector({ctx,loc,onChange,onRetry}:{ctx:InboxContext;loc:InboxS
    {selected&&ready&&<div className="flex flex-wrap items-center gap-2 text-xs"><ProviderLabel provider={selected.provider}/><span className="text-muted-foreground">{t('sessionsReady')}: {selected.ready_sessions}</span><span className="text-muted-foreground">{t(selected.ready?'online':'offline')}</span></div>}
   </>}
   <Button variant="ghost" className="w-full justify-between" onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}><span className="flex items-center gap-2"><Smartphone className="size-4"/>{t('sessions')}</span><ChevronDown className={cn('size-4 transition-transform',expanded&&'rotate-180')}/></Button>
-  {expanded&&<SessionList key={loc.scope+':'+loc.channel} ctx={ctx} loc={loc} onRetry={onRetry}/>}
+  {expanded&&<SessionList key={loc.scope+':'+loc.channel} ctx={ctx} loc={loc} revision={revision} onRetry={onRetry}/>}
  </div>
 }
-function SessionList({ctx,loc,onRetry}:{ctx:InboxContext;loc:InboxSelection;onRetry:()=>void}){
+function SessionList({ctx,loc,revision,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;onRetry:()=>void}){
  const t=useTranslations('Inbox.scoped'),{status}=useLabels()
  const q=new URLSearchParams({scope:loc.channel?'all':loc.scope,limit:'20'})
  if(loc.channel)q.set('channel_id',loc.channel)
- const data=useInboxPages<Connection>('connections?'+q.toString(),ctx,c=>!loc.channel||c.channel_id===loc.channel)
+ const data=useInboxPages<Connection>('connections?'+q.toString(),ctx,c=>!loc.channel||c.channel_id===loc.channel,revision)
  return <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border bg-muted/30 p-2">
   <p className="text-[11px] text-muted-foreground">{t('diagnosticsOnly')}</p>
   {data.items.map(c=><div key={c.id} className="rounded-md bg-background p-2 text-xs"><div className="flex items-center justify-between gap-1"><span dir="auto" className="min-w-0 truncate font-medium">{c.display_name||t('unnamedSession')}</span><ProviderLabel provider={c.provider}/></div><div className="mt-1 flex flex-wrap gap-2 text-[10px] text-muted-foreground"><span>{c.archived?t('historical'):status(c.status)}</span><span>{t(c.ready?'verifiedReady':c.identity_state==='unverified'?'unverified':'notReady')}</span>{c.is_primary&&<span>{t('primary')}</span>}</div></div>)}
@@ -108,16 +110,16 @@ function Filters({value,onChange}:{value:InboxFilters;onChange:(v:InboxFilters)=
   </div>}
  </div>
 }
-function TagPicker({ctx,selected,onChange,onRetry}:{ctx:InboxContext;selected:string[];onChange:(v:string[])=>void;onRetry:()=>void}){
+function TagPicker({ctx,revision,selected,onChange,onRetry}:{ctx:InboxContext;revision:number;selected:string[];onChange:(v:string[])=>void;onRetry:()=>void}){
  const t=useTranslations('Inbox.scoped'),[open,setOpen]=useState(false)
- const tags=useInboxPages<{id:string;name:string}>('filter-tags?scope=all&limit=30',ctx)
+ const tags=useInboxPages<{id:string;name:string}>('filter-tags?scope=all&limit=30',ctx,undefined,revision)
  return <div className="border-b border-border px-3 py-1"><Button variant="ghost" size="sm" aria-expanded={open} onClick={()=>setOpen(v=>!v)}>{t('tags')}{selected.length>0?' ('+selected.length+')':''}<ChevronDown className="size-3"/></Button>
  {open&&<div className="max-h-36 space-y-1 overflow-auto py-1">{tags.items.map(tag=><label key={tag.id} className="flex items-center gap-2 rounded-md p-1 text-xs hover:bg-muted"><input type="checkbox" checked={selected.includes(tag.id)} disabled={selected.length>=20&&!selected.includes(tag.id)} onChange={()=>onChange(selected.includes(tag.id)?selected.filter(x=>x!==tag.id):[...selected,tag.id])}/><span className="truncate" dir="auto">{tag.name}</span></label>)}{tags.busy&&<Wait/>}{tags.error&&<ErrorState onRetry={onRetry}/>} {tags.cursor&&<Button size="sm" variant="ghost" onClick={tags.more} disabled={tags.busy}>{t('more')}</Button>}</div>}</div>
 }
-function ScopeList({ctx,loc,filters,onSelect,onRetry}:{ctx:InboxContext;loc:InboxSelection;filters:InboxFilters;onSelect:(row:ScopedRow)=>void;onRetry:()=>void}){
+function ScopeList({ctx,loc,filters,revision,onSelect,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;filters:InboxFilters;onSelect:(row:ScopedRow)=>void;onRetry:()=>void}){
  const t=useTranslations('Inbox.scoped'),query=listQuery(loc.scope,loc.channel,filters)
- const list=useInboxPages<ScopedRow>('threads?'+query,ctx,r=>sameScope(r,loc.scope,loc.channel))
- const counts=useInboxCounts<Counts>('counts?'+query,ctx)
+ const list=useInboxPages<ScopedRow>('threads?'+query,ctx,r=>sameScope(r,loc.scope,loc.channel),revision)
+ const counts=useInboxCounts<Counts>('counts?'+query,ctx,revision)
  return <div className="flex min-h-0 flex-1 flex-col">
   <div className="grid grid-cols-3 gap-1 border-b border-border px-3 py-2 text-center">
    {[[t('threads'),counts.value?.threads],[t('messages'),counts.value?.lane_messages],[t(loc.scope==='unknown'?'legacyUnread':'knownUnread'),loc.scope==='unknown'?counts.value?.legacy_lane_unread:counts.value?.known_unread]].map(([label,n])=><div key={label} className="rounded-md bg-muted/40 px-1 py-1.5"><div className="text-sm font-semibold tabular-nums">{n===undefined?'—':n}</div><div className="text-[10px] text-muted-foreground">{label}</div></div>)}
@@ -133,28 +135,22 @@ function ScopeList({ctx,loc,filters,onSelect,onRetry}:{ctx:InboxContext;loc:Inbo
   </div>
  </div>
 }
-function DetailCard({row,onBack}:{row:ScopedRow;onBack:()=>void}){
+function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:InboxContext;revision:number;onBack:()=>void;onRefresh:()=>void}){
  const t=useTranslations('Inbox.scoped'),{status}=useLabels()
- return <div className="flex h-full min-w-0 flex-col">
-  <div className="flex items-center gap-3 border-b border-border bg-card p-4"><Button variant="ghost" size="icon-lg" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button><div className="min-w-0 flex-1"><h2 className="truncate font-semibold" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p></div><ProviderLabel provider={row.provider}/></div>
-  <div className="flex-1 overflow-auto p-4 sm:p-6">
-   <div className="mx-auto max-w-xl space-y-4">
-    <div className="rounded-xl border border-border bg-card p-4"><div className="flex flex-wrap items-center gap-2"><ProviderLabel provider={row.provider}/><span className="text-sm font-medium" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')}</span></div><div className="mt-3 grid grid-cols-2 gap-3 text-xs"><div><p className="text-muted-foreground">{t('status')}</p><p className="mt-1 font-medium">{status(row.status)}</p></div><div><p className="text-muted-foreground">{t('scope')}</p><p className="mt-1 font-medium">{t(row.scope)}</p></div><div><p className="text-muted-foreground">{t('company')}</p><p className="mt-1 font-medium" dir="auto">{row.contact.company||'—'}</p></div><div><p className="text-muted-foreground">{t('assigned')}</p><p className="mt-1 font-medium" dir="auto">{row.assigned_to_me?t('mine'):row.assigned_agent_name||t('unassigned')}</p></div></div></div>
-    <div className="space-y-2 rounded-xl border border-border bg-card p-4"><p className="text-xs font-medium text-muted-foreground">{t('latestPreview')}</p><p className="whitespace-pre-wrap break-words text-sm" dir="auto">{row.preview||t('noPreview')}</p></div>
-    <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/30 p-4 text-sm"><ShieldCheck className="mt-0.5 size-5 shrink-0 text-primary"/><div><p className="font-medium">{t('readOnly')}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t('historyLater')}</p></div></div>
-   </div>
-  </div>
+ return <div className="flex h-full min-h-0 min-w-0 flex-col">
+  <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card p-4"><Button variant="ghost" size="icon-lg" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button><div className="min-w-0 flex-1"><h2 className="truncate font-semibold" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}</p></div><ProviderLabel provider={row.provider}/></div>
+  <ScopedHistoryPane key={row.scope+':'+row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}/>
  </div>
 }
-function SelectedDetail({ctx,loc,onBack,onRetry}:{ctx:InboxContext;loc:InboxSelection;onBack:()=>void;onRetry:()=>void}){
+function SelectedDetail({ctx,loc,revision,onBack,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;onBack:()=>void;onRetry:()=>void}){
  const t=useTranslations('Inbox.scoped')
  const id=loc.scope==='unknown'?loc.parent:loc.thread
- const result=useInboxPages<ScopedRow>('threads?'+listQuery(loc.scope,loc.channel,defaultFilters,id??undefined),ctx,r=>sameScope(r,loc.scope,loc.channel))
+ const result=useInboxPages<ScopedRow>('threads?'+listQuery(loc.scope,loc.channel,defaultFilters,id??undefined),ctx,r=>sameScope(r,loc.scope,loc.channel),revision)
  const row=selectExact(result.items,loc)
  if(result.busy)return <Wait/>
  if(result.error)return <div className="p-4"><ErrorState onRetry={onRetry}/><Button className="mt-2" variant="ghost" onClick={onBack}>{t('back')}</Button></div>
  if(!row)return <div className="space-y-3 p-4"><p className="text-sm text-muted-foreground">{t('notFound')}</p><Button variant="outline" onClick={onBack}>{t('back')}</Button></div>
- return <DetailCard row={row} onBack={onBack}/>
+ return <DetailCard row={row} ctx={ctx} revision={revision} onBack={onBack} onRefresh={onRetry}/>
 }
 function LegacyChoices({ctx,loc,onSelect,onBack,onRetry}:{ctx:InboxContext;loc:InboxSelection;onSelect:(r:ScopedRow)=>void;onBack:()=>void;onRetry:()=>void}){
  const t=useTranslations('Inbox.scoped'),q=new URLSearchParams({scope:'all',limit:'30'})
@@ -181,24 +177,25 @@ function Workspace({ctx}:{ctx:InboxContext}){
  const choose=(row:ScopedRow)=>go(selectionHref(row.scope,loc.legacy||loc.scope!==row.scope?row.channel_id:loc.channel,row))
  const changeFilters=(next:InboxFilters)=>{setFilters(next);close()}
  const refresh=()=>setRevision(x=>x+1)
+ useScopedInboxRealtime(ctx,refresh)
  const hasSelection=!loc.invalid&&Boolean(loc.legacy||loc.thread||(loc.scope==='unknown'&&loc.parent))
- const listKey=[loc.scope,loc.channel,JSON.stringify(effective),revision].join(':')
+ const listKey=[loc.scope,loc.channel,JSON.stringify(effective)].join(':')
  return <div className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden bg-background sm:-m-6">
   <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-3">
    <div className="flex min-w-0 items-center gap-3"><div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"><Inbox className="size-5"/></div><div><h1 className="text-base font-semibold">{t('title')}</h1><p className="text-[11px] text-muted-foreground">{t('subtitle')}</p></div></div>
-   <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs text-muted-foreground"><ShieldCheck className="size-3.5"/>{t('readOnly')}</span><Button variant="outline" size="icon-lg" onClick={refresh} aria-label={t('refresh')}><RefreshCw className="size-4"/></Button></div>
+   <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs text-muted-foreground"><ShieldCheck className="size-3.5"/>{t('noSending')}</span><Button variant="outline" size="icon-lg" onClick={refresh} aria-label={t('refresh')}><RefreshCw className="size-4"/></Button></div>
   </header>
   {loc.invalid?<div className="space-y-2 p-4"><p role="alert" className="text-sm text-destructive">{t('invalidLink')}</p><Button variant="outline" onClick={()=>changeScope('active',null)}>{t('back')}</Button></div>:<div className="flex min-h-0 flex-1">
    <aside className={cn('min-h-0 w-full flex-col border-e border-border bg-card lg:w-[380px] lg:shrink-0',hasSelection?'hidden lg:flex':'flex')}>
     <div className="max-h-[55%] shrink-0 overflow-y-auto">
-     <ChannelSelector key={[loc.scope,loc.channel,revision].join(':')} ctx={ctx} loc={loc} onChange={changeScope} onRetry={refresh}/>
+     <ChannelSelector key={[loc.scope,loc.channel].join(':')} ctx={ctx} loc={loc} revision={revision} onChange={changeScope} onRetry={refresh}/>
      <Filters value={filters} onChange={changeFilters}/>
-     <TagPicker key={revision} ctx={ctx} selected={filters.tags} onChange={tags=>changeFilters({...filters,tags})} onRetry={refresh}/>
+     <TagPicker revision={revision} ctx={ctx} selected={filters.tags} onChange={tags=>changeFilters({...filters,tags})} onRetry={refresh}/>
     </div>
-    {search!==filters.search||company!==filters.company?<Wait/>:<ScopeList key={listKey} ctx={ctx} loc={loc} filters={effective} onSelect={choose} onRetry={refresh}/>}
+    {search!==filters.search||company!==filters.company?<Wait/>:<ScopeList key={listKey} revision={revision} ctx={ctx} loc={loc} filters={effective} onSelect={choose} onRetry={refresh}/>}
    </aside>
-   <main className={cn('min-h-0 min-w-0 flex-1 overflow-auto',hasSelection?'block':'hidden lg:block')}>
-    {hasSelection?(loc.legacy?<LegacyChoices key={query+':'+revision} ctx={ctx} loc={loc} onSelect={choose} onBack={close} onRetry={refresh}/>:<SelectedDetail key={query+':'+revision} ctx={ctx} loc={loc} onBack={close} onRetry={refresh}/>):
+   <main className={cn('min-h-0 min-w-0 flex-1 overflow-hidden',hasSelection?'block':'hidden lg:block')}>
+    {hasSelection?(loc.legacy?<LegacyChoices key={query+':'+revision} ctx={ctx} loc={loc} onSelect={choose} onBack={close} onRetry={refresh}/>:<SelectedDetail key={query} revision={revision} ctx={ctx} loc={loc} onBack={close} onRetry={refresh}/>):
      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center"><div className="rounded-full bg-muted p-5 text-muted-foreground"><CircleHelp className="size-8"/></div><h2 className="font-medium">{t('selectThread')}</h2><p className="max-w-sm text-sm text-muted-foreground">{t('selectHelp')}</p></div>}
    </main>
   </div>}

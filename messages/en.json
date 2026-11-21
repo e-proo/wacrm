@@ -200,7 +200,19 @@
       "selectThread": "Choose a conversation",
       "selectHelp": "Select a verified channel or the unverified lane, then choose a conversation to see its scoped information.",
       "refresh": "Refresh list",
-      "invalidLink": "The inbox link is invalid. Return to the active channel list."
+      "invalidLink": "The inbox link is invalid. Return to the active channel list.",
+      "noSending": "Sending disabled · TEST",
+      "markRead": "Mark conversation read",
+      "localReadNotice": "Local WACRM read only; no WhatsApp receipt is sent.",
+      "readFailed": "Could not update read state. Refresh and retry.",
+      "olderMessages": "Load older messages",
+      "emptyHistory": "No messages in this scope.",
+      "incoming": "Incoming",
+      "outgoing": "Outgoing",
+      "reply": "Reply to message",
+      "replyNotLoaded": "Quoted message is not loaded",
+      "openMedia": "Open attachment",
+      "mediaUnavailable": "Attachment is unavailable in this scope"
     },
     "page": {
       "whatsappNotConnected": "WhatsApp® is not connected. Go to Settings to connect your account."
