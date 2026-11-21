@@ -93,11 +93,22 @@ BEGIN
  EXECUTE 'SET LOCAL ROLE service_role';
  v=public.inbox_read_history_with_reactions(a,u,'active',ch,NULL,t,30,NULL,NULL);
  IF v->'rows'->0->'payload'->'reactions'->0->>'emoji'<>'👍' OR v->'rows'->0->'payload'->'reactions'->0->>'mine'<>'true' THEN RAISE EXCEPTION 'scoped reaction projection %',v; END IF;
+ -- A late-arriving canonical message after the observed highwater is not
+ -- acknowledged by a stale read snapshot, even if its provider time is older.
+ EXECUTE 'RESET ROLE';
+ token=gen_random_uuid();
+ INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,processing_token,processing_started_at)
+ VALUES(a,pri,'openwa','read219-late',clock_timestamp(),token,clock_timestamp());
+ v=public.inbox_commit_canonical_inbound_context(a,pri,'read219-late',token,c,'inbox219-1',NULL,'native219-late',true,'text','late body',NULL,'15550000217@c.us',clock_timestamp()-interval '2 minutes',NULL,'{}',false,false);
+ IF v->>'state'<>'inserted' THEN RAISE EXCEPTION 'late fixture %',v; END IF;
+ EXECUTE 'SET LOCAL ROLE service_role';
  SELECT unread_count INTO STRICT legacy_before FROM public.conversations WHERE id=c;
  v=public.inbox_mark_thread_read(a,u,t,ch,1);
- IF v->>'read_watermark'<>'1' OR v->>'unread_count_known'<>'0' THEN RAISE EXCEPTION 'read watermark %',v; END IF;
+ IF v->>'read_watermark'<>'1' OR v->>'unread_count_known'<>'1' THEN RAISE EXCEPTION 'read watermark %',v; END IF;
  v=public.inbox_mark_thread_read(a,u,t,ch,0);
  IF v->>'read_watermark'<>'1' THEN RAISE EXCEPTION 'watermark regressed'; END IF;
+ v=public.inbox_mark_thread_read(a,u,t,ch,2);
+ IF v->>'read_watermark'<>'2' OR v->>'unread_count_known'<>'0' THEN RAISE EXCEPTION 'latest local read %',v; END IF;
  IF (SELECT unread_count_known FROM public.inbox_threads WHERE id=t2)<>1 OR (SELECT unread_count FROM public.conversations WHERE id=c)<>legacy_before THEN RAISE EXCEPTION 'sibling or legacy unread cleared'; END IF;
  EXECUTE 'RESET ROLE';
  IF NOT EXISTS(SELECT 1 FROM public.inbox_thread_changes WHERE account_id=a AND thread_id=t AND revision>1) THEN RAISE EXCEPTION 'missing thread signal'; END IF;
@@ -118,7 +129,7 @@ BEGIN
  
  UPDATE public.whatsapp_connections SET status='disconnected' WHERE id IN(pri,sec);
  v=public.inbox_read_page(a,u,'history','historical',ch,NULL,t,NULL,NULL,NULL,10,NULL,NULL);
- IF jsonb_array_length(v->'rows')<>1 THEN RAISE EXCEPTION 'historical history lost'; END IF;
+ IF jsonb_array_length(v->'rows')<>2 THEN RAISE EXCEPTION 'historical history lost'; END IF;
  v=public.inbox_read_page(a,u,'connections','historical',ch,NULL,NULL,NULL,NULL,NULL,10,NULL,NULL);
  IF jsonb_array_length(v->'rows')<>2 OR EXISTS(SELECT 1 FROM jsonb_array_elements(v->'rows') r WHERE r->'payload'->>'ready'<>'false') THEN RAISE EXCEPTION 'historical connections %',v; END IF;
  IF public.inbox_read_page(a,u,'history','active',ch,NULL,t,NULL,NULL,NULL,10,NULL,NULL) IS NOT NULL THEN RAISE EXCEPTION 'stale active scope'; END IF;

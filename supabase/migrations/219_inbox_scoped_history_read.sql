@@ -46,10 +46,13 @@ GRANT EXECUTE ON FUNCTION public.inbox_read_history_with_reactions(uuid,uuid,tex
 -- No message body, native ID, sender route or credential is published. Clients
 -- receive a wake-up only; every refresh goes through the scoped read API.
 CREATE TABLE public.inbox_thread_changes (
+ -- Opaque replica identity: a DELETE WAL event cannot disclose a tenant or
+ -- thread identifier (Postgres Changes does not apply RLS to DELETE events).
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
  account_id uuid NOT NULL,
  thread_id uuid NOT NULL,
  revision bigint NOT NULL DEFAULT 1 CHECK(revision>0),
- PRIMARY KEY(account_id,thread_id)
+ UNIQUE(account_id,thread_id)
 );
 ALTER TABLE public.inbox_thread_changes ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.inbox_thread_changes FROM PUBLIC,anon,authenticated,service_role;
