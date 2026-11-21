@@ -1,8 +1,8 @@
 BEGIN;
 DO $test$
-DECLARE u uuid:='00000000-0000-4000-8000-000000002191';u2 uuid:='00000000-0000-4000-8000-000000002192';a uuid;a2 uuid;pri uuid;sec uuid;x uuid;ch uuid;ch2 uuid;ep uuid;d timestamptz;cv timestamptz;v jsonb;p uuid;c uuid;p2 uuid;c2 uuid;token uuid;mid uuid;t uuid;t2 uuid;raw uuid;anchor uuid;at timestamptz;arr jsonb;z jsonb;scope text;tg uuid;fg uuid;
+DECLARE u uuid:='00000000-0000-4000-8000-000000002191';u2 uuid:='00000000-0000-4000-8000-000000002192';a uuid;a2 uuid;pri uuid;sec uuid;x uuid;ch uuid;ch2 uuid;ep uuid;d timestamptz;cv timestamptz;v jsonb;p uuid;c uuid;p2 uuid;c2 uuid;token uuid;mid uuid;t uuid;t2 uuid;raw uuid;anchor uuid;at timestamptz;arr jsonb;z jsonb;scope text;tg uuid;fg uuid;legacy_before integer;
 BEGIN
- INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES(u,'inbox218@example.test','{"full_name":"Inbox 217"}'),(u2,'inbox219-foreign@example.test','{"full_name":"Foreign"}');
+ INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES(u,'inbox219@example.test','{"full_name":"Inbox 219"}'),(u2,'inbox219-foreign@example.test','{"full_name":"Foreign"}');
  SELECT account_id INTO STRICT a FROM public.profiles WHERE user_id=u;
  SELECT account_id INTO STRICT a2 FROM public.profiles WHERE user_id=u2;
  FOR i IN 1..3 LOOP
@@ -93,14 +93,29 @@ BEGIN
  EXECUTE 'SET LOCAL ROLE service_role';
  v=public.inbox_read_history_with_reactions(a,u,'active',ch,NULL,t,30,NULL,NULL);
  IF v->'rows'->0->'payload'->'reactions'->0->>'emoji'<>'👍' OR v->'rows'->0->'payload'->'reactions'->0->>'mine'<>'true' THEN RAISE EXCEPTION 'scoped reaction projection %',v; END IF;
+ SELECT unread_count INTO STRICT legacy_before FROM public.conversations WHERE id=c;
  v=public.inbox_mark_thread_read(a,u,t,ch,1);
  IF v->>'read_watermark'<>'1' OR v->>'unread_count_known'<>'0' THEN RAISE EXCEPTION 'read watermark %',v; END IF;
  v=public.inbox_mark_thread_read(a,u,t,ch,0);
  IF v->>'read_watermark'<>'1' THEN RAISE EXCEPTION 'watermark regressed'; END IF;
- IF (SELECT unread_count_known FROM public.inbox_threads WHERE id=t2)<>1 OR (SELECT unread_count FROM public.conversations WHERE id=c)<>2 THEN RAISE EXCEPTION 'sibling or legacy unread cleared'; END IF;
+ IF (SELECT unread_count_known FROM public.inbox_threads WHERE id=t2)<>1 OR (SELECT unread_count FROM public.conversations WHERE id=c)<>legacy_before THEN RAISE EXCEPTION 'sibling or legacy unread cleared'; END IF;
  EXECUTE 'RESET ROLE';
  IF NOT EXISTS(SELECT 1 FROM public.inbox_thread_changes WHERE account_id=a AND thread_id=t AND revision>1) THEN RAISE EXCEPTION 'missing thread signal'; END IF;
  IF has_table_privilege('authenticated','public.inbox_thread_changes','INSERT') OR has_table_privilege('anon','public.inbox_thread_changes','SELECT') THEN RAISE EXCEPTION 'signal privileges'; END IF;
+ PERFORM set_config('request.jwt.claim.sub',u2::text,true);
+ EXECUTE 'SET LOCAL ROLE authenticated';
+ IF EXISTS(SELECT 1 FROM public.inbox_thread_changes WHERE account_id=a) THEN RAISE EXCEPTION 'foreign realtime signal leaked'; END IF;
+ EXECUTE 'RESET ROLE';
+ PERFORM set_config('request.jwt.claim.sub',u::text,true);
+ EXECUTE 'SET LOCAL ROLE authenticated';
+ IF NOT EXISTS(SELECT 1 FROM public.inbox_thread_changes WHERE account_id=a AND thread_id=t) THEN RAISE EXCEPTION 'own signal not visible'; END IF;
+ EXECUTE 'RESET ROLE';
+ UPDATE public.profiles SET account_role='viewer' WHERE user_id=u;
+ EXECUTE 'SET LOCAL ROLE service_role';
+ BEGIN PERFORM public.inbox_mark_thread_read(a,u,t,ch,1); RAISE EXCEPTION 'viewer read mutation'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ EXECUTE 'RESET ROLE';
+ UPDATE public.profiles SET account_role='owner' WHERE user_id=u;
+ 
  UPDATE public.whatsapp_connections SET status='disconnected' WHERE id IN(pri,sec);
  v=public.inbox_read_page(a,u,'history','historical',ch,NULL,t,NULL,NULL,NULL,10,NULL,NULL);
  IF jsonb_array_length(v->'rows')<>1 THEN RAISE EXCEPTION 'historical history lost'; END IF;

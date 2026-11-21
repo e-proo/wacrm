@@ -21,6 +21,8 @@ REVOKE ALL ON FUNCTION public.inbox_mark_thread_read(uuid,uuid,uuid,uuid,bigint)
 GRANT EXECUTE ON FUNCTION public.inbox_mark_thread_read(uuid,uuid,uuid,uuid,bigint) TO service_role;
 
 -- Enrich only the exact authorized page, not arbitrary message IDs or actor IDs.
+-- Hosted TEST has this grant already; clean replay needs explicit minimal columns.
+GRANT SELECT(message_id,conversation_id,actor_type,actor_id,emoji) ON public.message_reactions TO service_role;
 CREATE FUNCTION public.inbox_read_history_with_reactions(p_account uuid,p_actor uuid,p_scope text,p_channel uuid,p_parent uuid,p_thread uuid,p_limit integer,p_before_at timestamptz,p_before_id uuid)
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
 DECLARE page jsonb; rows jsonb;
