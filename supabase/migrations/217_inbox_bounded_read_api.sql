@@ -84,7 +84,7 @@ BEGIN
  OR p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100 OR p_scope IS NULL OR p_scope NOT IN ('active','historical','unknown','all')
  OR (p_scope='all' AND p_op NOT IN ('resolve','counts','connections','channels'))
  OR (p_scope='unknown' AND (p_channel IS NOT NULL OR p_op IN ('channels','observations')))
- OR (p_op IN ('channels','connections') AND p_before_id IS NOT NULL AND p_before_at IS NULL)
+ OR (p_op IN ('channels','connections','observations') AND p_before_id IS NOT NULL AND p_before_at IS NULL)
  OR (p_op='observations' AND (p_thread IS NULL OR p_message IS NULL))
  OR (p_op<>'observations' AND p_message IS NOT NULL)
  OR (p_op NOT IN ('history','observations') AND p_thread IS NOT NULL)
@@ -182,10 +182,13 @@ BEGIN
  -- separate from selected lane counts and non-additive CRM unread.
  WITH inv AS (SELECT * FROM public.inbox_legacy_inventory(p_account)),
  lane AS (SELECT * FROM public.inbox_read_thread_rows(p_account,p_scope,p_channel,NULL,NULL,p_status,p_search)),
- counts AS (SELECT count(*) threads,coalesce(sum((payload->>'unread_count_known')::bigint),0) known_unread FROM lane)
- SELECT jsonb_build_object('counts',jsonb_build_object('threads',counts.threads,'known_unread',counts.known_unread,
+ counts AS (SELECT count(*) threads,coalesce(sum((payload->>'unread_count_known')::bigint),0) known_unread FROM lane),
+ lane_messages AS (SELECT count(*) n FROM public.messages m JOIN public.conversations c ON c.id=m.conversation_id AND c.account_id=p_account
+ LEFT JOIN public.inbox_message_memberships im ON im.message_id=m.id AND im.account_id=p_account AND im.conversation_id=m.conversation_id
+ WHERE EXISTS(SELECT 1 FROM lane l WHERE (im.message_id IS NOT NULL AND l.payload->>'scope'<>'unknown' AND l.row_id=im.thread_id AND l.payload->>'channel_id'=im.channel_id::text AND im.provider=m.provider AND im.connection_id=m.connection_id) OR (im.message_id IS NULL AND l.payload->>'scope'='unknown' AND l.row_id=m.conversation_id)))
+ SELECT jsonb_build_object('counts',jsonb_build_object('threads',counts.threads,'known_unread',counts.known_unread,'lane_messages',lane_messages.n,'scope',p_scope,'channel_id',p_channel,
  'source_messages',inv.source_messages,'associated_messages',inv.associated_messages,'unresolved_messages',inv.unresolved_messages,
- 'legacy_crm_unread',inv.legacy_unread,'legacy_unread_is_additive',false),'read_only',true) INTO result FROM counts CROSS JOIN inv;
+ 'legacy_crm_unread',inv.legacy_unread,'legacy_unread_is_additive',false),'read_only',true) INTO result FROM counts CROSS JOIN inv CROSS JOIN lane_messages;
  RETURN result;
 END $$;
 REVOKE ALL ON FUNCTION public.inbox_read_page(uuid,uuid,text,text,uuid,uuid,uuid,uuid,text,text,integer,timestamptz,uuid,uuid) FROM PUBLIC,anon,authenticated;

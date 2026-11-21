@@ -3,6 +3,7 @@ const h=vi.hoisted(()=>({role:vi.fn(),rpc:vi.fn(),isTest:vi.fn()}))
 vi.mock('@/lib/auth/account',()=>({requireRole:h.role,UnauthorizedError:class extends Error{},ForbiddenError:class extends Error{}}))
 vi.mock('@/lib/automations/admin-client',()=>({supabaseAdmin:()=>({rpc:h.rpc})}))
 vi.mock('@/lib/whatsapp/transport/openwa/environment',()=>({isOpenWATestProject:h.isTest}))
+import { UnauthorizedError, ForbiddenError } from '@/lib/auth/account'
 import { inboxRead,parseInboxRead,encodeInboxCursor,decodeInboxCursor,safeInboxMedia } from './read-api'
 const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222',c='33333333-3333-4333-8333-333333333333'
 const req=(query='')=>new Request('https://example.test/api/inbox/threads'+query)
@@ -38,6 +39,21 @@ describe('inbox read API',()=>{
   h.isTest.mockReturnValue(true);h.rpc.mockResolvedValue({data:null,error:null})
   expect((await inboxRead(req(),'history',{thread:c})).status).toBe(404)
   h.rpc.mockResolvedValue({data:null,error:{code:'42501'}});expect((await inboxRead(req(),'threads')).status).toBe(403)
+ })
+ it('fails safely before RPC if account authentication fails or read flag is disabled',async()=>{
+  h.role.mockRejectedValueOnce(new UnauthorizedError())
+  expect((await inboxRead(req(),'threads')).status).toBe(401)
+  h.role.mockRejectedValueOnce(new ForbiddenError())
+  expect((await inboxRead(req(),'threads')).status).toBe(403)
+  vi.stubEnv('WACRM_INBOX_READ_API','off')
+  expect((await inboxRead(req(),'threads')).status).toBe(403)
+  expect(h.rpc).not.toHaveBeenCalled()
+ })
+ it('binds observation cursor to source message and rejects unknown diagnostics',()=>{
+  const {input}=parseInboxRead(req('?scope=active'),'observations',{thread:b,message:c})
+  const token=encodeInboxCursor({at:'2026-11-21T22:00:00+00:00',id:c},a,b,input,'key')
+  expect(()=>decodeInboxCursor(token,a,b,{...input,message:b},'key')).toThrow()
+  expect(()=>parseInboxRead(req('?scope=unknown'),'observations',{thread:b,message:c})).toThrow()
  })
  it('never returns arbitrary provider links, foreign storage paths or URL tokens',()=>{
   const base='https://test.supabase.co',url=base+'/storage/v1/object/public/chat-media/account-'+a+'/x.png'
