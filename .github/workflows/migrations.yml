@@ -45,6 +45,8 @@ jobs:
         run: bash supabase/ci/inbox-backfill-concurrency-smoke.sh
       - name: INBOX-1 canonical observation foundation smoke
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-canonical-observation-smoke.sql
+      - name: INBOX-1 canonical source and effect reservation smoke
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-canonical-source-smoke.sql
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
       - name: NOTE-001 anonymous SECURITY DEFINER / RLS safety smoke
