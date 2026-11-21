@@ -1,0 +1,19 @@
+# INBOX-1 — Scoped data, migration and read API (SOF-69)
+Depends INBOX-0. P0 correctness boundary.
+## 1.1 Data model and backfill
+- Add migration with next available number. Keep conversations unique(account,contact), existing message IDs, reactions, deals, flow_runs, notifications, task references untouched. Proposed inbox_threads(id, account_id, conversation_id, connection_id, provider, last_message_id/at/preview, last_inbound_at, read_watermark, unread_count, state, timestamps); final schema per ADR.
+- Composite/account-matching constraints and indexes (account,connection,last_message_at,id), per-thread message scope (conversation,connection,created_at,id), exact provider assertion; preserve registry archived references. No browser native identity/credentials. Handle unknown/null legacy separately with explicit unresolved state and no send rights. Do not turn an unknown into Meta merely because default exists.
+- Backfill grouped from persisted provider/connection evidence, deterministic tie-breaker (created_at,id); no move or duplicate messages. Legacy unread cannot be allocated accurately without evidence: mark unknown/initialize via documented policy and show reconciliation state, never claim guessed values. Dry-run counts/hashes and mismatch report; restartable bounded batches, idempotent, maintain writes during backfill via transactional trigger/RPC or audited dual-write plus reconciliation as ADR chooses. No re-triggering bots or provider calls.
+### 1.2 Projection consistency and API
+- Update scoped summary atomically for every message insert/echo (including agent/bot/broadcast), read changes and relevant status updates. ACK/status changes must not reorder preview or claim unread; out-of-order inbound and duplicate webhooks no double count. Rebuild/reconcile from authoritative messages; transaction/lock semantics and concurrency tests.
+- New authenticated bounded read contracts (catalog, thread list, history and counts); validate cursor/scope together; select minimal fields; stable order with IDs; safe contact projection; preserve legacy API v1 response and ?c= links. Query only current account even with service role; RLS/grants deny cross-tenant write/read, no direct browser mutation of protected fields.
+### 1.3 Migration verification
+- Rollback transaction smoke: same contact 2 OpenWA and Meta, outbound-only, missing/archived connection, different tenants, duplicate/out-of-order rows, concurrent writer/read, rebuild equivalence; verify no old business references changed. Verify clean replay workflow before TEST apply, then ledger/readback and smoke. Feature flag off until gates; backout disables new reads/writes if safe while preserving original data; no destructive rollback after live writes.
+## DoD
+Projection counts reconcile to scoped authoritative messages (zero unexplained mismatch), unknown lane explicit, RLS negatives pass, deterministic pagination, CI and clean migration replay success + TEST migration/readback/smoke. Legacy behavior unchanged under flag off. No Production.
+
+## Gates مشتركة
+- اقرأ HEAD والخطة ذات الصلة وAGENTS.md قبل التنفيذ؛ هذا المرجع مبني على 33e8e9af73d3de8c010ee291700fff7073abf520. التاريخ 2026-11-21.
+- TEST فقط؛ لا تعديل Production ولا تشغيل إرسال حي بلا تفويض منفصل. لا تعديل migration قديمة، لا توسيع grants ولا تعطيل RLS أو guardrails لإمرار اختبار.
+- سجل commit, CI run, migrations ledger, smoke output, risks, screenshots إن لزم. فرّق implementation complete / CI verified / TEST verified / live acceptance / production ready.
+- لا إغلاق المهمة أو المرحلة قبل DoD المحدد؛ إذا كان CI قيد التشغيل فالبوابة مفتوحة.
