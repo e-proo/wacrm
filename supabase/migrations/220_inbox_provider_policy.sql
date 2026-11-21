@@ -48,6 +48,19 @@ REVOKE ALL ON FUNCTION public.inbox_guard_message_membership() FROM PUBLIC,anon,
 -- Only the authenticated server webhook supplies a signed phone_number_id,
 -- native message identity, sender and timestamp after a fresh source insert.
 -- Never infer proof from the CRM parent, replay, or stored current phone alone.
+-- A narrowly scoped private check, no credentials or configuration rows escape.
+CREATE FUNCTION wacrm_internal.inbox_meta_config_ready(p_account uuid,p_external text,p_lock boolean)
+RETURNS boolean LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF p_lock THEN
+  PERFORM 1 FROM public.whatsapp_config WHERE account_id=p_account AND phone_number_id=p_external AND status='connected' FOR SHARE;
+  RETURN FOUND;
+ END IF;
+ RETURN EXISTS(SELECT 1 FROM public.whatsapp_config WHERE account_id=p_account AND phone_number_id=p_external AND status='connected');
+END $$;
+REVOKE ALL ON FUNCTION wacrm_internal.inbox_meta_config_ready(uuid,text,boolean) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION wacrm_internal.inbox_meta_config_ready(uuid,text,boolean) TO service_role;
+
 CREATE FUNCTION public.inbox_record_meta_signed_ingress(p_account uuid,p_connection uuid,p_conversation uuid,p_message uuid,p_native text,p_external text,p_sender text,p_at timestamptz)
 RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
 DECLARE ep public.whatsapp_channel_memberships%ROWTYPE; t public.inbox_threads%ROWTYPE; seq bigint; v_now timestamptz:=clock_timestamp(); proof text;
@@ -60,11 +73,11 @@ BEGIN
  AND m.sender_type='customer' AND m.provider_message_id=p_native AND m.created_at=p_at AND regexp_replace(ct.phone,'[^0-9]','','g')=p_sender
  FOR UPDATE OF m;
  IF NOT FOUND THEN RETURN false; END IF;
+ IF NOT wacrm_internal.inbox_meta_config_ready(p_account,p_external,true) THEN RETURN false; END IF;
  SELECT e.* INTO ep FROM public.whatsapp_channel_memberships e JOIN public.whatsapp_connections w ON w.account_id=e.account_id AND w.id=e.connection_id AND w.provider=e.provider
- JOIN public.whatsapp_config cfg ON cfg.account_id=e.account_id AND cfg.phone_number_id=e.external_snapshot
  WHERE e.account_id=p_account AND e.connection_id=p_connection AND e.provider='meta_cloud' AND e.valid_until IS NULL
- AND e.external_snapshot=p_external AND w.provider_external_id=p_external AND w.archived_at IS NULL AND w.status='connected' AND cfg.status='connected'
- AND p_at>=e.valid_from FOR SHARE OF e,w,cfg;
+ AND e.external_snapshot=p_external AND w.provider_external_id=p_external AND w.archived_at IS NULL AND w.status='connected'
+ AND p_at>=e.valid_from FOR SHARE OF e,w;
  IF NOT FOUND THEN RETURN false; END IF;
  IF EXISTS(SELECT 1 FROM public.inbox_message_memberships WHERE message_id=p_message) THEN
   RETURN EXISTS(SELECT 1 FROM public.inbox_message_memberships WHERE message_id=p_message AND account_id=p_account AND membership_id=ep.id AND evidence_kind='verified_current_ingress');
@@ -112,7 +125,7 @@ BEGIN
   ORDER BY m.created_at DESC,m.id DESC LIMIT 1;
   IF t.provider='meta_cloud' THEN
    last_inbound=inbound.created_at;
-   ready=ready AND EXISTS(SELECT 1 FROM public.whatsapp_config cfg WHERE cfg.account_id=p_account AND cfg.phone_number_id=ep.external_snapshot AND cfg.status='connected');
+   ready=ready AND wacrm_internal.inbox_meta_config_ready(p_account,ep.external_snapshot,false);
    IF phone~'^[1-9][0-9]{6,14}$' THEN verified_recipient=phone; END IF;
   ELSE
    -- Exact native inbound route only; a LID never becomes a phone. If the

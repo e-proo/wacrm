@@ -36,8 +36,10 @@ BEGIN
  INSERT INTO public.messages(conversation_id,sender_type,content_type,content_text,status,provider,connection_id,provider_message_id,created_at) VALUES(c,'customer','text','signed Meta fresh','delivered','meta_cloud',mt,'meta-220-fresh',ts) RETURNING id INTO fresh;
  IF public.inbox_record_meta_signed_ingress(a,mt,c,fresh,'meta-220-fresh','wrong-id','15550000219',ts) THEN RAISE EXCEPTION 'wrong Meta external accepted'; END IF;
  IF public.inbox_record_meta_signed_ingress(a,mt,c,fresh,'meta-220-fresh','15550000193','15550000999',ts) THEN RAISE EXCEPTION 'wrong Meta sender accepted'; END IF;
+ EXECUTE 'SET LOCAL ROLE service_role';
  IF NOT public.inbox_record_meta_signed_ingress(a,mt,c,fresh,'meta-220-fresh','15550000193','15550000219',ts) THEN RAISE EXCEPTION 'fresh Meta proof absent'; END IF;
  IF NOT public.inbox_record_meta_signed_ingress(a,mt,c,fresh,'meta-220-fresh','15550000193','15550000219',ts) OR (SELECT count(*) FROM public.inbox_message_memberships WHERE message_id=fresh)<>1 THEN RAISE EXCEPTION 'duplicate signed proof'; END IF;
+ EXECUTE 'RESET ROLE';
  v=public.inbox_policy_context(a,u,t,mc,NULL);
  IF (v->>'last_inbound_at')::timestamptz IS DISTINCT FROM ts OR v->>'connection_id'<>mt::text THEN RAISE EXCEPTION 'exact signed Meta window %',v; END IF;
  INSERT INTO public.messages(conversation_id,sender_type,content_type,content_text,status,provider,connection_id,provider_message_id,created_at)

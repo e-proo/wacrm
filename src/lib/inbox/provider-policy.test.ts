@@ -17,7 +17,7 @@ const guard={manual_paused:false,pilot_enabled:true,circuit_open_until:null,hour
 function fixture(options:{context?:Partial<PolicyContext>;guard?:Partial<typeof guard>;grant?:boolean;reason?:string;count?:number}={}){
  const rpc=vi.fn(async(name:string)=>({data:name==='inbox_policy_context'?{...context,...options.context}:options.reason??null,error:null}))
  const from=vi.fn((table:string)=>{
-  const q={select:vi.fn(()=>q),eq:vi.fn(()=>q),gt:vi.fn(()=>q),gte:vi.fn(()=>q),in:vi.fn(async()=>({count:options.count??0,error:null})),maybeSingle:vi.fn(async()=>({data:table==='whatsapp_connection_guardrails'?{...guard,...options.guard}:options.grant===false?null:{id:id(8)},error:null}))}
+  const q={select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),gt:vi.fn().mockReturnThis(),gte:vi.fn().mockReturnThis(),in:vi.fn(async()=>({count:options.count??0,error:null})),maybeSingle:vi.fn(async()=>({data:table==='whatsapp_connection_guardrails'?{...guard,...options.guard}:options.grant===false?null:{id:id(8)},error:null}))}
   return q
  })
  return {db:{rpc,from} as unknown as SupabaseClient,rpc,from}
