@@ -36,3 +36,10 @@ Status: planned, no tests executed for this new feature. Technical tests first, 
 - TEST فقط؛ لا تعديل Production ولا تشغيل إرسال حي بلا تفويض منفصل. لا تعديل migration قديمة، لا توسيع grants ولا تعطيل RLS أو guardrails لإمرار اختبار.
 - سجل commit, CI run, migrations ledger, smoke output, risks, screenshots إن لزم. فرّق implementation complete / CI verified / TEST verified / live acceptance / production ready.
 - لا إغلاق المهمة أو المرحلة قبل DoD المحدد؛ إذا كان CI قيد التشغيل فالبوابة مفتوحة.
+
+## INBOX-0 additional negative gates (no PASS claimed)
+- A24: single-scope inherited unread and mixed legacy unallocated count preserved, late inbound after read watermark, explicit legacy acknowledgment audit; no sibling clearing.
+- A25: actual role grants, no unnecessary TRUNCATE/unsafe privileges, browser cannot forge trusted customer/provider/time/connection or bypass API; tenant FKs and RLS negatives, synthetic rollback tests only.
+- A26: migration 204 ledger/schema and correct authorized W07 mode verified; legacy TEST mode never cited as activation/consent readiness. Archived ready not eligible, unknown native ID not guessed. 
+- A27: immutable provider/connection binding, existing legacy unique collision and exact reply/echo/ACK dedup; no changes to external CRM IDs, no synthesized broadcasts.
+- A28: explicit outbound-only thread and stale sender no latest-inbound/Meta fallback; no partner/CRM action leakage.
