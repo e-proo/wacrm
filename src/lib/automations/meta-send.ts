@@ -2,6 +2,8 @@
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
 import { engineSendInteractiveButtons, engineSendInteractiveList } from '@/lib/flows/meta-send'
 import { sendMessageToConversation } from '@/lib/whatsapp/send-message'
+import { canonicalInboxTestMode } from '@/lib/inbox/canonical-ingress'
+import { getCanonicalAgentRunRoute } from '@/lib/inbox/canonical-route-context'
 import { resolveConversationTransport } from '@/lib/whatsapp/transport/router'
 import { WhatsAppTransportError, type WhatsAppProvider, type WhatsAppSendWorkload } from '@/lib/whatsapp/transport/types'
 import { supabaseAdmin } from './admin-client'
@@ -20,7 +22,10 @@ type SendInput = (SendTextArgs & { kind: 'text' }) | (SendTemplateArgs & { kind:
 
 async function sendViaTransport(input: SendInput): Promise<{ whatsapp_message_id: string; local_message_id: string }> {
   const db = supabaseAdmin()
-  const resolved = await resolveConversationTransport(db, input.accountId, input.conversationId, input.connectionId)
+  const causalConnection = canonicalInboxTestMode() && input.kind === 'text' && input.aiAgentRunId
+    ? await getCanonicalAgentRunRoute(db,input.accountId,input.conversationId,input.aiAgentRunId,input.connectionId)
+    : input.connectionId
+  const resolved = await resolveConversationTransport(db, input.accountId, input.conversationId, causalConnection)
   // Agent Task reservations freeze a tenant-scoped provider and connection. Never silently fail over.
   if (input.connectionId) {
     const { data: bound, error } = await db.from('whatsapp_connections')

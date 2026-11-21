@@ -70,3 +70,25 @@ export async function canonicalReceiptOutcome(db: SupabaseClient, accountId: str
   return { state: data.state, messageId: typeof data.messageId === 'string' ? data.messageId : undefined,
     conversationId: typeof data.conversationId === 'string' ? data.conversationId : undefined }
 }
+
+/** Per-stage record is a durable uncertainty boundary, never a promise that
+ * the external recipient received an effect. A started claim isn't replayed. */
+export async function runCanonicalStage<T>(db: SupabaseClient, accountId: string, run: CanonicalDispatch, stage: string, fn: () => Promise<T>): Promise<T> {
+  const args = {p_account:accountId,p_canonical:run.canonicalId,p_claim:run.claim,p_stage:stage}
+  const {data,error}=await db.rpc('inbox_begin_canonical_stage',args)
+  if(error||data!==true) throw new Error('Canonical stage unavailable or already claimed')
+  let result: T
+  try { result=await fn() } catch(error) {
+    await db.rpc('inbox_finish_canonical_stage',{...args,p_returned:false})
+    throw error
+  }
+  const done=await db.rpc('inbox_finish_canonical_stage',{...args,p_returned:true})
+  if(done.error||done.data!==true) throw new Error('Canonical stage outcome unconfirmed')
+  return result
+}
+export function hasExplicitCanonicalPeer(message: NormalizedInboundMessage): boolean {
+  const chat=message.providerChatId
+  if(message.provider!=='openwa'||!chat||!/^\d{5,20}@(c\.us|lid)$/.test(chat)) return false
+  const phone=message.from.replace(/^\+/,'')
+  return /^[1-9][0-9]{6,14}$/.test(phone) && (chat.endsWith('@lid') ? phone!==chat.slice(0,-4) : phone===chat.slice(0,-5))
+}

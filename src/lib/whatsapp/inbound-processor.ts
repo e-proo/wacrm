@@ -20,7 +20,8 @@ import { handleAdminChangeCommand } from '@/lib/ai/runtime/admin-change-commands
 import { engineSendText } from '@/lib/automations/meta-send'
 import { correlateInboundTaskReply } from '@/lib/ai/tasks/reply-correlation'
 import type { NormalizedInboundMessage } from '@/lib/whatsapp/inbound-normalization'
-import { canonicalReceiptOutcome, commitAndClaimCanonicalInbound, finishCanonicalDispatch, type CanonicalDispatch, type CanonicalReceipt } from '@/lib/inbox/canonical-ingress'
+import { withCanonicalRoute } from '@/lib/inbox/canonical-route-context'
+import { hasExplicitCanonicalPeer, runCanonicalStage, canonicalReceiptOutcome, commitAndClaimCanonicalInbound, finishCanonicalDispatch, type CanonicalDispatch, type CanonicalReceipt } from '@/lib/inbox/canonical-ingress'
 
 let _adminClient: ReturnType<typeof createClient> | null = null
 function supabaseAdmin() {
@@ -188,6 +189,7 @@ export async function processNormalizedInboundMessage(
   signedInlineMedia?: string,
   canonicalReceipt?: CanonicalReceipt,
 ) {
+  if (canonicalReceipt && !hasExplicitCanonicalPeer(message)) throw new Error('Canonical inbound requires explicit verified peer identity')
   const openWAIdentity = message.provider === 'openwa'
     ? await resolveOpenWAInboundContactIdentity(supabaseAdmin(), {
         accountId, connectionId: message.connectionId,
@@ -209,7 +211,7 @@ export async function processNormalizedInboundMessage(
         return { contact: existing, wasCreated: false }
       })()
     : await findOrCreateContact(accountId, configOwnerUserId, senderPhone, contactName)
-  if (!contactOutcome) return
+  if (!contactOutcome) { if (canonicalReceipt) throw new Error('Canonical contact unavailable'); return }
   const contactRecord = contactOutcome.contact
 
   // Find or create conversation
@@ -218,7 +220,7 @@ export async function processNormalizedInboundMessage(
     configOwnerUserId,
     contactRecord.id
   )
-  if (!convResult) return
+  if (!convResult) { if (canonicalReceipt) throw new Error('Canonical parent unavailable'); return }
   const conversation = convResult.conversation
 
   // Emit conversation.created as soon as the thread is opened — BEFORE
@@ -301,7 +303,7 @@ export async function processNormalizedInboundMessage(
   let contactCreated = contactOutcome.wasCreated
   let canonicalRun: CanonicalDispatch | null = null
   let isInboundReplay = false
-  let inboundMessageId: string | null = null
+  let persistedInboundMessageId: string | null = null
 
   if (canonicalReceipt) {
     canonicalRun = await commitAndClaimCanonicalInbound(supabaseAdmin(), {
@@ -323,7 +325,7 @@ export async function processNormalizedInboundMessage(
       }
       return
     }
-    inboundMessageId = canonicalRun.messageId
+    persistedInboundMessageId = canonicalRun.messageId
     replyToInternalId = canonicalRun.replyToMessageId
     isFirstInboundMessage = canonicalRun.firstInbound
     contactCreated = canonicalRun.contactCreated
@@ -380,7 +382,7 @@ export async function processNormalizedInboundMessage(
     // correlation if a previous invocation crashed after INSERT but before the
     // correlation RPC. That RPC is itself idempotent on inbound_message_id.
     isInboundReplay = !insertedRows || insertedRows.length === 0
-    inboundMessageId = insertedRows?.[0]?.id ?? null
+    persistedInboundMessageId = insertedRows?.[0]?.id ?? null
 
     if (isInboundReplay) {
       console.info(
@@ -405,31 +407,35 @@ export async function processNormalizedInboundMessage(
         )
         return
       }
-      inboundMessageId = persistedInbound.id as string
+      persistedInboundMessageId = persistedInbound.id as string
       if (message.provider === 'openwa') {
         // Rolling back the feature flag cannot re-run an admitted canonical
         // source (including an interrupted/held effect) via legacy Task replay.
         const { data: canonicalMembership, error: membershipError } = await supabaseAdmin().from('inbox_message_memberships')
-          .select('message_id').eq('account_id', accountId).eq('message_id', inboundMessageId)
+          .select('message_id').eq('account_id', accountId).eq('message_id', persistedInboundMessageId)
           .eq('evidence_kind', 'verified_current_ingress').maybeSingle()
         if (canonicalMembership || (membershipError && !['42P01','PGRST205'].includes(membershipError.code))) return
       }
     }
 
-    if (!inboundMessageId) {
+    if (!persistedInboundMessageId) {
       console.error('[webhook] inbound message id missing after persistence')
       return
     }
 
   }
-  if (!inboundMessageId) return
+  if (!persistedInboundMessageId) return
+  const inboundMessageId = persistedInboundMessageId
 
   let returned = true
+  const runEffect = <T>(stage: string, fn: () => Promise<T>): Promise<T> => canonicalRun
+    ? runCanonicalStage(supabaseAdmin(),accountId,canonicalRun,stage,() => withCanonicalRoute({ accountId, conversationId:conversation.id,messageId:inboundMessageId,connectionId:message.connectionId },fn))
+    : fn()
   try {
     if (canonicalRun?.conversationCreated) {
-      await dispatchWebhookEvent(supabaseAdmin(), accountId, 'conversation.created', {
+      await runEffect('conversation_created', () => dispatchWebhookEvent(supabaseAdmin(), accountId, 'conversation.created', {
         conversation_id: conversation.id, contact_id: contactRecord.id,
-      })
+      }))
     }
   // OpenWA media must NEVER block the initial message INSERT. The gateway may
   // be slow to archive a video/document, or may mark the bytes unavailable.
@@ -479,11 +485,15 @@ export async function processNormalizedInboundMessage(
     }
 
     // A customer writing again re-opens the thread (issue #409).
-    await reopenClosedConversation(supabaseAdmin(), conversation)
+    await runEffect('reopen', () => reopenClosedConversation(supabaseAdmin(), conversation))
 
     // If this contact was a recent broadcast recipient, flag the reply
     // so the broadcast's replied_count advances.
-    await flagBroadcastReplyIfAny(accountId, contactRecord.id)
+    await runEffect('broadcast_reply', async () => {
+      if (!canonicalRun) return flagBroadcastReplyIfAny(accountId, contactRecord.id)
+      const {data,error}=await supabaseAdmin().rpc('inbox_correlate_broadcast_reply',{p_account:accountId,p_canonical:canonicalRun.canonicalId,p_claim:canonicalRun.claim})
+      if(error||data==='review') throw new Error('Canonical broadcast correlation requires review')
+    })
   }
 
   // SECURITY BOUNDARY: resolve the sender plane before ANY customer Flow,
@@ -500,10 +510,12 @@ export async function processNormalizedInboundMessage(
     })
   } catch (err) {
     console.error('[webhook] trusted-admin plane lookup failed:', err)
+    if (canonicalRun) returned = false
     return
   }
 
   if (trustedAdminIdentity) {
+    const adminIdentity = trustedAdminIdentity
     // A replay must never re-execute administrator commands or generation.
     if (isInboundReplay) return
 
@@ -513,36 +525,37 @@ export async function processNormalizedInboundMessage(
       `[ai gate] plane=admin identity=${trustedAdminIdentity.id.slice(0, 8)} env=${multiAgent}`,
     )
 
-    const changeCommand = await handleAdminChangeCommand({
+    const changeCommand = await runEffect('admin_command', () => handleAdminChangeCommand({
       accountId,
-      identity: trustedAdminIdentity,
+      identity: adminIdentity,
       inboundMessageId,
       text: adminText,
-    })
+    }))
     if (changeCommand.handled) {
       if (configOwnerUserId) {
-        await engineSendText({
+        const ownerUserId = configOwnerUserId
+        await runEffect('admin_reply', () => engineSendText({
           accountId,
-          userId: configOwnerUserId,
+          userId: ownerUserId,
           conversationId: conversation.id,
           contactId: contactRecord.id,
           text: changeCommand.reply,
           workload: 'api',
           engineIdempotencyKey: `trusted-admin-command-reply:${inboundMessageId}`,
-        })
+        }))
       }
-      await dispatchWebhookEvent(supabaseAdmin(), accountId, 'message.received', {
+      await runEffect('message_received', () => dispatchWebhookEvent(supabaseAdmin(), accountId, 'message.received', {
         conversation_id: conversation.id,
         contact_id: contactRecord.id,
         whatsapp_message_id: message.id,
         content_type: contentType,
         text: contentText,
-      })
+      }))
       return
     }
 
     if (multiAgent && !interactiveReplyId && adminText.trim()) {
-      await dispatchInboundToAiAgent({
+      await runEffect('agent_dispatch', () => dispatchInboundToAiAgent({
         accountId,
         conversationId: conversation.id,
         inboundMessageId,
@@ -552,18 +565,18 @@ export async function processNormalizedInboundMessage(
         hasHumanAssignee: Boolean(conversation.assigned_agent_id),
         multiAgentEnabled: true,
         workerId: 'webhook-admin',
-      })
+      }))
     }
 
     // Public inbound event remains observable, but customer-plane engines
     // below are intentionally skipped even if the admin agent is disabled.
-    await dispatchWebhookEvent(supabaseAdmin(), accountId, 'message.received', {
+    await runEffect('message_received', () => dispatchWebhookEvent(supabaseAdmin(), accountId, 'message.received', {
       conversation_id: conversation.id,
       contact_id: contactRecord.id,
       whatsapp_message_id: message.id,
       content_type: contentType,
       text: contentText,
-    })
+    }))
     return
   }
 
@@ -582,20 +595,21 @@ export async function processNormalizedInboundMessage(
 
   if (multiAgentEnabled) {
     try {
-      taskCorrelation = await correlateInboundTaskReply({
+      taskCorrelation = await runEffect('task_correlation', () => correlateInboundTaskReply({
         accountId,
         conversationId: conversation.id,
         inboundMessageId,
         replyToMessageId: replyToInternalId,
         hasHumanAssignee: Boolean(conversation.assigned_agent_id),
-      })
+      }))
     } catch (err) {
       console.error('[task reply] correlation failed closed:', err)
+      if (canonicalRun) returned = false
 
       // Correlation errors must not fall through to a different AI agent and
       // answer a message that may belong to an active Task target.
       if (!isInboundReplay) {
-        await dispatchWebhookEvent(
+        await runEffect('message_received', () => dispatchWebhookEvent(
           supabaseAdmin(),
           accountId,
           'message.received',
@@ -606,14 +620,15 @@ export async function processNormalizedInboundMessage(
             content_type: contentType,
             text: contentText,
           },
-        )
+        ))
       }
       return
     }
   }
 
   if (taskCorrelation?.status === 'matched' && taskCorrelation.signal) {
-    const dispatched = await dispatchInboundToAiAgent({
+    const taskReply = taskCorrelation.signal
+    const dispatched = await runEffect('agent_dispatch', () => dispatchInboundToAiAgent({
       accountId,
       conversationId: conversation.id,
       inboundMessageId,
@@ -623,15 +638,15 @@ export async function processNormalizedInboundMessage(
       hasHumanAssignee: Boolean(conversation.assigned_agent_id),
       multiAgentEnabled: true,
       workerId: isInboundReplay ? 'webhook-task-replay' : 'webhook-task-reply',
-      taskReply: taskCorrelation.signal,
-    })
+      taskReply,
+    }))
 
     console.info(
       `[ai gate] path=task-reply queued=${dispatched.queued} reason=${dispatched.decision.reason}`,
     )
 
     if (!isInboundReplay) {
-      await dispatchWebhookEvent(
+      await runEffect('message_received', () => dispatchWebhookEvent(
         supabaseAdmin(),
         accountId,
         'message.received',
@@ -642,7 +657,7 @@ export async function processNormalizedInboundMessage(
           content_type: contentType,
           text: contentText,
         },
-      )
+      ))
     }
     return
   }
@@ -657,7 +672,7 @@ export async function processNormalizedInboundMessage(
     )
 
     if (!isInboundReplay) {
-      await dispatchWebhookEvent(
+      await runEffect('message_received', () => dispatchWebhookEvent(
         supabaseAdmin(),
         accountId,
         'message.received',
@@ -668,7 +683,7 @@ export async function processNormalizedInboundMessage(
           content_type: contentType,
           text: contentText,
         },
-      )
+      ))
     }
     return
   }
@@ -697,7 +712,7 @@ export async function processNormalizedInboundMessage(
   // no active flows take the runner's early-exit "no_match" path
   // basically for free (one indexed SELECT for the active run).
   // ============================================================
-  const flowResult = await dispatchInboundToFlows({
+  const flowResult = await runEffect('flows', () => dispatchInboundToFlows({
     accountId,
     userId: configOwnerUserId,
     contactId: contactRecord.id,
@@ -716,7 +731,7 @@ export async function processNormalizedInboundMessage(
             meta_message_id: message.id,
           },
     isFirstInboundMessage,
-  })
+  }))
   const flowConsumed = flowResult.consumed
 
   // Fire any automations that react to this webhook event. All dispatches
@@ -761,7 +776,7 @@ export async function processNormalizedInboundMessage(
   // and never throws; the `.catch` is belt-and-braces so one trigger
   // type's failure can't skip the rest of the loop.
   for (const triggerType of automationTriggers) {
-    await runAutomationsForTrigger({
+    await runEffect('automation:'+triggerType, () => runAutomationsForTrigger({
       accountId,
       triggerType,
       contactId: contactRecord.id,
@@ -772,7 +787,7 @@ export async function processNormalizedInboundMessage(
         // trigger's exact-id match.
         interactive_reply_id: interactiveReplyId ?? undefined,
       },
-    }).catch((err) => console.error('[automations] dispatch failed:', err))
+    })).catch((err) => { if (canonicalRun) returned = false; console.error('[automations] dispatch failed:', err) })
   }
 
   // Load route signals AFTER Flows/Automations have had their chance to
@@ -788,6 +803,7 @@ export async function processNormalizedInboundMessage(
     })
   } catch (err) {
     console.error('[ai gate] routing signal lookup failed:', err)
+    if (canonicalRun) throw err
     routingSignals = { inboxId, tags: [], language: null }
   }
 
@@ -819,7 +835,7 @@ export async function processNormalizedInboundMessage(
       `[ai gate] path=${handledByAgent ? 'multi-agent' : 'legacy'} env=${multiAgent}`,
     )
     if (handledByAgent) {
-      await dispatchInboundToAiAgent({
+      await runEffect('agent_dispatch', () => dispatchInboundToAiAgent({
         accountId,
         conversationId: conversation.id,
         inboundMessageId,
@@ -830,15 +846,15 @@ export async function processNormalizedInboundMessage(
         multiAgentEnabled: true,
         workerId: 'webhook',
         ...routingSignals,
-      })
+      }))
     } else {
-      await dispatchInboundToAiReply({
+      await runEffect('legacy_ai', () => dispatchInboundToAiReply({
         accountId,
         conversationId: conversation.id,
         contactId: contactRecord.id,
         inboundMessageId,
         configOwnerUserId,
-      })
+      }))
     }
   }
 
@@ -849,13 +865,13 @@ export async function processNormalizedInboundMessage(
   // when the account has no matching endpoint and never throws.
   // (conversation.created is emitted earlier, right after the thread is
   // opened.)
-  await dispatchWebhookEvent(supabaseAdmin(), accountId, 'message.received', {
+  await runEffect('message_received', () => dispatchWebhookEvent(supabaseAdmin(), accountId, 'message.received', {
     conversation_id: conversation.id,
     contact_id: contactRecord.id,
     whatsapp_message_id: message.id,
     content_type: contentType,
     text: contentText,
-  })
+  }))
   } catch (error) {
     returned = false
     throw error

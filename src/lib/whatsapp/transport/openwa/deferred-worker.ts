@@ -7,7 +7,7 @@
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { reconcileCanonicalAck } from '@/lib/inbox/canonical-outbound'
-import { canonicalInboxTestMode, canonicalReceiptOutcome } from '@/lib/inbox/canonical-ingress'
+import { canonicalInboxTestMode, canonicalReceiptOutcome, hasExplicitCanonicalPeer } from '@/lib/inbox/canonical-ingress'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
 import { applyWhatsAppStatus } from '@/lib/whatsapp/status-lifecycle'
 import { preflightOpenWAInboundIdentity, readDeferredInbound, readDeferredStatus } from './deferred'
@@ -112,6 +112,7 @@ async function processDeferredJob(db: SupabaseClient, job: DeferredJob): Promise
 
   if (canonicalInboxTestMode()) {
     const message = inbound.message
+    if (!hasExplicitCanonicalPeer(message)) return retry('canonical_peer_proof_missing')
     if (message.providerMessageIdentityKind !== 'native' || !message.providerEventId ||
         message.providerMetadata?.sessionId !== job.session_id ||
         (message.providerMetadata?.instanceId ?? null) !== job.instance_id) return review('canonical_receipt_reconciliation_required')
@@ -151,6 +152,10 @@ function nextRetrySeconds(attemptCount: number): number {
 export async function processOpenWADeferredTick(
   db: SupabaseClient = adminDb(),
 ): Promise<{ claimed: number; completed: number; pending: number; review: number }> {
+  if (canonicalInboxTestMode()) {
+    const recovered=await db.rpc('inbox_recover_stale_canonical_effects',{p_limit:20})
+    if(recovered.error) throw new Error('Canonical recovery sweep unavailable')
+  }
   const { data, error } = await db.rpc('claim_openwa_deferred_events', { p_limit: 5 })
   if (error) throw new Error('Could not claim OpenWA deferred events')
   const jobs = (data ?? []) as DeferredJob[]

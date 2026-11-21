@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { selectCanonicalRoute } from '@/lib/inbox/canonical-route-context'
 import { resolveMetaTransport } from './meta-adapter'
 import { resolveOpenWATransport } from './openwa/adapter'
 import { GuardedOpenWATransport } from './guardrails'
@@ -34,7 +35,8 @@ export async function resolveWhatsAppTransport(db: SupabaseClient, accountId: st
 
 /** The send core account-scopes the conversation first; the selected connection is account-scoped again. */
 export async function resolveConversationTransport(db: SupabaseClient, accountId: string, conversationId: string, requestedConnectionId?: string | null): Promise<ResolvedWhatsAppTransport> {
-  if (requestedConnectionId) return resolveWhatsAppTransport(db, accountId, requestedConnectionId)
+  const selected = await selectCanonicalRoute(db, accountId, conversationId, requestedConnectionId)
+  if (selected) return resolveWhatsAppTransport(db, accountId, selected)
   const { data: inbound, error: inboundError } = await db.from('messages').select('connection_id').eq('conversation_id', conversationId).eq('sender_type', 'customer').order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (inboundError) throw new WhatsAppTransportError('retryable_provider_failure', 'Could not resolve the conversation WhatsApp connection', inboundError)
   return resolveWhatsAppTransport(db, accountId, inbound?.connection_id ?? null)

@@ -11,7 +11,7 @@ import { applyOpenWAStatusWithRetry, parseOpenWAStatusEvent } from '@/lib/whatsa
 import { classifyOpenWAWebhookRejection, markOpenWAWebhookProcessed, verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
 import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 import { reconcileCanonicalAck, reconcileCanonicalEcho } from '@/lib/inbox/canonical-outbound'
-import { canonicalInboxTestMode, holdCanonicalReview } from '@/lib/inbox/canonical-ingress'
+import { canonicalInboxTestMode, hasExplicitCanonicalPeer, holdCanonicalReview } from '@/lib/inbox/canonical-ingress'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 
 export const maxDuration = 60
@@ -131,7 +131,7 @@ export async function POST(request: Request) {
           const identity = await preflightOpenWAInboundIdentity(db, {
             accountId, connectionId, sessionId: envelope.sessionId, inbound: normalized,
           })
-          if (identity === 'unresolved') {
+          if (identity === 'unresolved' || (canonicalReceipt && !hasExplicitCanonicalPeer(normalized.message))) {
             await deferOpenWAWebhook(db, {
               accountId, connectionId, sessionId: envelope.sessionId,
               providerEventId: envelope.eventId,

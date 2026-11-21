@@ -57,6 +57,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-canonical-deferred-smoke.sql
       - name: INBOX-1 signed own echo and cross-session ACK smoke
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-canonical-outbound-smoke.sql
+      - name: INBOX-1 durable effect stage interruption and causal route smoke
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-canonical-recovery-smoke.sql
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
       - name: NOTE-001 anonymous SECURITY DEFINER / RLS safety smoke

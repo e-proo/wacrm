@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { OpenWAPreDispatchDenied } from './openwa/pre-dispatch-denied'
 import { isOpenWATestProject } from './openwa/environment'
+import { assertCanonicalRoute } from '@/lib/inbox/canonical-route-context'
 import { assertOpenWAOperationalSendAllowed, openWAOperationalGateMode } from './openwa/operational-consent-gate'
 export { OpenWAPreDispatchDenied } from './openwa/pre-dispatch-denied'
 export { isOpenWATestProject } from './openwa/environment'
@@ -84,6 +85,7 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
   async send(request: WhatsAppTransportSendRequest): Promise<WhatsAppTransportSendResult> {
     // W07-04: current consent and exact connection activation are checked
     // before any guardrail reservation, for every outbound workload.
+    await assertCanonicalRoute(this.db, request.accountId, request.connectionId)
     await assertOpenWAOperationalSendAllowed(this.db, request.accountId, request.connectionId)
     const workload = request.workload ?? 'manual'
     const hash = recipientHash(request.accountId, request.connectionId, request.recipient)
@@ -124,6 +126,7 @@ export class GuardedOpenWATransport implements WhatsAppTransport {
     }
 
     try {
+      await assertCanonicalRoute(this.db, request.accountId, request.connectionId)
       const result = await this.inner.send(request)
       await this.record(request, hash, true)
       return result
