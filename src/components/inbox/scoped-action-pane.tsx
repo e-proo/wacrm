@@ -59,6 +59,12 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  const [busy,setBusy]=useState(false)
  const [attempt,setAttempt]=useState<Attempt|null>(()=>cachedAttempt(key))
  useEffect(()=>{saveScopedDraft(draftKey,{mode,text,caption})},[draftKey,mode,text,caption])
+ useEffect(()=>{
+  if(!containsUnsentDraft({mode,text,caption})&&!attachment)return
+  const protect=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue=''}
+  window.addEventListener('beforeunload',protect)
+  return()=>window.removeEventListener('beforeunload',protect)
+ },[mode,text,caption,attachment])
  useEffect(()=>{const timer=setInterval(()=>setTick(performance.now()),1000);return()=>clearInterval(timer)},[])
  const policyKey=ctx.accountId+':'+ctx.userId+':'+row.id+':'+row.channel_id+':'+(selectedConnection??'')+':'+revision
  useEffect(()=>{

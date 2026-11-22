@@ -238,6 +238,7 @@ function Workspace({ctx}:{ctx:InboxContext}){
  const [filters,setFilters]=useState<InboxFilters>({...defaultFilters}),[revision,setRevision]=useState(0)
  const [newThreadOpen,setNewThreadOpen]=useState(false)
  const latestSelected=useRef<string|null>(null)
+ const restoringFocus=useRef(false)
  const online=useBrowserOnline()
  useEffect(()=>()=>clearAccountScopedDrafts({accountId:ctx.accountId,userId:ctx.userId}),[ctx.accountId,ctx.userId])
  const search=useDebounced(filters.search),company=useDebounced(filters.company)
@@ -251,15 +252,8 @@ function Workspace({ctx}:{ctx:InboxContext}){
   try{localStorage.setItem(preferenceKey(ctx),JSON.stringify({scope,channel}))}catch{/* Storage is optional. */}
  }
  const close=()=>{
+  restoringFocus.current=true
   go(selectionHref(loc.scope,loc.channel))
-  // The list remains mounted on mobile: restore keyboard focus to the exact
-  // row after the thread pane is hidden, without changing scroll/filter.
-  requestAnimationFrame(()=>{
-   const id=latestSelected.current
-   if(!id)return
-   const items=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-inbox-row-id]'))
-   items.find(el=>el.dataset.inboxRowId===id&&el.getClientRects().length>0)?.focus({preventScroll:true})
-  })
  }
  const choose=(row:ScopedRow)=>{latestSelected.current=row.id;go(selectionHref(row.scope,loc.legacy||loc.scope!==row.scope?row.channel_id:loc.channel,row))}
  const changeFilters=(next:InboxFilters)=>{setFilters(next);close()}
@@ -267,6 +261,17 @@ function Workspace({ctx}:{ctx:InboxContext}){
  const realtime=useScopedInboxRealtime(ctx,refresh)
  const connectivityNotice=scopedConnectivityNotice(online,realtime)
  const hasSelection=!loc.invalid&&Boolean(loc.legacy||loc.thread||(loc.scope==='unknown'&&loc.parent))
+ useEffect(()=>{
+  if(hasSelection||!restoringFocus.current)return
+  const handle=requestAnimationFrame(()=>{
+   restoringFocus.current=false
+   const id=latestSelected.current
+   const rows=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-inbox-row-id]'))
+   const target=rows.find(el=>el.dataset.inboxRowId===id&&el.getClientRects().length>0)
+   target?.focus({preventScroll:true})
+  })
+  return()=>cancelAnimationFrame(handle)
+ },[hasSelection,loc.scope,loc.channel])
  const listKey=[loc.scope,loc.channel,JSON.stringify(effective)].join(':')
  return <div className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden bg-background sm:-m-6">
   <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-3">
