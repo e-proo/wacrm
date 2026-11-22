@@ -15,12 +15,14 @@ SELECT '10000000-0000-4000-8000-000000000001'::uuid,
  '30000000-0000-4000-8000-000000000001'::uuid,
  '2026-11-21T23:00:00Z'::timestamptz - (n/2)*interval '1 second',
  n%4 FROM generate_series(1,10000) n;
+-- Skewed realistic distribution: 1k active threads have 50 messages,
+-- remaining 9k threads share the other 50k (5-6 per thread).
 INSERT INTO inbox_bench_messages
-SELECT t.account_id,t.id,('40000000-0000-4000-8000-'||lpad((id_parts.n*10+m)::text,12,'0'))::uuid,
- t.last_message_at - (m*interval '1 minute')
-FROM inbox_bench_threads t
-CROSS JOIN LATERAL (SELECT substring(t.id::text,25,12)::integer AS n) id_parts
-CROSS JOIN generate_series(1,10) m;
+SELECT '10000000-0000-4000-8000-000000000001'::uuid,
+ ('20000000-0000-4000-8000-'||lpad((CASE WHEN i<=50000 THEN ((i-1)%1000)+1 ELSE 1001+((i-50001)%9000) END)::text,12,'0'))::uuid,
+ ('40000000-0000-4000-8000-'||lpad(i::text,12,'0'))::uuid,
+ '2026-11-21T23:00:00Z'::timestamptz-(i%4000)*interval '1 minute'
+FROM generate_series(1,100000) g(i);
 CREATE INDEX inbox_bench_list_idx ON inbox_bench_threads(account_id,last_message_at DESC NULLS LAST,id DESC);
 CREATE INDEX inbox_bench_history_idx ON inbox_bench_messages(thread_id,created_at DESC NULLS LAST,id DESC);
 ANALYZE inbox_bench_threads;
@@ -30,7 +32,7 @@ DECLARE t bigint; m bigint;
 BEGIN
  SELECT count(*) INTO t FROM inbox_bench_threads;
  SELECT count(*) INTO m FROM inbox_bench_messages;
- IF t<>10000 OR m<>100000 THEN RAISE EXCEPTION 'INBOX5_BAD_SYNTHETIC_FIXTURE: % %',t,m; END IF;
+ IF t<>10000 OR m<>100000 OR (SELECT count(*) FROM inbox_bench_messages WHERE thread_id='20000000-0000-4000-8000-000000000001')<>50 THEN RAISE EXCEPTION 'INBOX5_BAD_SYNTHETIC_FIXTURE: % %',t,m; END IF;
  RAISE NOTICE 'INBOX5_SYNTHETIC_SIZE threads=% messages=%',t,m;
 END $check$;
 \echo INBOX5 synthetic list plan:
