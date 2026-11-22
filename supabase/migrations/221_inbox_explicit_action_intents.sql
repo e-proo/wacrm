@@ -372,3 +372,30 @@ END $$;
 REVOKE ALL ON FUNCTION public.inbox_commit_outbound_echo(uuid,uuid,text,uuid,text,text,uuid,text,boolean,text,text,text,text,text,timestamptz,jsonb) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.inbox_commit_outbound_echo(uuid,uuid,text,uuid,text,text,uuid,text,boolean,text,text,text,text,text,timestamptz,jsonb) TO service_role;
 
+
+-- Explicit outbound-only opening for an existing CRM contact; no send or
+-- automatic selection. The legacy parent remains one per account/contact.
+CREATE FUNCTION wacrm_internal.inbox_open_explicit_thread(p_account uuid,p_actor uuid,p_contact uuid,p_channel uuid,p_connection uuid,p_membership uuid,p_provider text)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE parent_id uuid; thread_id uuid; c jsonb;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.profiles WHERE account_id=p_account AND user_id=p_actor AND account_role::text IN ('owner','admin','agent')) THEN RAISE EXCEPTION 'INBOX_ACTION_ACTOR' USING ERRCODE='42501'; END IF;
+ IF p_provider NOT IN ('openwa','meta_cloud') OR p_provider IS NULL OR NOT EXISTS(SELECT 1 FROM public.contacts WHERE account_id=p_account AND id=p_contact AND regexp_replace(phone,'[^0-9]','','g')~'^[1-9][0-9]{6,14}$') THEN RAISE EXCEPTION 'INBOX_ACTION_CONTACT' USING ERRCODE='42501'; END IF;
+ PERFORM 1 FROM public.whatsapp_channel_memberships e JOIN public.whatsapp_connections w ON w.id=e.connection_id AND w.account_id=e.account_id AND w.provider=e.provider WHERE e.account_id=p_account AND e.id=p_membership AND e.channel_id=p_channel AND e.connection_id=p_connection AND e.provider=p_provider AND e.valid_until IS NULL AND w.archived_at IS NULL FOR SHARE OF e,w;
+ IF NOT FOUND THEN RAISE EXCEPTION 'INBOX_ACTION_SCOPE' USING ERRCODE='42501'; END IF;
+ INSERT INTO public.conversations(user_id,account_id,contact_id,status,unread_count) VALUES(p_actor,p_account,p_contact,'pending',0) ON CONFLICT(account_id,contact_id) DO NOTHING;
+ SELECT id INTO STRICT parent_id FROM public.conversations WHERE account_id=p_account AND contact_id=p_contact;
+ INSERT INTO public.inbox_threads(account_id,conversation_id,channel_id,provider) VALUES(p_account,parent_id,p_channel,p_provider) ON CONFLICT(account_id,conversation_id,channel_id) DO NOTHING;
+ SELECT id INTO STRICT thread_id FROM public.inbox_threads WHERE account_id=p_account AND conversation_id=parent_id AND channel_id=p_channel;
+ c=public.inbox_policy_context(p_account,p_actor,thread_id,p_channel,p_connection);
+ IF c IS NULL OR c->>'membership_id' IS DISTINCT FROM p_membership::text OR c->>'ready' IS DISTINCT FROM 'true' OR c->>'can_operate' IS DISTINCT FROM 'true' OR c->>'recipient' IS NULL THEN RAISE EXCEPTION 'INBOX_ACTION_ROUTE' USING ERRCODE='42501'; END IF;
+ RETURN thread_id;
+END $$;
+REVOKE ALL ON FUNCTION wacrm_internal.inbox_open_explicit_thread(uuid,uuid,uuid,uuid,uuid,uuid,text) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION wacrm_internal.inbox_open_explicit_thread(uuid,uuid,uuid,uuid,uuid,uuid,text) TO service_role;
+CREATE FUNCTION public.inbox_open_explicit_thread(p_account uuid,p_actor uuid,p_contact uuid,p_channel uuid,p_connection uuid,p_membership uuid,p_provider text)
+RETURNS uuid LANGUAGE sql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+ SELECT wacrm_internal.inbox_open_explicit_thread(p_account,p_actor,p_contact,p_channel,p_connection,p_membership,p_provider)
+$$;
+REVOKE ALL ON FUNCTION public.inbox_open_explicit_thread(uuid,uuid,uuid,uuid,uuid,uuid,text) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.inbox_open_explicit_thread(uuid,uuid,uuid,uuid,uuid,uuid,text) TO service_role;

@@ -66,3 +66,23 @@ export async function getScopedAction(request:Request,threadId:string){
   return reply({state:data.state,intent_id:data.id,message_id:data.message_id})
  }catch(e){return e instanceof UnauthorizedError?fail(401,'unauthorized'):e instanceof ForbiddenError?fail(403,'forbidden'):fail(503,'action_unavailable')}
 }
+
+export async function openScopedThread(request:Request){
+ try{
+  const ctx=await requireRole('agent')
+  if(!scopedInboxActionsEnabled()||request.headers.get('x-wacrm-inbox-account')!==ctx.accountId||request.headers.get('x-wacrm-inbox-actor')!==ctx.userId)return fail(403,'context_changed')
+  const origin=request.headers.get('origin')
+  if(request.headers.get('sec-fetch-site')==='cross-site'||origin!==null&&origin!==new URL(request.url).origin)return fail(403,'forbidden_origin')
+  if(request.headers.get('content-type')?.split(';')[0]!=='application/json'||Number(request.headers.get('content-length')??0)>4096)return fail(400,'invalid_action')
+  const raw=await request.text()
+  if(raw.length>4096)return fail(400,'invalid_action')
+  let p:Record<string,unknown>
+  try{p=JSON.parse(raw)}catch{return fail(400,'invalid_action')}
+  if(!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).length!==5||![p.contactId,p.channelId,p.connectionId,p.membershipId].every(validId)||(p.provider!=='meta_cloud'&&p.provider!=='openwa'))return fail(400,'invalid_action')
+  const limit=checkRateLimit('send:'+ctx.userId,RATE_LIMITS.send)
+  if(!limit.success)return rateLimitResponse(limit)
+  const {data,error}=await supabaseAdmin().rpc('inbox_open_explicit_thread',{p_account:ctx.accountId,p_actor:ctx.userId,p_contact:p.contactId,p_channel:p.channelId,p_connection:p.connectionId,p_membership:p.membershipId,p_provider:p.provider})
+  if(error||!validId(data))return fail(409,'scope_changed')
+  return reply({thread_id:data,channel_id:p.channelId})
+ }catch(e){return e instanceof UnauthorizedError?fail(401,'unauthorized'):e instanceof ForbiddenError?fail(403,'forbidden'):fail(503,'action_unavailable')}
+}
