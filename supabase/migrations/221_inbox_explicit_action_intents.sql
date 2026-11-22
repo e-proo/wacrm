@@ -186,10 +186,14 @@ DECLARE a public.inbox_action_intents%ROWTYPE; m public.messages%ROWTYPE; t publ
 BEGIN
  SELECT * INTO a FROM public.inbox_action_intents WHERE id=p_intent AND account_id=p_account AND actor_id=p_actor AND action_kind='send' AND state='pending' AND dispatch_started_at IS NOT NULL FOR UPDATE;
  IF NOT FOUND OR p_native IS NULL OR length(btrim(p_native)) NOT BETWEEN 1 AND 512 OR p_recipient IS NULL OR a.recipient_hash<>encode(sha256(convert_to(p_recipient,'UTF8')),'hex') THEN RAISE EXCEPTION 'INBOX_ACTION_RESULT' USING ERRCODE='42501'; END IF;
+ IF a.provider='openwa' THEN
+  PERFORM pg_advisory_xact_lock(hashtextextended('inbox-outbound:'||p_account::text||':'||a.channel_id::text||':'||p_native,0));
+ END IF;
  SELECT * INTO STRICT m FROM public.messages WHERE id=a.message_id AND conversation_id=a.conversation_id AND connection_id=a.connection_id AND provider=a.provider AND sender_type='agent' AND outbound_idempotency_key='inbox-action:'||a.id::text AND status='sending' AND provider_message_id IS NULL FOR UPDATE;
+ UPDATE public.messages SET message_id=CASE WHEN EXISTS(SELECT 1 FROM public.messages m2 WHERE m2.conversation_id=a.conversation_id AND m2.message_id=p_native AND m2.id<>m.id) THEN NULL ELSE p_native END,
+ provider_message_id=p_native,status='sent',provider_chat_id=CASE WHEN a.provider='openwa' AND p_recipient~'^[0-9]{5,20}@(c[.]us|lid)$' THEN p_recipient ELSE NULL END WHERE id=m.id;
  IF a.provider='openwa' THEN
   SELECT namespace_key INTO STRICT ns FROM public.inbox_native_namespace_proofs WHERE account_id=p_account AND channel_id=a.channel_id AND connection_id=a.connection_id AND membership_id=a.membership_id;
-  PERFORM pg_advisory_xact_lock(hashtextextended('inbox-outbound:'||p_account::text||':'||a.channel_id::text||':'||p_native,0));
   INSERT INTO public.inbox_canonical_messages(account_id,provider,channel_id,conversation_id,namespace_key,direction,native_message_id,origin_connection_id,origin_membership_id,source_message_id)
   VALUES(p_account,'openwa',a.channel_id,a.conversation_id,ns,'outbound',p_native,a.connection_id,a.membership_id,m.id)
   ON CONFLICT(account_id,provider,channel_id,namespace_key,direction,native_message_id) DO NOTHING;
@@ -197,8 +201,6 @@ BEGIN
   IF canon.source_message_id IS DISTINCT FROM m.id OR canon.conversation_id<>a.conversation_id OR canon.origin_connection_id<>a.connection_id OR canon.origin_membership_id<>a.membership_id THEN RAISE EXCEPTION 'INBOX_ACTION_NATIVE_COLLISION' USING ERRCODE='23514'; END IF;
   INSERT INTO public.inbox_canonical_effects(canonical_id,account_id,provider,channel_id,state) VALUES(canon.id,p_account,'openwa',a.channel_id,'not_applicable') ON CONFLICT(canonical_id) DO NOTHING;
  END IF;
- UPDATE public.messages SET message_id=CASE WHEN EXISTS(SELECT 1 FROM public.messages m2 WHERE m2.conversation_id=a.conversation_id AND m2.message_id=p_native AND m2.id<>m.id) THEN NULL ELSE p_native END,
- provider_message_id=p_native,status='sent',provider_chat_id=CASE WHEN a.provider='openwa' AND p_recipient~'^[0-9]{5,20}@(c[.]us|lid)$' THEN p_recipient ELSE NULL END WHERE id=m.id;
  UPDATE public.inbox_action_intents SET state='accepted',finished_at=clock_timestamp() WHERE id=a.id AND account_id=p_account;
  proof='inbox-action:v1:'||a.id::text;
  INSERT INTO public.inbox_verified_message_evidence(message_id,account_id,conversation_id,provider,channel_id,connection_id,membership_id,native_message_id,observed_at,evidence_ref)
