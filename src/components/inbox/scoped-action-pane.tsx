@@ -15,6 +15,7 @@ import {TemplatePicker} from './template-picker'
 import {QuickReplyPicker} from './quick-reply-picker'
 import type {HistoryMessage} from '@/lib/inbox/scoped-history-model'
 import {scopedDraftKey,getScopedDraft,saveScopedDraft,clearScopedDraft,containsUnsentDraft} from '@/lib/inbox/scoped-draft-memory'
+import {useBrowserOnline} from '@/lib/inbox/scoped-connectivity'
 
 export type ActiveActionScope={scope:ActionScope;capabilities:InboxCapabilities}
 type Mode='text'|'media'|'template'|'interactive'
@@ -38,7 +39,7 @@ function cachedAttempt(key:string):Attempt|null{
 // Only the UUID/status are stored; never the contact, content, media,
 // recipient or credentials. A reload cannot silently recreate a send.
 export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectConnection,reply,onClearReply,onScopeChange,onRefresh}:Props){
- const t=useTranslations('Inbox.scoped')
+ const t=useTranslations('Inbox.scoped'),online=useBrowserOnline()
  const draftKey=scopedDraftKey(ctx,row.id,row.channel_id),key=outcomeStorage(ctx,row.id)
  const list=useInboxPages<Connection>('connections?scope=active&channel_id='+(row.channel_id??''),ctx,
   c=>c.channel_id===row.channel_id&&c.provider===row.provider,revision)
@@ -85,7 +86,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  const scope:ActionScope|null=c&&validId(c.membership_id)&&selectedConnection&&row.channel_id?{
   threadId:row.id,channelId:row.channel_id,connectionId:selectedConnection,membershipId:c.membership_id,provider:c.provider
  }:null
- const enabled=Boolean(c?.dispatch_enabled&&scope&&selected?.ready&&!selected.archived)
+ const enabled=Boolean(online&&c?.dispatch_enabled&&scope&&selected?.ready&&!selected.archived)
  const kindAllowed=mode==='text'?Boolean(c?.may_send_text&&!expired):mode==='media'?Boolean(c?.may_send_media&&!expired&&c.media_kinds.includes(mediaKind)):mode==='template'?Boolean(c?.may_send_template):Boolean(c?.may_send_interactive&&!expired)
  const replyAllowed=!reply||Boolean(c?.may_reply)
  const canSubmit=Boolean(enabled&&kindAllowed&&replyAllowed&&!busy&&!uploading&&!attempt&&(mode==='text'?text.trim().length>0:mode==='media'?attachment&&attachment.kind===mediaKind:mode==='template'?template:validateInteractivePayload(interactive).ok))
@@ -163,6 +164,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
     </select>
    </label>
   </div>
+  {!online&&<p role="status" aria-live="polite" className="text-xs text-destructive">{t('actionBrowserOffline')}</p>}
   {list.busy&&<p className="text-xs text-muted-foreground">{t('policyChecking')}</p>}
   {list.error&&<p role="alert" className="text-xs text-destructive">{t('policyUnavailable')}</p>}
   {!list.busy&&!list.error&&connections.length===0&&<p className="text-xs text-muted-foreground">{t('actionNoSender')}</p>}
@@ -179,7 +181,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   </div>}
   <div className="flex items-center gap-2">
    <label htmlFor={'inbox-mode-'+row.id} className="text-xs text-muted-foreground">{t('actionType')}</label>
-   <select id={'inbox-mode-'+row.id} className="min-h-11 rounded-lg border border-border bg-background px-2 text-base sm:text-sm" value={mode} disabled={Boolean(attempt)||busy} onChange={e=>setMode(e.target.value as Mode)}>
+   <select aria-label={t('actionType')} id={'inbox-mode-'+row.id} className="min-h-11 rounded-lg border border-border bg-background px-2 text-base sm:text-sm" value={mode} disabled={Boolean(attempt)||busy} onChange={e=>setMode(e.target.value as Mode)}>
     <option value="text">{t('policyText')}</option>
     <option value="media" disabled={!c?.may_send_media}>{t('policyMedia')}</option>
     {isMeta&&<option value="template" disabled={!c?.may_send_template}>{t('policyTemplate')}</option>}
@@ -205,7 +207,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   {fileError&&<p role="alert" className="text-xs text-destructive">{fileError}</p>}
   {mode==='template'&&isMeta&&<p className="text-xs text-muted-foreground" dir="auto">{template?template.name+' · '+template.language:t('actionSelectTemplate')}</p>}
   {mode==='interactive'&&isMeta&&<div className="max-h-44 overflow-y-auto rounded-lg border border-border p-2"><InteractiveBuilder value={interactive} onChange={setInteractive}/></div>}
-  {attempt&&<div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-2 text-xs">
+  {attempt&&<div aria-live="polite" role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-2 text-xs">
    <AlertTriangle className="size-4 shrink-0 text-muted-foreground"/><span className="min-w-0 flex-1">{t('actionState_'+attempt.state)}{attempt.code?' · '+attempt.code:''}</span>
    <Button size="sm" variant="outline" disabled={busy} onClick={()=>void inspect()}><RefreshCw className="me-1 size-3.5"/>{t('actionCheckOutcome')}</Button>
    {attempt.state==='blocked'&&<Button size="sm" variant="outline" disabled={busy} onClick={()=>persist(null)}>{t('actionNewAttempt')}</Button>}
@@ -213,7 +215,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   {containsUnsentDraft({mode,text,caption})&&!attempt&&<p role="status" className="text-xs text-muted-foreground">{t('actionDraftTabOnly')}</p>}
   <div className="flex items-center justify-between gap-2">
    <p className="max-w-[75%] text-[11px] text-muted-foreground">{!selectedConnection?t('actionSelectFirst'):c?.blocked_reason?t('policyDenied')+' · '+c.blocked_reason:!c?.dispatch_enabled?t('actionDisabled'):t('actionRecheck')}</p>
-   <Button size="sm" onClick={()=>void send()} disabled={!canSubmit} className="min-h-11 gap-2"><Send className="size-4"/>{busy?t('loading'):t('actionSend')}</Button>
+   <Button size="sm" onClick={()=>void send()} disabled={!canSubmit} className="min-h-11 min-w-11 gap-2"><Send className="size-4"/>{busy?t('loading'):t('actionSend')}</Button>
   </div>
   <TemplatePicker open={templatePicker} onOpenChange={setTemplatePicker} onSelect={(selectedTemplate,values)=>{setTemplate({name:selectedTemplate.name,language:selectedTemplate.language||'en_US',body:values.body,headerText:values.headerText,buttonParams:values.buttonParams});setMode('template')}}/>
   <QuickReplyPicker open={quickReplyPicker} onOpenChange={setQuickReplyPicker} onPick={qr=>{

@@ -72,7 +72,7 @@ function ChannelSelector({ctx,loc,revision,onChange,onRetry}:{ctx:InboxContext;l
  const ready=selected?.scope===scope
  return <div className="space-y-2 border-b border-border p-3">
   <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1" role="group" aria-label={t('scope')}>
-   {(['active','historical','unknown'] as const).map(s=><button key={s} type="button" aria-pressed={loc.scope===s} onClick={()=>onChange(s,null)} className={cn('rounded-md px-1 py-2 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring',loc.scope===s?'bg-background text-foreground shadow-sm':'text-muted-foreground hover:text-foreground')}>{t(s)}</button>)}
+   {(['active','historical','unknown'] as const).map(s=><button key={s} type="button" aria-pressed={loc.scope===s} onClick={()=>onChange(s,null)} className={cn('min-h-11 rounded-md px-1 py-2 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring',loc.scope===s?'bg-background text-foreground shadow-sm':'text-muted-foreground hover:text-foreground')}>{t(s)}</button>)}
   </div>
   {loc.scope!=='unknown'&&<>
    <label className="block space-y-1 text-xs font-medium"><span>{t('channel')}</span>
@@ -157,7 +157,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
  const [nativeOutcome,setNativeOutcome]=useState<ScopedActionOutcome|null>(null)
  const locks=useRef(new Map<string,{key:string;state:ScopedActionOutcome['state']}>())
  async function nativeAction(kind:'provider_read'|'reaction',message:HistoryMessage,emoji=''){
-  if(nativeBusy||!activeAction||selectedConnection!==activeAction.scope.connectionId||row.scope!=='active'||message.channel_id!==row.channel_id)return
+  if(nativeBusy||!online||!activeAction||selectedConnection!==activeAction.scope.connectionId||row.scope!=='active'||message.channel_id!==row.channel_id)return
   const {scope,capabilities}=activeAction
   if(!capabilities.dispatch_enabled||(kind==='provider_read'?!capabilities.may_read:!capabilities.may_react))return
   const identity=[scope.connectionId,scope.membershipId,message.id,kind,emoji].join(':')
@@ -195,7 +195,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
   </div>
   {nativeOutcome&&<div role="status" className="border-b border-border bg-muted/50 px-4 py-2 text-xs text-muted-foreground">{t('actionProviderResult')}: {t('actionState_'+nativeOutcome.state)}{nativeOutcome.code?' · '+nativeOutcome.code:''}</div>}
   <ScopedHistoryPane key={row.scope+':'+row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}
-   actions={activeAction&&activeAction.capabilities.dispatch_enabled?{
+   actions={online&&activeAction&&activeAction.capabilities.dispatch_enabled?{
     canReply:activeAction.capabilities.may_reply,canRead:activeAction.capabilities.may_read,canReact:activeAction.capabilities.may_react,
     onReply:setReply,onNative:(kind,message,emoji)=>{void nativeAction(kind,message,emoji)},busy:nativeBusy
    }:undefined}/>
@@ -239,7 +239,7 @@ function Workspace({ctx}:{ctx:InboxContext}){
  const [newThreadOpen,setNewThreadOpen]=useState(false)
  const latestSelected=useRef<string|null>(null)
  const online=useBrowserOnline()
- useEffect(()=>()=>clearAccountScopedDrafts(ctx),[ctx.accountId,ctx.userId])
+ useEffect(()=>()=>clearAccountScopedDrafts({accountId:ctx.accountId,userId:ctx.userId}),[ctx.accountId,ctx.userId])
  const search=useDebounced(filters.search),company=useDebounced(filters.company)
  const effective={...filters,search,company}
  useEffect(()=>{

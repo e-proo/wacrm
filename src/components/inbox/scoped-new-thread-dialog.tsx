@@ -66,33 +66,33 @@ export function ScopedNewThreadDialog({ctx,open,onOpenChange,onCreated}:Props){
   finally{setBusy(false)}
  }
  return <Dialog open={open} onOpenChange={onOpenChange}>
-  <DialogContent className="sm:max-w-lg">
+  <DialogContent className="max-h-[min(90dvh,50rem)] overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-lg">
    <DialogHeader><DialogTitle>{t('actionNewThread')}</DialogTitle><DialogDescription>{t('actionNewThreadNotice')}</DialogDescription></DialogHeader>
    <div className="space-y-3">
     <label className="block space-y-1 text-xs"><span>{t('chooseChannel')}</span>
-     <select className="h-10 w-full rounded-lg border border-border bg-background px-3" value={channelId} disabled={busy} onChange={e=>{setChannelId(e.target.value);setConnectionId('');setConnections([])}}>
+     <select className="min-h-11 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-base sm:text-sm" value={channelId} disabled={busy} onChange={e=>{setChannelId(e.target.value);setConnectionId('');setConnections([])}}>
       <option value="">{t('chooseChannel')}</option>
       {channels.map(c=><option value={c.id} key={c.id}>{(c.display_name||c.own_phone||c.provider)+' · '+c.provider}</option>)}
      </select>
     </label>
     <label className="block space-y-1 text-xs"><span>{t('actionChooseSender')}</span>
-     <select className="h-10 w-full rounded-lg border border-border bg-background px-3" value={connectionId} disabled={!channelId||busy} onChange={e=>setConnectionId(e.target.value)}>
+     <select className="min-h-11 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-base sm:text-sm" value={connectionId} disabled={!channelId||busy} onChange={e=>setConnectionId(e.target.value)}>
       <option value="">{t('actionChooseSender')}</option>
       {connections.map(c=><option key={c.id} value={c.id}>{(c.display_name||c.id.slice(0,8))+' · '+(c.is_primary?t('primary'):t('actionSecondary'))}</option>)}
      </select>
     </label>
     <label className="block space-y-1 text-xs"><span>{t('actionFindContact')}</span>
-     <input className="h-10 w-full rounded-lg border border-border bg-background px-3" value={search} maxLength={60} onChange={e=>{setSearch(e.target.value);setContactId('')}} placeholder={t('search')}/>
+     <input className="min-h-11 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-base sm:text-sm" value={search} maxLength={60} onChange={e=>{setSearch(e.target.value);setContactId('')}} placeholder={t('search')}/>
     </label>
     <label className="block space-y-1 text-xs"><span>{t('actionExistingContact')}</span>
-     <select className="h-10 w-full rounded-lg border border-border bg-background px-3" value={contactId} disabled={busy} onChange={e=>setContactId(e.target.value)}>
+     <select className="min-h-11 w-full min-w-0 rounded-lg border border-border bg-background px-3 text-base sm:text-sm" value={contactId} disabled={busy} onChange={e=>setContactId(e.target.value)}>
       <option value="">{t('actionExistingContact')}</option>
       {contacts.map(c=><option key={c.id} value={c.id}>{(c.name||c.phone)+' · '+c.phone}</option>)}
      </select>
     </label>
    </div>
    {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
-   <DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)} disabled={busy}>{t('actionCancelReply')}</Button><Button disabled={!connection||!contactId||busy} onClick={()=>void create()}>{busy?t('loading'):t('actionOpenThread')}</Button></DialogFooter>
+   <DialogFooter><Button className="min-h-11" variant="outline" onClick={()=>onOpenChange(false)} disabled={busy}>{t('actionCancelReply')}</Button><Button className="min-h-11" disabled={!connection||!contactId||busy} onClick={()=>void create()}>{busy?t('loading'):t('actionOpenThread')}</Button></DialogFooter>
   </DialogContent>
  </Dialog>
 }
