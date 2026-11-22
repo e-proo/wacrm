@@ -14,6 +14,7 @@ import {InteractiveBuilder,blankButtonsPayload} from '@/components/interactive/i
 import {TemplatePicker} from './template-picker'
 import {QuickReplyPicker} from './quick-reply-picker'
 import type {HistoryMessage} from '@/lib/inbox/scoped-history-model'
+import {scopedDraftKey,getScopedDraft,saveScopedDraft,clearScopedDraft,containsUnsentDraft} from '@/lib/inbox/scoped-draft-memory'
 
 export type ActiveActionScope={scope:ActionScope;capabilities:InboxCapabilities}
 type Mode='text'|'media'|'template'|'interactive'
@@ -38,24 +39,25 @@ function cachedAttempt(key:string):Attempt|null{
 // recipient or credentials. A reload cannot silently recreate a send.
 export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectConnection,reply,onClearReply,onScopeChange,onRefresh}:Props){
  const t=useTranslations('Inbox.scoped')
+ const draftKey=scopedDraftKey(ctx,row.id,row.channel_id),key=outcomeStorage(ctx,row.id)
  const list=useInboxPages<Connection>('connections?scope=active&channel_id='+(row.channel_id??''),ctx,
   c=>c.channel_id===row.channel_id&&c.provider===row.provider,revision)
  const [policy,setPolicy]=useState<{key:string;capabilities:InboxCapabilities;seen:number}|null>(null)
  const [tick,setTick]=useState(0)
- const [mode,setMode]=useState<Mode>('text')
- const [text,setText]=useState('')
+ const [mode,setMode]=useState<Mode>(()=>getScopedDraft(draftKey).mode)
+ const [text,setText]=useState(()=>getScopedDraft(draftKey).text)
  const [attachment,setAttachment]=useState<Attachment|null>(null)
  const [mediaKind,setMediaKind]=useState<Attachment['kind']>('image')
- const [caption,setCaption]=useState('')
+ const [caption,setCaption]=useState(()=>getScopedDraft(draftKey).caption)
+ const [fileError,setFileError]=useState<string|null>(null)
  const [template,setTemplate]=useState<TemplateDraft|null>(null)
  const [templatePicker,setTemplatePicker]=useState(false)
  const [quickReplyPicker,setQuickReplyPicker]=useState(false)
  const [interactive,setInteractive]=useState<InteractiveMessagePayload>(blankButtonsPayload)
  const [uploading,setUploading]=useState(false)
  const [busy,setBusy]=useState(false)
- const [attempt,setAttempt]=useState<Attempt|null>(null)
- const key=outcomeStorage(ctx,row.id)
- useEffect(()=>{setAttempt(cachedAttempt(key))},[key])
+ const [attempt,setAttempt]=useState<Attempt|null>(()=>cachedAttempt(key))
+ useEffect(()=>{saveScopedDraft(draftKey,{mode,text,caption})},[draftKey,mode,text,caption])
  useEffect(()=>{const timer=setInterval(()=>setTick(performance.now()),1000);return()=>clearInterval(timer)},[])
  const policyKey=ctx.accountId+':'+ctx.userId+':'+row.id+':'+row.channel_id+':'+(selectedConnection??'')+':'+revision
  useEffect(()=>{
@@ -63,8 +65,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   setPolicy(null)
   onScopeChange(null)
   if(!row.channel_id||!selectedConnection||row.scope!=='active')return()=>ctl.abort()
-  const started=performance.now()
-  const url='threads/'+row.id+'/capabilities?channel_id='+encodeURIComponent(row.channel_id)+'&connection_id='+encodeURIComponent(selectedConnection)
+   const url='threads/'+row.id+'/capabilities?channel_id='+encodeURIComponent(row.channel_id)+'&connection_id='+encodeURIComponent(selectedConnection)
   void fetchInbox<{capabilities:InboxCapabilities}>(url,ctx,ctl.signal).then(response=>{
    const c=response.capabilities
    if(!c||c.thread_id!==row.id||c.channel_id!==row.channel_id||c.connection_id!==selectedConnection||c.provider!==row.provider||!validId(c.membership_id))throw Error('Sender changed')
@@ -118,41 +119,41 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   setBusy(true)
   try{
    const outcome=await inspectScopedAction(ctx,row.id,attempt.key)
-   if(outcome.state==='accepted'){persist(null);setText('');setAttachment(null);onClearReply();onRefresh()}
+   if(outcome.state==='accepted'){clearScopedDraft(draftKey);persist(null);setMode('text');setText('');setCaption('');setAttachment(null);onClearReply();onRefresh()}
    else persist({...attempt,state:outcome.state,code:outcome.code})
   }catch{persist({...attempt,state:'uncertain',code:'admission_unconfirmed'})}
   finally{setBusy(false)}
  }
  async function stage(file:File|null){
   if(!file||!enabled||!c?.may_send_media||attempt||uploading||busy||file.size>MEDIA_MAX_BYTES_BY_KIND[mediaKind]){
-   if(file&&file.size>MEDIA_MAX_BYTES_BY_KIND[mediaKind])setCaption(t('actionFileTooLarge'))
+   if(file&&file.size>MEDIA_MAX_BYTES_BY_KIND[mediaKind])setFileError(t('actionFileTooLarge'))
    return
   }
-  setUploading(true)
+  setUploading(true);setFileError(null)
   try{
    const result=await uploadAccountMedia('chat-media',file)
    // The previous staged object has never crossed a provider boundary.
    if(attachment)void deleteAccountMedia('chat-media',attachment.path).catch(()=>{})
    setAttachment({kind:mediaKind,url:result.publicUrl,path:result.path,filename:file.name})
    setCaption('')
-  }catch{setCaption(t('actionUploadFailed'))}
+  }catch{setFileError(t('actionUploadFailed'))}
   finally{setUploading(false)}
  }
  async function discard(){
   if(!attachment||busy||attempt)return
   const previous=attachment
-  setAttachment(null);setCaption('')
+  setAttachment(null);setCaption('');setFileError(null)
   await deleteAccountMedia('chat-media',previous.path).catch(()=>{})
  }
  if(row.scope!=='active'||!row.channel_id)return null
  const isMeta=row.provider==='meta_cloud'
  const canAttach=Boolean(enabled&&c?.may_send_media)
- return <section className="shrink-0 space-y-2 border-t border-border bg-card px-4 py-3" aria-label={t('actionTitle')}>
+ return <section className="shrink-0 max-h-[min(55dvh,30rem)] space-y-2 overflow-y-auto overscroll-contain border-t border-border bg-card px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4" aria-label={t('actionTitle')}>
   <div className="flex flex-wrap items-center justify-between gap-2">
    <div className="flex min-w-0 items-center gap-2 text-xs font-medium"><ShieldCheck className="size-4 text-muted-foreground"/>{t('actionTitle')}</div>
    <label className="flex min-w-0 items-center gap-2 text-xs">
     <span className="shrink-0 text-muted-foreground">{t('actionChooseSender')}</span>
-    <select className="h-9 min-w-36 max-w-60 rounded-lg border border-border bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={t('actionChooseSender')}
+    <select className="min-h-11 min-w-0 max-w-52 rounded-lg border border-border bg-background px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm" aria-label={t('actionChooseSender')}
      value={selectedConnection??''} disabled={Boolean(attempt)||busy}
      onChange={e=>onSelectConnection(e.target.value||null)}>
      <option value="">{t('actionChooseSender')}</option>
@@ -178,7 +179,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   </div>}
   <div className="flex items-center gap-2">
    <label htmlFor={'inbox-mode-'+row.id} className="text-xs text-muted-foreground">{t('actionType')}</label>
-   <select id={'inbox-mode-'+row.id} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" value={mode} disabled={Boolean(attempt)||busy} onChange={e=>setMode(e.target.value as Mode)}>
+   <select id={'inbox-mode-'+row.id} className="min-h-11 rounded-lg border border-border bg-background px-2 text-base sm:text-sm" value={mode} disabled={Boolean(attempt)||busy} onChange={e=>setMode(e.target.value as Mode)}>
     <option value="text">{t('policyText')}</option>
     <option value="media" disabled={!c?.may_send_media}>{t('policyMedia')}</option>
     {isMeta&&<option value="template" disabled={!c?.may_send_template}>{t('policyTemplate')}</option>}
@@ -188,19 +189,20 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
    {mode==='template'&&isMeta&&<Button size="sm" variant="outline" disabled={!c?.may_send_template||!c.dispatch_enabled||Boolean(attempt)} onClick={()=>setTemplatePicker(true)}>{t('actionSelectTemplate')}</Button>}
   </div>
   {mode==='text'&&<textarea rows={2} maxLength={4096} value={text} onChange={e=>setText(e.target.value)} disabled={!enabled||!c?.may_send_text||Boolean(attempt)}
-   className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
    placeholder={t('actionTextPlaceholder')} dir="auto" aria-label={t('actionTextPlaceholder')}/>}
   {mode==='media'&&<div className="flex flex-wrap items-center gap-2">
    <Paperclip className="size-4 text-muted-foreground"/>
    <select className="h-9 rounded-lg border border-border bg-background px-2 text-xs" aria-label={t('actionMediaKind')} value={mediaKind} disabled={Boolean(attempt)||uploading||busy} onChange={e=>{if(attachment)void deleteAccountMedia('chat-media',attachment.path).catch(()=>{});setMediaKind(e.target.value as Attachment['kind']);setAttachment(null)}}>
     {(['image','video','document','audio'] as const).map(k=><option key={k} value={k} disabled={!c?.media_kinds.includes(k)}>{t('actionMedia_'+k)}</option>)}
    </select>
-   <input type="file" className="min-w-32 flex-1 text-xs file:me-2 file:rounded-md file:border file:border-border file:bg-muted file:px-2 file:py-1" disabled={!canAttach||uploading||Boolean(attempt)}
+   <input type="file" className="min-h-11 min-w-0 flex-1 text-xs file:me-2 file:rounded-md file:border file:border-border file:bg-muted file:px-2 file:py-1" disabled={!canAttach||uploading||Boolean(attempt)}
     accept={mediaKind==='image'?'image/png,image/jpeg,image/webp':mediaKind==='video'?'video/mp4,video/3gpp':mediaKind==='audio'?'audio/ogg,audio/mpeg':'.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt'}
     aria-label={t('actionChooseFile')} onChange={e=>{void stage(e.currentTarget.files?.[0]??null);e.currentTarget.value=''}}/>
    {attachment&&<div className="flex w-full items-center gap-2 text-xs"><span className="min-w-0 flex-1 truncate">{attachment.filename}</span><Button variant="ghost" size="sm" disabled={Boolean(attempt)||busy} onClick={()=>void discard()}>{t('actionRemoveFile')}</Button></div>}
-   {attachment&&attachment.kind!=='audio'&&<input className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" value={caption} maxLength={c?.caption_limit??1024} onChange={e=>setCaption(e.target.value)} placeholder={t('actionCaption')} aria-label={t('actionCaption')}/>}
+   {attachment&&attachment.kind!=='audio'&&<input className="min-h-11 w-full rounded-lg border border-border bg-background px-3 py-2 text-base sm:text-sm" value={caption} maxLength={c?.caption_limit??1024} onChange={e=>setCaption(e.target.value)} placeholder={t('actionCaption')} aria-label={t('actionCaption')}/>}
   </div>}
+  {fileError&&<p role="alert" className="text-xs text-destructive">{fileError}</p>}
   {mode==='template'&&isMeta&&<p className="text-xs text-muted-foreground" dir="auto">{template?template.name+' · '+template.language:t('actionSelectTemplate')}</p>}
   {mode==='interactive'&&isMeta&&<div className="max-h-44 overflow-y-auto rounded-lg border border-border p-2"><InteractiveBuilder value={interactive} onChange={setInteractive}/></div>}
   {attempt&&<div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-2 text-xs">
@@ -208,9 +210,10 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
    <Button size="sm" variant="outline" disabled={busy} onClick={()=>void inspect()}><RefreshCw className="me-1 size-3.5"/>{t('actionCheckOutcome')}</Button>
    {attempt.state==='blocked'&&<Button size="sm" variant="outline" disabled={busy} onClick={()=>persist(null)}>{t('actionNewAttempt')}</Button>}
   </div>}
+  {containsUnsentDraft({mode,text,caption})&&!attempt&&<p role="status" className="text-xs text-muted-foreground">{t('actionDraftTabOnly')}</p>}
   <div className="flex items-center justify-between gap-2">
    <p className="max-w-[75%] text-[11px] text-muted-foreground">{!selectedConnection?t('actionSelectFirst'):c?.blocked_reason?t('policyDenied')+' · '+c.blocked_reason:!c?.dispatch_enabled?t('actionDisabled'):t('actionRecheck')}</p>
-   <Button size="sm" onClick={()=>void send()} disabled={!canSubmit} className="min-h-10 gap-2"><Send className="size-4"/>{busy?t('loading'):t('actionSend')}</Button>
+   <Button size="sm" onClick={()=>void send()} disabled={!canSubmit} className="min-h-11 gap-2"><Send className="size-4"/>{busy?t('loading'):t('actionSend')}</Button>
   </div>
   <TemplatePicker open={templatePicker} onOpenChange={setTemplatePicker} onSelect={(selectedTemplate,values)=>{setTemplate({name:selectedTemplate.name,language:selectedTemplate.language||'en_US',body:values.body,headerText:values.headerText,buttonParams:values.buttonParams});setMode('template')}}/>
   <QuickReplyPicker open={quickReplyPicker} onOpenChange={setQuickReplyPicker} onPick={qr=>{
