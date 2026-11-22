@@ -46,19 +46,23 @@ WHERE thread_id='20000000-0000-4000-8000-000000000001'
 ORDER BY created_at DESC NULLS LAST,id DESC LIMIT 51;
 CREATE TEMP TABLE inbox_bench_samples(operation text NOT NULL,elapsed_ms numeric NOT NULL) ON COMMIT DROP;
 DO $bench$
-DECLARE started timestamptz; ignored uuid; n integer;
+DECLARE started timestamptz; observed_rows bigint; n integer;
 BEGIN
  FOR n IN 1..35 LOOP
   started=clock_timestamp();
-  SELECT id INTO ignored FROM inbox_bench_threads
-  WHERE account_id='10000000-0000-4000-8000-000000000001'
-  AND (last_message_at,id)<('2026-11-21T22:55:00Z'::timestamptz,'20000000-0000-4000-8000-000000000900'::uuid)
-  ORDER BY last_message_at DESC NULLS LAST,id DESC LIMIT 1;
+  SELECT count(*) INTO observed_rows FROM (
+   SELECT id FROM inbox_bench_threads
+   WHERE account_id='10000000-0000-4000-8000-000000000001'
+   AND (last_message_at,id)<('2026-11-21T22:55:00Z'::timestamptz,'20000000-0000-4000-8000-000000000900'::uuid)
+   ORDER BY last_message_at DESC NULLS LAST,id DESC LIMIT 31
+  ) bounded;
   INSERT INTO inbox_bench_samples VALUES('list',extract(epoch FROM clock_timestamp()-started)*1000);
   started=clock_timestamp();
-  SELECT id INTO ignored FROM inbox_bench_messages
-  WHERE thread_id='20000000-0000-4000-8000-000000000001'
-  ORDER BY created_at DESC NULLS LAST,id DESC LIMIT 1;
+  SELECT count(*) INTO observed_rows FROM (
+   SELECT id FROM inbox_bench_messages
+   WHERE thread_id='20000000-0000-4000-8000-000000000001'
+   ORDER BY created_at DESC NULLS LAST,id DESC LIMIT 51
+  ) bounded;
   INSERT INTO inbox_bench_samples VALUES('history',extract(epoch FROM clock_timestamp()-started)*1000);
  END LOOP;
 END $bench$;
