@@ -8,7 +8,8 @@ import { useScopedHistory } from '@/lib/inbox/use-scoped-history'
 import type { InboxContext,ScopedRow } from '@/lib/inbox/scoped-list-model'
 
 type Anchor={bottom:boolean;id:string|null;offset:number;top:number}
-function Message({message,quote}:{message:HistoryMessage;quote:HistoryMessage|undefined}){
+type MessageActions={canReply:boolean;canRead:boolean;canReact:boolean;onReply:(m:HistoryMessage)=>void;onNative:(kind:'provider_read'|'reaction',m:HistoryMessage,emoji?:string)=>void;busy:boolean}
+function Message({message,quote,actions}:{message:HistoryMessage;quote:HistoryMessage|undefined;actions?:MessageActions}){
  const t=useTranslations('Inbox.scoped'),locale=useLocale(),incoming=message.sender_type==='customer'
  const time=message.created_at?new Date(message.created_at):null
  return <div data-message-id={message.id} className={cn('flex',incoming?'justify-start':'justify-end')}>
@@ -19,10 +20,15 @@ function Message({message,quote}:{message:HistoryMessage;quote:HistoryMessage|un
    {message.media_url?<a href={message.media_url} target="_blank" rel="noopener noreferrer" className="block break-words text-xs font-medium text-primary underline">{t('openMedia')}</a>:message.has_media?<p className="text-xs text-muted-foreground">{t('mediaUnavailable')}</p>:!message.content_text?<p className="text-xs text-muted-foreground">[{message.content_type}]</p>:null}
    {!!message.reactions.length&&<div className="flex flex-wrap gap-1">{message.reactions.map(r=><span key={r.emoji} className={cn('rounded-full border px-1.5 text-xs',r.mine?'border-primary bg-primary/10':'border-border bg-muted')}>{r.emoji} {r.count}</span>)}</div>}
    <div className="flex flex-wrap justify-end gap-2 text-[10px] text-muted-foreground"><span>{time&&!Number.isNaN(time.getTime())?new Intl.DateTimeFormat(locale,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(time):''}</span>{!incoming&&<span>{message.status}</span>}</div>
+   {actions&&(actions.canReply||actions.canRead||actions.canReact)&&<div className="flex flex-wrap items-center justify-end gap-1 border-t border-border/50 pt-1 text-xs">
+    {actions.canReply&&<Button type="button" size="sm" variant="ghost" disabled={actions.busy} onClick={()=>actions.onReply(message)}>{t('reply')}</Button>}
+    {incoming&&actions.canRead&&<Button type="button" size="sm" variant="ghost" disabled={actions.busy} onClick={()=>actions.onNative('provider_read',message)}>{t('actionProviderRead')}</Button>}
+    {actions.canReact&&<Button type="button" size="sm" variant="ghost" disabled={actions.busy} onClick={()=>actions.onNative('reaction',message,'👍')} aria-label={t('actionReact')}>👍</Button>}
+   </div>}
   </div>
  </div>
 }
-export function ScopedHistoryPane({row,ctx,revision,onRefresh}:{row:ScopedRow;ctx:InboxContext;revision:number;onRefresh:()=>void}){
+export function ScopedHistoryPane({row,ctx,revision,onRefresh,actions}:{row:ScopedRow;ctx:InboxContext;revision:number;onRefresh:()=>void;actions?:MessageActions}){
  const t=useTranslations('Inbox.scoped')
  const scroll=useRef<HTMLDivElement>(null),anchor=useRef<Anchor|null>(null),request=useRef<AbortController|null>(null)
  const [reading,setReading]=useState(false),[readError,setReadError]=useState(false)
@@ -67,7 +73,7 @@ export function ScopedHistoryPane({row,ctx,revision,onRefresh}:{row:ScopedRow;ct
     {history.busy&&<p role="status" className="text-center text-xs text-muted-foreground">{t('loading')}</p>}
     {history.error&&<div role="alert" className="space-y-2 text-center text-sm text-destructive"><p>{t('error')}</p><Button onClick={history.retry} variant="outline">{t('retry')}</Button></div>}
     {!history.busy&&!history.error&&!chronological.length&&<p className="py-8 text-center text-sm text-muted-foreground">{t('emptyHistory')}</p>}
-    {chronological.map(message=><Message key={message.id} message={message} quote={message.reply_to_message_id?byId.get(message.reply_to_message_id):undefined}/>)}
+    {chronological.map(message=><Message key={message.id} message={message} quote={message.reply_to_message_id?byId.get(message.reply_to_message_id):undefined} actions={actions}/>)}
    </div>
   </div>
  </div>
