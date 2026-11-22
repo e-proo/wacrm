@@ -10,6 +10,7 @@ import { useInboxPages,useInboxCounts } from '@/lib/inbox/use-scoped-list'
 import { useScopedInboxRealtime } from '@/lib/inbox/use-scoped-realtime'
 import { ScopedHistoryPane } from './scoped-history-pane'
 import {ScopedActionPane,type ActiveActionScope} from './scoped-action-pane'
+import {ScopedContactPanel} from './scoped-contact-panel'
 import {submitScopedAction,inspectScopedAction,type ScopedActionOutcome} from '@/lib/inbox/scoped-action-client'
 import type {HistoryMessage} from '@/lib/inbox/scoped-history-model'
 import { defaultFilters, listQuery, parseLocation, preferenceKey, readPreference, sameScope, selectExact, selectionHref, type Channel,type Connection,type Counts,type InboxContext,type InboxFilters,type InboxScope,type InboxSelection,type ScopedRow } from '@/lib/inbox/scoped-list-model'
@@ -144,6 +145,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
  const [activeAction,setActiveAction]=useState<ActiveActionScope|null>(null)
  const [reply,setReply]=useState<HistoryMessage|null>(null)
  const [nativeBusy,setNativeBusy]=useState(false)
+ const [contactOpen,setContactOpen]=useState(false)
  const [nativeOutcome,setNativeOutcome]=useState<ScopedActionOutcome|null>(null)
  const locks=useRef(new Map<string,{key:string;state:ScopedActionOutcome['state']}>())
  async function nativeAction(kind:'provider_read'|'reaction',message:HistoryMessage,emoji=''){
@@ -175,19 +177,13 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
    setNativeOutcome({state:'uncertain',code:'admission_unconfirmed'})
   }finally{setNativeBusy(false)}
  }
- return <div className="flex h-full min-h-0 min-w-0 flex-col">
+ return <div className="relative flex h-full min-h-0 min-w-0">
+  <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
   <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card p-4">
    <Button variant="ghost" size="icon-lg" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button>
    <div className="min-w-0 flex-1"><h2 className="truncate font-semibold" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}{row.assigned_agent_name?' · '+row.assigned_agent_name:''}</p></div>
    <ProviderLabel provider={row.provider}/>
-   <details className="relative"><summary className="cursor-pointer rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring">{t('actionContactDetails')}</summary>
-    <div className="absolute end-0 top-full z-20 mt-1 w-64 space-y-2 rounded-xl border border-border bg-popover p-3 text-xs shadow-lg">
-     <p className="font-semibold">{row.contact.name||row.contact.phone}</p><p dir="ltr">{row.contact.phone}</p>
-     {row.contact.company&&<p>{row.contact.company}</p>}
-     {row.assigned_agent_name&&<p>{t('assigned')}: {row.assigned_agent_name}</p>}
-     <p className="text-muted-foreground">{t('actionNoCrossAccount')}</p>
-    </div>
-   </details>
+   <Button type="button" variant="outline" size="sm" onClick={()=>setContactOpen(v=>!v)} aria-expanded={contactOpen} aria-label={t('actionContactDetails')}>{t('actionContactDetails')}</Button>
   </div>
   {nativeOutcome&&<div role="status" className="border-b border-border bg-muted/50 px-4 py-2 text-xs text-muted-foreground">{t('actionProviderResult')}: {t('actionState_'+nativeOutcome.state)}{nativeOutcome.code?' · '+nativeOutcome.code:''}</div>}
   <ScopedHistoryPane key={row.scope+':'+row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}
@@ -197,6 +193,11 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
    }:undefined}/>
   {row.scope==='active'&&<ScopedActionPane row={row} ctx={ctx} revision={revision} selectedConnection={selectedConnection} onSelectConnection={setSelectedConnection}
    reply={reply} onClearReply={()=>setReply(null)} onScopeChange={setActiveAction} onRefresh={onRefresh}/>}
+  </div>
+  {contactOpen&&<aside className="absolute inset-y-0 end-0 z-30 flex w-70 shrink-0 flex-col border-s border-border bg-card shadow-xl xl:static xl:shadow-none" aria-label={t('actionContactDetails')}>
+   <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2 text-sm font-medium"><span>{t('actionContactDetails')}</span><Button size="sm" variant="ghost" onClick={()=>setContactOpen(false)} aria-label={t('actionCloseContact')}><X className="size-4"/></Button></div>
+   <div className="min-h-0 flex-1"><ScopedContactPanel row={row} ctx={ctx}/></div>
+  </aside>}
  </div>
 }
 function SelectedDetail({ctx,loc,revision,onBack,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;onBack:()=>void;onRetry:()=>void}){

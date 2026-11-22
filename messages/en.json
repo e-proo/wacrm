@@ -262,6 +262,9 @@
       "actionContactDetails": "Contact",
       "actionNoCrossAccount": "CRM details remain account-scoped",
       "actionProviderResult": "WhatsApp action result",
+      "actionCloseContact": "Close contact details",
+      "actionContactLoading": "Loading contact details…",
+      "actionContactUnavailable": "Contact details are unavailable for this account.",
       "actionTestProtected": "TEST · guarded sending",
       "policyPreviewOnly": "Policy preview only. Sending remains disabled until explicit sender actions are enabled."
     },

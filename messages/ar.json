@@ -262,6 +262,9 @@
       "actionContactDetails": "العميل",
       "actionNoCrossAccount": "تفاصيل CRM ضمن حسابك فقط",
       "actionProviderResult": "نتيجة إجراء واتساب",
+      "actionCloseContact": "إغلاق تفاصيل العميل",
+      "actionContactLoading": "جارٍ تحميل تفاصيل العميل…",
+      "actionContactUnavailable": "تعذر تحميل تفاصيل العميل من الحساب الحالي.",
       "actionTestProtected": "TEST · إرسال محمي",
       "policyPreviewOnly": "هذه معاينة للسياسة فقط. يظل الإرسال معطلًا حتى تفعيل إجراءات المرسل المحدد."
     },
