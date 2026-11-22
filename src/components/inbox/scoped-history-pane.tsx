@@ -23,7 +23,11 @@ function Message({message,quote,actions}:{message:HistoryMessage;quote:HistoryMe
    {actions&&(actions.canReply||actions.canRead||actions.canReact)&&<div className="flex flex-wrap items-center justify-end gap-1 border-t border-border/50 pt-1 text-xs">
     {actions.canReply&&<Button type="button" size="sm" variant="ghost" disabled={actions.busy} onClick={()=>actions.onReply(message)}>{t('reply')}</Button>}
     {incoming&&actions.canRead&&<Button type="button" size="sm" variant="ghost" disabled={actions.busy} onClick={()=>actions.onNative('provider_read',message)}>{t('actionProviderRead')}</Button>}
-    {actions.canReact&&<Button type="button" size="sm" variant="ghost" disabled={actions.busy} onClick={()=>actions.onNative('reaction',message,'👍')} aria-label={t('actionReact')}>👍</Button>}
+    {actions.canReact&&<>
+     <Button type="button" size="sm" variant="ghost" disabled={actions.busy} onClick={()=>actions.onNative('reaction',message,'👍')} aria-label={t('actionReact')}>👍</Button>
+     <Button type="button" size="sm" variant="ghost" disabled={actions.busy} onClick={()=>actions.onNative('reaction',message,'❤️')} aria-label={t('actionReactHeart')}>❤️</Button>
+     {message.reactions.some(r=>r.mine)&&<Button type="button" size="sm" variant="ghost" disabled={actions.busy} onClick={()=>actions.onNative('reaction',message,'')}>{t('actionRemoveReaction')}</Button>}
+    </>}
    </div>}
   </div>
  </div>

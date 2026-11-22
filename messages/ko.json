@@ -262,6 +262,8 @@
       "actionContactDetails": "연락처",
       "actionNoCrossAccount": "CRM 정보는 계정별로 제한됩니다",
       "actionProviderResult": "WhatsApp 작업 결과",
+      "actionReactHeart": "하트 반응",
+      "actionRemoveReaction": "반응 삭제",
       "actionNewThread": "새 대화",
       "actionNewThreadNotice": "기존 연락처와 확인된 채널 및 세션을 선택하세요. 대화를 열어도 메시지는 전송되지 않습니다.",
       "actionFindContact": "연락처 검색",

@@ -262,6 +262,8 @@
       "actionContactDetails": "Contact",
       "actionNoCrossAccount": "CRM details remain account-scoped",
       "actionProviderResult": "WhatsApp action result",
+      "actionReactHeart": "React with heart",
+      "actionRemoveReaction": "Remove reaction",
       "actionNewThread": "New conversation",
       "actionNewThreadNotice": "Choose an existing contact, verified channel and session. Opening the conversation does not send a message.",
       "actionFindContact": "Find contact",

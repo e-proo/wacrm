@@ -262,6 +262,8 @@
       "actionContactDetails": "العميل",
       "actionNoCrossAccount": "تفاصيل CRM ضمن حسابك فقط",
       "actionProviderResult": "نتيجة إجراء واتساب",
+      "actionReactHeart": "تفاعل بالقلب",
+      "actionRemoveReaction": "إزالة التفاعل",
       "actionNewThread": "محادثة جديدة",
       "actionNewThreadNotice": "اختر عميلًا موجودًا وقناة وجلسة موثّقتين. فتح المحادثة لا يرسل رسالة.",
       "actionFindContact": "ابحث عن عميل",
