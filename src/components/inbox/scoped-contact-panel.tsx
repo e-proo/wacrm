@@ -16,9 +16,12 @@ export function ScopedContactPanel({row,ctx}:{row:ScopedRow;ctx:InboxContext}){
  useEffect(()=>{
   let cancelled=false
   const db=createClient()
-  void db.from('contacts').select('*').eq('account_id',ctx.accountId).eq('id',row.contact.id).maybeSingle()
-   .then(({data,error})=>{if(!cancelled)setState({key,value:error?null:data as Contact|null,error:Boolean(error||!data)})})
-   .catch(()=>{if(!cancelled)setState({key,value:null,error:true})})
+  void (async()=>{
+   try{
+    const {data,error}=await db.from('contacts').select('*').eq('account_id',ctx.accountId).eq('id',row.contact.id).maybeSingle()
+    if(!cancelled)setState({key,value:error?null:data as Contact|null,error:Boolean(error||!data)})
+   }catch{if(!cancelled)setState({key,value:null,error:true})}
+  })()
   return()=>{cancelled=true}
  },[ctx.accountId,row.contact.id,key])
  if(!state||state.key!==key)return <p role="status" className="p-4 text-xs text-muted-foreground">{t('actionContactLoading')}</p>
