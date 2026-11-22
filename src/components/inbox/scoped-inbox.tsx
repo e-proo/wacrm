@@ -148,7 +148,9 @@ function ScopeList({ctx,loc,filters,revision,onSelect,onRetry}:{ctx:InboxContext
  </div>
 }
 function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:InboxContext;revision:number;onBack:()=>void;onRefresh:()=>void}){
- const t=useTranslations('Inbox.scoped'),{status}=useLabels()
+ const t=useTranslations('Inbox.scoped'),locale=useLocale(),online=useBrowserOnline(),{status}=useLabels()
+ const titleRef=useRef<HTMLHeadingElement>(null)
+ useEffect(()=>{titleRef.current?.focus()},[row.id])
  const [selectedConnection,setSelectedConnection]=useState<string|null>(null)
  const [activeAction,setActiveAction]=useState<ActiveActionScope|null>(null)
  const [reply,setReply]=useState<HistoryMessage|null>(null)
