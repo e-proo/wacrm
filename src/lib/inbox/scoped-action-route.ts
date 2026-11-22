@@ -8,7 +8,7 @@ import {evaluateInboxPolicy} from './provider-policy'
 import {claimInboxAction,failInboxAction} from './action-intents'
 import {parseScopedAction,type ScopedActionInput} from './scoped-action-input'
 import {runScopedNativeAction} from './scoped-native-actions'
-import {scopedInboxActionsEnabled} from './scoped-ui-gate'
+import {scopedInboxActionsEnabled,scopedInboxEnabled} from './scoped-ui-gate'
 import {validId} from './scoped-list-model'
 const headers={'Cache-Control':'private, no-store, max-age=0','Vary':'Cookie'}
 const reply=(data:object,status=200)=>NextResponse.json(data,{status,headers})
@@ -57,7 +57,7 @@ export async function performScopedAction(request:Request,threadId:string){
 export async function getScopedAction(request:Request,threadId:string){
  try{
   const ctx=await requireRole('agent')
-  if(!scopedInboxActionsEnabled()||request.headers.get('x-wacrm-inbox-account')!==ctx.accountId||request.headers.get('x-wacrm-inbox-actor')!==ctx.userId)return fail(403,'context_changed')
+  if(!scopedInboxEnabled()||request.headers.get('x-wacrm-inbox-account')!==ctx.accountId||request.headers.get('x-wacrm-inbox-actor')!==ctx.userId)return fail(403,'context_changed')
   const q=new URL(request.url).searchParams,key=q.get('key')
   if(!validId(threadId)||!validId(key)||[...q.keys()].some(k=>k!=='key'||q.getAll(k).length!==1))return fail(400,'invalid_action')
   const {data,error}=await supabaseAdmin().from('inbox_action_intents').select('id,state,message_id').eq('account_id',ctx.accountId).eq('actor_id',ctx.userId).eq('thread_id',threadId).eq('request_key',key).maybeSingle()
@@ -78,10 +78,18 @@ export async function openScopedThread(request:Request){
   if(raw.length>4096)return fail(400,'invalid_action')
   let p:Record<string,unknown>
   try{p=JSON.parse(raw)}catch{return fail(400,'invalid_action')}
-  if(!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).length!==5||![p.contactId,p.channelId,p.connectionId,p.membershipId].every(validId)||(p.provider!=='meta_cloud'&&p.provider!=='openwa'))return fail(400,'invalid_action')
+  if(!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).length!==4||![p.contactId,p.channelId,p.connectionId].every(validId)||(p.provider!=='meta_cloud'&&p.provider!=='openwa'))return fail(400,'invalid_action')
   const limit=checkRateLimit('send:'+ctx.userId,RATE_LIMITS.send)
   if(!limit.success)return rateLimitResponse(limit)
-  const {data,error}=await supabaseAdmin().rpc('inbox_open_explicit_thread',{p_account:ctx.accountId,p_actor:ctx.userId,p_contact:p.contactId,p_channel:p.channelId,p_connection:p.connectionId,p_membership:p.membershipId,p_provider:p.provider})
+  // The browser selects a specific verified session, never an epoch UUID.
+  // Bind the current membership on the server and let the SQL RPC recheck
+  // its active state transactionally; there is no implicit primary fallback.
+  const db=supabaseAdmin()
+  const {data:epoch,error:epochError}=await db.from('whatsapp_channel_memberships').select('id')
+   .eq('account_id',ctx.accountId).eq('channel_id',p.channelId).eq('connection_id',p.connectionId)
+   .eq('provider',p.provider).is('valid_until',null).maybeSingle()
+  if(epochError||!validId(epoch?.id))return fail(409,'scope_changed')
+  const {data,error}=await db.rpc('inbox_open_explicit_thread',{p_account:ctx.accountId,p_actor:ctx.userId,p_contact:p.contactId,p_channel:p.channelId,p_connection:p.connectionId,p_membership:epoch.id,p_provider:p.provider})
   if(error||!validId(data))return fail(409,'scope_changed')
   return reply({thread_id:data,channel_id:p.channelId})
  }catch(e){return e instanceof UnauthorizedError?fail(401,'unauthorized'):e instanceof ForbiddenError?fail(403,'forbidden'):fail(503,'action_unavailable')}
