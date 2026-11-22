@@ -79,13 +79,13 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  const selected=connections.find(c=>c.id===selectedConnection)
  const active=policy?.key===policyKey?policy:null
  const c=active?.capabilities??null
- const remaining=c?.window_expires_at&&active?Math.max(0,Date.parse(c.window_expires_at)-Date.parse(c.server_now)-(tick-active.seen)):0
+ const remaining=c?.window_expires_at&&active?Math.max(0,Date.parse(c.window_expires_at)-Date.parse(c.server_now)-(Math.max(tick,active.seen)-active.seen)):0
  const expired=c?.provider==='meta_cloud'&&c.window_expires_at!==null&&remaining<=0
  const scope:ActionScope|null=c&&validId(c.membership_id)&&selectedConnection&&row.channel_id?{
   threadId:row.id,channelId:row.channel_id,connectionId:selectedConnection,membershipId:c.membership_id,provider:c.provider
  }:null
- const enabled=Boolean(c?.dispatch_enabled&&scope&&selected?.ready&&!selected.archived&&!expired)
- const kindAllowed=mode==='text'?Boolean(c?.may_send_text):mode==='media'?Boolean(c?.may_send_media&&c.media_kinds.includes(mediaKind)):mode==='template'?Boolean(c?.may_send_template):Boolean(c?.may_send_interactive)
+ const enabled=Boolean(c?.dispatch_enabled&&scope&&selected?.ready&&!selected.archived)
+ const kindAllowed=mode==='text'?Boolean(c?.may_send_text&&!expired):mode==='media'?Boolean(c?.may_send_media&&!expired&&c.media_kinds.includes(mediaKind)):mode==='template'?Boolean(c?.may_send_template):Boolean(c?.may_send_interactive&&!expired)
  const replyAllowed=!reply||Boolean(c?.may_reply)
  const canSubmit=Boolean(enabled&&kindAllowed&&replyAllowed&&!busy&&!uploading&&!attempt&&(mode==='text'?text.trim().length>0:mode==='media'?attachment&&attachment.kind===mediaKind:mode==='template'?template:validateInteractivePayload(interactive).ok))
  const persist=(value:Attempt|null)=>{
@@ -192,7 +192,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
    placeholder={t('actionTextPlaceholder')} dir="auto" aria-label={t('actionTextPlaceholder')}/>}
   {mode==='media'&&<div className="flex flex-wrap items-center gap-2">
    <Paperclip className="size-4 text-muted-foreground"/>
-   <select className="h-9 rounded-lg border border-border bg-background px-2 text-xs" aria-label={t('actionMediaKind')} value={mediaKind} disabled={Boolean(attempt)||uploading||busy} onChange={e=>{setMediaKind(e.target.value as Attachment['kind']);setAttachment(null)}}>
+   <select className="h-9 rounded-lg border border-border bg-background px-2 text-xs" aria-label={t('actionMediaKind')} value={mediaKind} disabled={Boolean(attempt)||uploading||busy} onChange={e=>{if(attachment)void deleteAccountMedia('chat-media',attachment.path).catch(()=>{});setMediaKind(e.target.value as Attachment['kind']);setAttachment(null)}}>
     {(['image','video','document','audio'] as const).map(k=><option key={k} value={k} disabled={!c?.media_kinds.includes(k)}>{t('actionMedia_'+k)}</option>)}
    </select>
    <input type="file" className="min-w-32 flex-1 text-xs file:me-2 file:rounded-md file:border file:border-border file:bg-muted file:px-2 file:py-1" disabled={!canAttach||uploading||Boolean(attempt)}

@@ -153,22 +153,27 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
   const identity=[scope.connectionId,scope.membershipId,message.id,kind,emoji].join(':')
   const old=locks.current.get(identity)
   setNativeBusy(true)
+  let nextKey=old?.key
   try{
-   // A second click on a pending/uncertain/accepted operation is a
-   // read-only status lookup, never a second provider dispatch.
-   const current=old&&old.state!=='blocked'
-    ?await inspectScopedAction(ctx,row.id,old.key)
-    :await submitScopedAction(ctx,kind==='provider_read'
-      ?{scope,key:crypto.randomUUID(),action:'provider_read',messageId:message.id}
-      :{scope,key:crypto.randomUUID(),action:'reaction',messageId:message.id,emoji})
-   if(!old||old.state==='blocked'){
-    // The sent key must be captured before POST; see the explicit helper
-    // below for the complete locked-submission path.
+   // Only a proven pre-dispatch blocked result may receive a new key
+   // on a second deliberate click. An uncertain result is status-only.
+   let current:ScopedActionOutcome
+   if(old&&old.state!=='blocked'){
+    current=await inspectScopedAction(ctx,row.id,old.key)
+   }else{
+    nextKey=crypto.randomUUID()
+    locks.current.set(identity,{key:nextKey,state:'pending'})
+    current=await submitScopedAction(ctx,kind==='provider_read'
+      ?{scope,key:nextKey,action:'provider_read',messageId:message.id}
+      :{scope,key:nextKey,action:'reaction',messageId:message.id,emoji})
    }
+   if(nextKey)locks.current.set(identity,{key:nextKey,state:current.state})
    setNativeOutcome(current)
    if(current.state==='accepted')onRefresh()
-  }catch{setNativeOutcome({state:'uncertain',code:'admission_unconfirmed'})}
-  finally{setNativeBusy(false)}
+  }catch{
+   if(nextKey)locks.current.set(identity,{key:nextKey,state:'uncertain'})
+   setNativeOutcome({state:'uncertain',code:'admission_unconfirmed'})
+  }finally{setNativeBusy(false)}
  }
  return <div className="flex h-full min-h-0 min-w-0 flex-col">
   <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card p-4">
@@ -235,7 +240,7 @@ function Workspace({ctx}:{ctx:InboxContext}){
  return <div className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden bg-background sm:-m-6">
   <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-3">
    <div className="flex min-w-0 items-center gap-3"><div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"><Inbox className="size-5"/></div><div><h1 className="text-base font-semibold">{t('title')}</h1><p className="text-[11px] text-muted-foreground">{t('subtitle')}</p></div></div>
-   <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs text-muted-foreground"><ShieldCheck className="size-3.5"/>{t('noSending')}</span><Button variant="outline" size="icon-lg" onClick={refresh} aria-label={t('refresh')}><RefreshCw className="size-4"/></Button></div>
+   <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs text-muted-foreground"><ShieldCheck className="size-3.5"/>{t('actionTestProtected')}</span><Button variant="outline" size="icon-lg" onClick={refresh} aria-label={t('refresh')}><RefreshCw className="size-4"/></Button></div>
   </header>
   {loc.invalid?<div className="space-y-2 p-4"><p role="alert" className="text-sm text-destructive">{t('invalidLink')}</p><Button variant="outline" onClick={()=>changeScope('active',null)}>{t('back')}</Button></div>:<div className="flex min-h-0 flex-1">
    <aside className={cn('min-h-0 w-full flex-col border-e border-border bg-card lg:w-[380px] lg:shrink-0',hasSelection?'hidden lg:flex':'flex')}>
