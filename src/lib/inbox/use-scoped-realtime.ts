@@ -1,12 +1,15 @@
 'use client'
-import { useEffect,useRef } from 'react'
+import { useEffect,useRef,useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { InboxContext } from './scoped-list-model'
 import { createScopedRefreshQueue } from './scoped-refresh-queue'
 
 // Realtime is an invalidation hint, NEVER a message/list payload. Exact
 // server snapshots remain authoritative for ordering, deletes and counts.
+export type ScopedRealtimeStatus='connecting'|'connected'|'reconnecting'
 export function useScopedInboxRealtime({accountId,userId}:InboxContext,onInvalidate:()=>void){
+ const key=accountId+':'+userId
+ const [current,setCurrent]=useState<{key:string;status:ScopedRealtimeStatus}>({key,status:'connecting'})
  const callback=useRef(onInvalidate)
  useEffect(()=>{callback.current=onInvalidate},[onInvalidate])
  useEffect(()=>{
@@ -19,7 +22,11 @@ export function useScopedInboxRealtime({accountId,userId}:InboxContext,onInvalid
    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'inbox_thread_changes',filter},wake)
    .on('postgres_changes',{event:'INSERT',schema:'public',table:'conversations',filter},wake)
    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'conversations',filter},wake)
-   .subscribe(status=>{if(status==='SUBSCRIBED'||status==='CHANNEL_ERROR'||status==='TIMED_OUT')wake()})
+   .subscribe(status=>{
+     if(status==='SUBSCRIBED')setCurrent({key,status:'connected'})
+     else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED')setCurrent({key,status:'reconnecting'})
+     if(status==='SUBSCRIBED'||status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED')wake()
+    })
   // Recovery covers events lost during disconnect, DELETE, readiness changes
   // and unknown-lane reactions. No reads are acknowledged by these refreshes.
   const poll=setInterval(wake,20_000)
@@ -34,5 +41,6 @@ export function useScopedInboxRealtime({accountId,userId}:InboxContext,onInvalid
    window.removeEventListener('focus',wake)
    void client.removeChannel(channel)
   }
- },[accountId,userId])
+ },[accountId,userId,key])
+ return current.key===key?current.status:'connecting'
 }
