@@ -133,10 +133,14 @@ GRANT EXECUTE ON FUNCTION public.inbox_reserve_action_message(uuid,uuid,uuid,tex
 -- existing adapter calls this AFTER its own policy and pacing recheck.
 CREATE FUNCTION wacrm_internal.inbox_begin_action_dispatch(p_account uuid,p_actor uuid,p_intent uuid,p_recipient text)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
-DECLARE a public.inbox_action_intents%ROWTYPE;
+DECLARE a public.inbox_action_intents%ROWTYPE; c jsonb;
 BEGIN
  a=wacrm_internal.inbox_action_context(p_account,p_actor,p_intent,p_recipient);
  IF a.dispatch_started_at IS NOT NULL OR (a.action_kind='send' AND NOT EXISTS(SELECT 1 FROM public.messages m WHERE m.id=a.message_id AND m.conversation_id=a.conversation_id AND m.connection_id=a.connection_id AND m.provider=a.provider AND m.outbound_idempotency_key='inbox-action:'||a.id::text AND m.status='sending' AND m.provider_message_id IS NULL)) THEN RETURN false; END IF;
+ IF a.provider='meta_cloud' AND (a.action_kind='reaction' OR (a.action_kind='send' AND EXISTS(SELECT 1 FROM public.messages WHERE id=a.message_id AND (content_type<>'template' OR reply_to_message_id IS NOT NULL)))) THEN
+  c=public.inbox_policy_context(p_account,p_actor,a.thread_id,a.channel_id,a.connection_id);
+  IF c->>'last_inbound_at' IS NULL OR (c->>'last_inbound_at')::timestamptz<=clock_timestamp()-interval '24 hours' OR (c->>'last_inbound_at')::timestamptz>clock_timestamp() THEN RETURN false; END IF;
+ END IF;
  UPDATE public.inbox_action_intents SET dispatch_started_at=clock_timestamp() WHERE id=a.id AND account_id=p_account;
  RETURN true;
 END $$;

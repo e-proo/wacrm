@@ -1,0 +1,81 @@
+BEGIN;
+DO $mixed$
+DECLARE u uuid:='00000000-0000-4000-8000-000000002203';a uuid;co uuid;mt uuid;mc uuid;me uuid;ow uuid;oc uuid;oe uuid;unverified uuid;d timestamptz;cv timestamptz;p uuid;c uuid;m1 uuid;m2 uuid;m3 uuid;m4 uuid;m5 uuid;t uuid;ot uuid;v jsonb;z jsonb;k uuid;ts timestamptz; fresh uuid; legacy uuid; other uuid; intent uuid; msg uuid; key1 uuid:=gen_random_uuid(); key2 uuid:=gen_random_uuid(); key3 uuid:=gen_random_uuid();
+BEGIN
+ INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES(u,'inbox220-mixed@example.test','{"full_name":"Mixed"}');
+ SELECT account_id INTO STRICT a FROM public.profiles WHERE user_id=u;
+ INSERT INTO public.whatsapp_config(user_id,account_id,phone_number_id,access_token,status) VALUES(u,a,'15550000193','fixture-meta-secret','connected') RETURNING updated_at INTO cv;
+ INSERT INTO public.whatsapp_connections(account_id,provider,status,provider_external_id) VALUES(a,'meta_cloud','connected','15550000193') RETURNING id,updated_at INTO mt,d;
+ v=public.inbox_enroll_verified_channel(a,u,mt,'meta_cloud','15550000193',NULL,NULL,d,cv,clock_timestamp(),'meta-fixture',true);
+ mc=(v->>'channel_id')::uuid;me=(v->>'membership_id')::uuid;
+ INSERT INTO public.whatsapp_connections(account_id,provider,status,session_id,phone_identity) VALUES(a,'openwa','ready','inbox220-mixed','15550000193') RETURNING id,updated_at INTO ow,d;
+ INSERT INTO public.whatsapp_connection_credentials(account_id,connection_id,provider,base_url,api_key_encrypted) VALUES(a,ow,'openwa','https://example.test','fixture') RETURNING updated_at INTO cv;
+ v=public.inbox_enroll_verified_channel(a,u,ow,'openwa','15550000193','inbox220-mixed',NULL,d,cv,clock_timestamp(),'ow-fixture',true);
+ oc=(v->>'channel_id')::uuid;oe=(v->>'membership_id')::uuid;
+ IF mc=oc THEN RAISE EXCEPTION 'cross-provider channel merged'; END IF;
+ INSERT INTO public.whatsapp_connections(account_id,provider,status,session_id,phone_identity) VALUES(a,'openwa','ready','inbox220-unverified','15550000193') RETURNING id INTO unverified;
+ INSERT INTO public.contacts(user_id,account_id,phone,name) VALUES(u,a,'+15550000219','Mixed Contact') RETURNING id INTO p;
+ INSERT INTO public.conversations(user_id,account_id,contact_id,status,unread_count) VALUES(u,a,p,'pending',0) RETURNING id INTO c;
+ ts=clock_timestamp();
+ INSERT INTO public.messages(conversation_id,sender_type,content_type,content_text,status,provider,connection_id,provider_message_id,created_at) VALUES(c,'agent','text','Meta outbound','sent','meta_cloud',mt,'meta-217-a',ts) RETURNING id INTO m1;
+ INSERT INTO public.messages(conversation_id,sender_type,content_type,content_text,status,provider,connection_id,provider_message_id,created_at) VALUES(c,'bot','text','Meta older','sent','meta_cloud',mt,'meta-217-b',ts-interval '1 second') RETURNING id INTO m2;
+ INSERT INTO public.messages(conversation_id,sender_type,content_type,content_text,status,provider,connection_id,provider_message_id,created_at) VALUES(c,'agent','text','OpenWA outbound','sent','openwa',ow,'ow-217-a',ts) RETURNING id INTO m3;
+ INSERT INTO public.messages(conversation_id,sender_type,content_type,content_text,status,provider,connection_id,provider_message_id,created_at) VALUES(c,'customer','text','Unverified connection','delivered','openwa',unverified,'ow-217-unverified',NULL) RETURNING id INTO m4;
+ INSERT INTO public.messages(conversation_id,sender_type,content_type,content_text,status,created_at) VALUES(c,'customer','text','Missing route','delivered',NULL) RETURNING id INTO m5;
+ INSERT INTO public.inbox_verified_message_evidence(message_id,account_id,conversation_id,provider,channel_id,connection_id,membership_id,native_message_id,observed_at,evidence_ref)
+ VALUES(m1,a,c,'meta_cloud',mc,mt,me,'meta-217-a',clock_timestamp(),'fixture-a'),
+ (m2,a,c,'meta_cloud',mc,mt,me,'meta-217-b',clock_timestamp(),'fixture-b'),
+ (m3,a,c,'openwa',oc,ow,oe,'ow-217-a',clock_timestamp(),'fixture-c');
+ IF public.inbox_backfill_verified_messages(a,100)<>3 OR public.inbox_backfill_verified_messages(a,100)<>0 THEN RAISE EXCEPTION 'mixed backfill'; END IF;
+ SELECT id INTO STRICT t FROM public.inbox_threads WHERE account_id=a AND channel_id=mc;
+ SELECT id INTO STRICT ot FROM public.inbox_threads WHERE account_id=a AND channel_id=oc;
+ v=public.inbox_policy_context(a,u,t,mc,mt);
+ IF v->>'provider'<>'meta_cloud' OR v->>'last_inbound_at' IS NOT NULL OR v->>'ready'<>'true' THEN RAISE EXCEPTION 'no trusted inbound %',v; END IF;
+ IF public.inbox_policy_context(a,u,t,mc,ow) IS NOT NULL OR public.inbox_policy_context(a,u,t,oc,mt) IS NOT NULL THEN RAISE EXCEPTION 'wrong provider/channel accepted'; END IF;
+ ts=clock_timestamp();
+ INSERT INTO public.messages(conversation_id,sender_type,content_type,content_text,status,provider,connection_id,provider_message_id,created_at) VALUES(c,'customer','text','signed Meta fresh','delivered','meta_cloud',mt,'meta-220-fresh',ts) RETURNING id INTO fresh;
+ IF public.inbox_record_meta_signed_ingress(a,mt,c,fresh,'meta-220-fresh','wrong-id','15550000219',ts) THEN RAISE EXCEPTION 'wrong Meta external accepted'; END IF;
+ IF public.inbox_record_meta_signed_ingress(a,mt,c,fresh,'meta-220-fresh','15550000193','15550000999',ts) THEN RAISE EXCEPTION 'wrong Meta sender accepted'; END IF;
+ EXECUTE 'SET LOCAL ROLE service_role';
+ IF NOT public.inbox_record_meta_signed_ingress(a,mt,c,fresh,'meta-220-fresh','15550000193','15550000219',ts) THEN RAISE EXCEPTION 'fresh Meta proof absent'; END IF;
+ IF NOT public.inbox_record_meta_signed_ingress(a,mt,c,fresh,'meta-220-fresh','15550000193','15550000219',ts) OR (SELECT count(*) FROM public.inbox_message_memberships WHERE message_id=fresh)<>1 THEN RAISE EXCEPTION 'duplicate signed proof'; END IF;
+ EXECUTE 'RESET ROLE';
+ v=public.inbox_policy_context(a,u,t,mc,NULL);
+ IF (v->>'last_inbound_at')::timestamptz IS DISTINCT FROM ts OR v->>'connection_id'<>mt::text THEN RAISE EXCEPTION 'exact signed Meta window %',v; END IF;
+
+ EXECUTE 'SET LOCAL ROLE service_role';
+ IF public.inbox_native_action_target(a,u,t,mc,mt,me,fresh,true)->>'native_id' IS DISTINCT FROM 'meta-220-fresh' THEN RAISE EXCEPTION 'exact read proof'; END IF;
+ IF public.inbox_native_action_target(a,u,t,mc,mt,me,m3,false) IS NOT NULL THEN RAISE EXCEPTION 'cross-provider reply'; END IF;
+ v=public.inbox_claim_action(a,u,key1,t,mc,mt,me,'meta_cloud','send',repeat('a',64));
+ IF v->>'state'<>'claimed' THEN RAISE EXCEPTION 'claim %',v; END IF;
+ intent=(v->>'intent_id')::uuid;
+ IF public.inbox_claim_action(a,u,key1,t,mc,mt,me,'meta_cloud','send',repeat('a',64))->>'state'<>'pending' THEN RAISE EXCEPTION 'duplicate claim'; END IF;
+ IF public.inbox_claim_action(a,u,key1,t,mc,mt,me,'meta_cloud','send',repeat('b',64))->>'state'<>'conflict' THEN RAISE EXCEPTION 'changed payload'; END IF;
+ msg=public.inbox_reserve_action_message(a,u,intent,'15550000219','text','reply fixture',NULL,NULL,NULL,fresh);
+ IF NOT public.inbox_begin_action_dispatch(a,u,intent,'15550000219') THEN RAISE EXCEPTION 'dispatch denied'; END IF;
+ IF public.inbox_begin_action_dispatch(a,u,intent,'15550000219') THEN RAISE EXCEPTION 'dispatch fence'; END IF;
+ IF public.inbox_complete_action_send(a,u,intent,'meta-221-result','15550000219')<>msg THEN RAISE EXCEPTION 'completion key'; END IF;
+ IF public.inbox_claim_action(a,u,key1,t,mc,mt,me,'meta_cloud','send',repeat('a',64))->>'state'<>'accepted' THEN RAISE EXCEPTION 'accepted replay'; END IF;
+ IF (SELECT count(*) FROM public.inbox_message_memberships WHERE message_id=msg AND thread_id=t AND connection_id=mt AND membership_id=me)<>1 THEN RAISE EXCEPTION 'outbound projection'; END IF;
+ IF public.inbox_native_action_target(a,u,t,mc,mt,me,msg,false)->>'native_id' IS DISTINCT FROM 'meta-221-result' THEN RAISE EXCEPTION 'outbound reply proof'; END IF;
+ v=public.inbox_claim_action(a,u,key2,t,mc,mt,me,'meta_cloud','send',repeat('c',64));
+ intent=(v->>'intent_id')::uuid;
+ msg=public.inbox_reserve_action_message(a,u,intent,'15550000219','text','blocked fixture',NULL,NULL,NULL,NULL);
+ IF public.inbox_fail_action(a,u,intent)<>'blocked' THEN RAISE EXCEPTION 'blocked state'; END IF;
+ v=public.inbox_claim_action(a,u,key3,t,mc,mt,me,'meta_cloud','send',repeat('d',64));
+ intent=(v->>'intent_id')::uuid;
+ msg=public.inbox_reserve_action_message(a,u,intent,'15550000219','text','uncertain fixture',NULL,NULL,NULL,NULL);
+ IF NOT public.inbox_begin_action_dispatch(a,u,intent,'15550000219') THEN RAISE EXCEPTION 'dispatch denied'; END IF;
+ IF public.inbox_fail_action(a,u,intent)<>'uncertain' THEN RAISE EXCEPTION 'uncertain state'; END IF;
+ IF public.inbox_claim_action(a,u,key3,t,mc,mt,me,'meta_cloud','send',repeat('d',64))->>'state'<>'uncertain' THEN RAISE EXCEPTION 'unsafe retry'; END IF;
+ IF has_table_privilege('authenticated','public.inbox_action_intents','SELECT') OR has_function_privilege('authenticated','public.inbox_claim_action(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,text)','EXECUTE') THEN RAISE EXCEPTION 'browser grant'; END IF;
+ EXECUTE 'RESET ROLE';
+ IF (SELECT status FROM public.messages WHERE id=msg)<>'sending' THEN RAISE EXCEPTION 'uncertain source lost'; END IF;
+ UPDATE public.profiles SET account_role='viewer' WHERE user_id=u;
+ BEGIN
+ PERFORM public.inbox_claim_action(a,u,gen_random_uuid(),t,mc,mt,me,'meta_cloud','send',repeat('a',64));
+ RAISE EXCEPTION 'viewer claim';
+ EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+END $mixed$;
+SET CONSTRAINTS ALL IMMEDIATE;
+ROLLBACK;
