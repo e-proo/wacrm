@@ -16,12 +16,11 @@ SELECT '10000000-0000-4000-8000-000000000001'::uuid,
  '2026-11-21T23:00:00Z'::timestamptz - (n/2)*interval '1 second',
  n%4 FROM generate_series(1,10000) n;
 INSERT INTO inbox_bench_messages
-SELECT t.account_id,t.id,('40000000-0000-4000-8000-'||lpad((n*10+m)::text,12,'0'))::uuid,
+SELECT t.account_id,t.id,('40000000-0000-4000-8000-'||lpad((id_parts.n*10+m)::text,12,'0'))::uuid,
  t.last_message_at - (m*interval '1 minute')
 FROM inbox_bench_threads t
 CROSS JOIN LATERAL (SELECT substring(t.id::text,25,12)::integer AS n) id_parts
-CROSS JOIN generate_series(1,10) m
-CROSS JOIN LATERAL (SELECT id_parts.n AS n) ints;
+CROSS JOIN generate_series(1,10) m;
 CREATE INDEX inbox_bench_list_idx ON inbox_bench_threads(account_id,last_message_at DESC NULLS LAST,id DESC);
 CREATE INDEX inbox_bench_history_idx ON inbox_bench_messages(thread_id,created_at DESC NULLS LAST,id DESC);
 ANALYZE inbox_bench_threads;
