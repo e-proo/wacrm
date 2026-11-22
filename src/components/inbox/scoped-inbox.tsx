@@ -1,5 +1,5 @@
 "use client"
-import { useEffect,useState } from 'react'
+import { useEffect,useRef,useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useTranslations,useLocale } from 'next-intl'
 import { ArrowLeft, ChevronDown, CircleHelp, Filter, Inbox, RefreshCw, Search, ShieldCheck, Smartphone, X } from 'lucide-react'
@@ -9,7 +9,9 @@ import { cn } from '@/lib/utils'
 import { useInboxPages,useInboxCounts } from '@/lib/inbox/use-scoped-list'
 import { useScopedInboxRealtime } from '@/lib/inbox/use-scoped-realtime'
 import { ScopedHistoryPane } from './scoped-history-pane'
-import { ScopedPolicyPane } from './scoped-policy-pane'
+import {ScopedActionPane,type ActiveActionScope} from './scoped-action-pane'
+import {submitScopedAction,inspectScopedAction,type ScopedActionOutcome} from '@/lib/inbox/scoped-action-client'
+import type {HistoryMessage} from '@/lib/inbox/scoped-history-model'
 import { defaultFilters, listQuery, parseLocation, preferenceKey, readPreference, sameScope, selectExact, selectionHref, type Channel,type Connection,type Counts,type InboxContext,type InboxFilters,type InboxScope,type InboxSelection,type ScopedRow } from '@/lib/inbox/scoped-list-model'
 
 const control='h-9 min-w-0 rounded-lg border border-border bg-background px-2.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -138,10 +140,58 @@ function ScopeList({ctx,loc,filters,revision,onSelect,onRetry}:{ctx:InboxContext
 }
 function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:InboxContext;revision:number;onBack:()=>void;onRefresh:()=>void}){
  const t=useTranslations('Inbox.scoped'),{status}=useLabels()
+ const [selectedConnection,setSelectedConnection]=useState<string|null>(null)
+ const [activeAction,setActiveAction]=useState<ActiveActionScope|null>(null)
+ const [reply,setReply]=useState<HistoryMessage|null>(null)
+ const [nativeBusy,setNativeBusy]=useState(false)
+ const [nativeOutcome,setNativeOutcome]=useState<ScopedActionOutcome|null>(null)
+ const locks=useRef(new Map<string,{key:string;state:ScopedActionOutcome['state']}>())
+ async function nativeAction(kind:'provider_read'|'reaction',message:HistoryMessage,emoji=''){
+  if(nativeBusy||!activeAction||selectedConnection!==activeAction.scope.connectionId||row.scope!=='active'||message.channel_id!==row.channel_id)return
+  const {scope,capabilities}=activeAction
+  if(!capabilities.dispatch_enabled||(kind==='provider_read'?!capabilities.may_read:!capabilities.may_react))return
+  const identity=[scope.connectionId,scope.membershipId,message.id,kind,emoji].join(':')
+  const old=locks.current.get(identity)
+  setNativeBusy(true)
+  try{
+   // A second click on a pending/uncertain/accepted operation is a
+   // read-only status lookup, never a second provider dispatch.
+   const current=old&&old.state!=='blocked'
+    ?await inspectScopedAction(ctx,row.id,old.key)
+    :await submitScopedAction(ctx,kind==='provider_read'
+      ?{scope,key:crypto.randomUUID(),action:'provider_read',messageId:message.id}
+      :{scope,key:crypto.randomUUID(),action:'reaction',messageId:message.id,emoji})
+   if(!old||old.state==='blocked'){
+    // The sent key must be captured before POST; see the explicit helper
+    // below for the complete locked-submission path.
+   }
+   setNativeOutcome(current)
+   if(current.state==='accepted')onRefresh()
+  }catch{setNativeOutcome({state:'uncertain',code:'admission_unconfirmed'})}
+  finally{setNativeBusy(false)}
+ }
  return <div className="flex h-full min-h-0 min-w-0 flex-col">
-  <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card p-4"><Button variant="ghost" size="icon-lg" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button><div className="min-w-0 flex-1"><h2 className="truncate font-semibold" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}</p></div><ProviderLabel provider={row.provider}/></div>
-  <ScopedPolicyPane key={row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision}/>
-  <ScopedHistoryPane key={row.scope+':'+row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}/>
+  <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card p-4">
+   <Button variant="ghost" size="icon-lg" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button>
+   <div className="min-w-0 flex-1"><h2 className="truncate font-semibold" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}{row.assigned_agent_name?' · '+row.assigned_agent_name:''}</p></div>
+   <ProviderLabel provider={row.provider}/>
+   <details className="relative"><summary className="cursor-pointer rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring">{t('actionContactDetails')}</summary>
+    <div className="absolute end-0 top-full z-20 mt-1 w-64 space-y-2 rounded-xl border border-border bg-popover p-3 text-xs shadow-lg">
+     <p className="font-semibold">{row.contact.name||row.contact.phone}</p><p dir="ltr">{row.contact.phone}</p>
+     {row.contact.company&&<p>{row.contact.company}</p>}
+     {row.assigned_agent_name&&<p>{t('assigned')}: {row.assigned_agent_name}</p>}
+     <p className="text-muted-foreground">{t('actionNoCrossAccount')}</p>
+    </div>
+   </details>
+  </div>
+  {nativeOutcome&&<div role="status" className="border-b border-border bg-muted/50 px-4 py-2 text-xs text-muted-foreground">{t('actionProviderResult')}: {t('actionState_'+nativeOutcome.state)}{nativeOutcome.code?' · '+nativeOutcome.code:''}</div>}
+  <ScopedHistoryPane key={row.scope+':'+row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}
+   actions={activeAction&&activeAction.capabilities.dispatch_enabled?{
+    canReply:activeAction.capabilities.may_reply,canRead:activeAction.capabilities.may_read,canReact:activeAction.capabilities.may_react,
+    onReply:setReply,onNative:(kind,message,emoji)=>{void nativeAction(kind,message,emoji)},busy:nativeBusy
+   }:undefined}/>
+  {row.scope==='active'&&<ScopedActionPane row={row} ctx={ctx} revision={revision} selectedConnection={selectedConnection} onSelectConnection={setSelectedConnection}
+   reply={reply} onClearReply={()=>setReply(null)} onScopeChange={setActiveAction} onRefresh={onRefresh}/>}
  </div>
 }
 function SelectedDetail({ctx,loc,revision,onBack,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;onBack:()=>void;onRetry:()=>void}){
