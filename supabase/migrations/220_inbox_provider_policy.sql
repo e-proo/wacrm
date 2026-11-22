@@ -61,8 +61,8 @@ END $$;
 REVOKE ALL ON FUNCTION wacrm_internal.inbox_meta_config_ready(uuid,text,boolean) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION wacrm_internal.inbox_meta_config_ready(uuid,text,boolean) TO service_role;
 
-CREATE FUNCTION public.inbox_record_meta_signed_ingress(p_account uuid,p_connection uuid,p_conversation uuid,p_message uuid,p_native text,p_external text,p_sender text,p_at timestamptz)
-RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+CREATE FUNCTION wacrm_internal.inbox_record_meta_signed_ingress(p_account uuid,p_connection uuid,p_conversation uuid,p_message uuid,p_native text,p_external text,p_sender text,p_at timestamptz)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
 DECLARE ep public.whatsapp_channel_memberships%ROWTYPE; t public.inbox_threads%ROWTYPE; seq bigint; v_now timestamptz:=clock_timestamp(); proof text;
 BEGIN
  IF p_native IS NULL OR length(btrim(p_native)) NOT BETWEEN 1 AND 512 OR p_sender IS NULL OR p_sender !~ '^[1-9][0-9]{6,14}$'
@@ -96,6 +96,13 @@ BEGIN
  VALUES(p_message,p_account,p_conversation,ep.channel_id,t.id,'meta_cloud',p_connection,ep.id,'verified_current_ingress',proof,seq);
  RETURN true;
 END $$;
+REVOKE ALL ON FUNCTION wacrm_internal.inbox_record_meta_signed_ingress(uuid,uuid,uuid,uuid,text,text,text,timestamptz) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION wacrm_internal.inbox_record_meta_signed_ingress(uuid,uuid,uuid,uuid,text,text,text,timestamptz) TO service_role;
+-- Only the private definer may lock source messages; no general UPDATE grant.
+CREATE FUNCTION public.inbox_record_meta_signed_ingress(p_account uuid,p_connection uuid,p_conversation uuid,p_message uuid,p_native text,p_external text,p_sender text,p_at timestamptz)
+RETURNS boolean LANGUAGE sql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+ SELECT wacrm_internal.inbox_record_meta_signed_ingress(p_account,p_connection,p_conversation,p_message,p_native,p_external,p_sender,p_at)
+$$;
 REVOKE ALL ON FUNCTION public.inbox_record_meta_signed_ingress(uuid,uuid,uuid,uuid,text,text,text,timestamptz) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.inbox_record_meta_signed_ingress(uuid,uuid,uuid,uuid,text,text,text,timestamptz) TO service_role;
 
