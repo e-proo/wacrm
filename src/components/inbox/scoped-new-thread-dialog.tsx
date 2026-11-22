@@ -21,7 +21,6 @@ export function ScopedNewThreadDialog({ctx,open,onOpenChange,onCreated}:Props){
  const [search,setSearch]=useState('')
  const [busy,setBusy]=useState(false)
  const [error,setError]=useState('')
- const [loading,setLoading]=useState(false)
  useEffect(()=>{
   if(!open)return
   const ctl=new AbortController()

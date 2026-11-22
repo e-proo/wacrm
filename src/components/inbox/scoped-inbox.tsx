@@ -11,6 +11,7 @@ import { useScopedInboxRealtime } from '@/lib/inbox/use-scoped-realtime'
 import { ScopedHistoryPane } from './scoped-history-pane'
 import {ScopedActionPane,type ActiveActionScope} from './scoped-action-pane'
 import {ScopedContactPanel} from './scoped-contact-panel'
+import {ScopedNewThreadDialog} from './scoped-new-thread-dialog'
 import {submitScopedAction,inspectScopedAction,type ScopedActionOutcome} from '@/lib/inbox/scoped-action-client'
 import type {HistoryMessage} from '@/lib/inbox/scoped-history-model'
 import { defaultFilters, listQuery, parseLocation, preferenceKey, readPreference, sameScope, selectExact, selectionHref, type Channel,type Connection,type Counts,type InboxContext,type InboxFilters,type InboxScope,type InboxSelection,type ScopedRow } from '@/lib/inbox/scoped-list-model'
@@ -221,6 +222,7 @@ function LegacyChoices({ctx,loc,onSelect,onBack,onRetry}:{ctx:InboxContext;loc:I
 function Workspace({ctx}:{ctx:InboxContext}){
  const t=useTranslations('Inbox.scoped'),params=useSearchParams(),query=params.toString(),loc=parseLocation(query)
  const [filters,setFilters]=useState<InboxFilters>({...defaultFilters}),[revision,setRevision]=useState(0)
+ const [newThreadOpen,setNewThreadOpen]=useState(false)
  const search=useDebounced(filters.search),company=useDebounced(filters.company)
  const effective={...filters,search,company}
  useEffect(()=>{
@@ -241,7 +243,7 @@ function Workspace({ctx}:{ctx:InboxContext}){
  return <div className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden bg-background sm:-m-6">
   <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-3">
    <div className="flex min-w-0 items-center gap-3"><div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"><Inbox className="size-5"/></div><div><h1 className="text-base font-semibold">{t('title')}</h1><p className="text-[11px] text-muted-foreground">{t('subtitle')}</p></div></div>
-   <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs text-muted-foreground"><ShieldCheck className="size-3.5"/>{t('actionTestProtected')}</span><Button variant="outline" size="icon-lg" onClick={refresh} aria-label={t('refresh')}><RefreshCw className="size-4"/></Button></div>
+   <div className="flex items-center gap-2"><Button size="sm" variant="outline" onClick={()=>setNewThreadOpen(true)}>{t('actionNewThread')}</Button><span className="hidden items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs text-muted-foreground sm:inline-flex"><ShieldCheck className="size-3.5"/>{t('actionTestProtected')}</span><Button variant="outline" size="icon-lg" onClick={refresh} aria-label={t('refresh')}><RefreshCw className="size-4"/></Button></div>
   </header>
   {loc.invalid?<div className="space-y-2 p-4"><p role="alert" className="text-sm text-destructive">{t('invalidLink')}</p><Button variant="outline" onClick={()=>changeScope('active',null)}>{t('back')}</Button></div>:<div className="flex min-h-0 flex-1">
    <aside className={cn('min-h-0 w-full flex-col border-e border-border bg-card lg:w-[380px] lg:shrink-0',hasSelection?'hidden lg:flex':'flex')}>
@@ -257,6 +259,7 @@ function Workspace({ctx}:{ctx:InboxContext}){
      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center"><div className="rounded-full bg-muted p-5 text-muted-foreground"><CircleHelp className="size-8"/></div><h2 className="font-medium">{t('selectThread')}</h2><p className="max-w-sm text-sm text-muted-foreground">{t('selectHelp')}</p></div>}
    </main>
   </div>}
+  <ScopedNewThreadDialog open={newThreadOpen} onOpenChange={setNewThreadOpen} ctx={ctx} onCreated={href=>{go(href);refresh()}}/>
  </div>
 }
 export function ScopedInbox(){
