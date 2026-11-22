@@ -19,3 +19,8 @@ Runtime HEAD CI and migration CI success, TEST smoke with evidence, performance 
 
 ## 2026-11-21 — Owner-approved channel identity amendment (normative)
 [ADR-INBOX-002](14_INBOX0_CHANNEL_ADR.md) supersedes any earlier per-connection thread key or contradictory wording. Test simultaneous duplicate native events across sessions, distinct message IDs identical content, unknown aliases, cross-channel ID collision, identity epoch revocation/re-pair, archived/recreated session history, read cursor concurrency, canonical count and exactly-once logical fanout, frozen task and aggregate caps; measure observation volume and dedup lock contention.
+
+
+## 2026-11-22 — INBOX-5 technical evidence and owner-deferred upstream visual acceptance
+
+SOF-80/87 implementation and verification evidence is in [INBOX-5 technical report](18_INBOX5_TECHNICAL_REPORT.md). User permitted continuing technical engineering while the INBOX-4 visual acceptance remained explicitly deferred in [SOF-90](https://linear.app/eproo/issue/SOF-90), but that deferral **does not count as visual PASS**. This remains a release dependency for INBOX-5; neither Inbox is GA/live accepted. Detailed measured 10k/100k synthetic SQL-only p50/p95 and 0-row hosted TEST limitations are recorded in the report; these may not be represented as a measured full production API SLA. All schema changes are additive (222, 223); preexisting migrations unchanged. No production/flag/provider-send changes.  
