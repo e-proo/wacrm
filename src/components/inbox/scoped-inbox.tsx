@@ -13,6 +13,9 @@ import { ScopedHistoryPane } from './scoped-history-pane'
 import {ScopedActionPane,type ActiveActionScope} from './scoped-action-pane'
 import {ScopedContactPanel} from './scoped-contact-panel'
 import {ScopedNewThreadDialog} from './scoped-new-thread-dialog'
+import {Sheet,SheetContent,SheetHeader,SheetTitle,SheetDescription} from '@/components/ui/sheet'
+import {useBrowserOnline,scopedConnectivityNotice} from '@/lib/inbox/scoped-connectivity'
+import {clearAccountScopedDrafts} from '@/lib/inbox/scoped-draft-memory'
 import {submitScopedAction,inspectScopedAction,type ScopedActionOutcome} from '@/lib/inbox/scoped-action-client'
 import type {HistoryMessage} from '@/lib/inbox/scoped-history-model'
 import { defaultFilters, listQuery, parseLocation, preferenceKey, readPreference, sameScope, selectExact, selectionHref, type Channel,type Connection,type Counts,type InboxContext,type InboxFilters,type InboxScope,type InboxSelection,type ScopedRow } from '@/lib/inbox/scoped-list-model'
@@ -32,7 +35,7 @@ function ErrorState({onRetry}:{onRetry:()=>void}){
  const t=useTranslations('Inbox.scoped')
  return <div role="alert" className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm"><p>{t('error')}</p><Button variant="outline" onClick={onRetry}>{t('retry')}</Button></div>
 }
-function Wait(){const t=useTranslations('Inbox.scoped');return <div role="status" className="p-4 text-center text-sm text-muted-foreground">{t('loading')}</div>}
+function Wait(){const t=useTranslations('Inbox.scoped');return <div role="status" aria-live="polite" className="space-y-2 p-4 text-center text-sm text-muted-foreground"><div className="mx-auto h-3 w-3/4 animate-pulse rounded bg-muted motion-reduce:animate-none"/><div className="mx-auto h-3 w-1/2 animate-pulse rounded bg-muted motion-reduce:animate-none"/><span className="sr-only">{t('loading')}</span></div>}
 function ProviderLabel({provider}:{provider:string|null}){
  const {provider:label}=useLabels()
  return <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium',provider==='meta_cloud'?'bg-blue-500/10 text-blue-700 dark:text-blue-300':provider==='openwa'?'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300':'bg-muted text-muted-foreground')}><span className="size-1.5 rounded-full bg-current"/>{label(provider)}</span>
@@ -45,7 +48,9 @@ export function ScopedThreadCard({row,selected,onSelect}:{row:ScopedRow;selected
  const unread=row.scope==='unknown'?row.legacy_crm_unread??0:row.unread_count_known??0
  const time=row.last_message_at?new Date(row.last_message_at):null
  const prettyTime=time&&!Number.isNaN(time.getTime())?new Intl.DateTimeFormat(locale,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(time):''
- return <button type="button" onClick={onSelect} aria-pressed={selected} className={cn('block w-full border-b border-border/60 px-3 py-3 text-start transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',selected?'bg-primary/8 border-s-2 border-s-primary':'border-s-2 border-s-transparent')}>
+ return <button type="button" onClick={onSelect} aria-pressed={selected} data-inbox-row-id={row.id} aria-label={(row.contact.name||row.contact.phone)+' · '+(row.channel_name||row.own_phone||'')}
+  title={(row.contact.name||row.contact.phone)+' · '+(row.channel_name||row.own_phone||'')}
+  className={cn('block min-h-11 w-full border-b border-border/60 px-3 py-3 text-start transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',selected?'bg-primary/8 border-s-2 border-s-primary':'border-s-2 border-s-transparent')}>
   <div className="flex items-start gap-3">
    <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">{(row.contact.name||row.contact.phone||'?').slice(0,2).toUpperCase()}</span>
    <div className="min-w-0 flex-1 space-y-1">
@@ -81,6 +86,7 @@ function ChannelSelector({ctx,loc,revision,onChange,onRetry}:{ctx:InboxContext;l
    {catalog.cursor&&<Button variant="ghost" size="sm" disabled={catalog.busy} onClick={catalog.more}>{t('moreChannels')}</Button>}
    {loc.channel&&selected&&!ready&&<div className="rounded-lg bg-muted p-2 text-xs"><p>{t('channelMoved')}</p><Button variant="outline" className="mt-1" onClick={()=>onChange(selected.scope,selected.id)}>{t(selected.scope)}</Button></div>}
    {loc.channel&&!selected&&!exact.busy&&<p className="text-xs text-destructive">{t('notFound')}</p>}
+  {loc.scope==='active'&&!catalog.busy&&!catalog.error&&!catalog.items.length&&<p role="status" className="text-xs text-muted-foreground">{t('actionNoActiveChannels')}</p>}
    {selected&&ready&&<div className="flex flex-wrap items-center gap-2 text-xs"><ProviderLabel provider={selected.provider}/><span className="text-muted-foreground">{t('sessionsReady')}: {selected.ready_sessions}</span><span className="text-muted-foreground">{t(selected.ready?'online':'offline')}</span></div>}
   </>}
   <Button variant="ghost" className="w-full justify-between" onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}><span className="flex items-center gap-2"><Smartphone className="size-4"/>{t('sessions')}</span><ChevronDown className={cn('size-4 transition-transform',expanded&&'rotate-180')}/></Button>
@@ -181,11 +187,11 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
  }
  return <div className="relative flex h-full min-h-0 min-w-0">
   <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-  <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card p-4">
-   <Button variant="ghost" size="icon-lg" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button>
-   <div className="min-w-0 flex-1"><h2 className="truncate font-semibold" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}{row.assigned_agent_name?' · '+row.assigned_agent_name:''}</p></div>
+  <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-2 py-2 sm:gap-3 sm:p-4">
+   <Button variant="ghost" size="icon-lg" className="min-h-11 min-w-11" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button>
+   <div className="min-w-0 flex-1"><h2 ref={titleRef} tabIndex={-1} className="truncate rounded-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}{row.assigned_agent_name?' · '+row.assigned_agent_name:''}</p></div>
    <ProviderLabel provider={row.provider}/>
-   <Button type="button" variant="outline" size="sm" onClick={()=>setContactOpen(v=>!v)} aria-expanded={contactOpen} aria-label={t('actionContactDetails')}>{t('actionContactDetails')}</Button>
+   <Button type="button" variant="outline" size="sm" className="min-h-11 shrink-0" onClick={()=>setContactOpen(v=>!v)} aria-expanded={contactOpen} aria-label={t('actionContactDetails')}>{t('actionContactDetails')}</Button>
   </div>
   {nativeOutcome&&<div role="status" className="border-b border-border bg-muted/50 px-4 py-2 text-xs text-muted-foreground">{t('actionProviderResult')}: {t('actionState_'+nativeOutcome.state)}{nativeOutcome.code?' · '+nativeOutcome.code:''}</div>}
   <ScopedHistoryPane key={row.scope+':'+row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}
@@ -196,10 +202,16 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
   {row.scope==='active'&&<ScopedActionPane row={row} ctx={ctx} revision={revision} selectedConnection={selectedConnection} onSelectConnection={setSelectedConnection}
    reply={reply} onClearReply={()=>setReply(null)} onScopeChange={setActiveAction} onRefresh={onRefresh}/>}
   </div>
-  {contactOpen&&<aside className="absolute inset-y-0 end-0 z-30 flex w-70 shrink-0 flex-col border-s border-border bg-card shadow-xl xl:static xl:shadow-none" aria-label={t('actionContactDetails')}>
-   <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2 text-sm font-medium"><span>{t('actionContactDetails')}</span><Button size="sm" variant="ghost" onClick={()=>setContactOpen(false)} aria-label={t('actionCloseContact')}><X className="size-4"/></Button></div>
-   <div className="min-h-0 flex-1"><ScopedContactPanel row={row} ctx={ctx}/></div>
-  </aside>}
+  <Sheet open={contactOpen} onOpenChange={setContactOpen}>
+   <SheetContent side={locale==='ar'?'left':'right'} showCloseButton={false} className="h-[100dvh] w-[min(92vw,22rem)] gap-0 overflow-hidden p-0 sm:max-w-[22rem]">
+    <SheetHeader className="flex-row items-center justify-between gap-2 border-b border-border px-3 py-2">
+     <SheetTitle>{t('actionContactDetails')}</SheetTitle>
+     <SheetDescription className="sr-only">{t('actionNoCrossAccount')}</SheetDescription>
+     <Button size="icon-lg" variant="ghost" onClick={()=>setContactOpen(false)} aria-label={t('actionCloseContact')}><X className="size-4"/></Button>
+    </SheetHeader>
+    <div className="min-h-0 flex-1 overflow-y-auto"><ScopedContactPanel row={row} ctx={ctx}/></div>
+   </SheetContent>
+  </Sheet>
  </div>
 }
 function SelectedDetail({ctx,loc,revision,onBack,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;onBack:()=>void;onRetry:()=>void}){
@@ -225,6 +237,9 @@ function Workspace({ctx}:{ctx:InboxContext}){
  const canSend=useCan('send-messages')
  const [filters,setFilters]=useState<InboxFilters>({...defaultFilters}),[revision,setRevision]=useState(0)
  const [newThreadOpen,setNewThreadOpen]=useState(false)
+ const latestSelected=useRef<string|null>(null)
+ const online=useBrowserOnline()
+ useEffect(()=>()=>clearAccountScopedDrafts(ctx),[ctx.accountId,ctx.userId])
  const search=useDebounced(filters.search),company=useDebounced(filters.company)
  const effective={...filters,search,company}
  useEffect(()=>{
@@ -235,11 +250,22 @@ function Workspace({ctx}:{ctx:InboxContext}){
   go(selectionHref(scope,channel))
   try{localStorage.setItem(preferenceKey(ctx),JSON.stringify({scope,channel}))}catch{/* Storage is optional. */}
  }
- const close=()=>go(selectionHref(loc.scope,loc.channel))
- const choose=(row:ScopedRow)=>go(selectionHref(row.scope,loc.legacy||loc.scope!==row.scope?row.channel_id:loc.channel,row))
+ const close=()=>{
+  go(selectionHref(loc.scope,loc.channel))
+  // The list remains mounted on mobile: restore keyboard focus to the exact
+  // row after the thread pane is hidden, without changing scroll/filter.
+  requestAnimationFrame(()=>{
+   const id=latestSelected.current
+   if(!id)return
+   const items=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-inbox-row-id]'))
+   items.find(el=>el.dataset.inboxRowId===id&&el.getClientRects().length>0)?.focus({preventScroll:true})
+  })
+ }
+ const choose=(row:ScopedRow)=>{latestSelected.current=row.id;go(selectionHref(row.scope,loc.legacy||loc.scope!==row.scope?row.channel_id:loc.channel,row))}
  const changeFilters=(next:InboxFilters)=>{setFilters(next);close()}
  const refresh=()=>setRevision(x=>x+1)
- useScopedInboxRealtime(ctx,refresh)
+ const realtime=useScopedInboxRealtime(ctx,refresh)
+ const connectivityNotice=scopedConnectivityNotice(online,realtime)
  const hasSelection=!loc.invalid&&Boolean(loc.legacy||loc.thread||(loc.scope==='unknown'&&loc.parent))
  const listKey=[loc.scope,loc.channel,JSON.stringify(effective)].join(':')
  return <div className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden bg-background sm:-m-6">
@@ -247,8 +273,9 @@ function Workspace({ctx}:{ctx:InboxContext}){
    <div className="flex min-w-0 items-center gap-3"><div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"><Inbox className="size-5"/></div><div><h1 className="text-base font-semibold">{t('title')}</h1><p className="text-[11px] text-muted-foreground">{t('subtitle')}</p></div></div>
    <div className="flex items-center gap-2">{canSend&&<Button size="sm" variant="outline" onClick={()=>setNewThreadOpen(true)}>{t('actionNewThread')}</Button>}<span className="hidden items-center gap-1.5 rounded-full border border-border px-2 py-1 text-xs text-muted-foreground sm:inline-flex"><ShieldCheck className="size-3.5"/>{t('actionTestProtected')}</span><Button variant="outline" size="icon-lg" onClick={refresh} aria-label={t('refresh')}><RefreshCw className="size-4"/></Button></div>
   </header>
+  {connectivityNotice&&<div role="status" aria-live="polite" className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground"><span>{t(connectivityNotice==='browser_offline'?'actionBrowserOffline':'actionRealtimeReconnecting')}</span><Button size="sm" variant="outline" className="min-h-11" onClick={refresh}>{t('refresh')}</Button></div>}
   {loc.invalid?<div className="space-y-2 p-4"><p role="alert" className="text-sm text-destructive">{t('invalidLink')}</p><Button variant="outline" onClick={()=>changeScope('active',null)}>{t('back')}</Button></div>:<div className="flex min-h-0 flex-1">
-   <aside className={cn('min-h-0 w-full flex-col border-e border-border bg-card lg:w-[380px] lg:shrink-0',hasSelection?'hidden lg:flex':'flex')}>
+   <aside aria-label={t('actionThreadList')} className={cn('min-h-0 w-full flex-col border-e border-border bg-card lg:w-[380px] lg:shrink-0',hasSelection?'hidden lg:flex':'flex')}>
     <div className="max-h-[55%] shrink-0 overflow-y-auto">
      <ChannelSelector key={[loc.scope,loc.channel].join(':')} ctx={ctx} loc={loc} revision={revision} onChange={changeScope} onRetry={refresh}/>
      <Filters value={filters} onChange={changeFilters}/>
@@ -256,7 +283,7 @@ function Workspace({ctx}:{ctx:InboxContext}){
     </div>
     {search!==filters.search||company!==filters.company?<Wait/>:<ScopeList key={listKey} revision={revision} ctx={ctx} loc={loc} filters={effective} onSelect={choose} onRetry={refresh}/>}
    </aside>
-   <main className={cn('min-h-0 min-w-0 flex-1 overflow-hidden',hasSelection?'block':'hidden lg:block')}>
+   <main id="scoped-inbox-main" className={cn('min-h-0 min-w-0 flex-1 overflow-hidden',hasSelection?'block':'hidden lg:block')}>
     {hasSelection?(loc.legacy?<LegacyChoices key={query+':'+revision} ctx={ctx} loc={loc} onSelect={choose} onBack={close} onRetry={refresh}/>:<SelectedDetail key={query} revision={revision} ctx={ctx} loc={loc} onBack={close} onRetry={refresh}/>):
      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center"><div className="rounded-full bg-muted p-5 text-muted-foreground"><CircleHelp className="size-8"/></div><h2 className="font-medium">{t('selectThread')}</h2><p className="max-w-sm text-sm text-muted-foreground">{t('selectHelp')}</p></div>}
    </main>
