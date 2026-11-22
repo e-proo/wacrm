@@ -71,6 +71,10 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-provider-policy-smoke.sql
       - name: SOF-85 explicit action reservation and exact scope
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-explicit-actions-smoke.sql
+      - name: INBOX-5 redacted health scope and role regression
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox5-security-regression-smoke.sql
+      - name: INBOX-5 synthetic 10k threads 100k messages p50/p95 and EXPLAIN
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox5-synthetic-benchmark.sql
       - name: Verify the resulting schema
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/verify-schema.sql
       - name: NOTE-001 anonymous SECURITY DEFINER / RLS safety smoke
