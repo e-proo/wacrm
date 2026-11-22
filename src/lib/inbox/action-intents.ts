@@ -9,9 +9,18 @@ export async function claimInboxAction(db:SupabaseClient,actor:Actor,scope:Actio
  if(error)throw Error('Action admission unavailable')
  return decodeIntent(data)
 }
-export async function finishInboxAction(db:SupabaseClient,actor:Actor,intentId:string,state:'accepted'|'blocked'|'uncertain',messageId?:string){
- const {data,error}=await db.from('inbox_action_intents').update({state,message_id:messageId??null,finished_at:new Date().toISOString()}).eq('id',intentId).eq('account_id',actor.accountId).eq('actor_id',actor.userId).eq('state','pending').select('id').maybeSingle()
- if(error||!data)throw Error('Action outcome unconfirmed')
+export async function failInboxAction(db:SupabaseClient,actor:Actor,intentId:string):Promise<'accepted'|'blocked'|'uncertain'> {
+ const {data,error}=await db.rpc('inbox_fail_action',{p_account:actor.accountId,p_actor:actor.userId,p_intent:intentId})
+ if(error||!['accepted','blocked','uncertain'].includes(data))throw Error('Action outcome unconfirmed')
+ return data
+}
+export async function beginInboxDispatch(db:SupabaseClient,actor:Actor,intentId:string,recipient:string) {
+ const {data,error}=await db.rpc('inbox_begin_action_dispatch',{p_account:actor.accountId,p_actor:actor.userId,p_intent:intentId,p_recipient:recipient})
+ if(error||data!==true)throw Error('Action dispatch denied')
+}
+export async function completeNativeAction(db:SupabaseClient,actor:Actor,intentId:string,messageId:string,emoji:string|null){
+ const {data,error}=await db.rpc('inbox_complete_native_action',{p_account:actor.accountId,p_actor:actor.userId,p_intent:intentId,p_message:messageId,p_emoji:emoji})
+ if(error||data!==true)throw Error('Action completion unconfirmed')
 }
 export async function getInboxNativeTarget(db:SupabaseClient,actor:Actor,scope:ActionScope,messageId:string,read=false){
  if(!validId(messageId))return null

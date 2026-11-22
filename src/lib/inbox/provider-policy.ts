@@ -85,9 +85,9 @@ export async function evaluateInboxPolicy(db:SupabaseClient,s:PolicySelection,op
 }
 // Server-side fence for SOF-85's explicit sender. The existing guarded
 // transport remains the admission and reservation authority.
-export async function assertInboxSendPolicy(db:SupabaseClient,s:PolicySelection,expected:{conversationId:string;provider:string;connectionId:string;membershipId:string;recipient:string;kind:string},afterReservation=false):Promise<void>{
+export async function assertInboxSendPolicy(db:SupabaseClient,s:PolicySelection,expected:{conversationId:string;provider:string;connectionId:string;membershipId:string;recipient:string;kind:string;reply?:boolean},afterReservation=false):Promise<void>{
  if(!scopedInboxEnabled()||s.connectionId!==expected.connectionId)throw contextError()
  let result:Awaited<ReturnType<typeof evaluateInboxPolicy>>
  try{result=await evaluateInboxPolicy(db,s,{afterReservation})}catch{throw contextError()}
- if(!result||result.context.conversation_id!==expected.conversationId||result.context.provider!==expected.provider||result.context.connection_id!==expected.connectionId||result.context.membership_id!==expected.membershipId||result.context.recipient!==expected.recipient||!allowsContent(result.capabilities,expected.kind))throw contextError()
+ if(!result||result.context.conversation_id!==expected.conversationId||result.context.provider!==expected.provider||result.context.connection_id!==expected.connectionId||result.context.membership_id!==expected.membershipId||result.context.recipient!==expected.recipient||!allowsContent(result.capabilities,expected.kind)||(expected.reply&&!result.capabilities.may_reply))throw contextError()
 }
