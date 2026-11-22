@@ -18,7 +18,7 @@ export function ScopedPolicyPane({row,ctx,revision}:{row:ScopedRow;ctx:InboxCont
   const controller=new AbortController(),started=performance.now()
   void fetchInbox<{capabilities:InboxCapabilities}>(path,{accountId,userId},controller.signal).then(body=>{
    const c=body.capabilities
-   if(!c||c.thread_id!==id||c.channel_id!==channel||c.provider!==provider||c.dispatch_enabled!==false)throw Error('Policy scope changed')
+   if(!c||c.thread_id!==id||c.channel_id!==channel||c.provider!==provider||typeof c.dispatch_enabled!=='boolean')throw Error('Policy scope changed')
    if(!controller.signal.aborted){
     const received=performance.now()
     const remaining=c.window_expires_at?Math.max(0,Date.parse(c.window_expires_at)-Date.parse(c.server_now)-(received-started)):0

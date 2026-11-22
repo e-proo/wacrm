@@ -1,0 +1,54 @@
+import {NextResponse} from 'next/server'
+import {requireRole,UnauthorizedError,ForbiddenError} from '@/lib/auth/account'
+import {supabaseAdmin} from '@/lib/automations/admin-client'
+import {checkRateLimit,rateLimitResponse,RATE_LIMITS} from '@/lib/rate-limit'
+import {sendMessageToConversation} from '@/lib/whatsapp/send-message'
+import {allowsContent} from './provider-policy-model'
+import {evaluateInboxPolicy} from './provider-policy'
+import {claimInboxAction,failInboxAction} from './action-intents'
+import {parseScopedAction,type ScopedActionInput} from './scoped-action-input'
+import {runScopedNativeAction} from './scoped-native-actions'
+import {scopedInboxActionsEnabled} from './scoped-ui-gate'
+import {validId} from './scoped-list-model'
+const headers={'Cache-Control':'private, no-store, max-age=0','Vary':'Cookie'}
+const reply=(data:object,status=200)=>NextResponse.json(data,{status,headers})
+const fail=(status:number,code:string)=>reply({state:'denied',code},status)
+export async function performScopedAction(request:Request,threadId:string){
+ try{
+  const ctx=await requireRole('agent')
+  if(!scopedInboxActionsEnabled())return fail(403,'actions_disabled')
+  if(request.headers.get('x-wacrm-inbox-account')!==ctx.accountId||request.headers.get('x-wacrm-inbox-actor')!==ctx.userId)return fail(403,'context_changed')
+  const origin=request.headers.get('origin')
+  if(request.headers.get('sec-fetch-site')==='cross-site'||origin!==null&&origin!==new URL(request.url).origin)return fail(403,'forbidden_origin')
+  if(!validId(threadId)||request.headers.get('content-type')?.split(';')[0]!=='application/json'||Number(request.headers.get('content-length')??0)>32768)return fail(400,'invalid_action')
+  const raw=await request.text()
+  if(raw.length>32768)return fail(400,'invalid_action')
+  let input:ScopedActionInput
+  try{input=parseScopedAction(JSON.parse(raw),threadId,ctx.accountId)}catch{return fail(400,'invalid_action')}
+  const limit=checkRateLimit('send:'+ctx.userId,RATE_LIMITS.send)
+  if(!limit.success)return rateLimitResponse(limit)
+  const db=supabaseAdmin(),actor={accountId:ctx.accountId,userId:ctx.userId},s=input.scope
+  const policy=await evaluateInboxPolicy(db,{...actor,threadId:s.threadId,channelId:s.channelId,connectionId:s.connectionId})
+  if(!policy||policy.context.membership_id!==s.membershipId||policy.context.provider!==s.provider||!policy.context.recipient)return fail(409,'scope_changed')
+  const recipient=policy.context.recipient
+  const payload=input.kind==='send'?{...input.params,conversationId:policy.context.conversation_id}:input.kind==='reaction'?{messageId:input.messageId,emoji:input.emoji}:{messageId:input.messageId}
+  // Existing keys are resolved by the journal, never create a second provider request.
+  if(input.kind==='send'?(!allowsContent(policy.capabilities,input.params.messageType)||Boolean(input.params.replyToMessageId)&&!policy.capabilities.may_reply):input.kind==='reaction'?!policy.capabilities.may_react:!policy.capabilities.may_read)return fail(409,'policy_denied')
+  const intent=await claimInboxAction(db,actor,s,input.key,input.kind,recipient,payload)
+  if(intent.state==='conflict'||intent.state==='denied')return fail(409,intent.state==='conflict'?'idempotency_conflict':'scope_changed')
+  if(intent.state!=='claimed')return reply({state:intent.state,intent_id:intent.intent_id,message_id:intent.message_id??null,replayed:true},intent.state==='accepted'?200:409)
+  const id=intent.intent_id!
+  try{
+   if(input.kind==='send'){
+    const result=await sendMessageToConversation(ctx.supabase,ctx.accountId,{...input.params,conversationId:policy.context.conversation_id,connectionId:s.connectionId,idempotencyKey:'inbox-action:'+id,workload:'manual',senderType:'agent',scopedInbox:{userId:ctx.userId,threadId:s.threadId,channelId:s.channelId,membershipId:s.membershipId,intentId:id,provider:s.provider,recipient}})
+    return reply({state:'accepted',intent_id:id,message_id:result.messageId,replayed:false})
+   }
+   await runScopedNativeAction(db,ctx.supabase,actor,input,id,recipient)
+   return reply({state:'accepted',intent_id:id,replayed:false})
+  }catch{
+   let state:'accepted'|'blocked'|'uncertain'='uncertain'
+   try{state=await failInboxAction(db,actor,id)}catch{/* An unconfirmed outcome must never be reported as retryable. */}
+   return reply({state,intent_id:id,code:state==='blocked'?'pre_dispatch_denied':state==='uncertain'?'reconciliation_required':'accepted'},state==='accepted'?200:409)
+  }
+ }catch(e){return e instanceof UnauthorizedError?fail(401,'unauthorized'):e instanceof ForbiddenError?fail(403,'forbidden'):fail(503,'action_unavailable')}
+}

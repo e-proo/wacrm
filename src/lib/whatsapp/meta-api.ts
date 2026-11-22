@@ -1055,3 +1055,11 @@ export async function downloadMedia(
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
 }
+
+/** Explicit native read receipt. Only call after exact account/connection proof. */
+export async function markMetaMessageRead(args:{phoneNumberId:string;accessToken:string;messageId:string}):Promise<void>{
+ const response=await fetch(META_API_BASE+'/'+args.phoneNumberId+'/messages',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+args.accessToken},body:JSON.stringify({messaging_product:'whatsapp',status:'read',message_id:args.messageId})})
+ if(!response.ok)await throwMetaError(response,'Meta read acknowledgement failed')
+ const result=await response.json()
+ if(result?.success!==true)throw Error('Meta read acknowledgement unconfirmed')
+}
