@@ -1,6 +1,6 @@
 
 'use client'
-import {useEffect,useState} from 'react'
+import {useSyncExternalStore} from 'react'
 import type {ScopedRealtimeStatus} from './use-scoped-realtime'
 
 // Connectivity of the browser and the Supabase realtime channel is NOT
@@ -9,12 +9,14 @@ export type ScopedConnectivityNotice='browser_offline'|'realtime_reconnecting'|n
 export function scopedConnectivityNotice(browserOnline:boolean,realtime:ScopedRealtimeStatus):ScopedConnectivityNotice {
  return !browserOnline?'browser_offline':realtime==='reconnecting'?'realtime_reconnecting':null
 }
+function subscribeBrowserOnline(listener:()=>void){
+ window.addEventListener('online',listener)
+ window.addEventListener('offline',listener)
+ return()=>{window.removeEventListener('online',listener);window.removeEventListener('offline',listener)}
+}
+function browserOnlineSnapshot(){return typeof navigator==='undefined'?true:navigator.onLine}
 export function useBrowserOnline(){
- const [online,setOnline]=useState(true)
- useEffect(()=>{
-  const update=()=>setOnline(navigator.onLine)
-  window.addEventListener('online',update);window.addEventListener('offline',update)
-  return()=>{window.removeEventListener('online',update);window.removeEventListener('offline',update)}
- },[])
- return online
+ // Server snapshot remains deterministic; React checks the true client state
+ // immediately after hydration even when the browser starts offline.
+ return useSyncExternalStore(subscribeBrowserOnline,browserOnlineSnapshot,()=>true)
 }
