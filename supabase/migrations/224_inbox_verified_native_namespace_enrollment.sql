@@ -145,51 +145,7 @@ BEGIN
   ELSIF proof.scope_kind='single_connection' THEN
    IF proof.verified_at>r.received_at OR c.engine IS DISTINCT FROM proof.engine OR NOT ep.is_primary
    THEN reason='namespace_unverified';
-   ELSIF p_native_id !~ '^(true|false)_[0-9]{5,20}@(c[.]us|lid)_[A-Za-z0-9]+
- END IF;
- IF reason IS NULL THEN
-  -- Only the explicitly designated, currently verified primary can become
-  -- the origin of a NEW inbound reservation. Secondary-first arrival
-  -- records evidence without moving the frozen origin or running business effects.
-  SELECT * INTO canon FROM public.inbox_canonical_messages WHERE account_id=p_account AND provider='openwa' AND channel_id=ep.channel_id
-    AND namespace_key=proof.namespace_key AND direction=p_direction AND native_message_id=p_native_id FOR UPDATE;
-  IF NOT FOUND THEN
-   IF p_direction='outbound' THEN authoritative=ep;
-   ELSE
-    SELECT m.* INTO authoritative FROM public.whatsapp_channel_memberships m
-     JOIN public.whatsapp_connections wc ON wc.id=m.connection_id AND wc.account_id=m.account_id AND wc.provider=m.provider
-     JOIN public.inbox_native_namespace_proofs np ON np.membership_id=m.id AND np.account_id=m.account_id AND np.channel_id=m.channel_id
-     WHERE m.account_id=p_account AND m.provider='openwa' AND m.channel_id=ep.channel_id AND m.is_primary AND m.valid_until IS NULL
-       AND m.valid_from<=r.received_at AND np.namespace_key=proof.namespace_key AND wc.archived_at IS NULL AND wc.status IN ('ready','connected')
-       AND wc.session_id IS NOT DISTINCT FROM m.session_snapshot AND wc.instance_id IS NOT DISTINCT FROM m.instance_snapshot FOR SHARE OF m,wc;
-    IF NOT FOUND THEN reason='primary_unavailable'; END IF;
-   END IF;
-  ELSE
-   SELECT * INTO STRICT authoritative FROM public.whatsapp_channel_memberships WHERE id=canon.origin_membership_id AND account_id=p_account;
-  END IF;
- END IF;
- IF reason IS NULL THEN
-  -- Unique canonical key serializes concurrent observations; peer mismatch
-  -- is not accepted as duplicate. Direction is part of identity.
-  INSERT INTO public.inbox_canonical_messages(account_id,provider,channel_id,conversation_id,namespace_key,direction,native_message_id,origin_connection_id,origin_membership_id)
-  VALUES(p_account,'openwa',ep.channel_id,p_conversation,proof.namespace_key,p_direction,p_native_id,authoritative.connection_id,authoritative.id)
-  ON CONFLICT(account_id,provider,channel_id,namespace_key,direction,native_message_id) DO NOTHING RETURNING id INTO new_id;
-  SELECT * INTO STRICT canon FROM public.inbox_canonical_messages WHERE account_id=p_account AND provider='openwa' AND channel_id=ep.channel_id
-    AND namespace_key=proof.namespace_key AND direction=p_direction AND native_message_id=p_native_id FOR UPDATE;
-  IF canon.conversation_id<>p_conversation THEN reason='peer_conflict';
-  ELSE
-   INSERT INTO public.inbox_message_connection_observations(account_id,provider,channel_id,connection_id,membership_id,canonical_id,receipt_id,native_message_id,direction)
-   VALUES(p_account,'openwa',ep.channel_id,p_connection,ep.id,canon.id,r.id,p_native_id,p_direction)
-   ON CONFLICT(receipt_id) DO NOTHING;
-   INSERT INTO public.inbox_canonical_effects(canonical_id,account_id,provider,channel_id)
-   VALUES(canon.id,p_account,'openwa',ep.channel_id) ON CONFLICT(canonical_id) DO NOTHING;
-   RETURN jsonb_build_object('state',CASE WHEN new_id IS NULL THEN 'duplicate' ELSE 'reserved' END,'canonicalId',canon.id);
-  END IF;
- END IF;
- INSERT INTO public.inbox_canonical_intake_review(receipt_id,account_id,connection_id,provider,reason,normalized_payload)
- VALUES(r.id,p_account,p_connection,'openwa',reason,p_payload);
- RETURN jsonb_build_object('state','review','reason',reason);
-END $$;
+   ELSIF p_native_id !~ '^(true|false)_[0-9]{5,20}@(c[.]us|lid)_[A-Za-z0-9]+$'
     OR split_part(p_native_id,'_',2) IS DISTINCT FROM (p_payload->>'chatId')
     OR split_part(p_native_id,'_',1) IS DISTINCT FROM (CASE WHEN p_direction='inbound' THEN 'false' ELSE 'true' END)
    THEN reason='peer_conflict'; END IF;
