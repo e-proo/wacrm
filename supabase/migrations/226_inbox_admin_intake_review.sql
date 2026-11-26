@@ -25,7 +25,7 @@ RETURNS text LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path=pg_catalog
 DECLARE q public.inbox_canonical_intake_review%ROWTYPE;r public.whatsapp_webhook_event_receipts%ROWTYPE;
  o public.inbox_message_connection_observations%ROWTYPE; cm public.inbox_canonical_messages%ROWTYPE;
  e public.inbox_canonical_effects%ROWTYPE; ep public.whatsapp_channel_memberships%ROWTYPE;
- np public.inbox_native_namespace_proofs%ROWTYPE; payload jsonb; phone text; at_time timestamptz;
+ np public.inbox_native_namespace_proofs%ROWTYPE; payload jsonb; peer_phone text; at_time timestamptz;
 BEGIN
  SELECT * INTO q FROM public.inbox_canonical_intake_review WHERE account_id=p_account AND receipt_id=p_receipt AND provider='openwa';
  IF NOT FOUND OR q.resolved_at IS NOT NULL THEN RETURN 'closed'; END IF;
@@ -72,15 +72,15 @@ BEGIN
  OR (payload->'media' IS NOT NULL AND payload->'media'<>'null'::jsonb)
  OR coalesce(payload->>'timestamp','') !~ '^[0-9]{10}$'
  THEN RETURN 'unverified'; END IF;
- phone=regexp_replace(coalesce(payload->>'from',''),'^[+]','');
- IF phone !~ '^[1-9][0-9]{6,14}$' OR payload->>'chatId' IS DISTINCT FROM phone||'@c.us'
+ peer_phone=regexp_replace(coalesce(payload->>'from',''),'^[+]','');
+ IF peer_phone !~ '^[1-9][0-9]{6,14}$' OR payload->>'chatId' IS DISTINCT FROM peer_phone||'@c.us'
  OR cm.native_message_id !~ '^false_[0-9]{5,20}@c[.]us_[A-Za-z0-9]+$'
  OR split_part(cm.native_message_id,'_',2) IS DISTINCT FROM payload->>'chatId'
  THEN RETURN 'unverified'; END IF;
  at_time=to_timestamp((payload->>'timestamp')::bigint);
  IF at_time<ep.valid_from OR at_time>r.received_at+interval '5 minutes'
  OR NOT EXISTS(SELECT 1 FROM public.conversations cv JOIN public.contacts ct ON ct.id=cv.contact_id AND ct.account_id=cv.account_id
- WHERE cv.account_id=p_account AND cv.id=cm.conversation_id AND regexp_replace(ct.phone,'^[+]','')=phone)
+ WHERE cv.account_id=p_account AND cv.id=cm.conversation_id AND regexp_replace(ct.phone,'^[+]','')=peer_phone)
  OR EXISTS(SELECT 1 FROM public.messages m JOIN public.conversations cv ON cv.id=m.conversation_id AND cv.account_id=p_account
  WHERE (m.connection_id=cm.origin_connection_id AND m.provider='openwa' AND m.provider_message_id=cm.native_message_id)
  OR (m.conversation_id=cm.conversation_id AND m.message_id=cm.native_message_id))
