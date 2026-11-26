@@ -13,7 +13,7 @@ import { ScopedHistoryPane } from './scoped-history-pane'
 import {ScopedActionPane,type ActiveActionScope} from './scoped-action-pane'
 import {ScopedContactPanel} from './scoped-contact-panel'
 import {ScopedNewThreadDialog} from './scoped-new-thread-dialog'
-import { ScopedVerifyChannel } from './scoped-verify-channel'
+import { ScopedChannelReadiness } from './scoped-channel-readiness'
 import {Sheet,SheetContent,SheetHeader,SheetTitle,SheetDescription} from '@/components/ui/sheet'
 import {useBrowserOnline,scopedConnectivityNotice} from '@/lib/inbox/scoped-connectivity'
 import {clearAccountScopedDrafts} from '@/lib/inbox/scoped-draft-memory'
@@ -92,6 +92,7 @@ function ChannelSelector({ctx,loc,revision,onChange,onRetry}:{ctx:InboxContext;l
   </>}
   <Button variant="ghost" className="w-full justify-between" onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}><span className="flex items-center gap-2"><Smartphone className="size-4"/>{t('sessions')}</span><ChevronDown className={cn('size-4 transition-transform',expanded&&'rotate-180')}/></Button>
   {expanded&&<SessionList key={loc.scope+':'+loc.channel} ctx={ctx} loc={loc} revision={revision} onRetry={onRetry}/>}
+  <ScopedChannelReadiness ctx={ctx} revision={revision} onChanged={onRetry}/>
  </div>
 }
 function SessionList({ctx,loc,revision,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;onRetry:()=>void}){
@@ -101,7 +102,7 @@ function SessionList({ctx,loc,revision,onRetry}:{ctx:InboxContext;loc:InboxSelec
  const data=useInboxPages<Connection>('connections?'+q.toString(),ctx,c=>!loc.channel||c.channel_id===loc.channel,revision)
  return <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border bg-muted/30 p-2">
   <p className="text-[11px] text-muted-foreground">{t('diagnosticsOnly')}</p>
-  {data.items.map(c=><div key={c.id} className="rounded-md bg-background p-2 text-xs"><div className="flex items-center justify-between gap-1"><span dir="auto" className="min-w-0 truncate font-medium">{c.display_name||t('unnamedSession')}</span><ProviderLabel provider={c.provider}/></div><div className="mt-1 flex flex-wrap gap-2 text-[10px] text-muted-foreground"><span>{c.archived?t('historical'):status(c.status)}</span><span>{t(c.ready?'verifiedReady':c.identity_state==='unverified'?'unverified':'notReady')}</span>{c.is_primary&&<span>{t('primary')}</span>}</div>{c.registry_online&&!c.archived&&(c.identity_state==='unverified'||c.provider==='openwa')&&<ScopedVerifyChannel connectionId={c.id} ctx={ctx} identityUnverified={c.identity_state==='unverified'} openwa={c.provider==='openwa'} onVerified={onRetry}/>}</div>)}
+  {data.items.map(c=><div key={c.id} className="rounded-md bg-background p-2 text-xs"><div className="flex items-center justify-between gap-1"><span dir="auto" className="min-w-0 truncate font-medium">{c.display_name||t('unnamedSession')}</span><ProviderLabel provider={c.provider}/></div><div className="mt-1 flex flex-wrap gap-2 text-[10px] text-muted-foreground"><span>{c.archived?t('historical'):status(c.status)}</span><span>{t(c.ready?'verifiedReady':c.identity_state==='unverified'?'unverified':'notReady')}</span>{c.is_primary&&<span>{t('primary')}</span>}</div></div>)}
   {data.busy&&<Wait/>}{!data.busy&&!data.error&&!data.items.length&&<p className="p-1 text-xs text-muted-foreground">{t('emptySessions')}</p>}
   {data.error&&<ErrorState onRetry={onRetry}/>}
   {data.cursor&&<Button size="sm" variant="ghost" disabled={data.busy} onClick={data.more}>{t('more')}</Button>}
