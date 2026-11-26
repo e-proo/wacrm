@@ -156,7 +156,7 @@ export async function processOpenWADeferredTick(
     const recovered=await db.rpc('inbox_recover_stale_canonical_effects',{p_limit:20})
     if(recovered.error) throw new Error('Canonical recovery sweep unavailable')
   }
-  const { data, error } = await db.rpc('claim_openwa_deferred_events', { p_limit: 5 })
+  const { data, error } = await db.rpc('claim_openwa_deferred_events_for_mode', { p_canonical: canonicalInboxTestMode(), p_limit: 5 })
   if (error) throw new Error('Could not claim OpenWA deferred events')
   const jobs = (data ?? []) as DeferredJob[]
   const result = { claimed: jobs.length, completed: 0, pending: 0, review: 0 }

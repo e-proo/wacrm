@@ -1,27 +1,19 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-
-import { normalizeOpenWAInboundMessage, normalizeOpenWAOwnSentMessage } from '@/lib/whatsapp/inbound-normalization'
-import { processOpenWAOwnSentEcho } from '@/lib/whatsapp/transport/openwa/outbound-echo'
-import { deferOpenWAWebhook, preflightOpenWAInboundIdentity } from '@/lib/whatsapp/transport/openwa/deferred'
-import { isSensitiveOpenWAAdminOwnSentEcho } from '@/lib/whatsapp/transport/openwa/admin-approval-echo'
-import { extractOpenWASignedInlineMedia } from '@/lib/whatsapp/transport/openwa/webhook-media'
-import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
-import { applyOpenWAStatusWithRetry, parseOpenWAStatusEvent } from '@/lib/whatsapp/status-lifecycle'
-import { classifyOpenWAWebhookRejection, markOpenWAWebhookProcessed, verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
-import { refreshOpenWAConnectionStatus } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
-import { reconcileCanonicalAck, reconcileCanonicalEcho } from '@/lib/inbox/canonical-outbound'
-import { canonicalInboxTestMode, hasExplicitCanonicalPeer, holdCanonicalReview } from '@/lib/inbox/canonical-ingress'
-import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
-
-export const maxDuration = 60
-function adminDb() { const url = process.env.NEXT_PUBLIC_SUPABASE_URL; const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; if (!url || !serviceKey) throw new Error('Server database credentials are not configured'); return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } }) }
-
+import { classifyOpenWAWebhookRejection,verifyAndReserveOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook'
+import { createOpenWAWebhookDb,processReservedOpenWAWebhook } from '@/lib/whatsapp/transport/openwa/webhook-processing'
+import { durableOpenWAIntakeEnabled,readDurableWebhookBody,DurableIntakeBodyTooLarge } from '@/lib/whatsapp/transport/openwa/durable-intake'
+import { canonicalInboxTestMode } from '@/lib/inbox/canonical-ingress'
+export const maxDuration=60
 export async function POST(request: Request) {
-  const rawBody = await request.text(); const signature = request.headers.get('x-openwa-signature')
+  const durable=durableOpenWAIntakeEnabled()
+  let rawBody:string
+  try{rawBody=durable?await readDurableWebhookBody(request):await request.text()}catch(error){
+    return NextResponse.json({error:'OpenWA webhook body rejected',code:error instanceof DurableIntakeBodyTooLarge?'body_too_large':'invalid_payload'},{status:error instanceof DurableIntakeBodyTooLarge?413:400,headers:{'Cache-Control':'no-store'}})
+  }
+  const signature = request.headers.get('x-openwa-signature')
   let reservation
   try {
-    reservation = await verifyAndReserveOpenWAWebhook(adminDb(), { rawBody, signature })
+    reservation = await verifyAndReserveOpenWAWebhook(createOpenWAWebhookDb(), { rawBody, signature, ...(durable?{durableMode:canonicalInboxTestMode()}: {}) })
   } catch (error) {
     // A missing/busy receipt store is NOT an invalid signed event: ask the
     // gateway to retry the SAME idempotent delivery after a short delay.
@@ -36,7 +28,7 @@ export async function POST(request: Request) {
       'credential_decryption_failed',
       'credential_scope_mismatch',
     ]).has(reason)
-    const status = reason === 'invalid_signature' ? 401
+    const status = reason === 'body_too_large' ? 413 : reason === 'event_identity_conflict' ? 409 : reason === 'invalid_signature' ? 401
       : reason === 'unknown_session' ? 404
         : retryable ? 503 : 400
     const clientCode = retryable ? 'intake_unavailable' : reason
@@ -51,6 +43,7 @@ export async function POST(request: Request) {
         : { 'Cache-Control': 'no-store' },
     })
   }
+  if (reservation.queued) return NextResponse.json({ok:true,queued:true,duplicate:reservation.queueDuplicate===true},{status:202,headers:{'Cache-Control':'no-store'}})
   if (reservation.duplicate) return NextResponse.json({ ok: true, duplicate: true })
   // Concurrent delivery cannot be acknowledged before its existing handler
   // completes. Non-2xx asks the gateway to retry with the SAME signed event,
@@ -66,102 +59,7 @@ export async function POST(request: Request) {
       status: 503, headers: { 'Retry-After': '5' },
     })
   }
-
-  // Await business processing BEFORE returning 2xx. An after() callback
-  // can be aborted after a 202 is already sent; the gateway then assumes
-  // delivery even though the receipt is still unfinished. Here failures
-  // return 503 and an expired lease can be resumed on signed redelivery.
-  try {
-    const db = adminDb()
-    const canonicalReceipt = canonicalInboxTestMode()
-      ? { eventId: envelope.eventId, token: processingToken, sessionId: envelope.sessionId, instanceId: envelope.instanceId ?? null }
-      : null
-      const event = envelope.event.toLowerCase().replace(/[\s_-]+/g, '.')
-      if (['session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'].includes(event)) {
-        await refreshOpenWAConnectionStatus(db, accountId, connectionId)
-      } else if (['status', 'message.status', 'message.ack', 'message.receipt', 'message.failed', 'ack', 'delivery', 'receipt'].includes(event)) {
-        const status = parseOpenWAStatusEvent(envelope.data)
-        if (status) {
-          const result = canonicalReceipt
-            ? await reconcileCanonicalAck(db, { provider: 'openwa', accountId, connectionId, ...status }, canonicalReceipt)
-            : await applyOpenWAStatusWithRetry(db, { provider: 'openwa', accountId, connectionId, ...status })
-          if (result === 'unknown') {
-            // No provider payload, recipient or message contents in logs.
-            // Long-running ambiguous sends must be reconciled, not resent.
-            await deferOpenWAWebhook(db, {
-              accountId, connectionId, sessionId: envelope.sessionId,
-              providerEventId: envelope.eventId,
-              providerMessageId: status.providerMessageId, processingToken,
-              deferred: { kind: 'unmatched_status', status },
-            })
-            // The queue insert and signed receipt finalization committed
-            // atomically. Another signed retry is now a safe duplicate.
-            return NextResponse.json({ ok: true, deferred: 'pending_receipt' }, { status: 202 })
-          }
-        } else {
-          console.warn('[openwa-webhook] unrecognized delivery receipt', { connectionId, event })
-        }
-      } else if (event === 'message.sent') {
-        const ownSent = normalizeOpenWAOwnSentMessage(envelope, connectionId)
-        if (ownSent && !isSensitiveOpenWAAdminOwnSentEcho(ownSent) && canonicalReceipt) {
-          const { data: account, error: accountError } = await db.from('accounts').select('owner_user_id').eq('id', accountId).maybeSingle()
-          if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
-          await reconcileCanonicalEcho({ db, storage: db.storage, accountId, ownerUserId: account.owner_user_id, message: ownSent,
-            receipt: canonicalReceipt, signedInlineMedia: extractOpenWASignedInlineMedia(envelope) })
-        } else if (ownSent && !isSensitiveOpenWAAdminOwnSentEcho(ownSent)) {
-          const { data: account, error: accountError } = await db.from('accounts')
-            .select('owner_user_id').eq('id', accountId).maybeSingle()
-          if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
-          await processOpenWAOwnSentEcho({
-            db, storage: db.storage, accountId, connectionId,
-            ownerUserId: account.owner_user_id, message: ownSent,
-            signedInlineMedia: extractOpenWASignedInlineMedia(envelope),
-          })
-        }
-      } else {
-        const normalized = normalizeOpenWAInboundMessage(envelope, connectionId)
-        if (normalized) {
-          if (canonicalReceipt && normalized.message.type === 'reaction') {
-            await holdCanonicalReview(db, accountId, normalized.message, canonicalReceipt, 'reaction_unproven')
-            await markOpenWAWebhookProcessed(db, accountId, connectionId, envelope.eventId, processingToken)
-            return NextResponse.json({ ok: true, deferred: 'canonical_review' }, { status: 202 })
-          }
-          // Identity preflight runs BEFORE any CRM/AI side effect.
-          // Unknown native LIDs must be stored durably, never guessed.
-          const identity = await preflightOpenWAInboundIdentity(db, {
-            accountId, connectionId, sessionId: envelope.sessionId, inbound: normalized,
-          })
-          if (identity === 'unresolved' || (canonicalReceipt && !hasExplicitCanonicalPeer(normalized.message))) {
-            await deferOpenWAWebhook(db, {
-              accountId, connectionId, sessionId: envelope.sessionId,
-              providerEventId: envelope.eventId,
-              providerMessageId: normalized.message.providerMessageId,
-              processingToken, deferred: { kind: 'unresolved_identity', inbound: normalized },
-            })
-            return NextResponse.json({ ok: true, deferred: 'pending_identity' }, { status: 202 })
-          }
-          const { data: account, error: accountError } = await db.from('accounts').select('owner_user_id').eq('id', accountId).maybeSingle()
-          if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
-          if (canonicalReceipt) await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true, extractOpenWASignedInlineMedia(envelope), canonicalReceipt)
-          else await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true, extractOpenWASignedInlineMedia(envelope))
-        }
-      }
-    await markOpenWAWebhookProcessed(db, accountId, connectionId, envelope.eventId, processingToken)
-    return NextResponse.json({ ok: true }, { status: 202 })
-  } catch (error) {
-    // Never persist or log arbitrary upstream error messages, provider
-    // payloads or credentials. A failed attempt remains recoverable.
-    const code = error instanceof WhatsAppTransportError
-      ? error.code : error instanceof Error && error.name === 'AbortError'
-        ? 'aborted' : 'processing_failed'
-    try {
-      await markOpenWAWebhookProcessed(adminDb(), accountId, connectionId, envelope.eventId, processingToken, code)
-    } catch {
-      console.error('[openwa-webhook] could not release processing lease', { connectionId })
-    }
-    console.warn('[openwa-webhook] delivery deferred for signed retry', { connectionId, event: envelope.event, code })
-    return NextResponse.json({ error: 'OpenWA webhook processing deferred', code: 'processing_retry' }, {
-      status: 503, headers: { 'Retry-After': '5', 'Cache-Control': 'no-store' },
-    })
-  }
+  // Synchronous mode still acknowledges only after processing. Durable mode
+  // acknowledged only after the atomic receipt+encrypted payload commit above.
+  return processReservedOpenWAWebhook(createOpenWAWebhookDb(),{accountId,connectionId,envelope,processingToken},canonicalInboxTestMode())
 }

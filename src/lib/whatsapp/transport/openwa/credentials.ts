@@ -18,6 +18,7 @@ interface OpenWACredentialRow {
   api_key_encrypted: string
   webhook_secret_encrypted: string | null
   webhook_url: string | null
+  updated_at?: string
 }
 
 export interface ResolvedOpenWACredentials {
@@ -27,6 +28,7 @@ export interface ResolvedOpenWACredentials {
   apiKey: string
   webhookSecret?: string
   webhookUrl?: string
+  credentialVersion?: string
 }
 
 export async function resolveOpenWACredentials(
@@ -50,7 +52,7 @@ export async function resolveOpenWACredentials(
   const scopedConnection = connection as OpenWAConnectionRow
   const { data: credential, error: credentialError } = await db
     .from('whatsapp_connection_credentials')
-    .select('connection_id, account_id, provider, base_url, api_key_encrypted, webhook_secret_encrypted, webhook_url')
+    .select('connection_id, account_id, provider, base_url, api_key_encrypted, webhook_secret_encrypted, webhook_url, updated_at')
     .eq('connection_id', connectionId)
     .eq('account_id', accountId)
     .eq('provider', 'openwa')
@@ -73,6 +75,7 @@ export async function resolveOpenWACredentials(
       apiKey: decrypt(scopedCredential.api_key_encrypted),
       webhookSecret: scopedCredential.webhook_secret_encrypted ? decrypt(scopedCredential.webhook_secret_encrypted) : undefined,
       webhookUrl: scopedCredential.webhook_url || undefined,
+      ...(typeof scopedCredential.updated_at === 'string' ? { credentialVersion: scopedCredential.updated_at } : {}),
     }
   } catch (error) {
     throw new WhatsAppTransportError('authentication_or_configuration', 'OpenWA credentials could not be decrypted', error)

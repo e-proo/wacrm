@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { resolveOpenWACredentials } from './credentials'
 import { verifyOpenWAWebhookSignature } from './webhook-signature'
+import { enqueueVerifiedIntake,DurableIntakeBodyTooLarge } from './durable-intake'
 
 interface OpenWAWebhookConnectionRow {
   id: string
@@ -29,6 +30,8 @@ export interface ReservedOpenWAWebhook {
   duplicate: boolean
   inFlight?: boolean
   processingToken?: string
+  queued?: boolean
+  queueDuplicate?: boolean
 }
 
 // The handler runs for at most 60 seconds. A lease is longer than the
@@ -41,6 +44,7 @@ const WEBHOOK_LEASE_MS = 90_000
  * errors can contain request details or credentials.
  */
 export function classifyOpenWAWebhookRejection(error: unknown): string {
+  if (error instanceof DurableIntakeBodyTooLarge) return 'body_too_large'
   if (!(error instanceof Error)) return 'unexpected_error'
   switch (error.message) {
     case 'Invalid OpenWA webhook JSON': return 'invalid_json'
@@ -51,6 +55,7 @@ export function classifyOpenWAWebhookRejection(error: unknown): string {
     case 'OpenWA session is not active': return 'inactive_session'
     case 'OpenWA webhook secret is not configured': return 'missing_webhook_secret'
     case 'Invalid OpenWA webhook signature': return 'invalid_signature'
+    case 'OpenWA webhook event identity conflict': return 'event_identity_conflict'
     case 'OpenWA webhook receipt could not be reserved': return 'receipt_reservation_failed'
     case 'OpenWA connection is not configured for this account': return 'missing_connection'
     case 'OpenWA credentials are not configured for this connection': return 'missing_credentials'
@@ -94,6 +99,7 @@ export async function verifyAndReserveOpenWAWebhook(
     rawBody: string
     signature: string | null
     nowMs?: number
+    durableMode?: boolean
   },
 ): Promise<ReservedOpenWAWebhook> {
   const envelope = parseOpenWAWebhookEnvelope(input.rawBody)
@@ -164,6 +170,11 @@ export async function verifyAndReserveOpenWAWebhook(
         throw new Error('Unknown OpenWA session')
       }
     }
+  }
+
+  if (input.durableMode !== undefined) {
+    const queued = await enqueueVerifiedIntake(db, { accountId: scoped.account_id, connectionId: scoped.id }, envelope, credentials.credentialVersion, input.durableMode)
+    return { accountId: scoped.account_id, connectionId: scoped.id, envelope, ...queued }
   }
 
   const nowMs = input.nowMs ?? Date.now()

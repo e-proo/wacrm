@@ -42,7 +42,7 @@ function fixture(options: {
   } : options.connection
   const rpc = vi.fn(async (fn: string, args: Record<string, unknown>) => {
     if (fn === 'prune_openwa_deferred_events') return { data: 0, error: null }
-    if (fn === 'claim_openwa_deferred_events') return { data: options.jobs ?? [job()], error: null }
+    if (fn === 'claim_openwa_deferred_events_for_mode') return { data: options.jobs ?? [job()], error: null }
     if (fn === 'finish_openwa_deferred_event') {
       finished.push(args)
       return { data: true, error: null }
