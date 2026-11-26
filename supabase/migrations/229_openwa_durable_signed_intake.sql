@@ -14,27 +14,30 @@ ALTER TABLE public.whatsapp_webhook_event_receipts
  ADD COLUMN intake_reason text,
  ADD COLUMN intake_closed_by uuid,
  ADD COLUMN intake_claim_token uuid,
- ADD COLUMN intake_closed_at timestamptz;
+ ADD COLUMN intake_closed_at timestamptz,
+ ADD COLUMN intake_claimed_at timestamptz;
 ALTER TABLE public.whatsapp_webhook_event_receipts ADD CONSTRAINT openwa_durable_intake_shape CHECK (
- (intake_state IS NULL AND intake_canonical_mode IS NULL AND intake_ciphertext IS NULL AND intake_digest IS NULL AND intake_session IS NULL AND intake_instance IS NULL AND intake_phone IS NULL AND intake_credential_version IS NULL AND intake_finished_at IS NULL AND intake_reason IS NULL AND intake_closed_by IS NULL AND intake_claim_token IS NULL AND intake_closed_at IS NULL)
+ (intake_state IS NULL AND intake_canonical_mode IS NULL AND intake_ciphertext IS NULL AND intake_digest IS NULL AND intake_session IS NULL AND intake_instance IS NULL AND intake_phone IS NULL AND intake_credential_version IS NULL AND intake_finished_at IS NULL AND intake_reason IS NULL AND intake_closed_by IS NULL AND intake_claim_token IS NULL AND intake_closed_at IS NULL AND intake_claimed_at IS NULL)
  OR (intake_state IS NOT NULL AND provider='openwa' AND intake_state IN ('pending','running','completed','review','closed_unverified')
  AND intake_canonical_mode IS NOT NULL AND intake_digest IS NOT NULL AND intake_digest ~ '^[0-9a-f]{64}$'
  AND intake_session IS NOT NULL AND length(intake_session) BETWEEN 1 AND 160 AND intake_credential_version IS NOT NULL
  AND (intake_ciphertext IS NULL OR octet_length(intake_ciphertext) BETWEEN 58 AND 50331776)
  AND ((intake_state='completed' AND intake_ciphertext IS NULL AND processed_at IS NOT NULL)
    OR (intake_state<>'completed' AND intake_ciphertext IS NOT NULL))
+ AND ((intake_claim_token IS NULL AND intake_claimed_at IS NULL) OR (intake_claim_token IS NOT NULL AND intake_claimed_at IS NOT NULL))
  AND ((intake_state='pending' AND intake_claim_token IS NULL AND processing_attempts=0 AND processing_token IS NULL AND processing_started_at IS NULL AND processed_at IS NULL)
    OR (intake_state='running' AND intake_claim_token IS NOT NULL AND processing_attempts=1)
    OR (intake_state IN ('completed','review','closed_unverified') AND processing_started_at IS NULL))
  AND ((intake_state='closed_unverified' AND intake_closed_at IS NOT NULL) OR (intake_state<>'closed_unverified' AND intake_closed_at IS NULL))
  AND ((intake_state IN ('pending','running') AND intake_finished_at IS NULL AND intake_reason IS NULL AND intake_closed_by IS NULL)
    OR (intake_state IN ('completed','review') AND intake_finished_at IS NOT NULL AND intake_closed_by IS NULL)
-   OR (intake_state='closed_unverified' AND intake_finished_at IS NOT NULL AND intake_closed_by IS NOT NULL AND intake_reason='operator_closed_unverified'))
- AND (intake_reason IS NULL OR intake_reason IN ('binding_changed','processing_uncertain','lease_expired','payload_unavailable','operator_closed_unverified'))
+   OR (intake_state='closed_unverified' AND intake_finished_at IS NOT NULL AND intake_closed_by IS NOT NULL AND intake_reason IS NOT NULL))
+ AND (intake_reason IS NULL OR intake_reason IN ('binding_changed','processing_uncertain','lease_expired','payload_unavailable'))
  ));
 CREATE INDEX openwa_intake_pending_idx ON public.whatsapp_webhook_event_receipts(intake_canonical_mode,received_at,id) WHERE intake_state='pending';
 CREATE INDEX openwa_intake_running_idx ON public.whatsapp_webhook_event_receipts(processing_started_at,id) WHERE intake_state='running';
 CREATE INDEX openwa_intake_account_idx ON public.whatsapp_webhook_event_receipts(account_id,intake_state,received_at,id) WHERE intake_state IS NOT NULL;
+CREATE INDEX openwa_intake_completed_recent_idx ON public.whatsapp_webhook_event_receipts(account_id,intake_finished_at DESC,id) WHERE intake_state='completed';
 CREATE INDEX openwa_intake_route_pending_idx ON public.whatsapp_webhook_event_receipts(account_id,connection_id,received_at,id) WHERE intake_state='pending';
 CREATE UNIQUE INDEX openwa_intake_one_running_route ON public.whatsapp_webhook_event_receipts(account_id,connection_id) WHERE intake_state='running';
 -- Old application versions must never take a queued receipt lease through
@@ -55,8 +58,8 @@ BEGIN
  THEN RAISE EXCEPTION 'OPENWA_INTAKE_IMMUTABLE' USING ERRCODE='23514'; END IF;
  IF OLD.intake_state='pending' AND NEW.intake_state='running' AND NEW.processing_token IS NOT NULL
   AND NEW.processing_started_at IS NOT NULL AND NEW.processing_attempts=1 AND NEW.processed_at IS NULL
-  AND NEW.intake_claim_token=NEW.processing_token AND NEW.intake_ciphertext IS NOT DISTINCT FROM OLD.intake_ciphertext THEN RETURN NEW; END IF;
- IF NEW.intake_claim_token IS DISTINCT FROM OLD.intake_claim_token OR (NEW.intake_ciphertext IS DISTINCT FROM OLD.intake_ciphertext AND NOT (OLD.intake_state='running' AND NEW.intake_state='completed' AND NEW.intake_ciphertext IS NULL)) THEN RAISE EXCEPTION 'OPENWA_INTAKE_IMMUTABLE' USING ERRCODE='23514'; END IF;
+  AND NEW.intake_claim_token=NEW.processing_token AND NEW.intake_claimed_at=NEW.processing_started_at AND NEW.intake_ciphertext IS NOT DISTINCT FROM OLD.intake_ciphertext THEN RETURN NEW; END IF;
+ IF NEW.intake_claim_token IS DISTINCT FROM OLD.intake_claim_token OR NEW.intake_claimed_at IS DISTINCT FROM OLD.intake_claimed_at OR (NEW.intake_ciphertext IS DISTINCT FROM OLD.intake_ciphertext AND NOT (OLD.intake_state='running' AND NEW.intake_state='completed' AND NEW.intake_ciphertext IS NULL)) THEN RAISE EXCEPTION 'OPENWA_INTAKE_IMMUTABLE' USING ERRCODE='23514'; END IF;
  IF OLD.intake_state='pending' AND NEW.intake_state='review' AND NEW.processing_token IS NULL AND NEW.processing_started_at IS NULL THEN RETURN NEW; END IF;
  IF OLD.intake_state='running' AND NEW.intake_state='running' AND OLD.processing_started_at IS NOT NULL
   AND OLD.processing_started_at>=clock_timestamp()-interval '90 seconds' AND OLD.processed_at IS NULL
@@ -68,7 +71,7 @@ BEGIN
   AND NEW.processing_token IS NOT DISTINCT FROM OLD.processing_token THEN RETURN NEW; END IF;
  IF OLD.intake_state='review' AND NEW.intake_state='closed_unverified' AND NEW.processing_started_at IS NULL
   AND NEW.processed_at IS NOT DISTINCT FROM OLD.processed_at AND NEW.processing_token IS NOT DISTINCT FROM OLD.processing_token
-  AND NEW.intake_ciphertext IS NOT DISTINCT FROM OLD.intake_ciphertext AND NEW.processing_attempts=OLD.processing_attempts THEN RETURN NEW; END IF;
+  AND NEW.intake_ciphertext IS NOT DISTINCT FROM OLD.intake_ciphertext AND NEW.intake_reason IS NOT DISTINCT FROM OLD.intake_reason AND NEW.processing_attempts=OLD.processing_attempts THEN RETURN NEW; END IF;
  RAISE EXCEPTION 'OPENWA_INTAKE_LEASE_FENCED' USING ERRCODE='55P03';
 END $$;
 REVOKE ALL ON FUNCTION wacrm_internal.openwa_intake_receipt_fence() FROM PUBLIC,anon,authenticated,service_role;
@@ -134,7 +137,7 @@ BEGIN
  -- Single oldest event per connection, even across modes; a mode mismatch
  -- blocks newer events on that route until the operator drains the old mode.
  SELECT q.* INTO r FROM public.whatsapp_webhook_event_receipts q WHERE q.intake_state='pending' AND q.intake_canonical_mode=p_canonical
- AND NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts x WHERE x.account_id=q.account_id AND x.connection_id=q.connection_id AND x.intake_state='running')
+ AND NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts x WHERE x.account_id=q.account_id AND x.connection_id=q.connection_id AND x.intake_state IN ('running','review'))
  AND NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts x WHERE x.account_id=q.account_id AND x.connection_id=q.connection_id AND x.intake_state='pending' AND (x.received_at,x.id)<(q.received_at,q.id))
  ORDER BY q.received_at,q.id LIMIT 1 FOR UPDATE OF q SKIP LOCKED;
  IF NOT FOUND THEN RETURN jsonb_build_object('state','idle'); END IF;
@@ -151,13 +154,30 @@ BEGIN
   RETURN jsonb_build_object('state','review');
  END IF;
  tok=gen_random_uuid();
- UPDATE public.whatsapp_webhook_event_receipts SET intake_state='running',intake_claim_token=tok,processing_token=tok,processing_started_at=clock_timestamp(),processing_attempts=1
+ r.intake_claimed_at=clock_timestamp();
+ UPDATE public.whatsapp_webhook_event_receipts SET intake_state='running',intake_claim_token=tok,processing_token=tok,processing_started_at=r.intake_claimed_at,intake_claimed_at=r.intake_claimed_at,processing_attempts=1
  WHERE id=r.id AND intake_state='pending';
  RETURN jsonb_build_object('state','claimed','id',r.id,'account_id',r.account_id,'connection_id',r.connection_id,'event_id',r.provider_event_id,
   'session_id',r.intake_session,'instance_id',r.intake_instance,'canonical',r.intake_canonical_mode,'token',tok,'ciphertext',r.intake_ciphertext,'digest',r.intake_digest);
 END $$;
 REVOKE ALL ON FUNCTION public.openwa_claim_signed_intake(boolean) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.openwa_claim_signed_intake(boolean) TO service_role;
+
+-- Recheck the exact route immediately before business processing. Never
+-- authorize a changed credential, expired lease or disconnected message route.
+CREATE FUNCTION public.openwa_check_claimed_intake(p_id uuid,p_token uuid,p_canonical boolean,p_lifecycle boolean) RETURNS boolean
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+ SELECT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts r JOIN public.whatsapp_connections c
+ ON c.account_id=r.account_id AND c.id=r.connection_id AND c.provider=r.provider
+ JOIN public.whatsapp_connection_credentials k ON k.account_id=r.account_id AND k.connection_id=r.connection_id AND k.provider=r.provider
+ WHERE r.id=p_id AND r.provider='openwa' AND r.intake_state='running' AND r.intake_claim_token=p_token AND r.processing_token=p_token
+ AND r.processed_at IS NULL AND r.processing_started_at>=statement_timestamp()-interval '90 seconds' AND r.intake_canonical_mode=p_canonical
+ AND c.archived_at IS NULL AND c.session_id=r.intake_session AND c.instance_id IS NOT DISTINCT FROM r.intake_instance
+ AND c.phone_identity IS NOT DISTINCT FROM r.intake_phone AND k.updated_at=r.intake_credential_version
+ AND (p_lifecycle OR c.status IN ('ready','connected')));
+$$;
+REVOKE ALL ON FUNCTION public.openwa_check_claimed_intake(uuid,uuid,boolean,boolean) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.openwa_check_claimed_intake(uuid,uuid,boolean,boolean) TO service_role;
 
 CREATE FUNCTION public.openwa_finish_signed_intake(p_id uuid,p_token uuid,p_reason text DEFAULT NULL) RETURNS text
 LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
@@ -208,10 +228,21 @@ BEGIN
  'completed_24h',count(*) FILTER(WHERE intake_state='completed' AND intake_finished_at>=statement_timestamp()-interval '24 hours'),
  'mode_blocked',count(*) FILTER(WHERE intake_state='pending' AND intake_canonical_mode IS DISTINCT FROM p_canonical),
  'oldest_pending_seconds',coalesce(greatest(0,floor(extract(epoch FROM statement_timestamp()-min(received_at) FILTER(WHERE intake_state='pending')))),0),
- 'oldest_running_seconds',coalesce(greatest(0,floor(extract(epoch FROM statement_timestamp()-min(processing_started_at) FILTER(WHERE intake_state='running')))),0))
+ 'oldest_running_seconds',coalesce(greatest(0,floor(extract(epoch FROM statement_timestamp()-min(intake_claimed_at) FILTER(WHERE intake_state='running')))),0),
+ 'retained_events',count(*) FILTER(WHERE intake_ciphertext IS NOT NULL),
+ 'retained_bytes',coalesce(sum(octet_length(intake_ciphertext)),0))
  INTO result FROM public.whatsapp_webhook_event_receipts WHERE account_id=p_account AND intake_state IS NOT NULL
  AND (intake_state<>'completed' OR intake_finished_at>=statement_timestamp()-interval '24 hours');
- RETURN result;
+ RETURN result||jsonb_build_object(
+ 'legacy_unfinished',(SELECT count(*) FROM public.whatsapp_webhook_event_receipts WHERE account_id=p_account AND provider='openwa' AND intake_state IS NULL AND processed_at IS NULL),
+ 'review_blocked',(SELECT count(*) FROM public.whatsapp_webhook_event_receipts q WHERE q.account_id=p_account AND q.intake_state='pending'
+   AND EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts x WHERE x.account_id=q.account_id AND x.connection_id=q.connection_id AND x.intake_state='review')),
+ 'latency_sample',(SELECT jsonb_build_object('count',count(*),'avg_queue_ms',coalesce(round(avg(extract(epoch FROM intake_claimed_at-received_at)*1000)),0),
+ 'avg_processing_ms',coalesce(round(avg(extract(epoch FROM intake_finished_at-intake_claimed_at)*1000)),0),
+ 'max_processing_ms',coalesce(round(max(extract(epoch FROM intake_finished_at-intake_claimed_at)*1000)),0)) FROM (
+ SELECT received_at,intake_claimed_at,intake_finished_at FROM public.whatsapp_webhook_event_receipts
+ WHERE account_id=p_account AND intake_state='completed' AND intake_claimed_at IS NOT NULL AND intake_finished_at>=statement_timestamp()-interval '24 hours'
+ ORDER BY intake_finished_at DESC,id LIMIT 1000) sample));
 END $$;
 REVOKE ALL ON FUNCTION public.openwa_intake_health(uuid,uuid,boolean) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.openwa_intake_health(uuid,uuid,boolean) TO service_role;
@@ -331,7 +362,7 @@ BEGIN
  IF NOT FOUND THEN RETURN 'conflict'; END IF;
  IF r.intake_state='closed_unverified' AND r.intake_closed_by=p_actor THEN RETURN 'closed_unverified'; END IF;
  IF r.intake_state IS DISTINCT FROM 'review' OR r.processing_started_at IS NOT NULL THEN RETURN 'conflict'; END IF;
- UPDATE public.whatsapp_webhook_event_receipts SET intake_state='closed_unverified',intake_closed_by=p_actor,intake_closed_at=clock_timestamp(),intake_reason='operator_closed_unverified'
+ UPDATE public.whatsapp_webhook_event_receipts SET intake_state='closed_unverified',intake_closed_by=p_actor,intake_closed_at=clock_timestamp()
  WHERE account_id=p_account AND id=p_id AND intake_state='review';
  RETURN 'closed_unverified';
 END $$;

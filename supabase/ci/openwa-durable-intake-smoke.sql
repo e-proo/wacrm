@@ -36,19 +36,31 @@ BEGIN
  UPDATE public.whatsapp_webhook_event_receipts SET processing_started_at=NULL,processing_error='processing_failed' WHERE id=rid2 AND processing_token=tok;
  IF public.openwa_finish_signed_intake(rid2,tok,'processing_uncertain')<>'review' THEN RAISE EXCEPTION 'uncertain not retained'; END IF;
  IF public.openwa_claim_signed_intake(false)->>'state'<>'idle' OR NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=rid2 AND intake_state='review' AND intake_ciphertext=cipher AND processed_at IS NULL) THEN RAISE EXCEPTION 'blind retry'; END IF;
+ -- A review blocks further claims on this route until an explicit closure.
+ IF public.openwa_enqueue_signed_intake(a,c,'blocked','intake229',NULL,cv,true,d,cipher)<>'accepted' THEN RAISE EXCEPTION 'blocked fixture'; END IF;
+ IF public.openwa_claim_signed_intake(true)->>'state'<>'idle' THEN RAISE EXCEPTION 'uncertain route not fenced'; END IF;
+ BEGIN PERFORM public.openwa_intake_close_unverified(a,other_u,rid2);RAISE EXCEPTION 'foreign close';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ v=public.openwa_intake_close_unverified(a,u,rid2);IF v<>'closed_unverified' THEN RAISE EXCEPTION 'closure outcome %',v; END IF;
+ v=public.openwa_intake_close_unverified(a,u,rid2);IF v<>'closed_unverified' THEN RAISE EXCEPTION 'closure retry %',v; END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=rid2 AND intake_closed_by=u AND intake_closed_at IS NOT NULL AND intake_ciphertext=cipher AND processed_at IS NULL AND intake_reason='processing_uncertain') THEN RAISE EXCEPTION 'closure lost evidence'; END IF;
+ j=public.openwa_claim_signed_intake(true);IF j->>'state'<>'claimed' THEN RAISE EXCEPTION 'route remains blocked'; END IF;
+ rid=(j->>'id')::uuid;tok=(j->>'token')::uuid;
+ IF NOT public.openwa_check_claimed_intake(rid,tok,true,false) OR public.openwa_check_claimed_intake(rid,gen_random_uuid(),true,false) OR public.openwa_check_claimed_intake(rid,tok,false,false) THEN RAISE EXCEPTION 'preprocess binding check'; END IF;
+ -- Real deferred handoff finalizes receipt and clears its ordinary token.
+ IF NOT public.defer_openwa_webhook_event(a,c,'intake229','blocked','fixture-native','unmatched_status',NULL,'{"status":"delivered"}',tok) THEN RAISE EXCEPTION 'defer handoff'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.openwa_deferred_events WHERE account_id=a AND connection_id=c AND provider_event_id='blocked' AND intake_canonical_mode=true) THEN RAISE EXCEPTION 'handoff mode lost'; END IF;
+ IF public.openwa_finish_signed_intake(rid,gen_random_uuid(),NULL)<>'conflict' THEN RAISE EXCEPTION 'deferred token bypass'; END IF;
+ IF public.openwa_finish_signed_intake(rid,tok,NULL)<>'completed' THEN RAISE EXCEPTION 'handoff finish'; END IF;
+ IF EXISTS(SELECT 1 FROM public.claim_openwa_deferred_events(10) x WHERE x.account_id=a AND x.connection_id=c) OR EXISTS(SELECT 1 FROM public.claim_openwa_deferred_events_for_mode(false,10) x WHERE x.account_id=a AND x.connection_id=c) THEN RAISE EXCEPTION 'wrong worker claimed pinned handoff'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.claim_openwa_deferred_events_for_mode(true,10) x WHERE x.account_id=a AND x.connection_id=c) THEN RAISE EXCEPTION 'pinned handoff unclaimable'; END IF;
  IF public.openwa_enqueue_signed_intake(a,c,'rotation','intake229',NULL,cv,true,d,cipher)<>'accepted' THEN RAISE EXCEPTION 'rotation fixture'; END IF;
  UPDATE public.whatsapp_connections SET session_id='intake229-rotated' WHERE account_id=a AND id=c;
  IF public.openwa_claim_signed_intake(true)->>'state'<>'review' THEN RAISE EXCEPTION 'credential rotation admitted'; END IF;
- BEGIN PERFORM public.openwa_intake_close_unverified(a,other_u,rid2);RAISE EXCEPTION 'foreign close';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
- v=public.openwa_intake_close_unverified(a,u,rid2);
- IF v<>'closed_unverified' THEN RAISE EXCEPTION 'closure outcome %',v; END IF;
- v=public.openwa_intake_close_unverified(a,u,rid2);
- IF v<>'closed_unverified' THEN RAISE EXCEPTION 'closure retry %',v; END IF;
- IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=rid2 AND intake_closed_by=u AND intake_closed_at IS NOT NULL AND intake_ciphertext=cipher AND processed_at IS NULL) THEN RAISE EXCEPTION 'closure lost evidence'; END IF;
+
  j=public.openwa_intake_review_page(a,u,NULL,20);
  IF jsonb_array_length(j->'rows')<>2 OR j::text LIKE '%ciphertext%' OR j::text LIKE '%processing_token%' THEN RAISE EXCEPTION 'review projection'; END IF;
  j=public.openwa_intake_health(a,u,true);
- IF (j->>'review')::int<>1 OR (j->>'closed_unverified')::int<>1 OR (j->>'completed_24h')::int<>1 OR (j->>'pending')::int<>0 THEN RAISE EXCEPTION 'health %',j; END IF;
+ IF (j->>'review')::int<>1 OR (j->>'closed_unverified')::int<>1 OR (j->>'completed_24h')::int<>2 OR (j->>'pending')::int<>0 THEN RAISE EXCEPTION 'health %',j; END IF;
  BEGIN PERFORM public.openwa_intake_health(a,other_u,true);RAISE EXCEPTION 'foreign health';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
  IF has_function_privilege('authenticated','public.openwa_enqueue_signed_intake(uuid,uuid,text,text,text,timestamptz,boolean,text,text)','EXECUTE') OR has_function_privilege('anon','public.openwa_claim_signed_intake(boolean)','EXECUTE') OR has_table_privilege('authenticated','public.whatsapp_webhook_event_receipts','SELECT') THEN RAISE EXCEPTION 'browser ACL'; END IF;
 END $test$;
