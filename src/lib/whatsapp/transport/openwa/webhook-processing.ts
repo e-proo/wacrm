@@ -3,7 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 import { normalizeOpenWAInboundMessage, normalizeOpenWAOwnSentMessage } from '@/lib/whatsapp/inbound-normalization'
 import { processOpenWAOwnSentEcho } from '@/lib/whatsapp/transport/openwa/outbound-echo'
-import { deferOpenWAWebhook, preflightOpenWAInboundIdentity } from '@/lib/whatsapp/transport/openwa/deferred'
+import { deferOpenWAWebhook, preflightOpenWAInboundIdentity,isUnresolvedOpenWALidCandidate } from '@/lib/whatsapp/transport/openwa/deferred'
 import { isSensitiveOpenWAAdminOwnSentEcho } from '@/lib/whatsapp/transport/openwa/admin-approval-echo'
 import { extractOpenWASignedInlineMedia } from '@/lib/whatsapp/transport/openwa/webhook-media'
 import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processor'
@@ -80,6 +80,11 @@ export async function processReservedOpenWAWebhook(db:SupabaseClient,reservation
           const identity = await preflightOpenWAInboundIdentity(db, {
             accountId, connectionId, sessionId: envelope.sessionId, inbound: normalized,
           })
+          if(canonicalReceipt&&identity==='ready'&&!hasExplicitCanonicalPeer(normalized.message)&&!isUnresolvedOpenWALidCandidate(normalized.message)){
+            await holdCanonicalReview(db,accountId,normalized.message,canonicalReceipt,'peer_conflict')
+            await markOpenWAWebhookProcessed(db,accountId,connectionId,envelope.eventId,processingToken)
+            return NextResponse.json({ok:true,deferred:'canonical_review'},{status:202})
+          }
           if (identity === 'unresolved' || (canonicalReceipt && !hasExplicitCanonicalPeer(normalized.message))) {
             await deferOpenWAWebhook(db, {
               accountId, connectionId, sessionId: envelope.sessionId,

@@ -20,7 +20,7 @@ export function canonicalReviewPayload(message: NormalizedInboundMessage) {
     media: message.image ?? message.video ?? message.audio ?? message.document ?? message.sticker ?? null,
   }
 }
-export async function holdCanonicalReview(db: SupabaseClient, accountId: string, message: NormalizedInboundMessage, receipt: CanonicalReceipt, reason: 'outbound_echo_unproven' | 'reaction_unproven') {
+export async function holdCanonicalReview(db: SupabaseClient, accountId: string, message: NormalizedInboundMessage, receipt: CanonicalReceipt, reason: 'outbound_echo_unproven' | 'reaction_unproven' | 'peer_conflict') {
   const { error } = await db.rpc('inbox_hold_signed_observation', {
     p_account: accountId, p_connection: message.connectionId, p_event: receipt.eventId, p_token: receipt.token,
     p_session: receipt.sessionId, p_instance: receipt.instanceId, p_reason: reason, p_payload: canonicalReviewPayload(message),

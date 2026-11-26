@@ -135,7 +135,7 @@ BEGIN
   ORDER BY processing_started_at NULLS FIRST,id LIMIT 20 FOR UPDATE SKIP LOCKED)
  UPDATE public.whatsapp_webhook_event_receipts r0 SET
   intake_state=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL THEN 'completed' ELSE 'review' END,
-  intake_ciphertext=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL AND NOT EXISTS(SELECT 1 FROM public.openwa_deferred_events d WHERE d.account_id=r0.account_id AND d.connection_id=r0.connection_id AND d.provider_event_id=r0.provider_event_id AND d.event_kind='unresolved_identity' AND d.state<>'completed') THEN NULL ELSE intake_ciphertext END,
+  intake_ciphertext=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL AND NOT EXISTS(SELECT 1 FROM public.openwa_deferred_events d WHERE d.account_id=r0.account_id AND d.connection_id=r0.connection_id AND d.provider_event_id=r0.provider_event_id AND d.event_kind='unresolved_identity' AND d.state<>'completed') AND NOT EXISTS(SELECT 1 FROM public.inbox_canonical_intake_review q WHERE q.account_id=r0.account_id AND q.connection_id=r0.connection_id AND q.receipt_id=r0.id) THEN NULL ELSE intake_ciphertext END,
   intake_finished_at=clock_timestamp(),intake_reason=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL THEN NULL ELSE 'lease_expired' END,
   processing_started_at=NULL FROM stale WHERE r0.id=stale.id;
  -- Single oldest event per connection, even across modes; a mode mismatch
@@ -194,7 +194,7 @@ BEGIN
  IF r.intake_claim_token IS DISTINCT FROM p_token THEN RETURN 'conflict'; END IF;
  result=CASE WHEN r.processed_at IS NOT NULL AND r.processing_error IS NULL THEN 'completed' ELSE 'review' END;
  UPDATE public.whatsapp_webhook_event_receipts SET intake_state=result,intake_finished_at=clock_timestamp(),
- intake_ciphertext=CASE WHEN result='completed' AND NOT EXISTS(SELECT 1 FROM public.openwa_deferred_events d WHERE d.account_id=r.account_id AND d.connection_id=r.connection_id AND d.provider_event_id=r.provider_event_id AND d.event_kind='unresolved_identity' AND d.state<>'completed') THEN NULL ELSE intake_ciphertext END,
+ intake_ciphertext=CASE WHEN result='completed' AND NOT EXISTS(SELECT 1 FROM public.openwa_deferred_events d WHERE d.account_id=r.account_id AND d.connection_id=r.connection_id AND d.provider_event_id=r.provider_event_id AND d.event_kind='unresolved_identity' AND d.state<>'completed') AND NOT EXISTS(SELECT 1 FROM public.inbox_canonical_intake_review q WHERE q.account_id=r.account_id AND q.connection_id=r.connection_id AND q.receipt_id=r.id) THEN NULL ELSE intake_ciphertext END,
  intake_reason=CASE WHEN result='completed' THEN NULL ELSE coalesce(p_reason,'processing_uncertain') END,processing_started_at=NULL WHERE id=p_id;
  RETURN result;
 END $$;
@@ -424,9 +424,25 @@ CREATE FUNCTION wacrm_internal.openwa_scrub_completed_handoff() RETURNS trigger
 LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
 BEGIN
  IF NEW.state='completed' AND OLD.state IS DISTINCT FROM NEW.state AND NEW.intake_canonical_mode IS NOT NULL AND NEW.event_kind='unresolved_identity' THEN
-  UPDATE public.whatsapp_webhook_event_receipts SET intake_ciphertext=NULL WHERE account_id=NEW.account_id AND connection_id=NEW.connection_id AND provider='openwa' AND provider_event_id=NEW.provider_event_id AND intake_state='completed' AND intake_ciphertext IS NOT NULL;
+  UPDATE public.whatsapp_webhook_event_receipts SET intake_ciphertext=NULL WHERE account_id=NEW.account_id AND connection_id=NEW.connection_id AND provider='openwa' AND provider_event_id=NEW.provider_event_id AND intake_state='completed' AND intake_ciphertext IS NOT NULL
+  AND NOT EXISTS(SELECT 1 FROM public.inbox_canonical_intake_review q WHERE q.account_id=NEW.account_id AND q.connection_id=NEW.connection_id AND q.receipt_id=whatsapp_webhook_event_receipts.id);
  END IF;
  RETURN NEW;
 END $$;
 REVOKE ALL ON FUNCTION wacrm_internal.openwa_scrub_completed_handoff() FROM PUBLIC,anon,authenticated,service_role;
 CREATE TRIGGER openwa_scrub_completed_handoff AFTER UPDATE OF state ON public.openwa_deferred_events FOR EACH ROW EXECUTE FUNCTION wacrm_internal.openwa_scrub_completed_handoff();
+
+-- A non-LID peer conflict cannot enter the specialized LID queue.
+CREATE OR REPLACE FUNCTION public.inbox_hold_signed_observation(p_account uuid,p_connection uuid,p_event text,p_token uuid,p_session text,p_instance text,p_reason text,p_payload jsonb)
+RETURNS void LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+DECLARE rid uuid;
+BEGIN
+ IF p_reason NOT IN ('outbound_echo_unproven','reaction_unproven','source_unconfirmed','payload_changed','peer_conflict') THEN RAISE EXCEPTION 'INBOX_BAD_REVIEW_REASON' USING ERRCODE='22023'; END IF;
+ SELECT r.id INTO rid FROM public.whatsapp_webhook_event_receipts r JOIN public.whatsapp_connections c ON c.id=r.connection_id AND c.account_id=r.account_id AND c.provider=r.provider
+ WHERE r.account_id=p_account AND r.connection_id=p_connection AND r.provider='openwa' AND r.provider_event_id=p_event
+ AND r.id=public.inbox_authorized_receipt(p_account,p_connection,p_event,p_token,NULL)
+ AND c.session_id=p_session AND c.instance_id IS NOT DISTINCT FROM p_instance AND c.archived_at IS NULL FOR UPDATE OF r;
+ IF NOT FOUND THEN RAISE EXCEPTION 'INBOX_SIGNED_RECEIPT_REQUIRED' USING ERRCODE='42501'; END IF;
+ INSERT INTO public.inbox_canonical_intake_review(receipt_id,account_id,connection_id,provider,reason,normalized_payload) VALUES(rid,p_account,p_connection,'openwa',p_reason,p_payload)
+ ON CONFLICT(receipt_id) DO NOTHING;
+END $$;

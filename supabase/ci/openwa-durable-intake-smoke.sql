@@ -68,6 +68,13 @@ BEGIN
  BEGIN PERFORM public.finish_openwa_deferred_event(rid2,tok,'pending',0,'retry');RAISE EXCEPTION 'deferred replay permitted';EXCEPTION WHEN lock_not_available THEN NULL; END;
  IF NOT public.finish_openwa_deferred_event(rid2,tok,'completed',0,NULL) THEN RAISE EXCEPTION 'deferred finish'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=rid AND intake_state='completed' AND intake_ciphertext IS NULL) THEN RAISE EXCEPTION 'completed handoff retained ciphertext'; END IF;
+ -- Canonical review retains encrypted signed evidence (including inline media).
+ IF public.openwa_enqueue_signed_intake(a,c,'canonical-review','intake229',NULL,cv,true,d,cipher)<>'accepted' THEN RAISE EXCEPTION 'review enqueue'; END IF;
+ j=public.openwa_claim_signed_intake(true);rid=(j->>'id')::uuid;tok=(j->>'token')::uuid;
+ PERFORM public.inbox_hold_signed_observation(a,c,'canonical-review',tok,'intake229',NULL,'peer_conflict','{}');
+ UPDATE public.whatsapp_webhook_event_receipts SET processed_at=clock_timestamp(),processing_started_at=NULL WHERE id=rid AND processing_token=tok;
+ IF public.openwa_finish_signed_intake(rid,tok,NULL)<>'completed' THEN RAISE EXCEPTION 'review handoff'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=rid AND intake_state='completed' AND intake_ciphertext=cipher) THEN RAISE EXCEPTION 'canonical review lost evidence'; END IF;
  IF public.openwa_enqueue_signed_intake(a,c,'rotation','intake229',NULL,cv,true,d,cipher)<>'accepted' THEN RAISE EXCEPTION 'rotation fixture'; END IF;
  UPDATE public.whatsapp_connections SET session_id='intake229-rotated' WHERE account_id=a AND id=c;
  IF public.openwa_claim_signed_intake(true)->>'state'<>'review' THEN RAISE EXCEPTION 'credential rotation admitted'; END IF;
@@ -75,7 +82,7 @@ BEGIN
  j=public.openwa_intake_review_page(a,u,NULL,20);
  IF jsonb_array_length(j->'rows')<>2 OR j::text LIKE '%ciphertext%' OR j::text LIKE '%processing_token%' THEN RAISE EXCEPTION 'review projection'; END IF;
  j=public.openwa_intake_health(a,u,true);
- IF (j->>'review')::int<>1 OR (j->>'closed_unverified')::int<>1 OR (j->>'completed_24h')::int<>3 OR (j->>'pending')::int<>0 THEN RAISE EXCEPTION 'health %',j; END IF;
+ IF (j->>'review')::int<>1 OR (j->>'closed_unverified')::int<>1 OR (j->>'completed_24h')::int<>4 OR (j->>'pending')::int<>0 THEN RAISE EXCEPTION 'health %',j; END IF;
  BEGIN PERFORM public.openwa_intake_health(a,other_u,true);RAISE EXCEPTION 'foreign health';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
  IF has_function_privilege('authenticated','public.openwa_enqueue_signed_intake(uuid,uuid,text,text,text,timestamptz,boolean,text,text)','EXECUTE') OR has_function_privilege('anon','public.openwa_claim_signed_intake(boolean)','EXECUTE') OR has_table_privilege('authenticated','public.whatsapp_webhook_event_receipts','SELECT') THEN RAISE EXCEPTION 'browser ACL'; END IF;
 END $test$;
