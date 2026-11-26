@@ -53,6 +53,21 @@ BEGIN
  IF public.openwa_finish_signed_intake(rid,tok,NULL)<>'completed' THEN RAISE EXCEPTION 'handoff finish'; END IF;
  IF EXISTS(SELECT 1 FROM public.claim_openwa_deferred_events(10) x WHERE x.account_id=a AND x.connection_id=c) OR EXISTS(SELECT 1 FROM public.claim_openwa_deferred_events_for_mode(false,10) x WHERE x.account_id=a AND x.connection_id=c) THEN RAISE EXCEPTION 'wrong worker claimed pinned handoff'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.claim_openwa_deferred_events_for_mode(true,10) x WHERE x.account_id=a AND x.connection_id=c) THEN RAISE EXCEPTION 'pinned handoff unclaimable'; END IF;
+ -- Unresolved LID retains signed encrypted media until deferred completion.
+ IF public.openwa_enqueue_signed_intake(a,c,'lid','intake229',NULL,cv,true,d,cipher)<>'accepted' THEN RAISE EXCEPTION 'lid enqueue'; END IF;
+ j=public.openwa_claim_signed_intake(true);rid=(j->>'id')::uuid;tok=(j->>'token')::uuid;
+ IF NOT public.defer_openwa_webhook_event(a,c,'intake229','lid','fixture-lid','unresolved_identity','15550000999@lid','{"message":{"providerMessageIdentityKind":"native"}}',tok) THEN RAISE EXCEPTION 'lid handoff'; END IF;
+ IF public.openwa_finish_signed_intake(rid,tok,NULL)<>'completed' THEN RAISE EXCEPTION 'lid finish'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=rid AND intake_state='completed' AND intake_ciphertext=cipher) THEN RAISE EXCEPTION 'lid evidence discarded'; END IF;
+ SELECT jsonb_build_object('id',x.job_id,'token',x.lease_token) INTO j FROM public.claim_openwa_deferred_events_for_mode(true,10) x JOIN public.openwa_deferred_events q ON q.id=x.job_id WHERE q.account_id=a AND q.provider_event_id='lid';
+ rid2=(j->>'id')::uuid;tok=(j->>'token')::uuid;
+ IF public.openwa_begin_deferred_intake_business(rid2,gen_random_uuid(),true)->>'state'<>'conflict' THEN RAISE EXCEPTION 'foreign deferred business'; END IF;
+ j=public.openwa_begin_deferred_intake_business(rid2,tok,true);
+ IF j->>'state'<>'claimed' OR j->>'ciphertext'<>cipher THEN RAISE EXCEPTION 'deferred evidence unavailable %',j; END IF;
+ IF public.openwa_begin_deferred_intake_business(rid2,tok,true)->>'state'<>'conflict' THEN RAISE EXCEPTION 'deferred double business'; END IF;
+ BEGIN PERFORM public.finish_openwa_deferred_event(rid2,tok,'pending',0,'retry');RAISE EXCEPTION 'deferred replay permitted';EXCEPTION WHEN lock_not_available THEN NULL; END;
+ IF NOT public.finish_openwa_deferred_event(rid2,tok,'completed',0,NULL) THEN RAISE EXCEPTION 'deferred finish'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=rid AND intake_state='completed' AND intake_ciphertext IS NULL) THEN RAISE EXCEPTION 'completed handoff retained ciphertext'; END IF;
  IF public.openwa_enqueue_signed_intake(a,c,'rotation','intake229',NULL,cv,true,d,cipher)<>'accepted' THEN RAISE EXCEPTION 'rotation fixture'; END IF;
  UPDATE public.whatsapp_connections SET session_id='intake229-rotated' WHERE account_id=a AND id=c;
  IF public.openwa_claim_signed_intake(true)->>'state'<>'review' THEN RAISE EXCEPTION 'credential rotation admitted'; END IF;
@@ -60,7 +75,7 @@ BEGIN
  j=public.openwa_intake_review_page(a,u,NULL,20);
  IF jsonb_array_length(j->'rows')<>2 OR j::text LIKE '%ciphertext%' OR j::text LIKE '%processing_token%' THEN RAISE EXCEPTION 'review projection'; END IF;
  j=public.openwa_intake_health(a,u,true);
- IF (j->>'review')::int<>1 OR (j->>'closed_unverified')::int<>1 OR (j->>'completed_24h')::int<>2 OR (j->>'pending')::int<>0 THEN RAISE EXCEPTION 'health %',j; END IF;
+ IF (j->>'review')::int<>1 OR (j->>'closed_unverified')::int<>1 OR (j->>'completed_24h')::int<>3 OR (j->>'pending')::int<>0 THEN RAISE EXCEPTION 'health %',j; END IF;
  BEGIN PERFORM public.openwa_intake_health(a,other_u,true);RAISE EXCEPTION 'foreign health';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
  IF has_function_privilege('authenticated','public.openwa_enqueue_signed_intake(uuid,uuid,text,text,text,timestamptz,boolean,text,text)','EXECUTE') OR has_function_privilege('anon','public.openwa_claim_signed_intake(boolean)','EXECUTE') OR has_table_privilege('authenticated','public.whatsapp_webhook_event_receipts','SELECT') THEN RAISE EXCEPTION 'browser ACL'; END IF;
 END $test$;

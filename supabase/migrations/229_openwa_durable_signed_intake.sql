@@ -22,7 +22,7 @@ ALTER TABLE public.whatsapp_webhook_event_receipts ADD CONSTRAINT openwa_durable
  AND intake_canonical_mode IS NOT NULL AND intake_digest IS NOT NULL AND intake_digest ~ '^[0-9a-f]{64}$'
  AND intake_session IS NOT NULL AND length(intake_session) BETWEEN 1 AND 160 AND intake_credential_version IS NOT NULL
  AND (intake_ciphertext IS NULL OR octet_length(intake_ciphertext) BETWEEN 58 AND 50331776)
- AND ((intake_state='completed' AND intake_ciphertext IS NULL AND processed_at IS NOT NULL)
+ AND ((intake_state='completed' AND processed_at IS NOT NULL)
    OR (intake_state<>'completed' AND intake_ciphertext IS NOT NULL))
  AND ((intake_claim_token IS NULL AND intake_claimed_at IS NULL) OR (intake_claim_token IS NOT NULL AND intake_claimed_at IS NOT NULL))
  AND ((intake_state='pending' AND intake_claim_token IS NULL AND processing_attempts=0 AND processing_token IS NULL AND processing_started_at IS NULL AND processed_at IS NULL)
@@ -59,6 +59,10 @@ BEGIN
  IF OLD.intake_state='pending' AND NEW.intake_state='running' AND NEW.processing_token IS NOT NULL
   AND NEW.processing_started_at IS NOT NULL AND NEW.processing_attempts=1 AND NEW.processed_at IS NULL
   AND NEW.intake_claim_token=NEW.processing_token AND NEW.intake_claimed_at=NEW.processing_started_at AND NEW.intake_ciphertext IS NOT DISTINCT FROM OLD.intake_ciphertext THEN RETURN NEW; END IF;
+ -- Only a proven completed deferred job may scrub a completed handoff's ciphertext.
+ IF OLD.intake_state='completed' AND NEW.intake_state='completed' AND OLD.intake_ciphertext IS NOT NULL AND NEW.intake_ciphertext IS NULL
+ AND (to_jsonb(NEW)-'intake_ciphertext')=(to_jsonb(OLD)-'intake_ciphertext')
+ AND EXISTS(SELECT 1 FROM public.openwa_deferred_events d WHERE d.account_id=OLD.account_id AND d.connection_id=OLD.connection_id AND d.provider_event_id=OLD.provider_event_id AND d.event_kind='unresolved_identity' AND d.state='completed') THEN RETURN NEW; END IF;
  IF NEW.intake_claim_token IS DISTINCT FROM OLD.intake_claim_token OR NEW.intake_claimed_at IS DISTINCT FROM OLD.intake_claimed_at OR (NEW.intake_ciphertext IS DISTINCT FROM OLD.intake_ciphertext AND NOT (OLD.intake_state='running' AND NEW.intake_state='completed' AND NEW.intake_ciphertext IS NULL)) THEN RAISE EXCEPTION 'OPENWA_INTAKE_IMMUTABLE' USING ERRCODE='23514'; END IF;
  IF OLD.intake_state='pending' AND NEW.intake_state='review' AND NEW.processing_token IS NULL AND NEW.processing_started_at IS NULL THEN RETURN NEW; END IF;
  IF OLD.intake_state='running' AND NEW.intake_state='running' AND OLD.processing_started_at IS NOT NULL
@@ -107,7 +111,7 @@ BEGIN
   RETURN CASE WHEN r.processed_at IS NOT NULL THEN 'completed_duplicate' ELSE 'legacy_busy' END;
  END IF;
  SELECT count(*),coalesce(sum(octet_length(intake_ciphertext)),0) INTO n,bytes
- FROM public.whatsapp_webhook_event_receipts WHERE account_id=p_account AND intake_state IN ('pending','running','review','closed_unverified');
+ FROM public.whatsapp_webhook_event_receipts WHERE account_id=p_account AND intake_state IS NOT NULL AND intake_ciphertext IS NOT NULL;
  IF n>=500 OR bytes+octet_length(p_ciphertext)>134217728 THEN RETURN 'capacity'; END IF;
  INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,
   intake_state,intake_canonical_mode,intake_ciphertext,intake_digest,intake_session,intake_instance,intake_phone,intake_credential_version)
@@ -131,7 +135,7 @@ BEGIN
   ORDER BY processing_started_at NULLS FIRST,id LIMIT 20 FOR UPDATE SKIP LOCKED)
  UPDATE public.whatsapp_webhook_event_receipts r0 SET
   intake_state=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL THEN 'completed' ELSE 'review' END,
-  intake_ciphertext=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL THEN NULL ELSE intake_ciphertext END,
+  intake_ciphertext=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL AND NOT EXISTS(SELECT 1 FROM public.openwa_deferred_events d WHERE d.account_id=r0.account_id AND d.connection_id=r0.connection_id AND d.provider_event_id=r0.provider_event_id AND d.event_kind='unresolved_identity' AND d.state<>'completed') THEN NULL ELSE intake_ciphertext END,
   intake_finished_at=clock_timestamp(),intake_reason=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL THEN NULL ELSE 'lease_expired' END,
   processing_started_at=NULL FROM stale WHERE r0.id=stale.id;
  -- Single oldest event per connection, even across modes; a mode mismatch
@@ -190,7 +194,7 @@ BEGIN
  IF r.intake_claim_token IS DISTINCT FROM p_token THEN RETURN 'conflict'; END IF;
  result=CASE WHEN r.processed_at IS NOT NULL AND r.processing_error IS NULL THEN 'completed' ELSE 'review' END;
  UPDATE public.whatsapp_webhook_event_receipts SET intake_state=result,intake_finished_at=clock_timestamp(),
- intake_ciphertext=CASE WHEN result='completed' THEN NULL ELSE intake_ciphertext END,
+ intake_ciphertext=CASE WHEN result='completed' AND NOT EXISTS(SELECT 1 FROM public.openwa_deferred_events d WHERE d.account_id=r.account_id AND d.connection_id=r.connection_id AND d.provider_event_id=r.provider_event_id AND d.event_kind='unresolved_identity' AND d.state<>'completed') THEN NULL ELSE intake_ciphertext END,
  intake_reason=CASE WHEN result='completed' THEN NULL ELSE coalesce(p_reason,'processing_uncertain') END,processing_started_at=NULL WHERE id=p_id;
  RETURN result;
 END $$;
@@ -200,7 +204,9 @@ GRANT EXECUTE ON FUNCTION public.openwa_finish_signed_intake(uuid,uuid,text) TO 
 -- Preserve mode across the existing specialized LID/ACK handoff. Old
 -- workers must not claim pinned jobs. Unpinned historical jobs retain their
 -- existing contract; drain them before changing the canonical mode.
-ALTER TABLE public.openwa_deferred_events ADD COLUMN intake_canonical_mode boolean;
+ALTER TABLE public.openwa_deferred_events ADD COLUMN intake_canonical_mode boolean,
+ ADD COLUMN intake_business_started_at timestamptz, ADD COLUMN intake_business_token uuid;
+ALTER TABLE public.openwa_deferred_events ADD CONSTRAINT openwa_deferred_intake_business_shape CHECK ((intake_business_started_at IS NULL AND intake_business_token IS NULL) OR (intake_canonical_mode IS NOT NULL AND event_kind='unresolved_identity' AND intake_business_started_at IS NOT NULL AND intake_business_token IS NOT NULL));
 CREATE FUNCTION wacrm_internal.openwa_pin_deferred_intake_mode() RETURNS trigger
 LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
 BEGIN
@@ -232,7 +238,7 @@ BEGIN
  'retained_events',count(*) FILTER(WHERE intake_ciphertext IS NOT NULL),
  'retained_bytes',coalesce(sum(octet_length(intake_ciphertext)),0))
  INTO result FROM public.whatsapp_webhook_event_receipts WHERE account_id=p_account AND intake_state IS NOT NULL
- AND (intake_state<>'completed' OR intake_finished_at>=statement_timestamp()-interval '24 hours');
+ AND (intake_state<>'completed' OR intake_ciphertext IS NOT NULL OR intake_finished_at>=statement_timestamp()-interval '24 hours');
  RETURN result||jsonb_build_object(
  'legacy_unfinished',(SELECT count(*) FROM public.whatsapp_webhook_event_receipts WHERE account_id=p_account AND provider='openwa' AND intake_state IS NULL AND processed_at IS NULL),
  'review_blocked',(SELECT count(*) FROM public.whatsapp_webhook_event_receipts q WHERE q.account_id=p_account AND q.intake_state='pending'
@@ -307,7 +313,8 @@ RETURNS TABLE (
   verified_at timestamptz,
   normalized_payload jsonb,
   attempt_count integer,
-  lease_token uuid
+  lease_token uuid,
+  intake_canonical_mode boolean
 )
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=''
 AS $$
@@ -315,10 +322,14 @@ BEGIN
   IF p_canonical IS NULL OR p_limit IS NULL OR p_limit<1 OR p_limit>10 THEN
     RAISE EXCEPTION 'Invalid deferred worker batch' USING ERRCODE='22023';
   END IF;
+  -- A pinned business claim is never reclaimed after a crash. Safe preflight
+  -- and monotonic ACK leases remain retryable under the old contract.
+  WITH expired AS (SELECT id FROM public.openwa_deferred_events WHERE state='leased' AND intake_business_started_at IS NOT NULL AND lease_until<now() ORDER BY lease_until,id LIMIT 20 FOR UPDATE SKIP LOCKED)
+  UPDATE public.openwa_deferred_events q SET state='review',lease_token=NULL,lease_until=NULL,last_error_code='durable_business_uncertain',updated_at=now() FROM expired e WHERE q.id=e.id;
   RETURN QUERY
   WITH picked AS (
     SELECT q.id FROM public.openwa_deferred_events q
-    WHERE (q.intake_canonical_mode IS NULL OR q.intake_canonical_mode=p_canonical) AND ((q.state='pending' AND q.next_attempt_at<=now())
+    WHERE q.intake_business_started_at IS NULL AND (q.intake_canonical_mode IS NULL OR q.intake_canonical_mode=p_canonical) AND ((q.state='pending' AND q.next_attempt_at<=now())
        OR (q.state='leased' AND q.lease_until<now()))
     ORDER BY q.next_attempt_at,q.created_at
     FOR UPDATE OF q SKIP LOCKED LIMIT p_limit
@@ -332,7 +343,7 @@ BEGIN
     q.own_phone_identity,q.instance_id,q.event_kind,
     q.provider_message_id,q.native_chat_id,
     q.verified_phone,q.verification_source,q.verified_at,
-    q.normalized_payload,q.attempt_count,q.lease_token;
+    q.normalized_payload,q.attempt_count,q.lease_token,q.intake_canonical_mode;
 END;
 $$;
 REVOKE ALL ON FUNCTION public.claim_openwa_deferred_events_for_mode(boolean,integer) FROM PUBLIC,anon,authenticated;
@@ -368,3 +379,54 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.openwa_intake_close_unverified(uuid,uuid,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.openwa_intake_close_unverified(uuid,uuid,uuid) TO service_role;
+
+-- Pinned deferred identity: retain encrypted signed evidence until exact
+-- business completion. Before the irreversible stage, retries remain safe.
+CREATE FUNCTION wacrm_internal.openwa_deferred_business_fence() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF OLD.intake_business_started_at IS NOT NULL THEN
+  IF NEW.intake_business_started_at IS DISTINCT FROM OLD.intake_business_started_at OR NEW.intake_business_token IS DISTINCT FROM OLD.intake_business_token
+   OR NEW.state='pending' OR (NEW.state='leased' AND NEW.lease_token IS DISTINCT FROM OLD.lease_token)
+  THEN RAISE EXCEPTION 'OPENWA_DEFERRED_BUSINESS_FENCED' USING ERRCODE='55P03'; END IF;
+ ELSE
+  IF NEW.intake_business_started_at IS NOT NULL AND (OLD.state<>'leased' OR NEW.state<>'leased' OR NEW.intake_canonical_mode IS NULL OR NEW.intake_business_token IS DISTINCT FROM OLD.lease_token OR OLD.lease_until<=clock_timestamp())
+  THEN RAISE EXCEPTION 'OPENWA_DEFERRED_BUSINESS_FENCED' USING ERRCODE='55P03'; END IF;
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION wacrm_internal.openwa_deferred_business_fence() FROM PUBLIC,anon,authenticated,service_role;
+CREATE TRIGGER openwa_deferred_business_fence BEFORE UPDATE ON public.openwa_deferred_events FOR EACH ROW EXECUTE FUNCTION wacrm_internal.openwa_deferred_business_fence();
+
+CREATE FUNCTION public.openwa_begin_deferred_intake_business(p_job uuid,p_token uuid,p_canonical boolean) RETURNS jsonb
+LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+DECLARE q public.openwa_deferred_events%ROWTYPE;r public.whatsapp_webhook_event_receipts%ROWTYPE;
+BEGIN
+ SELECT * INTO q FROM public.openwa_deferred_events WHERE id=p_job AND event_kind='unresolved_identity';
+ IF NOT FOUND OR q.intake_canonical_mode IS DISTINCT FROM p_canonical THEN RETURN jsonb_build_object('state','conflict'); END IF;
+ SELECT * INTO r FROM public.whatsapp_webhook_event_receipts WHERE account_id=q.account_id AND connection_id=q.connection_id AND provider='openwa' AND provider_event_id=q.provider_event_id
+ AND intake_state IN ('running','completed') AND processed_at IS NOT NULL AND processing_error IS NULL AND intake_canonical_mode=p_canonical AND intake_ciphertext IS NOT NULL FOR SHARE;
+ IF NOT FOUND THEN RETURN jsonb_build_object('state','conflict'); END IF;
+ SELECT * INTO q FROM public.openwa_deferred_events WHERE id=p_job AND account_id=r.account_id AND connection_id=r.connection_id AND provider_event_id=r.provider_event_id
+ AND event_kind='unresolved_identity' AND state='leased' AND lease_token=p_token AND lease_until>clock_timestamp() AND expires_at>clock_timestamp()
+ AND intake_canonical_mode=p_canonical AND intake_business_started_at IS NULL FOR UPDATE;
+ IF NOT FOUND OR NOT EXISTS(SELECT 1 FROM public.whatsapp_connections c JOIN public.whatsapp_connection_credentials k ON k.account_id=c.account_id AND k.connection_id=c.id AND k.provider=c.provider
+ WHERE c.account_id=r.account_id AND c.id=r.connection_id AND c.provider='openwa' AND c.archived_at IS NULL AND c.status IN ('ready','connected')
+ AND c.session_id=r.intake_session AND c.instance_id IS NOT DISTINCT FROM r.intake_instance AND c.phone_identity IS NOT DISTINCT FROM r.intake_phone AND k.updated_at=r.intake_credential_version)
+ THEN RETURN jsonb_build_object('state','conflict'); END IF;
+ UPDATE public.openwa_deferred_events SET intake_business_started_at=clock_timestamp(),intake_business_token=p_token WHERE id=q.id;
+ RETURN jsonb_build_object('state','claimed','id',r.id,'account_id',r.account_id,'connection_id',r.connection_id,'event_id',r.provider_event_id,
+ 'session_id',r.intake_session,'instance_id',r.intake_instance,'canonical',r.intake_canonical_mode,'token',p_token,'ciphertext',r.intake_ciphertext,'digest',r.intake_digest);
+END $$;
+REVOKE ALL ON FUNCTION public.openwa_begin_deferred_intake_business(uuid,uuid,boolean) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.openwa_begin_deferred_intake_business(uuid,uuid,boolean) TO service_role;
+CREATE FUNCTION wacrm_internal.openwa_scrub_completed_handoff() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF NEW.state='completed' AND OLD.state IS DISTINCT FROM NEW.state AND NEW.intake_canonical_mode IS NOT NULL AND NEW.event_kind='unresolved_identity' THEN
+  UPDATE public.whatsapp_webhook_event_receipts SET intake_ciphertext=NULL WHERE account_id=NEW.account_id AND connection_id=NEW.connection_id AND provider='openwa' AND provider_event_id=NEW.provider_event_id AND intake_state='completed' AND intake_ciphertext IS NOT NULL;
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION wacrm_internal.openwa_scrub_completed_handoff() FROM PUBLIC,anon,authenticated,service_role;
+CREATE TRIGGER openwa_scrub_completed_handoff AFTER UPDATE OF state ON public.openwa_deferred_events FOR EACH ROW EXECUTE FUNCTION wacrm_internal.openwa_scrub_completed_handoff();
