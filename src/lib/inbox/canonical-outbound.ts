@@ -6,7 +6,7 @@ import { findOrCreateContact, findOrCreateConversation } from '@/lib/whatsapp/in
 import { hydrateOpenWAInboundSenderPhone } from '@/lib/whatsapp/transport/openwa/sender-phone'
 import { hydrateOpenWAInboundMessageMedia } from '@/lib/whatsapp/transport/openwa/inbound-media'
 import { canonicalReviewPayload, holdCanonicalReview, type CanonicalReceipt } from './canonical-ingress'
-export async function reconcileCanonicalEcho(input: { db: SupabaseClient; storage: MirrorStorage; accountId: string; ownerUserId: string; message: NormalizedInboundMessage; receipt: CanonicalReceipt; signedInlineMedia?: string }) {
+export async function reconcileCanonicalEcho(input: { db: SupabaseClient; storage: MirrorStorage; accountId: string; ownerUserId: string; message: NormalizedInboundMessage; receipt: CanonicalReceipt; signedInlineMedia?: string;strictReceipt?: boolean }) {
   const { db, storage, accountId, ownerUserId, receipt, signedInlineMedia, message } = input
   const chat = message.providerChatId
   if (message.provider !== 'openwa' || message.providerEventId !== receipt.eventId || message.providerMetadata?.sessionId !== receipt.sessionId || (message.providerMetadata?.instanceId ?? null) !== receipt.instanceId) throw new Error('Canonical echo binding mismatch')
@@ -32,8 +32,8 @@ export async function reconcileCanonicalEcho(input: { db: SupabaseClient; storag
   })
   if (error || !data || !['review','existing','inserted'].includes(data.state)) throw new Error('Canonical echo persistence unconfirmed')
   if (data.state !== 'review' && media && typeof data.messageId === 'string' && data.conversationId === parent.conversation.id) {
-    try { await hydrateOpenWAInboundMessageMedia({ db, storage, accountId, conversationId: data.conversationId, inboundMessageId: data.messageId, message, signedInlineMedia }) }
-    catch { console.warn('[inbox] scoped echo media recovery unavailable') }
+    try { await hydrateOpenWAInboundMessageMedia({ db, storage, accountId, conversationId: data.conversationId, inboundMessageId: data.messageId, message, signedInlineMedia });if(input.strictReceipt){const {data:stored,error}=await db.from('messages').select('media_url').eq('id',data.messageId).eq('conversation_id',data.conversationId).maybeSingle();if(error||!stored?.media_url)throw Error('Canonical echo media unconfirmed')} }
+    catch { if(input.strictReceipt)throw Error('Canonical echo media unconfirmed');console.warn('[inbox] scoped echo media recovery unavailable') }
   }
 }
 export async function reconcileCanonicalAck(db: SupabaseClient, input: NormalizedWhatsAppStatus, receipt: { eventId: string | null; token: string; sessionId: string; instanceId: string | null; jobId?: string }): Promise<'updated'|'ignored'|'unknown'> {

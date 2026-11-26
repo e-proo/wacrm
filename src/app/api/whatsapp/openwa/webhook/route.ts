@@ -5,6 +5,7 @@ import { durableOpenWAIntakeEnabled,readDurableWebhookBody,DurableIntakeBodyTooL
 import { canonicalInboxTestMode } from '@/lib/inbox/canonical-ingress'
 export const maxDuration=60
 export async function POST(request: Request) {
+  const started=performance.now()
   const durable=durableOpenWAIntakeEnabled()
   let rawBody:string
   try{rawBody=durable?await readDurableWebhookBody(request):await request.text()}catch(error){
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
         : { 'Cache-Control': 'no-store' },
     })
   }
-  if (reservation.queued) return NextResponse.json({ok:true,queued:true,duplicate:reservation.queueDuplicate===true},{status:202,headers:{'Cache-Control':'no-store'}})
+  if (reservation.queued) return NextResponse.json({ok:true,queued:true,duplicate:reservation.queueDuplicate===true},{status:202,headers:{'Cache-Control':'no-store','Server-Timing':'durable-intake;dur='+Math.round(performance.now()-started)}})
   if (reservation.duplicate) return NextResponse.json({ ok: true, duplicate: true })
   // Concurrent delivery cannot be acknowledged before its existing handler
   // completes. Non-2xx asks the gateway to retry with the SAME signed event,

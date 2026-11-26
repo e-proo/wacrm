@@ -18,7 +18,11 @@ export async function processOpenWAIntakeTick(db:SupabaseClient=createOpenWAWebh
   if(claim.canonical!==canonical)throw Error('Intake mode changed')
   const envelope=openIntake(claim)
   reason='processing_uncertain'
-  const response=await processReservedOpenWAWebhook(db,{accountId:claim.account_id,connectionId:claim.connection_id,envelope,processingToken:claim.token},canonical)
+  const event=envelope.event.toLowerCase().replace(/[\\s_-]+/g,'.')
+  const lifecycle=['session.status','session.authenticated','session.disconnected','session.restriction'].includes(event)
+  const checked=await db.rpc('openwa_check_claimed_intake',{p_id:claim.id,p_token:claim.token,p_canonical:canonical,p_lifecycle:lifecycle})
+  if(checked.error||checked.data!==true)throw Error('Intake route unavailable')
+  const response=await processReservedOpenWAWebhook(db,{accountId:claim.account_id,connectionId:claim.connection_id,envelope,processingToken:claim.token},canonical,true)
   if(response.ok)reason=null
  }catch{
   // No upstream data or exception text in logs; receipt evidence decides.

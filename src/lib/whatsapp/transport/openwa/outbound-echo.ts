@@ -22,8 +22,9 @@ export async function processOpenWAOwnSentEcho(input: {
   ownerUserId: string
   message: NormalizedInboundMessage
   signedInlineMedia?: string
+  strictReceipt?: boolean
 }): Promise<'inserted' | 'existing' | 'ignored'> {
-  const { db, storage, accountId, connectionId, ownerUserId, message, signedInlineMedia } = input
+  const { db, storage, accountId, connectionId, ownerUserId, message, signedInlineMedia,strictReceipt } = input
   if (message.provider !== 'openwa' || message.connectionId !== connectionId) return 'ignored'
   const chatId = message.providerChatId
   if (!chatId || !/^[0-9]{5,20}@(c\.us|lid)$/.test(chatId)) return 'ignored'
@@ -46,12 +47,14 @@ export async function processOpenWAOwnSentEcho(input: {
             db, storage, accountId, conversationId: scopedConversation.id,
             inboundMessageId: existing.id, message, signedInlineMedia,
           })
+          if(strictReceipt){const {data:stored,error}=await db.from('messages').select('media_url').eq('id',existing.id).eq('conversation_id',scopedConversation.id).maybeSingle();if(error||!stored?.media_url)throw Error('Echo media unconfirmed')}
         } catch (error) {
+          if(strictReceipt)throw Error('Echo media unconfirmed')
           console.warn('[openwa-echo] replay media hydration unavailable', {
             kind: message.type, code: error instanceof Error ? error.name : 'unknown',
           })
         }
-      }
+      }else if(strictReceipt)throw Error('Echo source scope unconfirmed')
     }
     return 'existing'
   }
@@ -103,14 +106,16 @@ export async function processOpenWAOwnSentEcho(input: {
   }, { onConflict: 'conversation_id,message_id', ignoreDuplicates: true }).select('id')
   if (insertError) throw insertError
   const insertedId = rows?.[0]?.id
-  if (!insertedId) return 'existing'
+  if (!insertedId){if(strictReceipt)throw Error('Echo source collision unconfirmed');return 'existing'}
 
   if (media) {
     try {
       await hydrateOpenWAInboundMessageMedia({
         db, storage, accountId, conversationId, inboundMessageId: insertedId, message, signedInlineMedia,
       })
+      if(strictReceipt){const {data:stored,error}=await db.from('messages').select('media_url').eq('id',insertedId).eq('conversation_id',conversationId).maybeSingle();if(error||!stored?.media_url)throw Error('Echo media unconfirmed')}
     } catch (error) {
+      if(strictReceipt)throw Error('Echo media unconfirmed')
       console.warn('[openwa-echo] own-sent media hydration unavailable', {
         kind, code: error instanceof Error ? error.name : 'unknown',
       })

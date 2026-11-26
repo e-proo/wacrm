@@ -12,6 +12,9 @@ import { processNormalizedInboundMessage } from '@/lib/whatsapp/inbound-processo
 import { applyWhatsAppStatus } from '@/lib/whatsapp/status-lifecycle'
 import { preflightOpenWAInboundIdentity, readDeferredInbound, readDeferredStatus } from './deferred'
 import { resolveOpenWAClient } from './credentials'
+import { readIntakeClaim,openIntake } from './durable-intake'
+import { extractOpenWASignedInlineMedia } from './webhook-media'
+import { normalizeOpenWAInboundMessage } from '@/lib/whatsapp/inbound-normalization'
 
 interface DeferredJob {
   job_id: string
@@ -29,6 +32,7 @@ interface DeferredJob {
   normalized_payload: unknown
   attempt_count: number
   lease_token: string
+  intake_canonical_mode?: boolean|null
 }
 
 type Outcome = { state: 'completed' | 'pending' | 'review'; reason: string | null }
@@ -110,7 +114,24 @@ async function processDeferredJob(db: SupabaseClient, job: DeferredJob): Promise
     .select('owner_user_id').eq('id', job.account_id).maybeSingle()
   if (ownerError || !account?.owner_user_id) return retry('account_owner_unavailable')
 
-  if (canonicalInboxTestMode()) {
+  const pinned=typeof job.intake_canonical_mode==='boolean'
+  let signedInlineMedia:string|undefined
+  const canonical=canonicalInboxTestMode()
+  if(pinned&&job.intake_canonical_mode!==canonical)return review('durable_mode_changed')
+  if(canonical&&!hasExplicitCanonicalPeer(inbound.message))return retry('canonical_peer_proof_missing')
+  if(pinned){
+    const begin=await db.rpc('openwa_begin_deferred_intake_business',{p_job:job.job_id,p_token:job.lease_token,p_canonical:canonical})
+    if(begin.error||begin.data?.state!=='claimed')return review('durable_business_unavailable')
+    try{
+      const claim=readIntakeClaim(begin.data)
+      if(!claim||claim.account_id!==job.account_id||claim.connection_id!==job.connection_id||claim.session_id!==job.session_id||claim.instance_id!==job.instance_id||claim.token!==job.lease_token||claim.canonical!==canonical)throw Error('Deferred evidence mismatch')
+      const envelope=openIntake(claim),original=normalizeOpenWAInboundMessage(envelope,job.connection_id)
+      if(!original||original.message.providerMessageId!==job.provider_message_id||original.message.providerChatId!==job.native_chat_id||envelope.eventId!==inbound.message.providerEventId)throw Error('Deferred source mismatch')
+      signedInlineMedia=extractOpenWASignedInlineMedia(envelope)
+    }catch{return review('durable_payload_unavailable')}
+  }
+
+  if (canonical) {
     const message = inbound.message
     if (!hasExplicitCanonicalPeer(message)) return retry('canonical_peer_proof_missing')
     if (message.providerMessageIdentityKind !== 'native' || !message.providerEventId ||
@@ -119,12 +140,14 @@ async function processDeferredJob(db: SupabaseClient, job: DeferredJob): Promise
     // The processed signed receipt is not reopened. SQL accepts only this
     // exact durable job lease and the original receipt under its valid epoch.
     const receipt = { eventId: message.providerEventId, token: job.lease_token, sessionId: job.session_id, instanceId: job.instance_id }
-    await processNormalizedInboundMessage(message, inbound.contact, job.account_id, job.connection_id, account.owner_user_id, '', true, undefined, receipt)
+    if(pinned)await processNormalizedInboundMessage(message,inbound.contact,job.account_id,job.connection_id,account.owner_user_id,'',true,signedInlineMedia,receipt,undefined,true)
+    else await processNormalizedInboundMessage(message, inbound.contact, job.account_id, job.connection_id, account.owner_user_id, '', true, undefined, receipt)
     const result = await canonicalReceiptOutcome(db, job.account_id, message, receipt)
-    return result.state === 'completed' ? COMPLETE : result.state === 'pending' ? retry('canonical_effect_pending') : review('canonical_effect_review')
+    return result.state === 'completed' ? COMPLETE : result.state === 'pending'&&!pinned ? retry('canonical_effect_pending') : review('canonical_effect_review')
   }
 
-  await processNormalizedInboundMessage(
+  if(pinned)await processNormalizedInboundMessage(inbound.message,inbound.contact,job.account_id,job.connection_id,account.owner_user_id,'',true,signedInlineMedia,undefined,undefined,true)
+  else await processNormalizedInboundMessage(
     inbound.message, inbound.contact, job.account_id, job.connection_id,
     account.owner_user_id, '', true,
     // Deferred media retains only provider-native IDs; no inline base64.
@@ -139,7 +162,7 @@ async function processDeferredJob(db: SupabaseClient, job: DeferredJob): Promise
       .select('id').eq('connection_id', job.connection_id)
       .eq('provider', 'openwa').eq('provider_message_id', job.provider_message_id)
       .eq('sender_type', 'customer').limit(1).maybeSingle()
-    if (storedError || !stored) return retry('inbound_persistence_unconfirmed')
+    if (storedError || !stored) return pinned?review('inbound_persistence_unconfirmed'):retry('inbound_persistence_unconfirmed')
   }
   return COMPLETE
 }
@@ -167,7 +190,7 @@ export async function processOpenWADeferredTick(
       outcome = await processDeferredJob(db, job)
     } catch {
       // No untrusted upstream error text enters SQL/logs.
-      outcome = retry('deferred_processing_failed')
+      outcome = typeof job.intake_canonical_mode==='boolean'&&job.event_kind==='unresolved_identity'?review('durable_business_uncertain'):retry('deferred_processing_failed')
     }
     const { data: finished, error: finishError } = await db.rpc('finish_openwa_deferred_event', {
       p_job_id: job.job_id, p_lease_token: job.lease_token,

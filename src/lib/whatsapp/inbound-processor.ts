@@ -190,7 +190,9 @@ export async function processNormalizedInboundMessage(
   signedInlineMedia?: string,
   canonicalReceipt?: CanonicalReceipt,
   signedMetaPhoneNumberId?: string,
+  strictOpenWAReceipt = false,
 ) {
+  const strictReceipt = strictOpenWAReceipt && message.provider === 'openwa'
   if (canonicalReceipt && !hasExplicitCanonicalPeer(message)) throw new Error('Canonical inbound requires explicit verified peer identity')
   const openWAIdentity = message.provider === 'openwa'
     ? await resolveOpenWAInboundContactIdentity(supabaseAdmin(), {
@@ -213,7 +215,7 @@ export async function processNormalizedInboundMessage(
         return { contact: existing, wasCreated: false }
       })()
     : await findOrCreateContact(accountId, configOwnerUserId, senderPhone, contactName)
-  if (!contactOutcome) { if (canonicalReceipt) throw new Error('Canonical contact unavailable'); return }
+  if (!contactOutcome) { if (canonicalReceipt||strictReceipt) throw new Error('Inbound contact unavailable'); return }
   const contactRecord = contactOutcome.contact
 
   // Find or create conversation
@@ -222,7 +224,7 @@ export async function processNormalizedInboundMessage(
     configOwnerUserId,
     contactRecord.id
   )
-  if (!convResult) { if (canonicalReceipt) throw new Error('Canonical parent unavailable'); return }
+  if (!convResult) { if (canonicalReceipt||strictReceipt) throw new Error('Inbound parent unavailable'); return }
   const conversation = convResult.conversation
 
   // Emit conversation.created as soon as the thread is opened — BEFORE
@@ -322,7 +324,7 @@ export async function processNormalizedInboundMessage(
           try {
             await hydrateOpenWAInboundMessageMedia({ db: supabaseAdmin(), storage: supabaseAdmin().storage, accountId,
               conversationId: conversation.id, inboundMessageId: outcome.messageId, message, signedInlineMedia })
-          } catch { console.warn('[openwa-media] scoped canonical retry unavailable') }
+          } catch { if(strictReceipt)throw Error('Canonical media persistence unconfirmed'); console.warn('[openwa-media] scoped canonical retry unavailable') }
         }
       }
       return
@@ -374,6 +376,7 @@ export async function processNormalizedInboundMessage(
       .select('id')
 
     if (msgError) {
+      if(strictReceipt)throw Error('Inbound source persistence unconfirmed')
       console.error('Error inserting message:', msgError)
       return
     }
@@ -403,6 +406,7 @@ export async function processNormalizedInboundMessage(
           .maybeSingle()
 
       if (persistedInboundError || !persistedInbound?.id) {
+        if(strictReceipt)throw Error('Inbound duplicate source unconfirmed')
         console.error(
           '[webhook] duplicate inbound message could not be reloaded:',
           persistedInboundError,
@@ -415,12 +419,17 @@ export async function processNormalizedInboundMessage(
         // source (including an interrupted/held effect) via legacy Task replay.
         const { data: canonicalMembership, error: membershipError } = await supabaseAdmin().from('inbox_message_memberships')
           .select('message_id').eq('account_id', accountId).eq('message_id', persistedInboundMessageId)
-          .eq('evidence_kind', 'verified_current_ingress').maybeSingle()
-        if (canonicalMembership || (membershipError && !['42P01','PGRST205'].includes(membershipError.code))) return
+          .in('evidence_kind', ['verified_current_ingress','verified_historical_epoch']).maybeSingle()
+        if(canonicalMembership)return
+        if(membershipError&&!['42P01','PGRST205'].includes(membershipError.code)){
+          if(strictReceipt)throw Error('Inbound source scope unavailable')
+          return
+        }
       }
     }
 
     if (!persistedInboundMessageId) {
+      if(strictReceipt)throw Error('Inbound source identity missing')
       console.error('[webhook] inbound message id missing after persistence')
       return
     }
@@ -468,7 +477,12 @@ export async function processNormalizedInboundMessage(
         message,
         signedInlineMedia,
       })
+      if(strictReceipt&&['image','video','audio','document'].includes(message.type)){
+        const {data:stored,error}=await supabaseAdmin().from('messages').select('media_url').eq('id',inboundMessageId).eq('conversation_id',conversation.id).maybeSingle()
+        if(error||!stored?.media_url)throw Error('Inbound media persistence unconfirmed')
+      }
     } catch (error) {
+      if(strictReceipt)throw Error('Inbound media persistence unconfirmed')
       console.warn('[openwa-media] hydration failed', {
         connectionId: message.connectionId,
         kind: message.type,
@@ -495,6 +509,7 @@ export async function processNormalizedInboundMessage(
     )
 
     if (convError) {
+      if(strictReceipt)throw Error('Inbound conversation update unconfirmed')
       console.error('Error updating conversation:', convError)
     }
     }
@@ -526,6 +541,7 @@ export async function processNormalizedInboundMessage(
   } catch (err) {
     console.error('[webhook] trusted-admin plane lookup failed:', err)
     if (canonicalRun) returned = false
+    if(strictReceipt)throw Error('Inbound sender plane unavailable')
     return
   }
 
@@ -620,6 +636,7 @@ export async function processNormalizedInboundMessage(
     } catch (err) {
       console.error('[task reply] correlation failed closed:', err)
       if (canonicalRun) returned = false
+      if(strictReceipt)throw Error('Inbound task correlation unconfirmed')
 
       // Correlation errors must not fall through to a different AI agent and
       // answer a message that may belong to an active Task target.
@@ -802,7 +819,7 @@ export async function processNormalizedInboundMessage(
         // trigger's exact-id match.
         interactive_reply_id: interactiveReplyId ?? undefined,
       },
-    })).catch((err) => { if (canonicalRun) returned = false; console.error('[automations] dispatch failed:', err) })
+    })).catch((err) => { if (canonicalRun) returned = false; if(strictReceipt)throw Error('Inbound automation outcome unconfirmed'); console.error('[automations] dispatch failed:', err) })
   }
 
   // Load route signals AFTER Flows/Automations have had their chance to
@@ -818,7 +835,7 @@ export async function processNormalizedInboundMessage(
     })
   } catch (err) {
     console.error('[ai gate] routing signal lookup failed:', err)
-    if (canonicalRun) throw err
+    if (canonicalRun||strictReceipt) throw err
     routingSignals = { inboxId, tags: [], language: null }
   }
 

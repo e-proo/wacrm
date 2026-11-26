@@ -17,7 +17,7 @@ import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
 export function createOpenWAWebhookDb():SupabaseClient { const url=process.env.NEXT_PUBLIC_SUPABASE_URL;const key=process.env.SUPABASE_SERVICE_ROLE_KEY;if(!url||!key)throw Error('Server database credentials are not configured');return createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}}) }
 
 /** Single business pipeline for synchronous and durably accepted signed events. */
-export async function processReservedOpenWAWebhook(db:SupabaseClient,reservation:{accountId:string;connectionId:string;envelope:OpenWAWebhookEnvelope;processingToken:string},canonicalMode:boolean){
+export async function processReservedOpenWAWebhook(db:SupabaseClient,reservation:{accountId:string;connectionId:string;envelope:OpenWAWebhookEnvelope;processingToken:string},canonicalMode:boolean,strictReceipt=false){
   const {accountId,connectionId,envelope,processingToken}=reservation
   try {
     const canonicalReceipt = canonicalMode
@@ -46,6 +46,7 @@ export async function processReservedOpenWAWebhook(db:SupabaseClient,reservation
             return NextResponse.json({ ok: true, deferred: 'pending_receipt' }, { status: 202 })
           }
         } else {
+          if(strictReceipt)throw Error('Delivery receipt unrecognized')
           console.warn('[openwa-webhook] unrecognized delivery receipt', { connectionId, event })
         }
       } else if (event === 'message.sent') {
@@ -54,16 +55,17 @@ export async function processReservedOpenWAWebhook(db:SupabaseClient,reservation
           const { data: account, error: accountError } = await db.from('accounts').select('owner_user_id').eq('id', accountId).maybeSingle()
           if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
           await reconcileCanonicalEcho({ db, storage: db.storage, accountId, ownerUserId: account.owner_user_id, message: ownSent,
-            receipt: canonicalReceipt, signedInlineMedia: extractOpenWASignedInlineMedia(envelope) })
+            receipt: canonicalReceipt, signedInlineMedia: extractOpenWASignedInlineMedia(envelope), ...(strictReceipt?{strictReceipt:true}:{}) })
         } else if (ownSent && !isSensitiveOpenWAAdminOwnSentEcho(ownSent)) {
           const { data: account, error: accountError } = await db.from('accounts')
             .select('owner_user_id').eq('id', accountId).maybeSingle()
           if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
-          await processOpenWAOwnSentEcho({
+          const echo=await processOpenWAOwnSentEcho({
             db, storage: db.storage, accountId, connectionId,
             ownerUserId: account.owner_user_id, message: ownSent,
-            signedInlineMedia: extractOpenWASignedInlineMedia(envelope),
+            signedInlineMedia: extractOpenWASignedInlineMedia(envelope), ...(strictReceipt?{strictReceipt:true}:{}),
           })
+          if(strictReceipt&&echo==='ignored')throw Error('Own-sent source unconfirmed')
         }
       } else {
         const normalized = normalizeOpenWAInboundMessage(envelope, connectionId)
@@ -89,7 +91,8 @@ export async function processReservedOpenWAWebhook(db:SupabaseClient,reservation
           }
           const { data: account, error: accountError } = await db.from('accounts').select('owner_user_id').eq('id', accountId).maybeSingle()
           if (accountError || !account?.owner_user_id) throw new Error('OpenWA account owner could not be resolved')
-          if (canonicalReceipt) await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true, extractOpenWASignedInlineMedia(envelope), canonicalReceipt)
+          if(strictReceipt)await processNormalizedInboundMessage(normalized.message,normalized.contact,accountId,connectionId,account.owner_user_id,'',true,extractOpenWASignedInlineMedia(envelope),canonicalReceipt??undefined,undefined,true)
+          else if (canonicalReceipt) await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true, extractOpenWASignedInlineMedia(envelope), canonicalReceipt)
           else await processNormalizedInboundMessage(normalized.message, normalized.contact, accountId, connectionId, account.owner_user_id, '', true, extractOpenWASignedInlineMedia(envelope))
         }
       }
@@ -106,7 +109,7 @@ export async function processReservedOpenWAWebhook(db:SupabaseClient,reservation
     } catch {
       console.error('[openwa-webhook] could not release processing lease', { connectionId })
     }
-    console.warn('[openwa-webhook] delivery deferred for signed retry', { connectionId, event: envelope.event, code })
+    console.warn('[openwa-webhook] processing outcome unconfirmed', { connectionId, code })
     return NextResponse.json({ error: 'OpenWA webhook processing deferred', code: 'processing_retry' }, {
       status: 503, headers: { 'Retry-After': '5', 'Cache-Control': 'no-store' },
     })
