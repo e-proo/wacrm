@@ -39,6 +39,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-channel-foundation-smoke.sql
       - name: INBOX-1 verified enrollment and historical evidence smoke
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-verified-enrollment-smoke.sql
+      - name: FIX-01 verified native namespace enrollment and epoch fences
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-native-namespace-enrollment-smoke.sql
       - name: INBOX-1 audit and mutable source consistency smoke
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-source-integrity-smoke.sql
       - name: INBOX-1 parallel evidence backfill race
