@@ -14,6 +14,7 @@ import {ScopedActionPane,type ActiveActionScope} from './scoped-action-pane'
 import {ScopedContactPanel} from './scoped-contact-panel'
 import {ScopedNewThreadDialog} from './scoped-new-thread-dialog'
 import { ScopedChannelReadiness } from './scoped-channel-readiness'
+import { ScopedIntakeReview } from './scoped-intake-review'
 import {Sheet,SheetContent,SheetHeader,SheetTitle,SheetDescription} from '@/components/ui/sheet'
 import {useBrowserOnline,scopedConnectivityNotice} from '@/lib/inbox/scoped-connectivity'
 import {clearAccountScopedDrafts} from '@/lib/inbox/scoped-draft-memory'
@@ -93,6 +94,7 @@ function ChannelSelector({ctx,loc,revision,onChange,onRetry}:{ctx:InboxContext;l
   <Button variant="ghost" className="w-full justify-between" onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}><span className="flex items-center gap-2"><Smartphone className="size-4"/>{t('sessions')}</span><ChevronDown className={cn('size-4 transition-transform',expanded&&'rotate-180')}/></Button>
   {expanded&&<SessionList key={loc.scope+':'+loc.channel} ctx={ctx} loc={loc} revision={revision} onRetry={onRetry}/>}
   <ScopedChannelReadiness ctx={ctx} revision={revision} onChanged={onRetry}/>
+  <ScopedIntakeReview ctx={ctx} revision={revision} onChanged={onRetry}/>
  </div>
 }
 function SessionList({ctx,loc,revision,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;onRetry:()=>void}){
