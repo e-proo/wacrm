@@ -41,6 +41,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-verified-enrollment-smoke.sql
       - name: FIX-01 verified native namespace enrollment and epoch fences
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-native-namespace-enrollment-smoke.sql
+      - name: FIX-04 durable signed intake and no-replay recovery
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-durable-intake-smoke.sql
       - name: FIX-03 evidence-bound review recovery and settlement
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-admin-intake-review-smoke.sql
       - name: FIX-02 admin readiness, redaction and revocation fences
