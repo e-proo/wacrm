@@ -17,7 +17,7 @@ const date=(v:unknown):v is string|null=>v===null||(typeof v==='string'&&v.lengt
 export function normalizeReadinessRow(value:unknown):ReadinessRow|null{
  const r=object(value)
  if(!r||!validId(r.id)||(r.provider!=='openwa'&&r.provider!=='meta_cloud')||
-   !(r.display_name===null||typeof r.display_name==='string'&&r.display_name.length<=160)||
+   !(r.display_name===null||typeof r.display_name==='string'&&Array.from(r.display_name).length<=160)||
    typeof r.online!=='boolean'||typeof r.identity_verified!=='boolean'||typeof r.identity_candidate!=='boolean'||
    !nullableId(r.channel_id)||!nullableId(r.membership_id)||!date(r.identity_verified_at)||!date(r.last_closed_at)||
    typeof r.primary!=='boolean'||typeof r.namespace_contract_verified!=='boolean'||typeof r.handover_blocked!=='boolean'||

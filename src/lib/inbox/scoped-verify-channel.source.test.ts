@@ -32,3 +32,17 @@ describe('Inbox verified channel onboarding is admin-only, explicit and safe',()
    }
  })
 })
+
+describe('FIX-02 central readiness console',()=>{
+ it('exposes all supported locales and explicit maintenance confirmation',()=>{
+  const consoleSource=source('src/components/inbox/scoped-channel-readiness.tsx')
+  expect(consoleSource).toContain("useCan('edit-settings')")
+  expect(consoleSource).toContain('confirmMaintenance:true')
+  expect(consoleSource).toContain('disabled={!maintenance||busy}')
+  expect(consoleSource).not.toContain('/api/whatsapp/send')
+  for(const locale of ['ar','en','ko']){
+   const dictionary=JSON.parse(source('messages/'+locale+'.json')) as {Inbox:{scoped:Record<string,string>}}
+   for(const key of ["readinessTitle","readinessDescription","readinessSnapshotNotice","readinessRefresh","readinessUpdated","readinessRevoked","readinessLoadFailed","readinessRuntime","readinessShadowOn","readinessShadowOff","readinessCanonicalOn","readinessCanonicalOff","readinessActionsOn","readinessActionsOff","readinessGateNotice","readinessNeedsAttention","readinessConfigured","readinessMetaVerified","readinessNamespaceVerified","readinessNamespaceMissing","readinessPrimaryMissing","readinessWebhookConfigured","readinessNoWebhook","readinessEngine","readinessVersion","readinessHeld","readinessIdentityAt","readinessProofAt","readinessClosedAt","readinessReasons","readinessOffline","readinessNoCandidate","readinessNoCredentials","readinessIdentityMissing","readinessSharedUnverified","readinessHandoverBlocked","readinessContractMismatch","readinessHandoverNotice","readinessHeldNotice","readinessMaintenanceRequired","readinessRevoke","readinessRevokeNotice","readinessMaintenanceConfirm","readinessConfirmRevoke","readinessRevokeBusy","readinessRevokeConflict","readinessRevokeFailed","readinessPages","readinessPrevious","readinessNext"]) expect(dictionary.Inbox.scoped[key],locale+':'+key).toBeTruthy()
+  }
+ })
+})

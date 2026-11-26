@@ -30,6 +30,12 @@ BEGIN
  IF r->>'handover_blocked'<>'true' OR r->>'channel_id' IS NOT NULL THEN RAISE EXCEPTION 'candidate route inferred %',r; END IF;
  BEGIN PERFORM public.inbox_admin_revoke_openwa_enrollment(a,other_u,c,ep,true,gen_random_uuid()); RAISE EXCEPTION 'foreign actor revoked'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  v=public.inbox_admin_revoke_openwa_enrollment(a,u,c,ep,false,gen_random_uuid());IF v->>'state'<>'conflict' THEN RAISE EXCEPTION 'stale role accepted'; END IF;
+ -- Pending action blocks administrative revocation; synthetic intent only.
+ INSERT INTO public.inbox_action_intents(account_id,actor_id,request_key,thread_id,conversation_id,channel_id,connection_id,membership_id,provider,action_kind,fingerprint,recipient_hash)
+ VALUES(a,u,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),ch,c,ep,'openwa','send',repeat('a',64),repeat('b',64));
+ v=public.inbox_admin_revoke_openwa_enrollment(a,u,c,ep,true,gen_random_uuid());
+ IF v->>'state'<>'busy' OR NOT EXISTS(SELECT 1 FROM public.whatsapp_channel_memberships WHERE id=ep AND valid_until IS NULL AND is_primary) THEN RAISE EXCEPTION 'pending action not fenced'; END IF;
+ UPDATE public.inbox_action_intents SET state='blocked',finished_at=clock_timestamp() WHERE account_id=a AND membership_id=ep;
  k=gen_random_uuid();
  EXECUTE 'SET LOCAL ROLE service_role';
  v=public.inbox_admin_revoke_openwa_enrollment(a,u,c,ep,true,k);
