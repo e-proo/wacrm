@@ -39,8 +39,16 @@ BEGIN
  IF public.openwa_enqueue_signed_intake(a,c,'rotation','intake229',NULL,cv,true,d,cipher)<>'accepted' THEN RAISE EXCEPTION 'rotation fixture'; END IF;
  UPDATE public.whatsapp_connections SET session_id='intake229-rotated' WHERE account_id=a AND id=c;
  IF public.openwa_claim_signed_intake(true)->>'state'<>'review' THEN RAISE EXCEPTION 'credential rotation admitted'; END IF;
+ BEGIN PERFORM public.openwa_intake_close_unverified(a,other_u,rid2);RAISE EXCEPTION 'foreign close';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ v=public.openwa_intake_close_unverified(a,u,rid2);
+ IF v<>'closed_unverified' THEN RAISE EXCEPTION 'closure outcome %',v; END IF;
+ v=public.openwa_intake_close_unverified(a,u,rid2);
+ IF v<>'closed_unverified' THEN RAISE EXCEPTION 'closure retry %',v; END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=rid2 AND intake_closed_by=u AND intake_closed_at IS NOT NULL AND intake_ciphertext=cipher AND processed_at IS NULL) THEN RAISE EXCEPTION 'closure lost evidence'; END IF;
+ j=public.openwa_intake_review_page(a,u,NULL,20);
+ IF jsonb_array_length(j->'rows')<>2 OR j::text LIKE '%ciphertext%' OR j::text LIKE '%processing_token%' THEN RAISE EXCEPTION 'review projection'; END IF;
  j=public.openwa_intake_health(a,u,true);
- IF (j->>'review')::int<>2 OR (j->>'completed_24h')::int<>1 OR (j->>'pending')::int<>0 THEN RAISE EXCEPTION 'health %',j; END IF;
+ IF (j->>'review')::int<>1 OR (j->>'closed_unverified')::int<>1 OR (j->>'completed_24h')::int<>1 OR (j->>'pending')::int<>0 THEN RAISE EXCEPTION 'health %',j; END IF;
  BEGIN PERFORM public.openwa_intake_health(a,other_u,true);RAISE EXCEPTION 'foreign health';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
  IF has_function_privilege('authenticated','public.openwa_enqueue_signed_intake(uuid,uuid,text,text,text,timestamptz,boolean,text,text)','EXECUTE') OR has_function_privilege('anon','public.openwa_claim_signed_intake(boolean)','EXECUTE') OR has_table_privilege('authenticated','public.whatsapp_webhook_event_receipts','SELECT') THEN RAISE EXCEPTION 'browser ACL'; END IF;
 END $test$;
