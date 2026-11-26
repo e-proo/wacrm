@@ -33,6 +33,7 @@ vi.mock('@/lib/whatsapp/inbound-normalization', () => ({
 }))
 vi.mock('@/lib/whatsapp/inbound-processor', () => ({ processNormalizedInboundMessage: h.processInbound }))
 vi.mock('@/lib/whatsapp/transport/openwa/deferred', () => ({
+ isUnresolvedOpenWALidCandidate: vi.fn(()=>false),
   preflightOpenWAInboundIdentity: h.preflight, deferOpenWAWebhook: h.defer,
 }))
 vi.mock('@/lib/whatsapp/transport/openwa/outbound-echo', () => ({ processOpenWAOwnSentEcho: h.processEcho }))
