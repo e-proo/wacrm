@@ -12,3 +12,6 @@ Migration 226 is additive, server-only RPCs and RLS ledger. Dedicated rollback s
 
 ## Clean-replay privilege parity
 Migration 227 explicitly grants only the service-role columns needed by the SECURITY INVOKER recovery transaction (source insert, conversation preview update and row locks). The earlier clean CI run 45857210055 found a missing conversation row-lock privilege that hosted TEST already supplied. Applied migration 226 is unchanged. No browser privileges or policies change.
+
+## Final conflict fence
+Migration 228 keeps payload/peer/receipt conflicts unverified even when a native ID matches. Only source_unconfirmed with matching recorded payload digest (when available) and exact observed existing source can settle as duplicate. Added rollback tests for pending and claimed effects, changed payload, and service-role reader. No existing receipt/source modified.

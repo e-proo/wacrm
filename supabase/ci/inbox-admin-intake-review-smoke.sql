@@ -47,6 +47,23 @@ BEGIN
  PERFORM public.inbox_hold_signed_observation(a,s,'restore',rt,'fixture-private-session',NULL,'source_unconfirmed',payload);
  UPDATE public.whatsapp_webhook_event_receipts SET processed_at=clock_timestamp(),processing_started_at=NULL WHERE id=rid;
  IF public.inbox_review_decision(a,rid)<>'restore' THEN RAISE EXCEPTION 'restore proof unavailable %',public.inbox_review_decision(a,rid); END IF;
+ -- Never settle a pending or claimed canonical effect. Nested exception rolls
+ -- back the synthetic state change before continuing the real restore test.
+ BEGIN
+  UPDATE public.inbox_canonical_effects SET state='pending' WHERE canonical_id=can AND account_id=a;
+  IF public.inbox_review_decision(a,rid)<>'busy' THEN RAISE EXCEPTION 'pending effect eligible'; END IF;
+  v=public.inbox_admin_settle_intake_review(a,u,rid,'close_unverified',gen_random_uuid());
+  IF v->>'state'<>'busy' THEN RAISE EXCEPTION 'pending effect settled'; END IF;
+  RAISE SQLSTATE 'P0002';
+ EXCEPTION WHEN no_data_found THEN NULL; END;
+ BEGIN
+  UPDATE public.inbox_canonical_effects SET state='claimed',claim_token=gen_random_uuid(),claimed_at=clock_timestamp() WHERE canonical_id=can AND account_id=a;
+  IF public.inbox_review_decision(a,rid)<>'busy' THEN RAISE EXCEPTION 'claimed effect eligible'; END IF;
+  v=public.inbox_admin_settle_intake_review(a,u,rid,'restore',gen_random_uuid());
+  IF v->>'state'<>'busy' THEN RAISE EXCEPTION 'claimed effect restored'; END IF;
+  RAISE SQLSTATE 'P0002';
+ EXCEPTION WHEN no_data_found THEN NULL; END;
+
  EXECUTE 'SET LOCAL ROLE service_role';
  v=public.inbox_admin_settle_intake_review(a,u,rid,'restore',gen_random_uuid());
  EXECUTE 'RESET ROLE';
@@ -68,7 +85,22 @@ BEGIN
  UPDATE public.whatsapp_webhook_event_receipts SET processed_at=clock_timestamp(),processing_started_at=NULL WHERE id=dup;
  v=public.inbox_admin_settle_intake_review(a,u,dup,'duplicate',gen_random_uuid());
  IF v->>'outcome'<>'duplicate_confirmed' OR (SELECT count(*) FROM public.messages WHERE conversation_id=c)<>1 THEN RAISE EXCEPTION 'duplicate not settled %',v; END IF;
+ -- Exact native ID with a recorded payload conflict is not settled as duplicate.
+ rt=gen_random_uuid();
+ INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,processing_token,processing_started_at)
+ VALUES(a,s,'openwa','payload-conflict',clock_timestamp(),rt,clock_timestamp()) RETURNING id INTO dup;
+ payload=payload||jsonb_build_object('text','changed fixture');
+ v=public.inbox_record_canonical_observation(a,s,'payload-conflict',rt,c,'fixture-private-session',NULL,native,true,'inbound',payload);
+ IF v->>'state'<>'duplicate' THEN RAISE EXCEPTION 'conflict observation fixture'; END IF;
+ PERFORM public.inbox_hold_signed_observation(a,s,'payload-conflict',rt,'fixture-private-session',NULL,'payload_changed',payload);
+ UPDATE public.whatsapp_webhook_event_receipts SET processed_at=clock_timestamp(),processing_started_at=NULL WHERE id=dup;
+ IF public.inbox_review_decision(a,dup)<>'unverified' THEN RAISE EXCEPTION 'payload conflict treated as duplicate'; END IF;
+ v=public.inbox_admin_settle_intake_review(a,u,dup,'duplicate',gen_random_uuid());
+ IF v->>'state'<>'not_eligible' THEN RAISE EXCEPTION 'payload conflict incorrectly settled'; END IF;
+ EXECUTE 'SET LOCAL ROLE service_role';
  v=public.inbox_admin_intake_review_page(a,u,true,NULL,20);
+ EXECUTE 'RESET ROLE';
+
  IF jsonb_array_length(v->'rows')<>3 OR v::text LIKE '%fixture-private%' OR v::text LIKE '%15550000226%' OR v::text LIKE '%3EB0ABCD%' THEN RAISE EXCEPTION 'review scope/redaction'; END IF;
  IF has_table_privilege('authenticated','public.inbox_intake_review_settlements','SELECT') OR has_table_privilege('service_role','public.inbox_intake_review_settlements','UPDATE')
  OR has_function_privilege('anon','public.inbox_admin_settle_intake_review(uuid,uuid,uuid,text,uuid)','EXECUTE') OR has_function_privilege('authenticated','public.inbox_admin_intake_review_page(uuid,uuid,boolean,uuid,integer)','EXECUTE') THEN RAISE EXCEPTION 'review ACL'; END IF;
