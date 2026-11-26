@@ -5,6 +5,8 @@ import { resolveOpenWACredentials } from './credentials'
 import { classifyOpenWAWebhookRejection, parseOpenWAWebhookEnvelope, verifyAndReserveOpenWAWebhook, markOpenWAWebhookProcessed } from './webhook'
 
 vi.mock('./credentials', () => ({ resolveOpenWACredentials: vi.fn() }))
+vi.mock('./durable-intake',()=>({enqueueVerifiedIntake:vi.fn(async()=>({duplicate:false,queued:true,queueDuplicate:false})),DurableIntakeBodyTooLarge:class extends Error{}}))
+import { enqueueVerifiedIntake } from './durable-intake'
 
 const mockedResolveCredentials = vi.mocked(resolveOpenWACredentials)
 const rawBody = JSON.stringify({ idempotencyKey: 'evt-1', deliveryId: 'attempt-1', timestamp: '2026-10-26T18:00:00.000Z', sessionId: 'session-1', instanceId: 'instance-1', event: 'message', data: { text: 'hello' } })
@@ -339,4 +341,18 @@ describe('OpenWA webhook intake', () => {
     expect(classifyOpenWAWebhookRejection(new Error('Authorization: Bearer sensitive-key'))).toBe('unexpected_error')
     expect(classifyOpenWAWebhookRejection(null)).toBe('unexpected_error')
   })
+})
+describe('FIX-04 HMAC-before-durable-persistence',()=>{
+ it('uses the exact authenticated credential version and never creates a synchronous receipt',async()=>{
+  const {db,receiptQuery}=dbFixture()
+  mockedResolveCredentials.mockResolvedValue({accountId:'account-1',connectionId:'connection-1',baseUrl:'https://fixture.example',apiKey:'fixture',webhookSecret,credentialVersion:timestamp})
+  vi.mocked(enqueueVerifiedIntake).mockClear()
+  const result=await verifyAndReserveOpenWAWebhook(db as never,{rawBody,signature:signature(),nowMs,durableMode:true})
+  expect(result.queued).toBe(true)
+  expect(enqueueVerifiedIntake).toHaveBeenCalledWith(db,{accountId:'account-1',connectionId:'connection-1'},expect.objectContaining({eventId:'evt-1'}),timestamp,true)
+  expect(receiptQuery.insert).not.toHaveBeenCalled()
+  vi.mocked(enqueueVerifiedIntake).mockClear()
+  await expect(verifyAndReserveOpenWAWebhook(db as never,{rawBody,signature:'invalid',nowMs,durableMode:true})).rejects.toThrow('Invalid OpenWA webhook signature')
+  expect(enqueueVerifiedIntake).not.toHaveBeenCalled()
+ })
 })

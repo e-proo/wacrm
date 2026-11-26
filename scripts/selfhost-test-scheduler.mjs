@@ -11,6 +11,7 @@ const APP_ORIGIN = 'http://app:3000'
 export const JOBS = Object.freeze([
   { name: 'agent-task', path: '/api/internal/ai-agent-task-worker', method: 'POST', secret: 'CRON_SECRET', intervalMs: 15_000, initialDelayMs: 5_000 },
   { name: 'broadcast', path: '/api/internal/whatsapp-broadcast-worker', method: 'POST', secret: 'CRON_SECRET', intervalMs: 15_000, initialDelayMs: 10_000 },
+  { name: 'openwa-intake', path: '/api/internal/openwa-intake-worker', method: 'POST', secret: 'CRON_SECRET', intervalMs: 15_000, initialDelayMs: 5_000 },
   { name: 'openwa-deferred', path: '/api/internal/openwa-deferred-worker', method: 'POST', secret: 'CRON_SECRET', intervalMs: 15_000, initialDelayMs: 15_000 },
   { name: 'agent-recovery', path: '/api/internal/ai-agent-worker', method: 'POST', secret: 'CRON_SECRET', intervalMs: 60_000, initialDelayMs: 20_000 },
   { name: 'automations', path: '/api/automations/cron', method: 'GET', secret: 'AUTOMATION_CRON_SECRET', intervalMs: 60_000, initialDelayMs: 30_000 },

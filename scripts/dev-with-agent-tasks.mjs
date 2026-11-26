@@ -26,7 +26,10 @@ const openwaDeferredEnabled = shouldRunDevOpenWADeferredWorker({
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
   mode: process.env.WACRM_DEV_OPENWA_DEFERRED_WORKER,
 })
-const pollingEnabled = enabled || broadcastEnabled || openwaDeferredEnabled
+const intakeEnabled = shouldRunDevOpenWADeferredWorker({
+  nodeEnv:'development',supabaseUrl:process.env.NEXT_PUBLIC_SUPABASE_URL,mode:process.env.WACRM_DEV_OPENWA_INTAKE_WORKER,
+}) && process.env.WACRM_OPENWA_DURABLE_INTAKE==='test_only'
+const pollingEnabled = enabled || broadcastEnabled || openwaDeferredEnabled || intakeEnabled
 const cronSecret = pollingEnabled
   ? (process.env.CRON_SECRET || randomBytes(32).toString('hex'))
   : process.env.CRON_SECRET
@@ -53,6 +56,10 @@ let stopped = false
 let polling = false
 let timer
 let firstTimeout
+let intakeTimer
+let intakeFirstTimeout
+let intakePolling=false
+let intakeFailures=0
 let failCount = 0
 let lastGatedCount = 0
 let repeatedGatedTicks = 0
@@ -125,11 +132,31 @@ async function tick() {
     polling = false
   }
 }
+// Intake polling is independent: a slow agent/broadcast tick must never
+// starve newly accepted signed webhook events.
+async function intakeTick(){
+ if(!intakeEnabled||stopped||intakePolling||next.exitCode!==null)return
+ intakePolling=true
+ try{
+  const response=await fetch('http://127.0.0.1:'+port+'/api/internal/openwa-intake-worker',{
+   method:'POST',headers:{Authorization:'Bearer '+cronSecret},signal:AbortSignal.timeout(120_000),cache:'no-store',
+  })
+  if(!response.ok)throw Error('Intake worker HTTP '+response.status)
+  const result=await response.json()
+  if(result.claimed||result.review)console.info('[TEST OpenWA intake worker] tick',{claimed:result.claimed,completed:result.completed,review:result.review})
+  intakeFailures=0
+ }catch{
+  intakeFailures++
+  if(intakeFailures===1||intakeFailures%20===0)console.warn('[TEST OpenWA intake worker] tick unavailable (redacted)')
+ }finally{intakePolling=false}
+}
 function shutdown(signal) {
   if (stopped) return
   stopped = true
   if (timer) clearInterval(timer)
   if (firstTimeout) clearTimeout(firstTimeout)
+  if(intakeTimer)clearInterval(intakeTimer)
+  if(intakeFirstTimeout)clearTimeout(intakeFirstTimeout)
   if (next.exitCode === null) next.kill(signal)
 }
 process.on('SIGINT', () => shutdown('SIGINT'))
@@ -145,12 +172,13 @@ next.on('exit', (code, signal) => {
 })
 if (pollingEnabled) {
   console.info('[WACRM TEST] Automatic workers enabled:', {
-    agentTasks: enabled, broadcastDelivery: broadcastEnabled, openwaDeferred: openwaDeferredEnabled,
+    agentTasks: enabled, broadcastDelivery: broadcastEnabled, openwaDeferred: openwaDeferredEnabled, openwaIntake:intakeEnabled,
     cadenceSeconds: 15,
     notice: 'This can send queued WhatsApp messages on TEST only',
   })
   firstTimeout = setTimeout(() => { void tick() }, 8_000)
   timer = setInterval(() => { void tick() }, 15_000)
+  if(intakeEnabled){intakeFirstTimeout=setTimeout(()=>{void intakeTick()},5000);intakeTimer=setInterval(()=>{void intakeTick()},5000)}
 } else {
   console.info('[WACRM] Automatic WhatsApp workers inactive (non-TEST or explicit opt-out).')
 }

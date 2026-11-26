@@ -30,9 +30,9 @@ test('requires deliberate acknowledgement and strong secrets', () => {
   assert.throws(() => validateEnvironment({ ...testEnv, AUTOMATION_CRON_SECRET: 'your-secret' }))
 })
 
-test('six independent jobs use fixed authentication contracts', () => {
+test('seven independent jobs use fixed authentication contracts', () => {
   assert.equal(new Set(JOBS.map(job => job.path)).size, JOBS.length)
-  assert.equal(JOBS.length, 6)
+  assert.equal(JOBS.length, 7)
   for (const job of JOBS) {
     assert.equal(job.path.startsWith('/api/'), true)
     assert.ok(job.intervalMs >= 15_000)

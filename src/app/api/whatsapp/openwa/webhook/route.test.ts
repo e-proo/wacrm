@@ -64,6 +64,7 @@ function request() {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://database.example')
+  vi.stubEnv('WACRM_OPENWA_DURABLE_INTAKE','off')
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'server-only-fixture')
   h.verify.mockResolvedValue(claim)
   h.markProcessed.mockResolvedValue(undefined)
@@ -233,4 +234,24 @@ describe('OpenWA webhook completion acknowledgement', () => {
     expect(h.processInbound).not.toHaveBeenCalled()
   })
 
+})
+
+describe('FIX-04 durable acknowledgment boundary',()=>{
+ it('returns 202 only for committed queue reservation and does not execute business logic',async()=>{
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL','https://pqirsnfupofhulmewakq.supabase.co')
+  vi.stubEnv('WACRM_OPENWA_DURABLE_INTAKE','test_only')
+  h.verify.mockResolvedValue({...claim,queued:true,queueDuplicate:false,processingToken:undefined})
+  const response=await POST(request())
+  expect(response.status).toBe(202)
+  expect(await response.json()).toEqual({ok:true,queued:true,duplicate:false})
+  expect(h.verify).toHaveBeenCalledWith(h.db,expect.objectContaining({durableMode:expect.any(Boolean)}))
+  expect(h.processInbound).not.toHaveBeenCalled()
+  expect(h.markProcessed).not.toHaveBeenCalled()
+ })
+ it('acknowledges exact durable duplicate without rerunning business logic',async()=>{
+  h.verify.mockResolvedValue({...claim,queued:true,queueDuplicate:true,processingToken:undefined})
+  const response=await POST(request())
+  expect(response.status).toBe(202);expect(await response.json()).toEqual({ok:true,queued:true,duplicate:true})
+  expect(h.processInbound).not.toHaveBeenCalled()
+ })
 })
