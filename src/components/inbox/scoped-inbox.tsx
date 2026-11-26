@@ -15,6 +15,7 @@ import {ScopedContactPanel} from './scoped-contact-panel'
 import {ScopedNewThreadDialog} from './scoped-new-thread-dialog'
 import { ScopedChannelReadiness } from './scoped-channel-readiness'
 import { ScopedIntakeReview } from './scoped-intake-review'
+import { ScopedOpenWAIntakeHealth } from './scoped-openwa-intake-health'
 import {Sheet,SheetContent,SheetHeader,SheetTitle,SheetDescription} from '@/components/ui/sheet'
 import {useBrowserOnline,scopedConnectivityNotice} from '@/lib/inbox/scoped-connectivity'
 import {clearAccountScopedDrafts} from '@/lib/inbox/scoped-draft-memory'
@@ -95,6 +96,7 @@ function ChannelSelector({ctx,loc,revision,onChange,onRetry}:{ctx:InboxContext;l
   {expanded&&<SessionList key={loc.scope+':'+loc.channel} ctx={ctx} loc={loc} revision={revision} onRetry={onRetry}/>}
   <ScopedChannelReadiness ctx={ctx} revision={revision} onChanged={onRetry}/>
   <ScopedIntakeReview ctx={ctx} revision={revision} onChanged={onRetry}/>
+  <ScopedOpenWAIntakeHealth ctx={ctx} revision={revision} onChanged={onRetry}/>
  </div>
 }
 function SessionList({ctx,loc,revision,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;onRetry:()=>void}){
