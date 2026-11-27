@@ -36,19 +36,20 @@ vi.mock('@/lib/whatsapp/encryption', () => ({ decrypt: (v: string) => v, encrypt
 vi.mock('@/lib/flows/admin-client', () => ({ supabaseAdmin: () => ({ from: () => ({ update: () => ({ eq: () => ({ eq: () => ({ eq: async () => ({ error: null }) }) }) }) }) }) }));
 
 interface CapturedWrites { message?: Record<string, unknown>; messageInsert?: Record<string, unknown>; conversation?: Record<string, unknown>; }
-function sendPathDb(templateRows: unknown[], captured: CapturedWrites): SupabaseClient {
+function sendPathDb(templateRows: unknown[], captured: CapturedWrites, existing?: Record<string,unknown>): SupabaseClient {
   const conversation = { id: 'cv-1', account_id: 'acct-1', contact: { id: 'ct-1', account_id: 'acct-1', phone: '+15551234567' } };
   const config = { id: 'cfg-1', account_id: 'acct-1', phone_number_id: 'pn-1', access_token: 'token' };
   const connection = { id: 'conn-meta-1', account_id: 'acct-1', provider: 'meta_cloud', provider_external_id: 'pn-1' };
   return { from(table: string) {
     let insertedMessage = false;
+    let idempotencyLookup=false;
     const builder: Record<string, unknown> = {};
     const chain = () => builder;
-    builder.select = chain; builder.eq = chain; builder.not = chain; builder.order = chain; builder.limit = chain;
+    builder.select = chain; builder.eq = (column:string) => {if(column==='outbound_idempotency_key')idempotencyLookup=true;return builder}; builder.not = chain; builder.order = chain; builder.limit = chain;
     builder.insert = (row: Record<string, unknown>) => { insertedMessage = table === 'messages'; if (table === 'messages') { captured.message = row; captured.messageInsert = row; } return builder; };
     builder.update = (row: Record<string, unknown>) => { if (table === 'conversations') captured.conversation = row; if (table === 'messages') captured.message = { ...(captured.message || {}), ...row }; return builder; };
     builder.maybeSingle = async () => {
-      if (table === 'messages') return insertedMessage ? { data: { id: 'msg-1', status: 'sending' }, error: null } : { data: null, error: null };
+      if (table === 'messages') return insertedMessage ? existing?{data:null,error:{code:'23505'}}:{ data: { id: 'msg-1', status: 'sending' }, error: null } : { data: idempotencyLookup?existing??null:null, error: null };
       if (table === 'whatsapp_connections') return { data: connection, error: null };
       if (table === 'whatsapp_config') return { data: config, error: null };
       return { data: null, error: null };
@@ -71,3 +72,20 @@ describe('sendMessageToConversation — template persistence (#483)', () => {
   it("sends the local row's language when the caller names none", async () => { sendTemplateMessage.mockClear(); const captured: CapturedWrites = {}; await sendMessageToConversation(sendPathDb([TEMPLATE_ROW], captured), 'acct-1', { conversationId: 'cv-1', messageType: 'template', templateName: 'order_update', templateParams: ['A123', 'Friday'] }); expect((sendTemplateMessage.mock.calls[0] as unknown as [{ language: string }])[0].language).toBe('en'); });
   it('leaves content_text null when the account has no local template row', async () => { const captured: CapturedWrites = {}; await sendMessageToConversation(sendPathDb([], captured), 'acct-1', { conversationId: 'cv-1', messageType: 'template', templateName: 'never_synced', templateParams: ['A123'] }); expect(captured.message?.content_text).toBeNull(); expect(captured.conversation?.last_message_text).toBe('[template]'); });
 });
+
+describe('FIX-05 immutable outbound route on idempotent retry',()=>{
+ const params={conversationId:'cv-1',messageType:'template',templateName:'order_update',templateParams:['A123','Friday'],idempotencyKey:'fixed-key'}
+ const prior={id:'old-message',provider_message_id:'wamid.old',message_id:'wamid.old',provider:'meta_cloud',connection_id:'conn-meta-1',status:'sent'}
+ it('returns the original identity on the same route without dispatch',async()=>{
+  sendTemplateMessage.mockClear()
+  await expect(sendMessageToConversation(sendPathDb([TEMPLATE_ROW],{},prior),'acct-1',params)).resolves.toEqual({messageId:'old-message',whatsappMessageId:'wamid.old'})
+  expect(sendTemplateMessage).not.toHaveBeenCalled()
+ })
+ it('rejects a matching key bound to a different or unknown route without dispatch',async()=>{
+  sendTemplateMessage.mockClear()
+  for(const old of [{...prior,provider:'openwa',connection_id:'conn-openwa'},{...prior,connection_id:'other-meta'},{...prior,connection_id:null}]){
+   await expect(sendMessageToConversation(sendPathDb([TEMPLATE_ROW],{},old),'acct-1',params)).rejects.toMatchObject({code:'ambiguous_outcome',status:409})
+  }
+  expect(sendTemplateMessage).not.toHaveBeenCalled()
+ })
+})
