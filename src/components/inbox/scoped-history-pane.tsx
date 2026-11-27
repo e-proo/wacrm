@@ -1,6 +1,9 @@
 'use client'
 import { useEffect,useLayoutEffect,useRef,useState } from 'react'
 import { useLocale,useTranslations } from 'next-intl'
+import { Check,CheckCheck,Clock,FileText,Reply,XCircle } from 'lucide-react'
+import { ReplyQuote } from './reply-quote'
+import { conversationDay,quotePreview } from '@/lib/inbox/scoped-conversation-model'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { canAcknowledge,submitScopedRead,type HistoryMessage } from '@/lib/inbox/scoped-history-model'
@@ -9,26 +12,25 @@ import type { InboxContext,ScopedRow } from '@/lib/inbox/scoped-list-model'
 
 type Anchor={bottom:boolean;id:string|null;offset:number;top:number}
 type MessageActions={canReply:boolean;canRead:boolean;canReact:boolean;onReply:(m:HistoryMessage)=>void;onNative:(kind:'provider_read'|'reaction',m:HistoryMessage,emoji?:string)=>void;busy:boolean}
-function Message({message,quote,actions}:{message:HistoryMessage;quote:HistoryMessage|undefined;actions?:MessageActions}){
+function Message({message,quote,actions,onJump}:{message:HistoryMessage;quote:HistoryMessage|undefined;actions?:MessageActions;onJump:(id:string)=>void}){
  const t=useTranslations('Inbox.scoped'),locale=useLocale(),incoming=message.sender_type==='customer'
  const time=message.created_at?new Date(message.created_at):null
  const deliveryLabels:Record<string,string>={sending:t('actionStatusSending'),sent:t('actionStatusSent'),delivered:t('actionStatusDelivered'),read:t('actionStatusRead'),replied:t('actionStatusReplied'),failed:t('actionStatusFailed')}
  const deliveryLabel=deliveryLabels[message.status]??t('actionStatusUnknown')
- return <div data-message-id={message.id} className={cn('flex',incoming?'justify-start':'justify-end')}>
-  <div className={cn('max-w-[85%] min-w-0 space-y-1 rounded-xl border border-border px-3 py-2 shadow-sm sm:max-w-[70%]',incoming?'bg-card':'bg-primary/10')}>
-   <p className="text-[10px] text-muted-foreground">{incoming?t('incoming'):t('outgoing')}</p>
-   {message.reply_to_message_id&&<div className="rounded-md border-s-2 border-primary/60 bg-muted/60 p-2 text-xs text-muted-foreground"><p className="font-medium">{t('reply')}</p><p className="truncate" dir="auto">{quote?.content_text||t('replyNotLoaded')}</p></div>}
+ return <div data-message-id={message.id} tabIndex={-1} className={cn('group/message flex scroll-m-4 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring',incoming?'justify-start':'justify-end')}>
+  <div className={cn('max-w-[88%] min-w-0 space-y-1 rounded-2xl border border-border/60 px-3 py-2 shadow-sm sm:max-w-[72%]',incoming?'rounded-ss-sm bg-card':'rounded-ee-sm bg-primary/10')}>
+   {message.reply_to_message_id&&(quote?<button type="button" className="block w-full min-w-0 text-start focus-visible:ring-2 focus-visible:ring-ring" onClick={()=>onJump(quote.id)}><ReplyQuote authorLabel={t(quote.sender_type==='customer'?'incoming':'outgoing')} preview={quotePreview(quote,t('replyNotLoaded'))}/></button>:<ReplyQuote authorLabel={t('reply')} preview={t('replyNotLoaded')}/> )}
    {message.content_text&&<p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm" dir="auto">{message.content_text}</p>}
    {message.media_url?<div className="min-w-0 space-y-2">
-    {message.content_type==='image'&&<img src={message.media_url} loading="lazy" alt={t('actionImagePreview')} className="max-h-64 max-w-full rounded-lg object-contain" />}
+    {message.content_type==='image'&&<a href={message.media_url} target="_blank" rel="noopener noreferrer" className="block rounded-lg focus-visible:ring-2 focus-visible:ring-ring">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={message.media_url} loading="lazy" alt={t('actionImagePreview')} className="max-h-72 max-w-full rounded-lg object-contain" /></a>}
     {message.content_type==='video'&&<video src={message.media_url} preload="none" controls playsInline aria-label={t('actionVideoPreview')} className="max-h-64 max-w-full rounded-lg" />}
     {(message.content_type==='audio'||message.media_type?.startsWith('audio/'))&&<audio src={message.media_url} preload="none" controls aria-label={t('actionAudioPreview')} className="w-full max-w-full" />}
-    <a href={message.media_url} target="_blank" rel="noopener noreferrer" className="inline-block break-all text-xs font-medium text-primary underline">{t('openMedia')}</a>
+    <a href={message.media_url} target="_blank" rel="noopener noreferrer" className={cn('inline-flex max-w-full items-center gap-2 break-all text-xs font-medium text-primary underline',message.content_type==='document'&&'rounded-lg bg-background/70 p-3 no-underline')} >{message.content_type==='document'&&<FileText className="size-5 shrink-0"/>}{message.content_type==='document'?(message.content_text||t('actionMedia_document')):t('openMedia')}</a>
    </div>:message.has_media?<p className="text-xs text-muted-foreground">{t('mediaUnavailable')}</p>:!message.content_text?<p className="text-xs text-muted-foreground">[{message.content_type}]</p>:null}
    {!!message.reactions.length&&<div className="flex flex-wrap gap-1">{message.reactions.map(r=><span key={r.emoji} className={cn('rounded-full border px-1.5 text-xs',r.mine?'border-primary bg-primary/10':'border-border bg-muted')}>{r.emoji} {r.count}</span>)}</div>}
-   <div className="flex flex-wrap justify-end gap-2 text-[10px] text-muted-foreground"><span>{time&&!Number.isNaN(time.getTime())?new Intl.DateTimeFormat(locale,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(time):''}</span>{!incoming&&<span className={cn('rounded px-1',message.status==='failed'?'text-destructive':'text-muted-foreground')} aria-label={t('actionDeliveryStatus')}>{deliveryLabel}</span>}</div>
-   {actions&&(actions.canReply||actions.canRead||actions.canReact)&&<div role="group" aria-label={t('actionMessageActions')} className="flex flex-wrap items-center justify-end gap-1 border-t border-border/50 pt-1 text-xs">
-    {actions.canReply&&<Button type="button" size="sm" variant="ghost" className="min-h-11" disabled={actions.busy} onClick={()=>actions.onReply(message)}>{t('reply')}</Button>}
+   <div className="flex flex-wrap justify-end gap-2 text-[10px] text-muted-foreground"><span>{time&&!Number.isNaN(time.getTime())?new Intl.DateTimeFormat(locale,{hour:'2-digit',minute:'2-digit'}).format(time):''}</span>{!incoming&&<span className={cn('rounded px-1',message.status==='failed'?'text-destructive':'text-muted-foreground')} aria-label={t('actionDeliveryStatus')+': '+deliveryLabel} title={deliveryLabel}><span className="inline-flex items-center gap-1">{message.status==='sending'?<Clock className="size-3"/>:message.status==='failed'?<XCircle className="size-3"/>:message.status==='sent'?<Check className="size-3"/>:['delivered','read'].includes(message.status)?<CheckCheck className={cn('size-3',message.status==='read'&&'text-blue-500')}/>:null}{deliveryLabel}</span></span>}</div>
+   {actions&&(actions.canReply||actions.canRead||actions.canReact)&&<div role="group" aria-label={t('actionMessageActions')} className="flex flex-wrap items-center justify-end gap-1 text-xs sm:opacity-0 sm:group-hover/message:opacity-100 sm:group-focus-within/message:opacity-100 [@media(hover:none)]:opacity-100">
+    {actions.canReply&&<Button type="button" size="sm" variant="ghost" className="min-h-11" disabled={actions.busy} onClick={()=>actions.onReply(message)}><Reply className="size-4"/>{t('reply')}</Button>}
     {incoming&&actions.canRead&&<Button type="button" size="sm" variant="ghost" className="min-h-11" disabled={actions.busy} onClick={()=>actions.onNative('provider_read',message)}>{t('actionProviderRead')}</Button>}
     {actions.canReact&&<>
      <Button type="button" size="sm" variant="ghost" className="min-h-11" disabled={actions.busy} onClick={()=>actions.onNative('reaction',message,'👍')} aria-label={t('actionReact')}>👍</Button>
@@ -40,7 +42,7 @@ function Message({message,quote,actions}:{message:HistoryMessage;quote:HistoryMe
  </div>
 }
 export function ScopedHistoryPane({row,ctx,revision,onRefresh,actions}:{row:ScopedRow;ctx:InboxContext;revision:number;onRefresh:()=>void;actions?:MessageActions}){
- const t=useTranslations('Inbox.scoped')
+ const t=useTranslations('Inbox.scoped'),locale=useLocale()
  const scroll=useRef<HTMLDivElement>(null),anchor=useRef<Anchor|null>(null),request=useRef<AbortController|null>(null)
  const [reading,setReading]=useState(false),[readError,setReadError]=useState(false)
  const history=useScopedHistory(row,ctx,revision,()=>{
@@ -72,19 +74,28 @@ export function ScopedHistoryPane({row,ctx,revision,onRefresh,actions}:{row:Scop
  }
  const chronological=[...history.items].reverse()
  const byId=new Map(history.items.map(m=>[m.id,m]))
+ const jump=(id:string)=>{
+  const target=Array.from(scroll.current?.querySelectorAll<HTMLElement>('[data-message-id]')??[]).find(node=>node.dataset.messageId===id)
+  target?.scrollIntoView({block:'center'})
+  target?.focus({preventScroll:true})
+ }
  return <div className="flex min-h-0 flex-1 flex-col">
   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2">
    <span className="text-xs text-muted-foreground">{row.scope==='active'?t('localReadNotice'):t('readOnly')}</span>
    {row.scope==='active'&&history.token&&<Button size="sm" variant="outline" className="min-h-11" disabled={reading||history.busy||history.error} onClick={()=>void read()}>{reading?t('loading'):t('markRead')}</Button>}
   </div>
   {readError&&<p role="alert" className="px-4 py-2 text-xs text-destructive">{t('readFailed')}</p>}
-  <div ref={scroll} role="log" aria-label={t('actionMessageHistory')} aria-live="off" className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4" aria-busy={history.busy}>
+  <div ref={scroll} role="log" aria-label={t('actionMessageHistory')} aria-live="off" className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted/30 p-3 sm:p-5" aria-busy={history.busy}>
    <div className="mx-auto max-w-3xl space-y-3">
     {history.cursor&&<div className="text-center"><Button size="sm" variant="outline" disabled={history.busy} onClick={history.more}>{t('olderMessages')}</Button></div>}
     {history.busy&&<p role="status" className="text-center text-xs text-muted-foreground">{t('loading')}</p>}
     {history.error&&<div role="alert" className="space-y-2 text-center text-sm text-destructive"><p>{t('error')}</p><Button onClick={history.retry} variant="outline">{t('retry')}</Button></div>}
     {!history.busy&&!history.error&&!chronological.length&&<p className="py-8 text-center text-sm text-muted-foreground">{t('emptyHistory')}</p>}
-    {chronological.map(message=><Message key={message.id} message={message} quote={message.reply_to_message_id?byId.get(message.reply_to_message_id):undefined} actions={actions}/>)}
+    {chronological.map((message,index)=>{
+     const day=conversationDay(message.created_at,locale)
+     const previous=index?conversationDay(chronological[index-1].created_at,locale):null
+     return <div key={message.id} className="space-y-3">{day&&day!==previous&&<div className="sticky top-0 z-10 flex justify-center"><span className="rounded-full border border-border/70 bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-sm">{day}</span></div>}<Message message={message} quote={message.reply_to_message_id?byId.get(message.reply_to_message_id):undefined} actions={actions} onJump={jump}/></div>
+    })}
    </div>
   </div>
  </div>

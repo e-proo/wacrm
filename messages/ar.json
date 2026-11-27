@@ -415,6 +415,7 @@
       "actionThreadList": "قائمة محادثات القنوات",
       "actionNoActiveChannels": "لا توجد قنوات نشطة موثّقة. تأكد من ربط جلسات الإرسال.",
       "actionMessageActions": "إجراءات الرسالة",
+      "actionEmoji": "الرموز التعبيرية",
       "actionMessageHistory": "سجل رسائل هذه القناة",
       "actionStatusSending": "قيد الإرسال أو التسوية",
       "actionStatusSent": "أُرسلت إلى المزود",

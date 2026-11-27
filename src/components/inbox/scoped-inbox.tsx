@@ -160,6 +160,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
  const [selectedConnection,setSelectedConnection]=useState<string|null>(null)
  const [activeAction,setActiveAction]=useState<ActiveActionScope|null>(null)
  const [reply,setReply]=useState<HistoryMessage|null>(null)
+ const canPrepareReply=useCan('send-messages')&&row.scope==='active'
  const [nativeBusy,setNativeBusy]=useState(false)
  const [contactOpen,setContactOpen]=useState(false)
  const [nativeOutcome,setNativeOutcome]=useState<ScopedActionOutcome|null>(null)
@@ -197,17 +198,20 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
   <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
   <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-2 py-2 sm:gap-3 sm:p-4">
    <Button variant="ghost" size="icon-lg" className="min-h-11 min-w-11" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button>
+   <div aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 font-semibold text-primary">{(row.contact.name||row.contact.phone).slice(0,1).toUpperCase()}</div>
    <div className="min-w-0 flex-1"><h2 ref={titleRef} tabIndex={-1} className="truncate rounded-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}{row.assigned_agent_name?' · '+row.assigned_agent_name:''}</p></div>
    <ProviderLabel provider={row.provider}/>
    <Button type="button" variant="outline" size="sm" className="min-h-11 shrink-0" onClick={()=>setContactOpen(v=>!v)} aria-expanded={contactOpen} aria-label={t('actionContactDetails')}>{t('actionContactDetails')}</Button>
   </div>
   {nativeOutcome&&<div role="status" className="border-b border-border bg-muted/50 px-4 py-2 text-xs text-muted-foreground">{t('actionProviderResult')}: {t('actionState_'+nativeOutcome.state)}{nativeOutcome.code?' · '+nativeOutcome.code:''}</div>}
   <ScopedHistoryPane key={row.scope+':'+row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}
-   actions={online&&activeAction&&activeAction.capabilities.dispatch_enabled?{
-    canReply:activeAction.capabilities.may_reply,canRead:activeAction.capabilities.may_read,canReact:activeAction.capabilities.may_react,
+   actions={row.scope==='active'?{
+    // Preparing a quote is local only. Dispatch still requires server policy,
+    // a selected connection and native-target proof at reservation.
+    canReply:canPrepareReply,canRead:Boolean(online&&activeAction?.capabilities.dispatch_enabled&&activeAction.capabilities.may_read),canReact:Boolean(online&&activeAction?.capabilities.dispatch_enabled&&activeAction.capabilities.may_react),
     onReply:setReply,onNative:(kind,message,emoji)=>{void nativeAction(kind,message,emoji)},busy:nativeBusy
    }:undefined}/>
-  {row.scope==='active'&&<ScopedActionPane row={row} ctx={ctx} revision={revision} selectedConnection={selectedConnection} onSelectConnection={setSelectedConnection}
+  {row.scope==='active'&&<ScopedActionPane row={row} ctx={ctx} revision={revision} selectedConnection={selectedConnection} onSelectConnection={value=>{if(selectedConnection&&value!==selectedConnection)setReply(null);setSelectedConnection(value)}}
    reply={reply} onClearReply={()=>setReply(null)} onScopeChange={setActiveAction} onRefresh={onRefresh}/>}
   </div>
   <Sheet open={contactOpen} onOpenChange={setContactOpen}>
