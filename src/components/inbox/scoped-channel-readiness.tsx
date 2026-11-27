@@ -103,7 +103,7 @@ export function ScopedChannelReadiness({ctx,revision,onChanged}:{ctx:InboxContex
    {current?.error&&<div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm">{t('readinessLoadFailed')} <Button type="button" variant="outline" className="mt-2 min-h-11" onClick={()=>setLocalRevision(x=>x+1)}>{t('retry')}</Button></div>}
    {page&&<>
     <section className="rounded-xl border border-border bg-muted/30 p-3 space-y-2"><h3 className="text-xs font-semibold">{t('readinessRuntime')}</h3>
-     <div className="flex flex-wrap gap-2"><Indicator ok={page.gates.shadow} label={t(page.gates.shadow?'readinessShadowOn':'readinessShadowOff')}/><Indicator ok={page.gates.canonical} label={t(page.gates.canonical?'readinessCanonicalOn':'readinessCanonicalOff')}/><span className="rounded-md border px-2 py-1 text-xs">{t(page.gates.actions?'readinessActionsOn':'readinessActionsOff')}</span></div>
+     <div className="flex flex-wrap gap-2"><Indicator ok={page.gates.shadow} label={t(page.gates.shadow?'readinessShadowOn':'readinessShadowOff')}/><Indicator ok={page.gates.canonical} label={t(page.gates.canonical?'readinessCanonicalOn':'readinessCanonicalOff')}/><span className="rounded-md border px-2 py-1 text-xs">{t(page.gates.actions?'readinessActionsOn':'readinessActionsOff')}</span><span className="rounded-md border px-2 py-1 text-xs">{t(page.gates.durable?'intakeEnabled':'intakeDisabled')}</span></div>
      <p className="text-xs text-muted-foreground">{t('readinessGateNotice')}</p>
     </section>
     {page.items.length===0&&<p className="py-6 text-center text-sm text-muted-foreground">{t('emptySessions')}</p>}

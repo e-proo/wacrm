@@ -9,7 +9,7 @@ export const dynamic='force-dynamic'
 const headers={'Cache-Control':'private, no-store, max-age=0','Vary':'Cookie'}
 const fail=(code:string,status:number)=>NextResponse.json({error:code},{status,headers})
 function enabled(){return isOpenWATestProject()&&process.env.WACRM_INBOX_READ_API==='test_only'&&process.env.WACRM_INBOX_SCOPED_UI==='test_only'}
-function maintenance(){return process.env.WACRM_INBOX_SHADOW_ENROLLMENT==='true'&&process.env.WACRM_INBOX_CANONICAL_INGRESS!=='test_only'&&process.env.WACRM_INBOX_ACTIONS!=='test_only'}
+function maintenance(){return process.env.WACRM_INBOX_SHADOW_ENROLLMENT==='true'&&process.env.WACRM_INBOX_CANONICAL_INGRESS!=='test_only'&&process.env.WACRM_INBOX_ACTIONS!=='test_only'&&process.env.WACRM_OPENWA_DURABLE_INTAKE!=='test_only'}
 function matches(request:Request,ctx:{accountId:string;userId:string}){return request.headers.get('x-wacrm-inbox-account')===ctx.accountId&&request.headers.get('x-wacrm-inbox-actor')===ctx.userId}
 function errorResponse(e:unknown){return e instanceof UnauthorizedError?fail('unauthorized',401):e instanceof ForbiddenError?fail('forbidden',403):fail('review_unavailable',503)}
 export async function GET(request:Request){

@@ -10,7 +10,7 @@ export const dynamic='force-dynamic'
 const headers={'Cache-Control':'private, no-store, max-age=0','Vary':'Cookie'}
 const fail=(code:string,status:number)=>NextResponse.json({error:code},{status,headers})
 function gates():ReadinessGates{return {shadow:process.env.WACRM_INBOX_SHADOW_ENROLLMENT==='true',
- canonical:process.env.WACRM_INBOX_CANONICAL_INGRESS==='test_only',actions:process.env.WACRM_INBOX_ACTIONS==='test_only'}}
+ canonical:process.env.WACRM_INBOX_CANONICAL_INGRESS==='test_only',actions:process.env.WACRM_INBOX_ACTIONS==='test_only',durable:process.env.WACRM_OPENWA_DURABLE_INTAKE==='test_only'}}
 function enabled(){return isOpenWATestProject()&&process.env.WACRM_INBOX_READ_API==='test_only'&&process.env.WACRM_INBOX_SCOPED_UI==='test_only'}
 function matches(request:Request,ctx:{accountId:string;userId:string}){return request.headers.get('x-wacrm-inbox-account')===ctx.accountId&&request.headers.get('x-wacrm-inbox-actor')===ctx.userId}
 function errorResponse(e:unknown){return e instanceof UnauthorizedError?fail('unauthorized',401):e instanceof ForbiddenError?fail('forbidden',403):fail('readiness_unavailable',503)}
@@ -41,7 +41,7 @@ export async function POST(request:Request){
  try{
   const ctx=await requireRole('admin')
   const g=gates()
-  if(!enabled()||!g.shadow||g.canonical||g.actions)return fail('maintenance_required',403)
+  if(!enabled()||!g.shadow||g.canonical||g.actions||g.durable)return fail('maintenance_required',403)
   if(!matches(request,ctx))return fail('context_changed',403)
   if(new URL(request.url).searchParams.size!==0)return fail('invalid_query',400)
   const limit=checkRateLimit('inbox-readiness-revoke:'+ctx.userId,{limit:8,windowMs:60000})

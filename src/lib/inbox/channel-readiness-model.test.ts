@@ -4,7 +4,7 @@ const id='11111111-1111-4111-8111-111111111111',member='22222222-2222-4222-8222-
 const row:ReadinessRow={id,provider:'openwa',display_name:'fixture',online:true,identity_verified:false,identity_candidate:true,channel_id:null,membership_id:null,
  identity_verified_at:null,last_closed_at:null,primary:false,credentials_present:true,signed_webhook_configured:true,engine:null,gateway_version:null,namespace_kind:'none',
  namespace_verified_at:null,namespace_contract_verified:false,handover_blocked:false,held_count_capped:2}
-const gates={shadow:true,canonical:false,actions:false}
+const gates={shadow:true,canonical:false,actions:false,durable:false}
 describe('FIX-02 readiness projection',()=>{
  it('does not conflate an online session or identity with canonical readiness',()=>{
   expect(readinessReasons(row)).toEqual(['readinessIdentityMissing','readinessNamespaceMissing','readinessPrimaryMissing'])
@@ -14,6 +14,7 @@ describe('FIX-02 readiness projection',()=>{
   expect(readinessCapabilities({...verified,handover_blocked:true},gates).verifyPrimary).toBe(false)
   expect(readinessCapabilities(verified,{...gates,canonical:true}).revoke).toBe(false)
   expect(readinessCapabilities(verified,{...gates,actions:true}).revoke).toBe(false)
+  expect(readinessCapabilities(verified,{...gates,durable:true}).revoke).toBe(false)
   expect(readinessCapabilities(verified,{...gates,shadow:false})).toEqual({verifyIdentity:false,verifyPrimary:false,revoke:false})
  })
  it('never applies OpenWA namespace conditions to Meta',()=>{

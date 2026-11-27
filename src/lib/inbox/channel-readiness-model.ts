@@ -1,6 +1,6 @@
 // Safe administration projection, no phone, native ID, gateway URL or credentials.
 import { validId } from './scoped-list-model'
-export type ReadinessGates={shadow:boolean;canonical:boolean;actions:boolean}
+export type ReadinessGates={shadow:boolean;canonical:boolean;actions:boolean;durable:boolean}
 export type ReadinessRow={
  id:string;provider:'openwa'|'meta_cloud';display_name:string|null;online:boolean;
  identity_verified:boolean;identity_candidate:boolean;channel_id:string|null;membership_id:string|null;
@@ -40,12 +40,12 @@ export function normalizeReadinessRow(value:unknown):ReadinessRow|null{
 export function normalizeReadinessPage(value:unknown):ReadinessPage|null{
  const p=object(value),g=object(p?.gates)
  if(!p||p.read_only!==true||!Array.isArray(p.items)||p.items.length>20||!nullableId(p.next_after)||
-   !g||typeof g.shadow!=='boolean'||typeof g.canonical!=='boolean'||typeof g.actions!=='boolean')return null
+   !g||typeof g.shadow!=='boolean'||typeof g.canonical!=='boolean'||typeof g.actions!=='boolean'||typeof g.durable!=='boolean')return null
  const items=p.items.map(normalizeReadinessRow)
  if(items.some(r=>r===null))return null
  const rows=items as ReadinessRow[]
  if(new Set(rows.map(r=>r.id)).size!==rows.length||p.next_after!==null&&p.next_after!==rows.at(-1)?.id)return null
- return {read_only:true,items:rows,next_after:p.next_after,gates:{shadow:g.shadow,canonical:g.canonical,actions:g.actions}}
+ return {read_only:true,items:rows,next_after:p.next_after,gates:{shadow:g.shadow,canonical:g.canonical,actions:g.actions,durable:g.durable}}
 }
 export type ReadinessReason='readinessOffline'|'readinessNoCandidate'|'readinessNoCredentials'|'readinessNoWebhook'|'readinessIdentityMissing'|'readinessNamespaceMissing'|'readinessSharedUnverified'|'readinessPrimaryMissing'|'readinessHandoverBlocked'|'readinessContractMismatch'
 export function readinessReasons(row:ReadinessRow):ReadinessReason[]{
@@ -70,5 +70,5 @@ export function readinessCapabilities(row:ReadinessRow,gates:ReadinessGates){
  const verifyIdentity=gates.shadow&&row.online&&row.identity_candidate&&(row.provider==='meta_cloud'||row.credentials_present===true)
  return {verifyIdentity:verifyIdentity&&!row.identity_verified,
   verifyPrimary:verifyIdentity&&row.provider==='openwa'&&row.signed_webhook_configured===true&&!row.handover_blocked,
-  revoke:gates.shadow&&!gates.canonical&&!gates.actions&&row.provider==='openwa'&&row.membership_id!==null}
+  revoke:gates.shadow&&!gates.canonical&&!gates.actions&&!gates.durable&&row.provider==='openwa'&&row.membership_id!==null}
 }
