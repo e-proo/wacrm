@@ -60,7 +60,8 @@ function useMediaDownload(message: MediaFilenameInput, t: Translator, fresh = fa
     if (downloading) return;
     setDownloading(true);
     try {
-      await downloadMediaMessage(message, fresh);
+      if (fresh) await downloadMediaMessage(message, true);
+      else await downloadMediaMessage(message);
     } catch {
       toast.error(t("downloadFailed"));
     } finally {
@@ -240,8 +241,8 @@ export function MediaAudioBubble({
   const { downloading, download } = useMediaDownload(message, t, fresh);
 
   return (
-    <div className="flex items-center gap-2">
-      <audio src={message.media_url} controls className="max-w-60" />
+    <div className="flex min-w-0 items-center gap-2">
+      <audio src={message.media_url} controls className="min-w-0 max-w-full sm:max-w-60" />
       <MediaActionButton
         icon={Download}
         label={t("download")}

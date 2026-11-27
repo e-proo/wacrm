@@ -94,7 +94,7 @@ export function ScopedHistoryPane({row,ctx,revision,onRefresh,actions}:{row:Scop
  const gallery:MediaGalleryItem[]=chronological.flatMap(m=>{
   const media=scopedMedia(m)
   if(!media?.media_url||(media.content_type!=='image'&&media.content_type!=='video')||!m.created_at||!Number.isFinite(Date.parse(m.created_at)))return []
-  return [{messageId:m.id,url:media.media_url,kind:media.content_type,caption:m.content_text??undefined,createdAt:m.created_at,fromCustomer:m.sender_type==='customer',message:media}]
+  return [{messageId:m.id,url:media.media_url,kind:media.content_type,caption:m.content_text??undefined,createdAt:m.created_at,fromCustomer:m.sender_type==='customer',message:{...media,id:m.id}}]
  })
  const jump=(id:string)=>{
   const target=Array.from(scroll.current?.querySelectorAll<HTMLElement>('[data-message-id]')??[]).find(node=>node.dataset.messageId===id)

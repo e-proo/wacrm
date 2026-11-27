@@ -25,7 +25,7 @@ export interface MediaGalleryItem {
   /** Drives the "You" vs contact-name label in the viewer header. */
   fromCustomer: boolean;
   /** The row itself, so a download can derive its filename. */
-  message: MediaFilenameInput;
+  message: MediaFilenameInput & Pick<Message, 'id'>;
 }
 
 function galleryKind(message: Message): MediaGalleryKind | null {

@@ -108,7 +108,8 @@ export function MediaLightbox({
     if (!item || downloading) return;
     setDownloading(true);
     try {
-      await downloadMediaMessage(item.message, fresh);
+      if (fresh) await downloadMediaMessage(item.message, true);
+      else await downloadMediaMessage(item.message);
     } catch {
       toast.error(t("downloadFailed"));
     } finally {
