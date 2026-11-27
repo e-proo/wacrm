@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { isOpenWATestProject } from '@/lib/whatsapp/transport/openwa/environment'
 import { processOpenWAIntakeTick } from '@/lib/whatsapp/transport/openwa/intake-worker'
 export const runtime='nodejs'
-export const maxDuration=120
+export const maxDuration=300
 const headers={'Cache-Control':'private, no-store'}
 export async function POST(request:Request){
  if(!isOpenWATestProject())return NextResponse.json({error:'TEST only'},{status:403,headers})

@@ -45,6 +45,8 @@ jobs:
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-legacy-receipt-disposition-smoke.sql
       - name: FIX-04 durable signed intake and no-replay recovery
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-durable-intake-smoke.sql
+      - name: FIX-06 renewable intake lease and exact returned-effect queue recovery
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/openwa-intake-lease-recovery-smoke.sql
       - name: FIX-03 evidence-bound review recovery and settlement
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f supabase/ci/inbox-admin-intake-review-smoke.sql
       - name: FIX-02 admin readiness, redaction and revocation fences

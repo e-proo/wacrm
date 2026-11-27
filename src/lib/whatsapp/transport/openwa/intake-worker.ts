@@ -2,6 +2,24 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { canonicalInboxTestMode } from '@/lib/inbox/canonical-ingress'
 import { durableOpenWAIntakeEnabled,readIntakeClaim,openIntake } from './durable-intake'
 import { createOpenWAWebhookDb,processReservedOpenWAWebhook } from './webhook-processing'
+export const INTAKE_HEARTBEAT_MS=20_000
+/** Keep one renewal in flight. A denied/expired renewal never retries the
+ * handler or resurrects its lease. The durable ledger decides the outcome. */
+function startHeartbeat(db:SupabaseClient,claim:{id:string;token:string},canonical:boolean,lifecycle:boolean){
+ let active=true,inFlight=false
+ const timer=setInterval(()=>{
+  if(!active||inFlight)return
+  inFlight=true
+  void (async()=>{
+   try{
+    const {data,error}=await db.rpc('openwa_renew_signed_intake',{p_id:claim.id,p_token:claim.token,p_canonical:canonical,p_lifecycle:lifecycle}).abortSignal(AbortSignal.timeout(10_000))
+    if(!error&&data!==true){active=false;clearInterval(timer)}
+   }catch{/* A transient failure cannot extend or reclaim a lease. */}
+   finally{inFlight=false}
+  })()
+ },INTAKE_HEARTBEAT_MS)
+ return ()=>{active=false;clearInterval(timer)}
+}
 /** At most one claim per tick. No retry after entering the business pipeline.
  * An expired/uncertain claim remains evidence for operator reconciliation. */
 export async function processOpenWAIntakeTick(db:SupabaseClient=createOpenWAWebhookDb()){
@@ -22,8 +40,11 @@ export async function processOpenWAIntakeTick(db:SupabaseClient=createOpenWAWebh
   const lifecycle=['session.status','session.authenticated','session.disconnected','session.restriction'].includes(event)
   const checked=await db.rpc('openwa_check_claimed_intake',{p_id:claim.id,p_token:claim.token,p_canonical:canonical,p_lifecycle:lifecycle})
   if(checked.error||checked.data!==true)throw Error('Intake route unavailable')
-  const response=await processReservedOpenWAWebhook(db,{accountId:claim.account_id,connectionId:claim.connection_id,envelope,processingToken:claim.token},canonical,true)
-  if(response.ok)reason=null
+  const stopHeartbeat=startHeartbeat(db,claim,canonical,lifecycle)
+  try{
+   const response=await processReservedOpenWAWebhook(db,{accountId:claim.account_id,connectionId:claim.connection_id,envelope,processingToken:claim.token},canonical,true)
+   if(response.ok)reason=null
+  }finally{stopHeartbeat()}
  }catch{
   // No upstream data or exception text in logs; receipt evidence decides.
  }

@@ -139,7 +139,7 @@ async function intakeTick(){
  intakePolling=true
  try{
   const response=await fetch('http://127.0.0.1:'+port+'/api/internal/openwa-intake-worker',{
-   method:'POST',headers:{Authorization:'Bearer '+cronSecret},signal:AbortSignal.timeout(120_000),cache:'no-store',
+   method:'POST',headers:{Authorization:'Bearer '+cronSecret},signal:AbortSignal.timeout(310_000),cache:'no-store',
   })
   if(!response.ok)throw Error('Intake worker HTTP '+response.status)
   const result=await response.json()

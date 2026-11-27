@@ -49,3 +49,49 @@ it('recognizes session lifecycle aliases before applying the ready-session fence
  expect((await processOpenWAIntakeTick({rpc} as never)).completed).toBe(1)
  expect(rpc).toHaveBeenCalledWith('openwa_check_claimed_intake',{p_id:'fixture',p_token:'lease',p_canonical:true,p_lifecycle:true})
 })
+
+describe('FIX-06 heartbeat',()=>{
+ it('renews an in-flight long handler, never dispatches twice, and stops on completion',async()=>{
+  vi.useFakeTimers()
+  try{
+   let complete!:(r:Response)=>void
+   h.process.mockReturnValueOnce(new Promise<Response>(resolve=>{complete=resolve}))
+   const renewal=vi.fn().mockResolvedValue({data:true,error:null})
+   const rpc=vi.fn().mockImplementation((name:string)=>{
+    if(name==='openwa_claim_signed_intake')return Promise.resolve({data:claim,error:null})
+    if(name==='openwa_check_claimed_intake')return Promise.resolve({data:true,error:null})
+    if(name==='openwa_renew_signed_intake')return {abortSignal:renewal}
+    return Promise.resolve({data:'completed',error:null})
+   })
+   const tick=processOpenWAIntakeTick({rpc} as never)
+   await vi.advanceTimersByTimeAsync(110_000)
+   expect(renewal).toHaveBeenCalledTimes(5)
+   expect(h.process).toHaveBeenCalledTimes(1)
+   expect(rpc).toHaveBeenCalledWith('openwa_renew_signed_intake',{p_id:'fixture',p_token:'lease',p_canonical:true,p_lifecycle:false})
+   complete(new Response(null,{status:202}))
+   expect((await tick).completed).toBe(1)
+   await vi.advanceTimersByTimeAsync(60_000)
+   expect(renewal).toHaveBeenCalledTimes(5)
+  }finally{vi.useRealTimers()}
+ })
+ it('stops renewals on denial and leaves the single business invocation for ledger reconciliation',async()=>{
+  vi.useFakeTimers()
+  try{
+   let complete!:(r:Response)=>void
+   h.process.mockReturnValueOnce(new Promise<Response>(resolve=>{complete=resolve}))
+   const renewal=vi.fn().mockResolvedValue({data:false,error:null})
+   const rpc=vi.fn().mockImplementation((name:string)=>{
+    if(name==='openwa_claim_signed_intake')return Promise.resolve({data:claim,error:null})
+    if(name==='openwa_check_claimed_intake')return Promise.resolve({data:true,error:null})
+    if(name==='openwa_renew_signed_intake')return {abortSignal:renewal}
+    return Promise.resolve({data:'review',error:null})
+   })
+   const tick=processOpenWAIntakeTick({rpc} as never)
+   await vi.advanceTimersByTimeAsync(110_000)
+   expect(renewal).toHaveBeenCalledTimes(1)
+   complete(new Response(null,{status:503}))
+   expect((await tick).review).toBe(1)
+   expect(h.process).toHaveBeenCalledTimes(1)
+  }finally{vi.useRealTimers()}
+ })
+})

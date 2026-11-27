@@ -1,0 +1,18 @@
+# FIX-06 — Durable Intake Lease & Queue Recovery
+
+## Incident and scope
+2026-11-27 hosted TEST: text completed in 17.11 s, image in 30.24 s; video persisted and visible with exact canonical source and seven returned stages (including message_received), but its receipt was held after 107.78 s. The existing finalizer rejected writes after the original 90 s lease. Four later encrypted receipts were still pending, never claimed. This is a queue head-of-line safety fence, not evidence of a PDF decoder failure.
+
+## Design
+- Migration 233: same immutable claim token, original intake_claimed_at, account, connection, pinned mode and payload. Heartbeat every 20 s, 90 s sliding lease, renewal capped at 5 minutes from original claim; exact live token and current route/credential checks. Cannot revive expired or terminal leases. Existing single-running-per-route constraint, FIFO, review block and no handler replay remain.
+- Worker route maxDuration 300 s, local intake request timeout 310 s; server/platform may impose shorter limits. Renewal RPC timeout 10 s; no overlap, timer stopped in finally. Loss of lease never causes another business invocation. A non-cooperative handler may still finish after a platform timeout; the receipt and stage fences prevent replay, not an external exactly-once guarantee.
+- Claim routine performs bounded (5 per tick) receipt-only recovery in canonical mode. Requires exact signed receipt/observation, source/provider/native ID, active verified single-connection epoch and current credentials, returned effect and final message_received stage with no incomplete stages, media URL for media, no canonical review or deferred handoff, no token/mode change. Unknown/nonmatching outcomes remain blocked. Completed proof derives processed_at from stored returned_at; stores recovered_at/from and retains digest and canonical/stage evidence, scrubs completed encrypted payload under existing policy. No synthetic actor/delivery proof, no send, no reprocessing. Old code remains compatible with additive schema but must be stopped before rollout.
+- Recovery is intentionally conservative: e.g. missing/deleted media, changed binding or missing final stage stay in review. Do not disable canonical/durable gates while pending work is pinned to canonical. No Production modification.
+
+## DoD
+1. Exact HEAD Full CI green; clean migration replay 233 and lease/recovery smoke green, existing receipt and canonical regressions green.
+2. TEST ledger 233 and read-only preflight (no running worker, reviewed video exact evidence, 4 pending unchanged); stop old runtimes before starting updated worker. No blind resend, no manual state overwrite.
+3. With owned TEST scope, canonical/durable on, actions/agent/broadcast/scheduling off, start updated worker; verify recovered receipt marked completed with audit metadata, no duplicate video/side effects, pending events drained in order. If any remains review, stop and inspect.
+4. Verify actual PDF/text/voice and repeat a >90-second media case with renewed lease; simulate crash/late finalizer, concurrency, credential change and timeout on isolated fixtures. Capture worker logs, counts, UI, CI. No full live acceptance until remaining matrix completed.
+
+Implementation and verification tracked separately; incident remains live-blocked until step 3 and media retest.
