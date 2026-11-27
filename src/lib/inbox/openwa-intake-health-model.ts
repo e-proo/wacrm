@@ -1,10 +1,10 @@
 import {validId} from './scoped-list-model'
-export const INTAKE_METRICS=['pending','running','review','closed_unverified','completed_24h','mode_blocked','review_blocked','oldest_pending_seconds','oldest_running_seconds','retained_events','retained_bytes','legacy_unfinished'] as const
+export const INTAKE_METRICS=['pending','running','review','closed_unverified','completed_24h','mode_blocked','review_blocked','oldest_pending_seconds','oldest_running_seconds','retained_events','retained_bytes','legacy_unfinished','legacy_closed'] as const
 export const INTAKE_LATENCY=['count','avg_queue_ms','avg_processing_ms','max_processing_ms'] as const
-export const INTAKE_REASONS=['binding_changed','processing_uncertain','lease_expired','payload_unavailable'] as const
+export const INTAKE_REASONS=['binding_changed','processing_uncertain','lease_expired','payload_unavailable','legacy_payload_missing'] as const
 export type IntakeReason=typeof INTAKE_REASONS[number]
 export type IntakeHealth=Record<typeof INTAKE_METRICS[number],number>&{latency_sample:Record<typeof INTAKE_LATENCY[number],number>}
-export type IntakeReviewRow={id:string;connection_id:string;display_name:string|null;state:'review'|'closed_unverified';reason:IntakeReason;received_at:string;finished_at:string;closed_at:string|null;canonical:boolean}
+export type IntakeReviewRow={id:string;connection_id:string;display_name:string|null;state:'review'|'closed_unverified';reason:IntakeReason;received_at:string;finished_at:string|null;closed_at:string|null;canonical:boolean;can_close:boolean}
 export type IntakeHealthPage={read_only:true;health:IntakeHealth;items:IntakeReviewRow[];next_after:string|null;enabled:boolean;canonical:boolean;maintenance_ready:boolean}
 const object=(v:unknown):Record<string,unknown>|null=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:null
 const count=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0
@@ -22,8 +22,8 @@ export function normalizeIntakeReviewRow(value:unknown):IntakeReviewRow|null{
  const r=object(value)
  if(!r||!validId(r.id)||!validId(r.connection_id)||!(r.display_name===null||typeof r.display_name==='string'&&Array.from(r.display_name).length<=160)||
   (r.state!=='review'&&r.state!=='closed_unverified')||typeof r.reason!=='string'||!(INTAKE_REASONS as readonly string[]).includes(r.reason)||
-  !date(r.received_at)||!date(r.finished_at)||!(r.closed_at===null||date(r.closed_at))||typeof r.canonical!=='boolean'||(r.state==='closed_unverified')!==(r.closed_at!==null))return null
- return {id:r.id,connection_id:r.connection_id,display_name:r.display_name,state:r.state,reason:r.reason as IntakeReason,received_at:r.received_at,finished_at:r.finished_at,closed_at:r.closed_at,canonical:r.canonical}
+  !date(r.received_at)||!(r.finished_at===null||date(r.finished_at))||!(r.closed_at===null||date(r.closed_at))||typeof r.canonical!=='boolean'||typeof r.can_close!=='boolean'||(r.state==='closed_unverified')!==(r.closed_at!==null)||r.state==='closed_unverified'&&r.can_close||r.finished_at===null&&r.reason!=='legacy_payload_missing')return null
+ return {id:r.id,connection_id:r.connection_id,display_name:r.display_name,state:r.state,reason:r.reason as IntakeReason,received_at:r.received_at,finished_at:r.finished_at,closed_at:r.closed_at,canonical:r.canonical,can_close:r.can_close}
 }
 export function normalizeIntakeHealthPage(value:unknown):IntakeHealthPage|null{
  const r=object(value),health=normalizeIntakeHealth(r?.health)

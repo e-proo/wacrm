@@ -32,6 +32,7 @@ export interface ReservedOpenWAWebhook {
   processingToken?: string
   queued?: boolean
   queueDuplicate?: boolean
+  closedUnverified?: boolean
 }
 
 // The handler runs for at most 60 seconds. A lease is longer than the
@@ -126,7 +127,7 @@ export async function verifyAndReserveOpenWAWebhook(
   if (envelope.instanceId && scoped.instance_id && scoped.instance_id !== envelope.instanceId) {
     throw new Error('Unknown OpenWA session')
   }
-  const lifecycleEvent = ['session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'].includes(envelope.event)
+  const lifecycleEvent = ['session.status', 'session.authenticated', 'session.disconnected', 'session.restriction'].includes(envelope.event.toLowerCase().replace(/[\s_-]+/g,'.'))
   if (!['connected', 'ready'].includes(scoped.status) && !lifecycleEvent) {
     throw new Error('OpenWA session is not active')
   }
@@ -206,7 +207,7 @@ export async function verifyAndReserveOpenWAWebhook(
   }
 
   const match = () => db.from('whatsapp_webhook_event_receipts')
-    .select('processed_at, processing_started_at, processing_token, processing_attempts, processing_error, received_at')
+    .select('processed_at, processing_started_at, processing_token, processing_attempts, processing_error, received_at, legacy_closed_at, intake_state')
     .eq('account_id', scoped.account_id)
     .eq('connection_id', scoped.id)
     .eq('provider', 'openwa')
@@ -214,6 +215,12 @@ export async function verifyAndReserveOpenWAWebhook(
 
   const { data: existing, error: readError } = await match().maybeSingle()
   if (readError || !existing) throw new Error('OpenWA webhook receipt could not be reserved')
+  if (existing.legacy_closed_at || existing.intake_state==='closed_unverified') {
+    return {accountId:scoped.account_id,connectionId:scoped.id,envelope,duplicate:true,closedUnverified:true}
+  }
+  // Synchronous mode may not reclaim any durably accepted event, including
+  // pending/review rows that have no processed_at timestamp.
+  if(existing.intake_state && !existing.processed_at) return {accountId:scoped.account_id,connectionId:scoped.id,envelope,duplicate:false,inFlight:true}
   if (existing.processed_at) {
     // Historical rows with processed_at set are terminal; never rerun old
     // business side effects even if a legacy processing_error was recorded.

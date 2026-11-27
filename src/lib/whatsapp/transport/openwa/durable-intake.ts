@@ -78,6 +78,7 @@ export async function enqueueVerifiedIntake(db:SupabaseClient,binding:IntakeBind
  })
  if(error)throw Error('OpenWA webhook receipt could not be reserved')
  if(data==='conflict')throw Error('OpenWA webhook event identity conflict')
+ if(data==='closed_unverified_duplicate')return {duplicate:true,closedUnverified:true}
  if(data==='completed_duplicate')return {duplicate:true}
  if(data==='accepted'||data==='accepted_duplicate')return {duplicate:false,queued:true,queueDuplicate:data==='accepted_duplicate'}
  throw Error('OpenWA webhook receipt could not be reserved')

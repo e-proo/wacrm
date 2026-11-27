@@ -45,6 +45,7 @@ export async function POST(request: Request) {
     })
   }
   if (reservation.queued) return NextResponse.json({ok:true,queued:true,duplicate:reservation.queueDuplicate===true},{status:202,headers:{'Cache-Control':'no-store','Server-Timing':'durable-intake;dur='+Math.round(performance.now()-started)}})
+  if(reservation.closedUnverified)return NextResponse.json({ok:true,duplicate:true,disposition:'closed_unverified'},{status:202,headers:{'Cache-Control':'no-store'}})
   if (reservation.duplicate) return NextResponse.json({ ok: true, duplicate: true })
   // Concurrent delivery cannot be acknowledged before its existing handler
   // completes. Non-2xx asks the gateway to retry with the SAME signed event,

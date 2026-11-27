@@ -285,6 +285,8 @@
       "intakeModeBlocked": "모드 불일치로 차단",
       "intakeReviewBlocked": "검토 사례로 차단",
       "intakeLegacyUnfinished": "미완료 기존 수신 기록",
+      "intakeLegacyPayloadMissing": "보존된 페이로드가 없는 기존 수신 기록; 처리 결과를 입증할 수 없음",
+      "intakeLegacyClosed": "미확인 종료된 기존 수신 기록",
       "intakeRetained": "보존된 증거",
       "intakeCapacity": "암호화된 증거 용량",
       "intakeClosedCount": "미확인 종료",

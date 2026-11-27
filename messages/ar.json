@@ -285,6 +285,8 @@
       "intakeModeBlocked": "موقوفة بسبب اختلاف الوضع",
       "intakeReviewBlocked": "موقوفة بسبب حالة مراجعة",
       "intakeLegacyUnfinished": "استقبالات قديمة غير مكتملة",
+      "intakeLegacyPayloadMissing": "استقبال قديم بلا حمولة محفوظة؛ لا يمكن إثبات نتيجة المعالجة",
+      "intakeLegacyClosed": "استقبالات قديمة مغلقة دون تحقق",
       "intakeRetained": "الأدلة المحتفظ بها",
       "intakeCapacity": "سعة الأدلة المشفرة",
       "intakeClosedCount": "مغلقة دون تحقق",

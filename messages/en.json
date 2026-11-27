@@ -285,6 +285,8 @@
       "intakeModeBlocked": "Blocked by mode",
       "intakeReviewBlocked": "Blocked by review",
       "intakeLegacyUnfinished": "Unfinished legacy receipts",
+      "intakeLegacyPayloadMissing": "Legacy receipt without retained payload; processing outcome cannot be proven",
+      "intakeLegacyClosed": "Legacy receipts closed unverified",
       "intakeRetained": "Retained evidence",
       "intakeCapacity": "Encrypted evidence capacity",
       "intakeClosedCount": "Closed unverified",

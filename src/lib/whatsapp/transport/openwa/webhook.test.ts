@@ -356,3 +356,19 @@ describe('FIX-04 HMAC-before-durable-persistence',()=>{
   expect(enqueueVerifiedIntake).not.toHaveBeenCalled()
  })
 })
+
+describe('FIX-05 historical receipt disposition',()=>{
+ it('acknowledges a closed legacy event without reclaiming its lease',async()=>{
+  mockedResolveCredentials.mockResolvedValue({accountId:'account-1',connectionId:'connection-1',baseUrl:'https://fixture.example',apiKey:'fixture',webhookSecret})
+  const {db,receiptQuery}=dbFixture({insertError:{code:'23505'},receipt:{processed_at:null,legacy_closed_at:timestamp,intake_state:null}})
+  const result=await verifyAndReserveOpenWAWebhook(db as never,{rawBody,signature:signature(),nowMs})
+  expect(result).toMatchObject({duplicate:true,closedUnverified:true})
+  expect(receiptQuery.update).not.toHaveBeenCalled()
+ })
+ it('does not seize a pending durable receipt even when the new flag is disabled',async()=>{
+  const {db,receiptQuery}=dbFixture({insertError:{code:'23505'},receipt:{processed_at:null,intake_state:'review',processing_error:'processing_failed'}})
+  const result=await verifyAndReserveOpenWAWebhook(db as never,{rawBody,signature:signature(),nowMs})
+  expect(result).toMatchObject({duplicate:false,inFlight:true})
+  expect(receiptQuery.update).not.toHaveBeenCalled()
+ })
+})
