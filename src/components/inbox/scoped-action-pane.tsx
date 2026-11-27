@@ -23,8 +23,9 @@ import type {HistoryMessage} from '@/lib/inbox/scoped-history-model'
 import {scopedDraftKey,getScopedDraft,saveScopedDraft,clearScopedDraft,containsUnsentDraft} from '@/lib/inbox/scoped-draft-memory'
 import {useBrowserOnline} from '@/lib/inbox/scoped-connectivity'
 import {uploadScopedVideo,scopedVideoMime} from '@/lib/inbox/scoped-video-upload'
+import {createPolicyRefreshQueue,freshPolicy,policyScopeKey,POLICY_PREVIEW_MAX_AGE_MS,type PolicySnapshot} from '@/lib/inbox/scoped-policy-refresh'
 
-export type ActiveActionScope={scope:ActionScope;capabilities:InboxCapabilities}
+export type ActiveActionScope={scope:ActionScope;capabilities:InboxCapabilities;expiresAt:number}
 type Mode='text'|'media'|'template'|'interactive'
 type Attachment=ScopedAttachment
 type TemplateDraft={name:string;language:string;body:string[];headerText?:string;buttonParams?:Record<number,string>}
@@ -51,7 +52,8 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  const list=useInboxPages<Connection>('connections?scope=active&channel_id='+(row.channel_id??''),ctx,
   c=>c.channel_id===row.channel_id&&c.provider===row.provider,revision)
  const [policyError,setPolicyError]=useState<string|null>(null)
- const [policy,setPolicy]=useState<{key:string;capabilities:InboxCapabilities;seen:number}|null>(null)
+ const [policy,setPolicy]=useState<PolicySnapshot|null>(null)
+ const policyQueue=useRef<ReturnType<typeof createPolicyRefreshQueue>|null>(null)
  const [tick,setTick]=useState(0)
  const [mode,setMode]=useState<Mode>(()=>getScopedAttachment(draftKey)?'media':'text')
  const [text,setText]=useState(()=>getScopedDraft(draftKey).text)
@@ -84,27 +86,40 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   return()=>window.removeEventListener('beforeunload',protect)
  },[mode,text,caption,attachment])
  useEffect(()=>{const timer=setInterval(()=>setTick(performance.now()),1000);return()=>clearInterval(timer)},[])
- const policyKey=ctx.accountId+':'+ctx.userId+':'+row.id+':'+row.channel_id+':'+(selectedConnection??'')+':'+revision
+ // The revision is an invalidation hint, NOT part of sender identity.
+ const policyKey=policyScopeKey(ctx.accountId,ctx.userId,row.id,row.channel_id,row.provider,selectedConnection,row.conversation_id,online)
+ const accountId=ctx.accountId,userId=ctx.userId,threadId=row.id,channelId=row.channel_id,provider=row.provider
  useEffect(()=>{
-  const ctl=new AbortController()
   setPolicy(null);setPolicyError(null)
   onScopeChange(null)
-  if(!row.channel_id||!selectedConnection||row.scope!=='active')return()=>ctl.abort()
-   const url='threads/'+row.id+'/capabilities?channel_id='+encodeURIComponent(row.channel_id)+'&connection_id='+encodeURIComponent(selectedConnection)
-  void fetchInbox<{capabilities:InboxCapabilities}>(url,ctx,ctl.signal,{retryTransient:true}).then(response=>{
-   const c=response.capabilities
-   if(!c||c.thread_id!==row.id||c.channel_id!==row.channel_id||c.connection_id!==selectedConnection||c.provider!==row.provider||!validId(c.membership_id))throw Error('Sender changed')
-   if(ctl.signal.aborted)return
-   const next={key:policyKey,capabilities:c,seen:performance.now()}
-   setPolicy(next)
-   onScopeChange({scope:{threadId:row.id,channelId:row.channel_id!,connectionId:selectedConnection,membershipId:c.membership_id!,provider:c.provider},capabilities:c})
-  }).catch(error=>{if(!ctl.signal.aborted){setPolicy(null);setPolicyError(inboxReadErrorCode(error));onScopeChange(null)}})
-  return()=>{ctl.abort();onScopeChange(null)}
- },[ctx.accountId,ctx.userId,row.id,row.channel_id,row.provider,row.scope,selectedConnection,revision,policyKey,onScopeChange])
+  if(!online||!channelId||!selectedConnection||row.scope!=='active')return
+  const ctl=new AbortController()
+  const url='threads/'+threadId+'/capabilities?channel_id='+encodeURIComponent(channelId)+'&connection_id='+encodeURIComponent(selectedConnection)
+  const queue=createPolicyRefreshQueue(async()=>{
+   // Keep the last confirmed same-scope preview while the refresh runs.
+   // Request start is conservative for Meta's countdown and freshness.
+   const seen=performance.now()
+   try{
+    const response=await fetchInbox<{capabilities:InboxCapabilities}>(url,{accountId,userId},ctl.signal,{retryTransient:true})
+    if(ctl.signal.aborted)return
+    const c=response.capabilities
+    if(!c||c.thread_id!==threadId||c.channel_id!==channelId||c.connection_id!==selectedConnection||c.provider!==provider||!validId(c.membership_id))throw Error('Sender changed')
+    setPolicy({key:policyKey,capabilities:c,seen});setPolicyError(null)
+   }catch(error){if(!ctl.signal.aborted){setPolicy(null);setPolicyError(inboxReadErrorCode(error))}}
+  })
+  policyQueue.current=queue
+  queue.wake()
+  return()=>{ctl.abort();queue.dispose();if(policyQueue.current===queue)policyQueue.current=null;onScopeChange(null)}
+ },[accountId,userId,threadId,channelId,provider,row.scope,selectedConnection,policyKey,online,onScopeChange])
+ useEffect(()=>{policyQueue.current?.wake()},[revision])
  const connections=list.items
  const selected=connections.find(c=>c.id===selectedConnection)
- const active=policy?.key===policyKey?policy:null
+ const active=freshPolicy(policy,policyKey,tick,online)
  const c=active?.capabilities??null
+ useEffect(()=>{
+  if(!active||!channelId||!selectedConnection||!active.capabilities.membership_id||!selected?.ready||selected.archived){onScopeChange(null);return}
+  onScopeChange({scope:{threadId,channelId,connectionId:selectedConnection,membershipId:active.capabilities.membership_id,provider:active.capabilities.provider},capabilities:active.capabilities,expiresAt:active.seen+POLICY_PREVIEW_MAX_AGE_MS})
+ },[active,channelId,threadId,selectedConnection,selected?.ready,selected?.archived,onScopeChange])
  const windowInfo=metaWindow(c,active?Math.max(tick,active.seen)-active.seen:0)
  const remaining=windowInfo?.remaining??0
  const expired=windowInfo!==null&&!windowInfo.open
@@ -136,7 +151,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   return {messageType:'text',contentText:text.trim(),replyToMessageId:quote}
  }
  async function send(){
-  if(!canSubmit||!scope||sendLock.current||uploadLock.current)return
+  if(!canSubmit||!scope||!freshPolicy(policy,policyKey,performance.now(),online)||sendLock.current||uploadLock.current)return
   sendLock.current=true
   // This key is stored before the network boundary and is never
   // regenerated by a failed fetch, timeout, or component remount.
@@ -146,7 +161,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
    const result=await submitScopedAction(ctx,{scope,key:next.key,action:'send',payload:buildPayload()})
    if(result.state==='accepted'){
     finishAccepted(next.mode)
-   }else persist({...next,state:result.state,code:result.code})
+   }else {persist({...next,state:result.state,code:result.code});if(result.state==='denied'||result.state==='blocked'){setPolicy(null);policyQueue.current?.wake(true)}}
   }catch{persist({...next,state:'uncertain',code:'admission_unconfirmed'})}
   finally{sendLock.current=false;setBusy(false)}
  }
@@ -161,7 +176,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   finally{setBusy(false)}
  }
  async function stage(file:File|null,kind:Attachment['kind']=mediaKind){
-  if(!file||!mounted.current||!canDraft||!enabled||expired||!c?.may_send_media||!c.media_kinds.includes(kind)||attempt||uploading||uploadLock.current||busy||sendLock.current||file.size===0||file.size>MEDIA_MAX_BYTES_BY_KIND[kind]){
+  if(!file||!mounted.current||!canDraft||!enabled||!freshPolicy(policy,policyKey,performance.now(),online)||expired||!c?.may_send_media||!c.media_kinds.includes(kind)||attempt||uploading||uploadLock.current||busy||sendLock.current||file.size===0||file.size>MEDIA_MAX_BYTES_BY_KIND[kind]){
    if(file&&file.size>MEDIA_MAX_BYTES_BY_KIND[kind])setFileError(t('actionFileTooLarge'))
    return
   }
@@ -207,15 +222,15 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
    </label>
   </div>
   {!online&&<p role="status" aria-live="polite" className="text-xs text-destructive">{t('actionBrowserOffline')}</p>}
-  {list.busy&&<p className="text-xs text-muted-foreground">{t('policyChecking')}</p>}
+  {list.busy&&!connections.length&&<p className="text-xs text-muted-foreground">{t('policyChecking')}</p>}
   {list.error&&<p role="alert" className="text-xs text-destructive">{t('policyUnavailable')}</p>}
   {!list.busy&&!list.error&&connections.length===0&&<p className="text-xs text-muted-foreground">{t('actionNoSender')}</p>}
-  {selectedConnection&&!c&&<div className="flex items-center gap-2 text-xs text-muted-foreground"><span role="status">{t(policyError?'policyUnavailable':'policyChecking')}</span>{policyError&&<code dir="ltr" className="rounded bg-muted px-1.5 py-0.5">{policyError}</code>}<Button type="button" variant="ghost" size="sm" onClick={onRefresh} aria-label={t('retry')}><RefreshCw className="size-3"/></Button></div>}
+  {online&&selectedConnection&&!c&&<div className="flex items-center gap-2 text-xs text-muted-foreground"><span role="status">{t(policyError?'policyUnavailable':'policyChecking')}</span>{policyError&&<code dir="ltr" className="rounded bg-muted px-1.5 py-0.5">{policyError}</code>}<Button type="button" variant="ghost" size="sm" onClick={()=>{policyQueue.current?.wake(true);onRefresh()}} aria-label={t('retry')}><RefreshCw className="size-3"/></Button></div>}
   {c&&<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
    {isMeta&&<span className="rounded-full bg-muted px-2 py-1 tabular-nums">{windowInfo?.open?t('policyWindowOpen',{time:new Date(remaining).toISOString().slice(11,19)}):t('policyWindowClosed')}</span>}
    {c.blocked_reason&&<span role="status" className="rounded-md border border-border px-2 py-0.5">{t('policyDenied')}: {c.blocked_reason}</span>}{c.blocked_reason&&row.provider==='openwa'&&<a href="/settings?tab=whatsapp" className="text-primary underline">{t('actionChooseSender')} ↗</a>}
    {!c.dispatch_enabled&&<span>{t('actionDisabled')}</span>}
-   {c.dispatch_enabled&&c.ready&&<span>{t('actionVerified')}</span>}
+   {c.dispatch_enabled&&c.ready&&!c.blocked_reason&&<span className="inline-flex items-center gap-1"><ShieldCheck className="size-3"/>{t('actionVerified')}</span>}
   </div>}
   {reply&&<ReplyQuote authorLabel={t('reply')+' · '+(reply.sender_type==='customer'?(row.contact.name||row.contact.phone):t('outgoing'))} preview={quotePreview(reply,t('replyNotLoaded'))} onDismiss={onClearReply}/>}
   {/* Original composer layout: compact attachment menu, more menu, one text row.
@@ -273,11 +288,11 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
    {attempt.state==='blocked'&&<Button size="sm" variant="outline" disabled={busy} onClick={()=>persist(null)}>{t('actionNewAttempt')}</Button>}
   </div>}
   {containsUnsentDraft({mode,text,caption})&&!attempt&&<p role="status" className="text-xs text-muted-foreground">{t('actionDraftTabOnly')}</p>}
-  <div className="flex items-center justify-between gap-2">
-   <p className="max-w-[75%] text-[11px] text-muted-foreground">{!selectedConnection?t('actionSelectFirst'):c?.blocked_reason?t('policyDenied')+' · '+c.blocked_reason:!c?.dispatch_enabled?t('actionDisabled'):t('actionRecheck')}</p>
+  {(!selectedConnection||mode==='template'||mode==='interactive')&&<div className="flex items-center justify-between gap-2">
+   {!selectedConnection&&<p className="text-[11px] text-muted-foreground">{t('actionSelectFirst')}</p>}
    {(mode==='template'||mode==='interactive')&&<Button type="button" size="sm" variant="ghost" disabled={draftLocked} onClick={()=>{setMode('text');setTemplate(null)}} aria-label={composerT('cancel')}><X className="size-4"/></Button>}
    {(mode==='template'||mode==='interactive')&&<Button size="sm" onClick={()=>void send()} disabled={!canSubmit} className="min-h-11 min-w-11 gap-2"><Send className="size-4 rtl:rotate-180"/>{busy?t('loading'):t('actionSend')}</Button>}
-  </div>
+  </div>}
   <TemplatePicker open={templatePicker} onOpenChange={setTemplatePicker} onSelect={(selectedTemplate,values)=>{if(attachment||attempt||busy||recording||!enabled||!c?.may_send_template)return;setTemplate({name:selectedTemplate.name,language:selectedTemplate.language||'en_US',body:values.body,headerText:values.headerText,buttonParams:values.buttonParams});setMode('template')}}/>
   <QuickReplyPicker open={quickReplyPicker} onOpenChange={setQuickReplyPicker} onPick={qr=>{
    if(!canDraft||attachment||attempt||busy||recording)return

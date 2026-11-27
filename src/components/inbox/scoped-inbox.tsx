@@ -169,7 +169,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
  const [nativeOutcome,setNativeOutcome]=useState<ScopedActionOutcome|null>(null)
  const locks=useRef(new Map<string,{key:string;state:ScopedActionOutcome['state']}>())
  async function nativeAction(kind:'provider_read'|'reaction',message:HistoryMessage,emoji=''){
-  if(nativeBusy||!online||!activeAction||selectedConnection!==activeAction.scope.connectionId||row.scope!=='active'||message.channel_id!==row.channel_id||message.conversation_id!==row.conversation_id||message.provider!==row.provider)return
+  if(nativeBusy||!online||!activeAction||performance.now()>=activeAction.expiresAt||selectedConnection!==activeAction.scope.connectionId||row.scope!=='active'||message.channel_id!==row.channel_id||message.conversation_id!==row.conversation_id||message.provider!==row.provider)return
   const {scope,capabilities}=activeAction
   if(!capabilities.dispatch_enabled||(kind==='provider_read'?!capabilities.may_read:!capabilities.may_react))return
   const identity=[scope.connectionId,scope.membershipId,message.id,kind,emoji].join(':')
@@ -226,7 +226,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
     onReply:setReply,onNative:(kind,message,emoji)=>{void nativeAction(kind,message,emoji)},busy:nativeBusy
    }:undefined}/>
   {row.scope==='active'&&<ScopedAiThreadBanner key={row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}/>}
-  {row.scope==='active'&&<ScopedActionPane row={row} ctx={ctx} revision={revision} selectedConnection={selectedConnection} onSelectConnection={value=>{if(selectedConnection&&value!==selectedConnection)setReply(null);setSelectedConnection(value)}}
+  {row.scope==='active'&&<ScopedActionPane row={row} ctx={ctx} revision={revision} selectedConnection={selectedConnection} onSelectConnection={value=>{if(value!==selectedConnection){setActiveAction(null);if(selectedConnection)setReply(null)}setSelectedConnection(value)}}
    reply={reply} onClearReply={()=>setReply(null)} onScopeChange={setActiveAction} onRefresh={onRefresh}/>}
   </div>
   {desktopContactOpen&&<aside aria-label={t('actionContactDetails')} className="hidden min-h-0 w-72 shrink-0 overflow-y-auto border-s border-border bg-card lg:block xl:w-80"><ScopedContactPanel row={row} ctx={ctx}/></aside>}
