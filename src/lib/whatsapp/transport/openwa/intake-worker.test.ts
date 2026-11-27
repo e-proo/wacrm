@@ -58,7 +58,7 @@ describe('FIX-06 heartbeat',()=>{
    h.process.mockReturnValueOnce(new Promise<Response>(resolve=>{complete=resolve}))
    const renewal=vi.fn().mockResolvedValue({data:true,error:null})
    const rpc=vi.fn().mockImplementation((name:string)=>{
-    if(name==='openwa_claim_signed_intake')return Promise.resolve({data:claim,error:null})
+    if(name==='openwa_claim_signed_intake_v2')return Promise.resolve({data:claim,error:null})
     if(name==='openwa_check_claimed_intake')return Promise.resolve({data:true,error:null})
     if(name==='openwa_renew_signed_intake')return {abortSignal:renewal}
     return Promise.resolve({data:'completed',error:null})
@@ -81,7 +81,7 @@ describe('FIX-06 heartbeat',()=>{
    h.process.mockReturnValueOnce(new Promise<Response>(resolve=>{complete=resolve}))
    const renewal=vi.fn().mockResolvedValue({data:false,error:null})
    const rpc=vi.fn().mockImplementation((name:string)=>{
-    if(name==='openwa_claim_signed_intake')return Promise.resolve({data:claim,error:null})
+    if(name==='openwa_claim_signed_intake_v2')return Promise.resolve({data:claim,error:null})
     if(name==='openwa_check_claimed_intake')return Promise.resolve({data:true,error:null})
     if(name==='openwa_renew_signed_intake')return {abortSignal:renewal}
     return Promise.resolve({data:'review',error:null})

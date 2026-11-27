@@ -25,7 +25,7 @@ function startHeartbeat(db:SupabaseClient,claim:{id:string;token:string},canonic
 export async function processOpenWAIntakeTick(db:SupabaseClient=createOpenWAWebhookDb()){
  if(!durableOpenWAIntakeEnabled())return {claimed:0,completed:0,review:0,disabled:true}
  const canonical=canonicalInboxTestMode()
- const {data,error}=await db.rpc('openwa_claim_signed_intake',{p_canonical:canonical})
+ const {data,error}=await db.rpc('openwa_claim_signed_intake_v2',{p_canonical:canonical})
  if(error)throw Error('Intake claim unavailable')
  if(data?.state==='idle')return {claimed:0,completed:0,review:0,disabled:false}
  if(data?.state==='review')return {claimed:0,completed:0,review:1,disabled:false}

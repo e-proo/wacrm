@@ -142,8 +142,9 @@ BEGIN
  SELECT * INTO r FROM public.whatsapp_webhook_event_receipts WHERE id=p_id AND account_id=p_account AND connection_id=p_connection AND provider='openwa' FOR UPDATE;
  IF NOT FOUND THEN RETURN false; END IF;
  IF r.intake_state='completed' AND r.intake_recovered_at IS NOT NULL THEN RETURN true; END IF;
- -- Lock the matching proof graph before finalizing. Use the same receipt-first
- -- order as the canonical observation path. The trigger rechecks the proof.
+ -- Lock the exact source row against concurrent deletion/media change. Proof
+ -- tables are SELECT-only for service_role; keep their grants unchanged.
+ -- Immutable historical evidence is rechecked by the receipt trigger.
  PERFORM 1 FROM public.inbox_message_connection_observations o
  JOIN public.inbox_canonical_messages cm ON cm.account_id=o.account_id AND cm.id=o.canonical_id
  JOIN public.inbox_canonical_effects e ON e.account_id=cm.account_id AND e.canonical_id=cm.id
@@ -153,7 +154,7 @@ BEGIN
  JOIN public.whatsapp_channel_memberships ep ON ep.account_id=o.account_id AND ep.id=o.membership_id
  JOIN public.inbox_native_namespace_proofs np ON np.account_id=ep.account_id AND np.membership_id=ep.id
  WHERE o.account_id=r.account_id AND o.connection_id=r.connection_id AND o.receipt_id=r.id
- FOR SHARE OF o,cm,e,m,im,ch,ep,np;
+ FOR SHARE OF m;
  proof=public.openwa_returned_intake_evidence(r.id);
  IF proof IS NULL THEN RETURN false; END IF;
  t=clock_timestamp();
@@ -165,23 +166,13 @@ END $$;
 REVOKE ALL ON FUNCTION public.openwa_recover_returned_intake(uuid,uuid,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.openwa_recover_returned_intake(uuid,uuid,uuid) TO service_role;
 
-CREATE OR REPLACE FUNCTION public.openwa_claim_signed_intake(p_canonical boolean) RETURNS jsonb
+-- Versioned entry point: applying the migration cannot activate recovery in
+-- an already-running old worker. The existing claim routine stays unchanged.
+CREATE FUNCTION public.openwa_claim_signed_intake_v2(p_canonical boolean) RETURNS jsonb
 LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
-DECLARE r public.whatsapp_webhook_event_receipts%ROWTYPE; c public.whatsapp_connections%ROWTYPE; cv timestamptz; tok uuid; candidate record;
+DECLARE candidate record;
 BEGIN
  IF p_canonical IS NULL THEN RAISE EXCEPTION 'OPENWA_INTAKE_MODE_REQUIRED' USING ERRCODE='22023'; END IF;
- -- Crash after finalization: complete without replay. Crash before confirmed
- -- finalization: preserve ciphertext and review, NEVER reclaim the handler.
- WITH stale AS (SELECT id FROM public.whatsapp_webhook_event_receipts WHERE intake_state='running'
-  AND (processing_started_at IS NULL OR processing_started_at<clock_timestamp()-interval '90 seconds')
-  ORDER BY processing_started_at NULLS FIRST,id LIMIT 20 FOR UPDATE SKIP LOCKED)
- UPDATE public.whatsapp_webhook_event_receipts r0 SET
-  intake_state=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL THEN 'completed' ELSE 'review' END,
-  intake_ciphertext=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL AND NOT EXISTS(SELECT 1 FROM public.openwa_deferred_events d WHERE d.account_id=r0.account_id AND d.connection_id=r0.connection_id AND d.provider_event_id=r0.provider_event_id AND d.event_kind='unresolved_identity' AND d.state<>'completed') AND NOT EXISTS(SELECT 1 FROM public.inbox_canonical_intake_review q WHERE q.account_id=r0.account_id AND q.connection_id=r0.connection_id AND q.receipt_id=r0.id) THEN NULL ELSE intake_ciphertext END,
-  intake_finished_at=clock_timestamp(),intake_reason=CASE WHEN processed_at IS NOT NULL AND processing_error IS NULL THEN NULL ELSE 'lease_expired' END,
-  processing_started_at=NULL FROM stale WHERE r0.id=stale.id;
- -- Only complete exact, already-returned canonical receipts; never call the
- -- business handler again. Invalid evidence remains in review.
  IF p_canonical THEN
   FOR candidate IN SELECT q.id,q.account_id,q.connection_id
     FROM public.whatsapp_webhook_event_receipts q
@@ -192,29 +183,9 @@ BEGIN
    PERFORM public.openwa_recover_returned_intake(candidate.account_id,candidate.connection_id,candidate.id);
   END LOOP;
  END IF;
- -- Single oldest event per connection, even across modes; a mode mismatch
- -- blocks newer events on that route until the operator drains the old mode.
- SELECT q.* INTO r FROM public.whatsapp_webhook_event_receipts q WHERE q.intake_state='pending' AND q.intake_canonical_mode=p_canonical
- AND NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts x WHERE x.account_id=q.account_id AND x.connection_id=q.connection_id AND x.intake_state IN ('running','review'))
- AND NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts x WHERE x.account_id=q.account_id AND x.connection_id=q.connection_id AND x.intake_state='pending' AND (x.received_at,x.id)<(q.received_at,q.id))
- ORDER BY q.received_at,q.id LIMIT 1 FOR UPDATE OF q SKIP LOCKED;
- IF NOT FOUND THEN RETURN jsonb_build_object('state','idle'); END IF;
- -- Receipt-first lock matches the existing canonical processing path.
- SELECT * INTO c FROM public.whatsapp_connections WHERE account_id=r.account_id AND id=r.connection_id AND provider='openwa' AND archived_at IS NULL FOR SHARE;
- IF NOT FOUND OR c.session_id IS DISTINCT FROM r.intake_session OR c.instance_id IS DISTINCT FROM r.intake_instance OR c.phone_identity IS DISTINCT FROM r.intake_phone
- THEN
-  UPDATE public.whatsapp_webhook_event_receipts SET intake_state='review',intake_reason='binding_changed',intake_finished_at=clock_timestamp() WHERE id=r.id;
-  RETURN jsonb_build_object('state','review');
- END IF;
- SELECT updated_at INTO cv FROM public.whatsapp_connection_credentials WHERE account_id=r.account_id AND connection_id=r.connection_id AND provider='openwa' FOR SHARE;
- IF NOT FOUND OR cv IS DISTINCT FROM r.intake_credential_version THEN
-  UPDATE public.whatsapp_webhook_event_receipts SET intake_state='review',intake_reason='binding_changed',intake_finished_at=clock_timestamp() WHERE id=r.id;
-  RETURN jsonb_build_object('state','review');
- END IF;
- tok=gen_random_uuid();
- r.intake_claimed_at=clock_timestamp();
- UPDATE public.whatsapp_webhook_event_receipts SET intake_state='running',intake_claim_token=tok,processing_token=tok,processing_started_at=r.intake_claimed_at,intake_claimed_at=r.intake_claimed_at,processing_attempts=1
- WHERE id=r.id AND intake_state='pending';
- RETURN jsonb_build_object('state','claimed','id',r.id,'account_id',r.account_id,'connection_id',r.connection_id,'event_id',r.provider_event_id,
-  'session_id',r.intake_session,'instance_id',r.intake_instance,'canonical',r.intake_canonical_mode,'token',tok,'ciphertext',r.intake_ciphertext,'digest',r.intake_digest);
+ -- Retain the single existing FIFO, route-binding and stale-claim pipeline.
+ -- A stale running claim swept into review can be reconciled next tick.
+ RETURN public.openwa_claim_signed_intake(p_canonical);
 END $$;
+REVOKE ALL ON FUNCTION public.openwa_claim_signed_intake_v2(boolean) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.openwa_claim_signed_intake_v2(boolean) TO service_role;
