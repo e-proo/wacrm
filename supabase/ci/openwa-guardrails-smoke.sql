@@ -10,7 +10,7 @@ begin
   if not has_function_privilege('service_role','public.reserve_openwa_guardrail_send(uuid,uuid,text,text)','execute') then raise exception 'service_role cannot reserve OW-10 capacity'; end if;
   select pg_get_functiondef('public.reserve_openwa_guardrail_send(uuid,uuid,text,text)'::regprocedure) into v_reserve;
   select pg_get_functiondef('public.record_openwa_guardrail_outcome(uuid,uuid,text,text,boolean,text)'::regprocedure) into v_record;
-  if position('pg_advisory_xact_lock' in v_reserve)=0 or position('account_id = p_account_id' in v_reserve)=0 then raise exception 'OW-10 reservation is not atomic/account scoped'; end if;
+  if position('pg_advisory_xact_lock' in v_reserve)=0 or v_reserve !~ 'account_id[[:space:]]*=[[:space:]]*p_account_id' then raise exception 'OW-10 reservation is not atomic/account scoped'; end if;
   if position('manual_paused' in v_reserve)=0 or position('warmup_until' in v_reserve)=0 or position('first_touch_daily_cap' in v_reserve)=0 or position('minimum_interval_ms' in v_reserve)=0 then raise exception 'OW-10 required policy controls missing'; end if;
   if position('failure_rate_threshold' in v_record)=0 or position('circuit_open_until' in v_record)=0 then raise exception 'OW-10 failure circuit breaker missing'; end if;
   raise notice 'OW-10 OpenWA guardrail smoke passed';

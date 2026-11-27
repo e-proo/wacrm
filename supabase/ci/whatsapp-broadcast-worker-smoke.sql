@@ -1,3 +1,4 @@
+BEGIN;
 -- Durable queue schema, SQL lease and privilege smoke; never dispatches a message.
 DO $$
 DECLARE v_rls boolean;
@@ -51,3 +52,4 @@ BEGIN
     RAISE EXCEPTION 'Frozen Meta media header missing';
   END IF;
 END $$;
+ROLLBACK;
