@@ -30,7 +30,9 @@ describe('FIX-02 readiness API',()=>{
   vi.stubEnv('WACRM_INBOX_CANONICAL_INGRESS','test_only')
   expect((await POST(req('',{},revoke))).status).toBe(403)
   vi.stubEnv('WACRM_INBOX_CANONICAL_INGRESS','off');vi.stubEnv('WACRM_INBOX_ACTIONS','test_only')
-  ()=>a
+  expect((await POST(req('',{},revoke))).status).toBe(403)
+  vi.stubEnv('WACRM_INBOX_ACTIONS','off');vi.stubEnv('WACRM_OPENWA_DURABLE_INTAKE','test_only')
+  expect((await POST(req('',{},revoke))).status).toBe(403);expect(mock.rpc).not.toHaveBeenCalled()
  })
  it('passes exact epoch and rejects stale or busy revocation without leaking internal errors',async()=>{
   mock.rpc.mockResolvedValueOnce({data:{state:'revoked'},error:null})
