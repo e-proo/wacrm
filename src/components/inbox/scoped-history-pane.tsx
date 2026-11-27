@@ -1,8 +1,10 @@
 'use client'
 import { useEffect,useLayoutEffect,useRef,useState } from 'react'
 import { useLocale,useTranslations } from 'next-intl'
-import { Check,CheckCheck,Clock,FileText,Reply,XCircle } from 'lucide-react'
+import { Check,CheckCheck,Clock,FileText,Reply,XCircle,Copy,SmilePlus } from 'lucide-react'
 import { ReplyQuote } from './reply-quote'
+import {Popover,PopoverTrigger,PopoverContent} from '@/components/ui/popover'
+import {toast} from 'sonner'
 import { conversationDay,quotePreview } from '@/lib/inbox/scoped-conversation-model'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -13,7 +15,8 @@ import type { InboxContext,ScopedRow } from '@/lib/inbox/scoped-list-model'
 type Anchor={bottom:boolean;id:string|null;offset:number;top:number}
 type MessageActions={canReply:boolean;canRead:boolean;canReact:boolean;onReply:(m:HistoryMessage)=>void;onNative:(kind:'provider_read'|'reaction',m:HistoryMessage,emoji?:string)=>void;busy:boolean}
 function Message({message,quote,actions,onJump}:{message:HistoryMessage;quote:HistoryMessage|undefined;actions?:MessageActions;onJump:(id:string)=>void}){
- const t=useTranslations('Inbox.scoped'),locale=useLocale(),incoming=message.sender_type==='customer'
+ const t=useTranslations('Inbox.scoped'),a=useTranslations('Inbox.actions'),locale=useLocale(),incoming=message.sender_type==='customer'
+ const [picker,setPicker]=useState(false),[touchOpen,setTouchOpen]=useState(false)
  const time=message.created_at?new Date(message.created_at):null
  const hold=useRef<{timer:ReturnType<typeof setTimeout>;x:number;y:number}|null>(null)
  const cancelHold=()=>{if(hold.current){clearTimeout(hold.current.timer);hold.current=null}}
@@ -22,29 +25,28 @@ function Message({message,quote,actions,onJump}:{message:HistoryMessage;quote:Hi
  const deliveryLabels:Record<string,string>={sending:t('actionStatusSending'),sent:t('actionStatusSent'),delivered:t('actionStatusDelivered'),read:t('actionStatusRead'),replied:t('actionStatusReplied'),failed:t('actionStatusFailed')}
  const deliveryLabel=deliveryLabels[message.status]??t('actionStatusUnknown')
  return <div data-message-id={message.id} tabIndex={-1}
-  onPointerDown={e=>{if(e.pointerType!=='touch'||!actions?.canReply||actions.busy||(e.target as HTMLElement).closest('button,a,input,video,audio'))return;cancelHold();hold.current={x:e.clientX,y:e.clientY,timer:setTimeout(()=>{hold.current=null;actions.onReply(message)},550)}}}
+  onPointerDown={e=>{if(e.pointerType!=='touch'||!actions?.canReply||actions.busy||(e.target as HTMLElement).closest('button,a,input,video,audio'))return;cancelHold();hold.current={x:e.clientX,y:e.clientY,timer:setTimeout(()=>{hold.current=null;setTouchOpen(true);actions.onReply(message)},550)}}}
   onPointerMove={e=>{if(hold.current&&(Math.abs(e.clientX-hold.current.x)>10||Math.abs(e.clientY-hold.current.y)>10))cancelHold()}}
-  onPointerUp={cancelHold} onPointerCancel={cancelHold} onPointerLeave={cancelHold} className={cn('group/message flex scroll-m-4 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring',incoming?'justify-start':'justify-end')}>
-  <div className={cn('max-w-[88%] min-w-0 space-y-1 rounded-2xl border border-border/60 px-3 py-2 shadow-sm sm:max-w-[72%]',incoming?'rounded-ss-sm bg-card':'rounded-ee-sm bg-primary/10')}>
-   {message.reply_to_message_id&&(quote?<button type="button" className="block w-full min-w-0 text-start focus-visible:ring-2 focus-visible:ring-ring" onClick={()=>onJump(quote.id)}><ReplyQuote authorLabel={t(quote.sender_type==='customer'?'incoming':'outgoing')} preview={quotePreview(quote,t('replyNotLoaded'))}/></button>:<ReplyQuote authorLabel={t('reply')} preview={t('replyNotLoaded')}/> )}
-   {message.content_text&&<p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm" dir="auto">{message.content_text}</p>}
+  onPointerUp={cancelHold} onPointerCancel={cancelHold} onPointerLeave={cancelHold} className={cn('flex w-full scroll-m-4 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring',incoming?'justify-start':'justify-end')}>
+  <div className="group/message relative min-w-0 max-w-[85%] sm:max-w-[75%]"><div className={cn('relative min-w-0 space-y-1 rounded-2xl px-3 py-2',incoming?'rounded-es-md bg-muted text-foreground':'rounded-ee-md bg-primary text-primary-foreground')}>
+   {message.reply_to_message_id&&(quote?<button type="button" className="block w-full min-w-0 text-start focus-visible:ring-2 focus-visible:ring-ring" onClick={()=>onJump(quote.id)}><ReplyQuote authorLabel={t(quote.sender_type==='customer'?'incoming':'outgoing')} preview={quotePreview(quote,t('replyNotLoaded'))} onPrimary={!incoming}/></button>:<ReplyQuote authorLabel={t('reply')} preview={t('replyNotLoaded')} onPrimary={!incoming}/> )}
+   {message.content_text&&message.content_type!=='document'&&<p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm" dir="auto">{message.content_text}</p>}
    {message.media_url?<div className="min-w-0 space-y-2">
-    {message.content_type==='image'&&<a href={message.media_url} target="_blank" rel="noopener noreferrer" className="block rounded-lg focus-visible:ring-2 focus-visible:ring-ring">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={message.media_url} loading="lazy" alt={t('actionImagePreview')} className="max-h-72 max-w-full rounded-lg object-contain" /></a>}
-    {message.content_type==='video'&&<video src={message.media_url} preload="none" controls playsInline aria-label={t('actionVideoPreview')} className="max-h-64 max-w-full rounded-lg" />}
+    {message.content_type==='image'&&<a href={message.media_url} target="_blank" rel="noopener noreferrer" className="block rounded-lg focus-visible:ring-2 focus-visible:ring-ring">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={message.media_url} loading="lazy" alt={t('actionImagePreview')} className="max-h-64 max-w-full sm:max-w-60 rounded-lg object-contain" /></a>}
+    {message.content_type==='video'&&<video src={message.media_url} preload="none" controls playsInline aria-label={t('actionVideoPreview')} className="max-h-64 max-w-full rounded-lg sm:max-w-60" />}
     {(message.content_type==='audio'||message.media_type?.startsWith('audio/'))&&<audio src={message.media_url} preload="none" controls aria-label={t('actionAudioPreview')} className="w-full max-w-full" />}
     <a href={message.media_url} target="_blank" rel="noopener noreferrer" className={cn('inline-flex max-w-full items-center gap-2 break-all text-xs font-medium text-primary underline',message.content_type==='document'&&'rounded-lg bg-background/70 p-3 no-underline')} >{message.content_type==='document'&&<FileText className="size-5 shrink-0"/>}{message.content_type==='document'?(message.content_text||t('actionMedia_document')):t('openMedia')}</a>
    </div>:message.has_media?<p className="text-xs text-muted-foreground">{t('mediaUnavailable')}</p>:!message.content_text?<p className="text-xs text-muted-foreground">[{message.content_type}]</p>:null}
    {!!message.reactions.length&&<div className="flex flex-wrap gap-1">{message.reactions.map(r=><span key={r.emoji} className={cn('rounded-full border px-1.5 text-xs',r.mine?'border-primary bg-primary/10':'border-border bg-muted')}>{r.emoji} {r.count}</span>)}</div>}
-   <div className="flex flex-wrap justify-end gap-2 text-[10px] text-muted-foreground"><span>{time&&!Number.isNaN(time.getTime())?new Intl.DateTimeFormat(locale,{hour:'2-digit',minute:'2-digit'}).format(time):''}</span>{!incoming&&<span className={cn('rounded px-1',message.status==='failed'?'text-destructive':'text-muted-foreground')} aria-label={t('actionDeliveryStatus')+': '+deliveryLabel} title={deliveryLabel}><span className="inline-flex items-center gap-1">{message.status==='sending'?<Clock className="size-3"/>:message.status==='failed'?<XCircle className="size-3"/>:message.status==='sent'?<Check className="size-3"/>:['delivered','read'].includes(message.status)?<CheckCheck className={cn('size-3',message.status==='read'&&'text-blue-500')}/>:null}{deliveryLabel}</span></span>}</div>
-   {actions&&(actions.canReply||actions.canRead||actions.canReact)&&<div role="group" aria-label={t('actionMessageActions')} className="flex flex-wrap items-center justify-end gap-1 text-xs sm:opacity-0 sm:group-hover/message:opacity-100 sm:group-focus-within/message:opacity-100 [@media(hover:none)]:opacity-100">
-    {actions.canReply&&<Button type="button" size="sm" variant="ghost" className="min-h-11" disabled={actions.busy} onClick={()=>actions.onReply(message)}><Reply className="size-4"/>{t('reply')}</Button>}
-    {incoming&&actions.canRead&&<Button type="button" size="sm" variant="ghost" className="min-h-11" disabled={actions.busy} onClick={()=>actions.onNative('provider_read',message)}>{t('actionProviderRead')}</Button>}
-    {actions.canReact&&<>
-     <Button type="button" size="sm" variant="ghost" className="min-h-11" disabled={actions.busy} onClick={()=>actions.onNative('reaction',message,'👍')} aria-label={t('actionReact')}>👍</Button>
-     <Button type="button" size="sm" variant="ghost" className="min-h-11" disabled={actions.busy} onClick={()=>actions.onNative('reaction',message,'❤️')} aria-label={t('actionReactHeart')}>❤️</Button>
-     {message.reactions.some(r=>r.mine)&&<Button type="button" size="sm" variant="ghost" className="min-h-11" disabled={actions.busy} onClick={()=>actions.onNative('reaction',message,'')}>{t('actionRemoveReaction')}</Button>}
-    </>}
+   <div className={cn('mt-1 flex flex-wrap items-center gap-1 text-[10px]',incoming?'justify-start text-muted-foreground':'justify-end text-primary-foreground/70')}><span>{time&&!Number.isNaN(time.getTime())?new Intl.DateTimeFormat(locale,{hour:'2-digit',minute:'2-digit'}).format(time):''}</span>{!incoming&&<span className={cn('rounded px-1',message.status==='failed'?'text-red-300':'text-primary-foreground/70')} aria-label={t('actionDeliveryStatus')+': '+deliveryLabel} title={deliveryLabel}><span className="inline-flex items-center gap-1">{message.status==='sending'?<Clock className="size-3"/>:message.status==='failed'?<XCircle className="size-3"/>:message.status==='sent'?<Check className="size-3"/>:['delivered','read'].includes(message.status)?<CheckCheck className={cn('size-3',message.status==='read'&&'text-blue-500')}/>:null}<span className="sr-only">{deliveryLabel}</span></span></span>}</div>
+  </div>
+   {actions&&(actions.canReply||actions.canRead||actions.canReact)&&<div role="group" aria-label={t('actionMessageActions')} className={cn('absolute -top-3 z-10 flex min-h-7 items-center gap-0.5 rounded-full border border-border bg-popover/95 px-1 text-popover-foreground shadow-md backdrop-blur-sm transition-opacity',incoming?'start-3':'end-3',touchOpen||picker?'opacity-100':'opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100 [@media(hover:none)]:opacity-100')}>
+    {actions.canReact&&<Popover open={picker} onOpenChange={setPicker}><PopoverTrigger disabled={actions.busy} className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-muted" aria-label={t('actionReact')}><SmilePlus className="size-3.5"/></PopoverTrigger><PopoverContent className="flex w-auto gap-1 p-1.5">{['👍','❤️','😂','😮','😢','🙏',...(message.reactions.some(r=>r.mine)?['']:[])].map(emoji=><button type="button" key={emoji} disabled={actions.busy} className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-muted" aria-label={emoji?a('reactWith',{emoji}):t('actionRemoveReaction')} onClick={()=>{actions.onNative('reaction',message,emoji);setPicker(false);setTouchOpen(false)}}>{emoji||'×'}</button>)}</PopoverContent></Popover>}
+    {actions.canReply&&<button type="button" className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-muted" disabled={actions.busy} onClick={()=>{actions.onReply(message);setTouchOpen(false)}} aria-label={t('reply')} title={t('reply')}><Reply className="size-3.5"/></button>}
+    {message.content_text&&<button type="button" className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-muted" aria-label={a('copyText')} title={a('copyText')} onClick={()=>{void navigator.clipboard.writeText(message.content_text??'').then(()=>toast.success(a('copied'))).catch(()=>toast.error(a('copyFailed')));setTouchOpen(false)}}><Copy className="size-3.5"/></button>}
+    {incoming&&actions.canRead&&<button type="button" className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-muted" disabled={actions.busy} onClick={()=>actions.onNative('provider_read',message)} aria-label={t('actionProviderRead')} title={t('actionProviderRead')}><CheckCheck className="size-3.5"/></button>}
    </div>}
+
   </div>
  </div>
 }
@@ -92,8 +94,8 @@ export function ScopedHistoryPane({row,ctx,revision,onRefresh,actions}:{row:Scop
    {row.scope==='active'&&history.token&&<Button size="sm" variant="outline" className="min-h-11" disabled={reading||history.busy||history.error} onClick={()=>void read()}>{reading?t('loading'):t('markRead')}</Button>}
   </div>
   {readError&&<p role="alert" className="px-4 py-2 text-xs text-destructive">{t('readFailed')}</p>}
-  <div ref={scroll} role="log" aria-label={t('actionMessageHistory')} aria-live="off" className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted/30 p-3 sm:p-5" aria-busy={history.busy}>
-   <div className="mx-auto max-w-3xl space-y-3">
+  <div ref={scroll} role="log" aria-label={t('actionMessageHistory')} aria-live="off" className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-background bg-[url('/inbox-doodle.svg')] bg-repeat p-4" aria-busy={history.busy}>
+   <div className="space-y-2">
     {history.cursor&&<div className="text-center"><Button size="sm" variant="outline" disabled={history.busy} onClick={history.more}>{t('olderMessages')}</Button></div>}
     {history.busy&&<p role="status" className="text-center text-xs text-muted-foreground">{t('loading')}</p>}
     {history.error&&<div role="alert" className="space-y-2 text-center text-sm text-destructive"><p>{t('error')}</p><Button onClick={history.retry} variant="outline">{t('retry')}</Button></div>}
@@ -101,7 +103,7 @@ export function ScopedHistoryPane({row,ctx,revision,onRefresh,actions}:{row:Scop
     {chronological.map((message,index)=>{
      const day=conversationDay(message.created_at,locale)
      const previous=index?conversationDay(chronological[index-1].created_at,locale):null
-     return <div key={message.id} className="space-y-3">{day&&day!==previous&&<div className="sticky top-0 z-10 flex justify-center"><span className="rounded-full border border-border/70 bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-sm">{day}</span></div>}<Message message={message} quote={message.reply_to_message_id?byId.get(message.reply_to_message_id):undefined} actions={actions} onJump={jump}/></div>
+     return <div key={message.id} className="space-y-2">{day&&day!==previous&&<div className="flex justify-center"><span className="rounded-full border border-border/70 bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-sm">{day}</span></div>}<Message message={message} quote={message.reply_to_message_id?byId.get(message.reply_to_message_id):undefined} actions={actions} onJump={jump}/></div>
     })}
    </div>
   </div>

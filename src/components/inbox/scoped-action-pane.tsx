@@ -1,8 +1,9 @@
 'use client'
 import {useEffect,useRef,useState} from 'react'
 import {useTranslations} from 'next-intl'
-import {AlertTriangle,Paperclip,RefreshCw,Send,ShieldCheck,X,Smile,Zap,LayoutTemplate} from 'lucide-react'
+import {AlertTriangle,Paperclip,RefreshCw,Send,ShieldCheck,X,Smile,Zap,LayoutTemplate,ImageIcon,Video,FileText,Plus,MessageSquareDashed} from 'lucide-react'
 import {Button} from '@/components/ui/button'
+import {DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuItem} from '@/components/ui/dropdown-menu'
 import {useInboxPages} from '@/lib/inbox/use-scoped-list'
 import {fetchInbox,validId,type Connection,type InboxContext,type ScopedRow} from '@/lib/inbox/scoped-list-model'
 import {uploadAccountMedia,deleteAccountMedia,MEDIA_MAX_BYTES_BY_KIND} from '@/lib/storage/upload-media'
@@ -50,9 +51,10 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   c=>c.channel_id===row.channel_id&&c.provider===row.provider,revision)
  const [policy,setPolicy]=useState<{key:string;capabilities:InboxCapabilities;seen:number}|null>(null)
  const [tick,setTick]=useState(0)
- const [mode,setMode]=useState<Mode>(()=>getScopedAttachment(draftKey)?'media':getScopedDraft(draftKey).mode)
+ const [mode,setMode]=useState<Mode>(()=>getScopedAttachment(draftKey)?'media':'text')
  const [text,setText]=useState(()=>getScopedDraft(draftKey).text)
  const [attachment,setAttachmentState]=useState<Attachment|null>(()=>getScopedAttachment(draftKey))
+ const fileInputs=useRef<Partial<Record<Attachment['kind'],HTMLInputElement|null>>>({})
  const [mediaKind,setMediaKind]=useState<Attachment['kind']>(()=>getScopedAttachment(draftKey)?.kind??'image')
  const setAttachment=(value:Attachment|null)=>{saveScopedAttachment(draftKey,value);setAttachmentState(value)}
  const [recording,setRecording]=useState(false)
@@ -110,7 +112,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  const enabled=Boolean(online&&c?.dispatch_enabled&&scope&&selected?.ready&&!selected.archived)
  const kindAllowed=mode==='text'?Boolean(c?.may_send_text&&!expired):mode==='media'?Boolean(c?.may_send_media&&!expired&&c.media_kinds.includes(mediaKind)):mode==='template'?Boolean(c?.may_send_template):Boolean(c?.may_send_interactive&&!expired)
  const replyAllowed=!reply||Boolean(c?.may_reply&&sameReplyLane(reply,row.conversation_id,row.channel_id,row.provider))
- const canSubmit=Boolean(enabled&&kindAllowed&&replyAllowed&&!busy&&!uploading&&!recording&&!attempt&&(mode==='text'?text.trim().length>0:mode==='media'?attachment&&attachment.kind===mediaKind:mode==='template'?template:validateInteractivePayload(interactive).ok))
+ const canSubmit=Boolean(canDraft&&enabled&&kindAllowed&&replyAllowed&&!busy&&!uploading&&!recording&&!attempt&&(mode==='text'?text.trim().length>0:mode==='media'?attachment&&attachment.kind===mediaKind:mode==='template'?template:validateInteractivePayload(interactive).ok))
  const persist=(value:Attempt|null)=>{
   setAttempt(value)
   try{if(value)sessionStorage.setItem(key,JSON.stringify(value));else sessionStorage.removeItem(key)}catch{/* Optional storage; no content persisted */}
@@ -177,13 +179,16 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  async function discard(){
   if(!attachment||busy||attempt||uploadLock.current||recording||sendLock.current)return
   const previous=attachment
-  setAttachment(null);setCaption('');setFileError(null)
+  setAttachment(null);setCaption('');setFileError(null);setMode('text')
   await deleteAccountMedia('chat-media',previous.path).catch(()=>{})
  }
  if(row.scope!=='active'||!row.channel_id)return null
  const isMeta=row.provider==='meta_cloud'
- const canAttach=Boolean(enabled&&c?.may_send_media&&!expired)
- return <section className="shrink-0 max-h-[min(55dvh,30rem)] space-y-2 overflow-y-auto overscroll-contain border-t border-border bg-card px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4" aria-label={t('actionTitle')}>
+ const canAttach=Boolean(canDraft&&enabled&&c?.may_send_media&&!expired)
+ const draftLocked=Boolean(attempt)||busy||uploading||recording
+ const iconClass='inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
+ const mediaOptions=[{kind:'image',Icon:ImageIcon,accept:'image/png,image/jpeg,image/webp'},{kind:'video',Icon:Video,accept:'video/mp4,video/3gpp'},{kind:'document',Icon:FileText,accept:'.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt'},{kind:'audio',Icon:FileText,accept:'audio/ogg,audio/mpeg'}] as const
+ return <section className="shrink-0 max-h-[min(55dvh,30rem)] space-y-2 overflow-y-auto overscroll-contain border-t border-border bg-card p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]" aria-label={t('actionTitle')}>
   <div className="flex flex-wrap items-center justify-between gap-2">
    <div className="flex min-w-0 items-center gap-2 text-xs font-medium"><ShieldCheck className="size-4 text-muted-foreground"/>{t('actionTitle')}</div>
    <label className="flex min-w-0 items-center gap-2 text-xs">
@@ -202,43 +207,58 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   {list.busy&&<p className="text-xs text-muted-foreground">{t('policyChecking')}</p>}
   {list.error&&<p role="alert" className="text-xs text-destructive">{t('policyUnavailable')}</p>}
   {!list.busy&&!list.error&&connections.length===0&&<p className="text-xs text-muted-foreground">{t('actionNoSender')}</p>}
-  {selectedConnection&&!c&&<p role="status" className="text-xs text-muted-foreground">{t('policyChecking')}</p>}
+  {selectedConnection&&!c&&<div className="flex items-center gap-2 text-xs text-muted-foreground"><span role="status">{t('policyChecking')}</span><Button type="button" variant="ghost" size="sm" onClick={onRefresh} aria-label={t('retry')}><RefreshCw className="size-3"/></Button></div>}
   {c&&<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
    {isMeta&&<span className="rounded-full bg-muted px-2 py-1 tabular-nums">{windowInfo?.open?t('policyWindowOpen',{time:new Date(remaining).toISOString().slice(11,19)}):t('policyWindowClosed')}</span>}
-   {c.blocked_reason&&<span role="status" className="rounded-md border border-border px-2 py-0.5">{t('policyDenied')}: {c.blocked_reason}</span>}
+   {c.blocked_reason&&<span role="status" className="rounded-md border border-border px-2 py-0.5">{t('policyDenied')}: {c.blocked_reason}</span>}{c.blocked_reason&&row.provider==='openwa'&&<a href="/settings?tab=whatsapp" className="text-primary underline">{t('actionChooseSender')}</a>}
    {!c.dispatch_enabled&&<span>{t('actionDisabled')}</span>}
    {c.dispatch_enabled&&c.ready&&<span>{t('actionVerified')}</span>}
   </div>}
   {reply&&<ReplyQuote authorLabel={t('reply')+' · '+(reply.sender_type==='customer'?(row.contact.name||row.contact.phone):t('outgoing'))} preview={quotePreview(reply,t('replyNotLoaded'))} onDismiss={onClearReply}/>}
-  <div role="group" aria-label={t('actionType')} className="flex flex-wrap items-center gap-1">
-   <Button type="button" size="sm" variant={mode==='text'?'secondary':'ghost'} disabled={!canDraft||Boolean(attempt)||busy||uploading||recording||Boolean(attachment)} onClick={()=>setMode('text')}>{t('policyText')}</Button>
-   <Button type="button" size="sm" variant={mode==='media'?'secondary':'ghost'} disabled={!canAttach||Boolean(attempt)||busy||uploading||recording} onClick={()=>setMode('media')} aria-label={t('policyMedia')}><Paperclip className="size-4"/>{t('policyMedia')}</Button>
-   <Button type="button" size="sm" variant="ghost" disabled={!canDraft||Boolean(attempt)||busy||uploading||recording||Boolean(attachment)} aria-label={composerT('quickReplies')} onClick={()=>setQuickReplyPicker(true)}><Zap className="size-4"/></Button>
-   {mode==='text'&&<Button type="button" size="sm" variant="ghost" disabled={!canDraft||Boolean(attempt)||busy} aria-label={t('actionEmoji')} aria-expanded={emojiOpen} onClick={()=>setEmojiOpen(v=>!v)}><Smile className="size-4"/></Button>}
-   {isMeta&&<Button type="button" size="sm" variant={mode==='template'?'secondary':'ghost'} disabled={!enabled||!c?.may_send_template||Boolean(attempt)||busy||uploading||recording||Boolean(attachment)} onClick={()=>setTemplatePicker(true)}><LayoutTemplate className="size-4"/>{t('policyTemplate')}</Button>}
-   {isMeta&&<Button type="button" size="sm" variant={mode==='interactive'?'secondary':'ghost'} disabled={!enabled||!c?.may_send_interactive||expired||Boolean(attempt)||busy||uploading||recording||Boolean(attachment)} onClick={()=>setMode('interactive')}>{t('policyInteractive')}</Button>}
-  </div>
-  {mode==='text'&&emojiOpen&&<div role="group" aria-label={t('actionEmoji')} className="flex flex-wrap gap-1">{['😀','😊','👍','❤️','🙏','🎉','✅','👋'].map(emoji=><Button type="button" key={emoji} size="sm" variant="ghost" disabled={!canDraft||Boolean(attempt)||busy} onClick={()=>{setText(v=>(v+emoji).slice(0,4096));setEmojiOpen(false);textarea.current?.focus()}}>{emoji}</Button>)}</div>}
-  {mode==='text'&&<div className="flex items-end gap-2"><textarea ref={textarea} rows={2} maxLength={4096} value={text} onChange={e=>setText(e.target.value)} disabled={!canDraft||Boolean(attempt)||busy}
-   onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&(e.ctrlKey||e.metaKey||window.matchMedia('(pointer:fine)').matches)){e.preventDefault();void send()}}}
-   className="min-w-0 flex-1 resize-none rounded-2xl border border-border bg-background px-4 py-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
-   placeholder={t('actionTextPlaceholder')} dir="auto" aria-label={t('actionTextPlaceholder')}/><Button type="button" onClick={()=>void send()} disabled={!canSubmit} aria-label={t('actionSend')} className="min-h-11 min-w-11 shrink-0 rounded-full px-3"><Send className="size-4 rtl:rotate-180"/></Button></div>}
-  {mode==='media'&&<div className="flex flex-wrap items-center gap-2">
-   <Paperclip className="size-4 text-muted-foreground"/>
-   <select className="h-9 rounded-lg border border-border bg-background px-2 text-xs" aria-label={t('actionMediaKind')} value={mediaKind} disabled={Boolean(attempt)||uploading||busy||recording||Boolean(attachment)} onChange={e=>setMediaKind(e.target.value as Attachment['kind'])}>
-    {(['image','video','document','audio'] as const).map(k=><option key={k} value={k} disabled={!c?.media_kinds.includes(k)}>{t('actionMedia_'+k)}</option>)}
-   </select>
-   <input type="file" className="min-h-11 min-w-0 flex-1 text-xs file:me-2 file:rounded-md file:border file:border-border file:bg-muted file:px-2 file:py-1" disabled={!canAttach||uploading||busy||recording||Boolean(attempt)}
-    accept={mediaKind==='image'?'image/png,image/jpeg,image/webp':mediaKind==='video'?'video/mp4,video/3gpp':mediaKind==='audio'?'audio/ogg,audio/mpeg':'.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt'}
-    aria-label={t('actionChooseFile')} onChange={e=>{void stage(e.currentTarget.files?.[0]??null);e.currentTarget.value=''}}/>
-   <ScopedVoiceRecorder key={selectedConnection??'none'} disabled={!canAttach||!c?.media_kinds.includes('audio')||Boolean(attempt)||busy||Boolean(attachment)||(uploading&&!recording)} onBusyChange={setRecording} onFile={file=>stage(file,'audio')}/>
-   {attachment&&<div className="w-full space-y-2 rounded-xl border border-border p-2">
-    {attachment.kind==='image'&&<a href={attachment.url} target="_blank" rel="noopener noreferrer">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={attachment.url} alt={attachment.filename} className="max-h-28 max-w-full rounded-lg object-contain"/></a>}
-    {attachment.kind==='video'&&<video src={attachment.url} controls playsInline preload="none" className="max-h-28 max-w-full rounded-lg"/>}
-    {attachment.kind==='audio'&&<audio src={attachment.url} controls preload="none" className="w-full"/>}
-    <div className="flex items-center gap-2 text-xs"><span className="min-w-0 flex-1 truncate" dir="auto">{attachment.filename}</span><Button variant="ghost" size="sm" disabled={Boolean(attempt)||busy||uploading||recording} onClick={()=>void discard()} aria-label={t('actionRemoveFile')}><X className="size-4"/></Button></div>
+  {/* Original composer layout: compact attachment menu, more menu, one text row.
+      Each choice stages a file only; scoped send admission remains authoritative. */}
+  {mediaOptions.map(({kind,accept})=><input key={kind} ref={el=>{fileInputs.current[kind]=el}} type="file" accept={accept} className="hidden" aria-label={t('actionMedia_'+kind)} disabled={!canAttach||draftLocked||Boolean(attachment)||!c?.media_kinds.includes(kind)} onChange={e=>{void stage(e.currentTarget.files?.[0]??null,kind);e.currentTarget.value=''}}/>)}
+  <div className="flex flex-wrap items-end gap-2">
+   <div className={recording?'hidden':'contents'}>
+    {!attachment&&mode==='text'&&<>
+     <DropdownMenu>
+      <DropdownMenuTrigger className={iconClass} disabled={!canAttach||draftLocked} aria-label={composerT('attachMedia')} title={composerT('attachMedia')}><Paperclip className="size-4"/></DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top" className="w-48 border-border bg-popover">
+       {mediaOptions.map(({kind,Icon})=><DropdownMenuItem key={kind} disabled={!c?.media_kinds.includes(kind)} onClick={()=>fileInputs.current[kind]?.click()}><Icon className="size-4"/>{t('actionMedia_'+kind)}</DropdownMenuItem>)}
+      </DropdownMenuContent>
+     </DropdownMenu>
+     <DropdownMenu>
+      <DropdownMenuTrigger className={iconClass} disabled={!canDraft||draftLocked} aria-label={composerT('moreActions')} title={composerT('moreActions')}><Plus className="size-4"/></DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top" className="w-48 border-border bg-popover">
+       <DropdownMenuItem onClick={()=>setQuickReplyPicker(true)}><Zap className="size-4"/>{composerT('quickReplies')}</DropdownMenuItem>
+       {isMeta&&<DropdownMenuItem disabled={!enabled||!c?.may_send_interactive||expired} onClick={()=>setMode('interactive')}><MessageSquareDashed className="size-4"/>{t('policyInteractive')}</DropdownMenuItem>}
+      </DropdownMenuContent>
+     </DropdownMenu>
+     {isMeta&&<Button type="button" variant="ghost" size="sm" className={iconClass} disabled={!enabled||!c?.may_send_template||draftLocked} onClick={()=>setTemplatePicker(true)} aria-label={t('policyTemplate')} title={t('policyTemplate')}><LayoutTemplate className="size-4"/></Button>}
+     <Button type="button" variant="ghost" size="sm" className={iconClass} disabled={!canDraft||draftLocked} aria-label={t('actionEmoji')} aria-expanded={emojiOpen} onClick={()=>setEmojiOpen(v=>!v)}><Smile className="size-4"/></Button>
+    </>}
+   </div>
+   {!attachment&&mode==='text'&&<ScopedVoiceRecorder key={selectedConnection??'none'} compact disabled={!canAttach||!c?.media_kinds.includes('audio')||Boolean(attempt)||busy||(uploading&&!recording)} onBusyChange={setRecording} onFile={file=>stage(file,'audio')}/>}
+   {mode==='text'&&!recording&&<div className="flex min-w-[min(100%,12rem)] flex-1 items-end gap-2">
+    <textarea ref={textarea} rows={1} maxLength={4096} value={text} onChange={e=>{setText(e.target.value);e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,96)+'px'}} disabled={!canDraft||draftLocked}
+     onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&(e.ctrlKey||e.metaKey||window.matchMedia('(pointer:fine)').matches)){e.preventDefault();void send()}}}
+     className="min-w-0 flex-1 resize-none rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50"
+     placeholder={t('actionTextPlaceholder')} dir="auto" aria-label={t('actionTextPlaceholder')}/>
+    <Button type="button" size="sm" onClick={()=>void send()} disabled={!canSubmit} aria-label={t('actionSend')} className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"><Send className="size-4 rtl:rotate-180"/></Button>
    </div>}
-   {attachment&&attachment.kind!=='audio'&&<input className="min-h-11 w-full rounded-lg border border-border bg-background px-3 py-2 text-base sm:text-sm" value={caption} disabled={Boolean(attempt)||busy||recording} maxLength={c?.caption_limit??1024} onChange={e=>setCaption(e.target.value)} placeholder={t('actionCaption')} aria-label={t('actionCaption')}/>}
+  </div>
+  {mode==='text'&&emojiOpen&&!recording&&<div role="group" aria-label={t('actionEmoji')} className="flex flex-wrap gap-1">{['😀','😊','👍','❤️','🙏','🎉','✅','👋'].map(emoji=><Button type="button" key={emoji} size="sm" variant="ghost" disabled={!canDraft||draftLocked} onClick={()=>{setText(v=>(v+emoji).slice(0,4096));setEmojiOpen(false);textarea.current?.focus()}}>{emoji}</Button>)}</div>}
+  {mode==='media'&&attachment&&<div className="rounded-xl border border-border bg-muted/40 p-3">
+   <div className="flex items-start gap-3"><div className="min-w-0 flex-1">
+    {attachment.kind==='image'&&<a href={attachment.url} target="_blank" rel="noopener noreferrer">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={attachment.url} alt={attachment.filename} className="max-h-40 max-w-full rounded-lg object-cover"/></a>}
+    {attachment.kind==='video'&&<video src={attachment.url} controls playsInline preload="none" className="max-h-40 max-w-full rounded-lg"/>}
+    {attachment.kind==='audio'&&<audio src={attachment.url} controls preload="none" className="w-full"/>}
+    {attachment.kind==='document'&&<div className="flex items-center gap-2 text-sm"><FileText className="size-5 shrink-0 text-muted-foreground"/><span className="truncate" dir="auto">{attachment.filename}</span></div>}
+   </div><Button type="button" variant="ghost" size="sm" disabled={draftLocked} onClick={()=>void discard()} aria-label={t('actionRemoveFile')}><X className="size-4"/></Button></div>
+   <div className="mt-2 flex items-end gap-2">
+    {attachment.kind!=='audio'&&<input className="min-w-0 flex-1 rounded-xl border border-border bg-muted px-4 py-2.5 text-sm outline-none focus:border-primary/50" value={caption} disabled={draftLocked} maxLength={c?.caption_limit??1024} onChange={e=>setCaption(e.target.value)} placeholder={t('actionCaption')} aria-label={t('actionCaption')}/>}
+    <Button type="button" size="sm" className="ms-auto h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90" onClick={()=>void send()} disabled={!canSubmit} aria-label={t('actionSend')}><Send className="size-4 rtl:rotate-180"/></Button>
+   </div>
   </div>}
   {fileError&&<p role="alert" className="text-xs text-destructive">{fileError}</p>}
   {mode==='template'&&isMeta&&<p className="text-xs text-muted-foreground" dir="auto">{template?template.name+' · '+template.language:t('actionSelectTemplate')}</p>}
@@ -251,7 +271,8 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   {containsUnsentDraft({mode,text,caption})&&!attempt&&<p role="status" className="text-xs text-muted-foreground">{t('actionDraftTabOnly')}</p>}
   <div className="flex items-center justify-between gap-2">
    <p className="max-w-[75%] text-[11px] text-muted-foreground">{!selectedConnection?t('actionSelectFirst'):c?.blocked_reason?t('policyDenied')+' · '+c.blocked_reason:!c?.dispatch_enabled?t('actionDisabled'):t('actionRecheck')}</p>
-   {mode!=='text'&&<Button size="sm" onClick={()=>void send()} disabled={!canSubmit} className="min-h-11 min-w-11 gap-2"><Send className="size-4 rtl:rotate-180"/>{busy?t('loading'):t('actionSend')}</Button>}
+   {(mode==='template'||mode==='interactive')&&<Button type="button" size="sm" variant="ghost" disabled={draftLocked} onClick={()=>{setMode('text');setTemplate(null)}} aria-label={composerT('cancel')}><X className="size-4"/></Button>}
+   {(mode==='template'||mode==='interactive')&&<Button size="sm" onClick={()=>void send()} disabled={!canSubmit} className="min-h-11 min-w-11 gap-2"><Send className="size-4 rtl:rotate-180"/>{busy?t('loading'):t('actionSend')}</Button>}
   </div>
   <TemplatePicker open={templatePicker} onOpenChange={setTemplatePicker} onSelect={(selectedTemplate,values)=>{if(attachment||attempt||busy||recording||!enabled||!c?.may_send_template)return;setTemplate({name:selectedTemplate.name,language:selectedTemplate.language||'en_US',body:values.body,headerText:values.headerText,buttonParams:values.buttonParams});setMode('template')}}/>
   <QuickReplyPicker open={quickReplyPicker} onOpenChange={setQuickReplyPicker} onPick={qr=>{

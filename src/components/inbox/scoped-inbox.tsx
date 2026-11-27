@@ -197,10 +197,10 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
  }
  return <div className="relative flex h-full min-h-0 min-w-0">
   <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-  <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-2 py-2 sm:gap-3 sm:p-4">
-   <Button variant="ghost" size="icon-lg" className="min-h-11 min-w-11" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button>
-   <div aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 font-semibold text-primary">{(row.contact.name||row.contact.phone).slice(0,1).toUpperCase()}</div>
-   <div className="min-w-0 flex-1"><h2 ref={titleRef} tabIndex={-1} className="truncate rounded-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}{row.assigned_agent_name?' · '+row.assigned_agent_name:''}</p></div>
+  <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-3 sm:gap-3 sm:px-4">
+   <Button variant="ghost" size="icon-lg" className="min-h-11 min-w-11 lg:hidden" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button>
+   <div aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">{(row.contact.name||row.contact.phone).slice(0,1).toUpperCase()}</div>
+   <div className="min-w-0 flex-1"><h2 ref={titleRef} tabIndex={-1} className="truncate rounded-sm text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}{row.assigned_agent_name?' · '+row.assigned_agent_name:''}</p></div>
    <ProviderLabel provider={row.provider}/>
    <Button type="button" variant="outline" size="sm" className="min-h-11 shrink-0" onClick={()=>setContactOpen(v=>!v)} aria-expanded={contactOpen} aria-label={t('actionContactDetails')}><Info className="size-4"/><span className="hidden sm:inline">{t('actionContactDetails')}</span></Button>
   </div>

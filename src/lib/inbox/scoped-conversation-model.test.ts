@@ -36,6 +36,17 @@ describe('FIX-07 conversation presentation',()=>{
    expect(dict.Inbox.scoped.actionRecordingFailed).toBeTruthy()
   }
  })
+ it('restores legacy visual patterns without routing through the old composer or thread',()=>{
+  const composer=readFileSync('src/components/inbox/scoped-action-pane.tsx','utf8')
+  const history=readFileSync('src/components/inbox/scoped-history-pane.tsx','utf8')
+  expect(composer).toContain('DropdownMenuTrigger')
+  expect(composer).toContain('rounded-xl border border-border bg-muted')
+  expect(composer).not.toContain('<MessageComposer')
+  expect(history).toContain("bg-[url('/inbox-doodle.svg')]")
+  expect(history).toContain('bg-primary text-primary-foreground')
+  expect(history).toContain('absolute -top-3')
+  expect(history).toContain('submitScopedRead(row,ctx,')
+ })
  it('rejects a reply from any other conversation, channel or provider',()=>{
   const message={conversation_id:'p',channel_id:'c',provider:'openwa'} as HistoryMessage
   expect(sameReplyLane(message,'p','c','openwa')).toBe(true)
