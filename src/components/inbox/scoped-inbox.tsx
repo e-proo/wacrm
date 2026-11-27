@@ -19,6 +19,7 @@ import { ScopedOpenWAIntakeHealth } from './scoped-openwa-intake-health'
 import {Sheet,SheetContent,SheetHeader,SheetTitle,SheetDescription} from '@/components/ui/sheet'
 import {useBrowserOnline,scopedConnectivityNotice} from '@/lib/inbox/scoped-connectivity'
 import {clearAccountScopedDrafts} from '@/lib/inbox/scoped-draft-memory'
+import {clearAccountScopedAttachments} from '@/lib/inbox/scoped-attachment-memory'
 import {submitScopedAction,inspectScopedAction,type ScopedActionOutcome} from '@/lib/inbox/scoped-action-client'
 import type {HistoryMessage} from '@/lib/inbox/scoped-history-model'
 import { defaultFilters, listQuery, parseLocation, preferenceKey, readPreference, sameScope, selectExact, selectionHref, type Channel,type Connection,type Counts,type InboxContext,type InboxFilters,type InboxScope,type InboxSelection,type ScopedRow } from '@/lib/inbox/scoped-list-model'
@@ -166,7 +167,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
  const [nativeOutcome,setNativeOutcome]=useState<ScopedActionOutcome|null>(null)
  const locks=useRef(new Map<string,{key:string;state:ScopedActionOutcome['state']}>())
  async function nativeAction(kind:'provider_read'|'reaction',message:HistoryMessage,emoji=''){
-  if(nativeBusy||!online||!activeAction||selectedConnection!==activeAction.scope.connectionId||row.scope!=='active'||message.channel_id!==row.channel_id)return
+  if(nativeBusy||!online||!activeAction||selectedConnection!==activeAction.scope.connectionId||row.scope!=='active'||message.channel_id!==row.channel_id||message.conversation_id!==row.conversation_id||message.provider!==row.provider)return
   const {scope,capabilities}=activeAction
   if(!capabilities.dispatch_enabled||(kind==='provider_read'?!capabilities.may_read:!capabilities.may_react))return
   const identity=[scope.connectionId,scope.membershipId,message.id,kind,emoji].join(':')
@@ -252,7 +253,7 @@ function Workspace({ctx}:{ctx:InboxContext}){
  const latestSelected=useRef<string|null>(null)
  const restoringFocus=useRef(false)
  const online=useBrowserOnline()
- useEffect(()=>()=>clearAccountScopedDrafts({accountId:ctx.accountId,userId:ctx.userId}),[ctx.accountId,ctx.userId])
+ useEffect(()=>()=>{clearAccountScopedDrafts({accountId:ctx.accountId,userId:ctx.userId});clearAccountScopedAttachments({accountId:ctx.accountId,userId:ctx.userId})},[ctx.accountId,ctx.userId])
  const search=useDebounced(filters.search),company=useDebounced(filters.company)
  const effective={...filters,search,company}
  useEffect(()=>{

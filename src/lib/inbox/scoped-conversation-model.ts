@@ -8,7 +8,7 @@ export function conversationDay(value:string|null,locale:string):string|null{
  return Number.isFinite(date.getTime())?new Intl.DateTimeFormat(locale,{year:'numeric',month:'long',day:'numeric'}).format(date):null
 }
 export function quotePreview(message:Pick<HistoryMessage,'content_text'|'content_type'>,fallback:string){
- return (message.content_text?.trim()||('['+message.content_type+']')||fallback).slice(0,240)
+ return (message.content_text?.trim()||(message.content_type?'['+message.content_type+']':fallback)).slice(0,240)
 }
 export function metaWindow(c:InboxCapabilities|null,elapsedMs:number){
  if(c?.provider!=='meta_cloud')return null

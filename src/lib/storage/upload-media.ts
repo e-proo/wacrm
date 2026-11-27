@@ -94,6 +94,7 @@ export interface UploadAccountMediaResult {
 export async function uploadAccountMedia(
   bucket: string,
   file: File,
+  expected?: { accountId: string; userId: string },
 ): Promise<UploadAccountMediaResult> {
   const supabase = createClient();
 
@@ -101,7 +102,7 @@ export async function uploadAccountMedia(
     data: { user },
     error: userErr,
   } = await supabase.auth.getUser();
-  if (userErr || !user) {
+  if (userErr || !user || (expected && user.id !== expected.userId)) {
     throw new Error("Not signed in.");
   }
 
@@ -113,7 +114,7 @@ export async function uploadAccountMedia(
     .select("account_id")
     .eq("user_id", user.id)
     .maybeSingle();
-  if (profileErr || !profile?.account_id) {
+  if (profileErr || !profile?.account_id || (expected && profile.account_id !== expected.accountId)) {
     throw new Error("Could not resolve your account.");
   }
 

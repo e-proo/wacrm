@@ -415,6 +415,7 @@
       "actionThreadList": "채널 대화 목록",
       "actionNoActiveChannels": "확인된 활성 채널이 없습니다. 연결된 발신 세션을 확인하세요.",
       "actionMessageActions": "메시지 작업",
+      "actionRecordingFailed": "마이크 또는 음성 녹음을 사용할 수 없습니다.",
       "actionEmoji": "이모지",
       "actionMessageHistory": "이 채널의 메시지 기록",
       "actionStatusSending": "전송 중 또는 확인 대기",

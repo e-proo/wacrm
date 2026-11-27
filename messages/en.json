@@ -415,6 +415,7 @@
       "actionThreadList": "Channel conversation list",
       "actionNoActiveChannels": "No verified active channels. Check connected sending sessions.",
       "actionMessageActions": "Message actions",
+      "actionRecordingFailed": "Microphone or voice recording unavailable.",
       "actionEmoji": "Emoji",
       "actionMessageHistory": "Message history for this channel",
       "actionStatusSending": "Sending or pending reconciliation",

@@ -15,9 +15,16 @@ type MessageActions={canReply:boolean;canRead:boolean;canReact:boolean;onReply:(
 function Message({message,quote,actions,onJump}:{message:HistoryMessage;quote:HistoryMessage|undefined;actions?:MessageActions;onJump:(id:string)=>void}){
  const t=useTranslations('Inbox.scoped'),locale=useLocale(),incoming=message.sender_type==='customer'
  const time=message.created_at?new Date(message.created_at):null
+ const hold=useRef<{timer:ReturnType<typeof setTimeout>;x:number;y:number}|null>(null)
+ const cancelHold=()=>{if(hold.current){clearTimeout(hold.current.timer);hold.current=null}}
+ useEffect(()=>()=>{if(hold.current)clearTimeout(hold.current.timer)},[])
+ useEffect(()=>{if(!actions?.canReply||actions.busy){if(hold.current)clearTimeout(hold.current.timer);hold.current=null}},[actions?.canReply,actions?.busy])
  const deliveryLabels:Record<string,string>={sending:t('actionStatusSending'),sent:t('actionStatusSent'),delivered:t('actionStatusDelivered'),read:t('actionStatusRead'),replied:t('actionStatusReplied'),failed:t('actionStatusFailed')}
  const deliveryLabel=deliveryLabels[message.status]??t('actionStatusUnknown')
- return <div data-message-id={message.id} tabIndex={-1} className={cn('group/message flex scroll-m-4 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring',incoming?'justify-start':'justify-end')}>
+ return <div data-message-id={message.id} tabIndex={-1}
+  onPointerDown={e=>{if(e.pointerType!=='touch'||!actions?.canReply||actions.busy||(e.target as HTMLElement).closest('button,a,input,video,audio'))return;cancelHold();hold.current={x:e.clientX,y:e.clientY,timer:setTimeout(()=>{hold.current=null;actions.onReply(message)},550)}}}
+  onPointerMove={e=>{if(hold.current&&(Math.abs(e.clientX-hold.current.x)>10||Math.abs(e.clientY-hold.current.y)>10))cancelHold()}}
+  onPointerUp={cancelHold} onPointerCancel={cancelHold} onPointerLeave={cancelHold} className={cn('group/message flex scroll-m-4 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring',incoming?'justify-start':'justify-end')}>
   <div className={cn('max-w-[88%] min-w-0 space-y-1 rounded-2xl border border-border/60 px-3 py-2 shadow-sm sm:max-w-[72%]',incoming?'rounded-ss-sm bg-card':'rounded-ee-sm bg-primary/10')}>
    {message.reply_to_message_id&&(quote?<button type="button" className="block w-full min-w-0 text-start focus-visible:ring-2 focus-visible:ring-ring" onClick={()=>onJump(quote.id)}><ReplyQuote authorLabel={t(quote.sender_type==='customer'?'incoming':'outgoing')} preview={quotePreview(quote,t('replyNotLoaded'))}/></button>:<ReplyQuote authorLabel={t('reply')} preview={t('replyNotLoaded')}/> )}
    {message.content_text&&<p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm" dir="auto">{message.content_text}</p>}
