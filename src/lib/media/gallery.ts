@@ -1,4 +1,5 @@
 import type { Message } from "@/types";
+import type { MediaFilenameInput } from "./filename";
 
 /**
  * The set of media in a thread that the lightbox can page through, built
@@ -24,7 +25,7 @@ export interface MediaGalleryItem {
   /** Drives the "You" vs contact-name label in the viewer header. */
   fromCustomer: boolean;
   /** The row itself, so a download can derive its filename. */
-  message: Message;
+  message: MediaFilenameInput;
 }
 
 function galleryKind(message: Message): MediaGalleryKind | null {

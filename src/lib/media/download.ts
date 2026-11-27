@@ -1,4 +1,4 @@
-import type { Message } from "@/types";
+import type { MediaFilenameInput } from "./filename";
 import { loadMediaBlob, MediaResponseError } from "./blob-cache";
 import { mediaFilename } from "./filename";
 
@@ -16,13 +16,18 @@ import { mediaFilename } from "./filename";
  * Throws so the caller can toast; the only silent path is the new-tab
  * fallback below.
  */
-export async function downloadMediaMessage(message: Message): Promise<void> {
+export async function downloadMediaMessage(message: MediaFilenameInput, fresh = false): Promise<void> {
   const url = message.media_url;
   if (!url) throw new Error("This message has no attachment.");
 
   let blob: Blob;
   try {
-    blob = await loadMediaBlob(url);
+    // Scoped URLs use a fresh request, never the legacy URL-only blob cache.
+    if (fresh) {
+      const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
+      if (!response.ok) throw new MediaResponseError(response.status);
+      blob = await response.blob();
+    } else blob = await loadMediaBlob(url);
   } catch (error) {
     // A refused *response* is a real failure — inbound media Meta has
     // expired 401s here, and quietly opening a tab onto that error would

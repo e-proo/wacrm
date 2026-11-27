@@ -50,6 +50,8 @@ interface MediaLightboxProps {
   onActiveIdChange: (id: string | null) => void;
   /** Display name used for customer-sent media. */
   contactLabel: string;
+  /** Use only the scoped history URL, without the legacy proxy cache. */
+  fresh?: boolean;
 }
 
 export function MediaLightbox({
@@ -57,6 +59,7 @@ export function MediaLightbox({
   activeId,
   onActiveIdChange,
   contactLabel,
+  fresh = false,
 }: MediaLightboxProps) {
   const t = useTranslations("Inbox.mediaViewer");
 
@@ -105,13 +108,13 @@ export function MediaLightbox({
     if (!item || downloading) return;
     setDownloading(true);
     try {
-      await downloadMediaMessage(item.message);
+      await downloadMediaMessage(item.message, fresh);
     } catch {
       toast.error(t("downloadFailed"));
     } finally {
       setDownloading(false);
     }
-  }, [downloading, item, t]);
+  }, [downloading, item, t, fresh]);
 
   if (!item) return null;
 
@@ -169,7 +172,9 @@ export function MediaLightbox({
         <div className="relative flex items-center justify-center">
           {item.kind === "image" ? (
             <LightboxImage
+              key={item.messageId}
               item={item}
+              fresh={fresh}
               zoomed={zoomed}
               onToggleZoom={toggleZoom}
               t={t}
@@ -216,18 +221,21 @@ export function MediaLightbox({
 
 function LightboxImage({
   item,
+  fresh,
   zoomed,
   onToggleZoom,
   t,
 }: {
   item: MediaGalleryItem;
+  fresh: boolean;
   zoomed: boolean;
   onToggleZoom: () => void;
   t: Translator;
 }) {
   // Hits the blob cache when the thumbnail already pulled these bytes, so
   // opening the viewer is instant rather than a second trip through Meta.
-  const { src, status } = useMediaBlobUrl(item.url);
+  const resolved = useMediaBlobUrl(fresh ? undefined : item.url);
+  const {src,status} = fresh ? {src:item.url,status:'ready'} : resolved;
   const [broken, setBroken] = useState(false);
 
   if (status === "error" || broken) {

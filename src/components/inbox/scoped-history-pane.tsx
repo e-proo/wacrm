@@ -1,8 +1,12 @@
 'use client'
 import { useEffect,useLayoutEffect,useRef,useState } from 'react'
 import { useLocale,useTranslations } from 'next-intl'
-import { Check,CheckCheck,Clock,FileText,Reply,XCircle,Copy,SmilePlus } from 'lucide-react'
+import { Check,CheckCheck,Clock,Reply,XCircle,Copy,SmilePlus } from 'lucide-react'
 import { ReplyQuote } from './reply-quote'
+import {MediaAudioBubble,MediaDocumentBubble,MediaImageBubble,MediaVideoBubble,MediaUnavailable} from './message-media'
+import {MediaLightbox} from './media-lightbox'
+import type {MediaGalleryItem} from '@/lib/media/gallery'
+import type {MediaFilenameInput} from '@/lib/media/filename'
 import {Popover,PopoverTrigger,PopoverContent} from '@/components/ui/popover'
 import {toast} from 'sonner'
 import { conversationDay,quotePreview } from '@/lib/inbox/scoped-conversation-model'
@@ -14,9 +18,15 @@ import type { InboxContext,ScopedRow } from '@/lib/inbox/scoped-list-model'
 
 type Anchor={bottom:boolean;id:string|null;offset:number;top:number}
 type MessageActions={canReply:boolean;canRead:boolean;canReact:boolean;onReply:(m:HistoryMessage)=>void;onNative:(kind:'provider_read'|'reaction',m:HistoryMessage,emoji?:string)=>void;busy:boolean}
-function Message({message,quote,actions,onJump}:{message:HistoryMessage;quote:HistoryMessage|undefined;actions?:MessageActions;onJump:(id:string)=>void}){
+function scopedMedia(message:HistoryMessage):MediaFilenameInput|null{
+ const kind=message.content_type
+ if(kind!=='image'&&kind!=='video'&&kind!=='audio'&&kind!=='document')return null
+ return {content_type:kind,media_url:message.media_url??undefined,content_text:message.content_text??undefined,media_type:message.media_type,created_at:message.created_at??''}
+}
+function Message({message,quote,actions,onJump,onOpenMedia}:{message:HistoryMessage;quote:HistoryMessage|undefined;actions?:MessageActions;onJump:(id:string)=>void;onOpenMedia:(id:string)=>void}){
  const t=useTranslations('Inbox.scoped'),a=useTranslations('Inbox.actions'),locale=useLocale(),incoming=message.sender_type==='customer'
  const [picker,setPicker]=useState(false),[touchOpen,setTouchOpen]=useState(false)
+ const b=useTranslations('Inbox.bubble'),media=scopedMedia(message)
  const time=message.created_at?new Date(message.created_at):null
  const hold=useRef<{timer:ReturnType<typeof setTimeout>;x:number;y:number}|null>(null)
  const cancelHold=()=>{if(hold.current){clearTimeout(hold.current.timer);hold.current=null}}
@@ -30,13 +40,10 @@ function Message({message,quote,actions,onJump}:{message:HistoryMessage;quote:Hi
   onPointerUp={cancelHold} onPointerCancel={cancelHold} onPointerLeave={cancelHold} className={cn('flex w-full scroll-m-4 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring',incoming?'justify-start':'justify-end')}>
   <div className="group/message relative min-w-0 max-w-[85%] sm:max-w-[75%]"><div className={cn('relative min-w-0 space-y-1 rounded-2xl px-3 py-2',incoming?'rounded-es-md bg-muted text-foreground':'rounded-ee-md bg-primary text-primary-foreground')}>
    {message.reply_to_message_id&&(quote?<button type="button" className="block w-full min-w-0 text-start focus-visible:ring-2 focus-visible:ring-ring" onClick={()=>onJump(quote.id)}><ReplyQuote authorLabel={t(quote.sender_type==='customer'?'incoming':'outgoing')} preview={quotePreview(quote,t('replyNotLoaded'))} onPrimary={!incoming}/></button>:<ReplyQuote authorLabel={t('reply')} preview={t('replyNotLoaded')} onPrimary={!incoming}/> )}
-   {message.content_text&&message.content_type!=='document'&&<p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm" dir="auto">{message.content_text}</p>}
-   {message.media_url?<div className="min-w-0 space-y-2">
-    {message.content_type==='image'&&<a href={message.media_url} target="_blank" rel="noopener noreferrer" className="block rounded-lg focus-visible:ring-2 focus-visible:ring-ring">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={message.media_url} loading="lazy" alt={t('actionImagePreview')} className="max-h-64 max-w-full sm:max-w-60 rounded-lg object-contain" /></a>}
-    {message.content_type==='video'&&<video src={message.media_url} preload="none" controls playsInline aria-label={t('actionVideoPreview')} className="max-h-64 max-w-full rounded-lg sm:max-w-60" />}
-    {(message.content_type==='audio'||message.media_type?.startsWith('audio/'))&&<audio src={message.media_url} preload="none" controls aria-label={t('actionAudioPreview')} className="w-full max-w-full" />}
-    <a href={message.media_url} target="_blank" rel="noopener noreferrer" className={cn('inline-flex max-w-full items-center gap-2 break-all text-xs font-medium text-primary underline',message.content_type==='document'&&'rounded-lg bg-background/70 p-3 no-underline')} >{message.content_type==='document'&&<FileText className="size-5 shrink-0"/>}{message.content_type==='document'?(message.content_text||t('actionMedia_document')):t('openMedia')}</a>
-   </div>:message.has_media?<p className="text-xs text-muted-foreground">{t('mediaUnavailable')}</p>:!message.content_text?<p className="text-xs text-muted-foreground">[{message.content_type}]</p>:null}
+   {media?<div className="min-w-0">
+    {!media.media_url?<MediaUnavailable label={message.content_type==='document'?message.content_text||b('document'):b(message.content_type==='image'?'photo':message.content_type==='video'?'video':'audio')} t={b}/>:media.content_type==='image'?<MediaImageBubble message={media} fresh onOpen={()=>onOpenMedia(message.id)} t={b}/>:media.content_type==='video'?<MediaVideoBubble message={media} fresh onOpen={()=>onOpenMedia(message.id)} t={b}/>:media.content_type==='audio'?<MediaAudioBubble message={media} fresh t={b}/>:<MediaDocumentBubble message={media} fresh t={b}/>}
+    {(media.content_type==='image'||media.content_type==='video')&&message.content_text&&<p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm" dir="auto">{message.content_text}</p>}
+   </div>:<>{message.content_text&&<p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm" dir="auto">{message.content_text}</p>}{message.media_url?<a href={message.media_url} target="_blank" rel="noopener noreferrer" className="text-xs underline">{t('openMedia')}</a>:message.has_media?<p className="text-xs opacity-70">{t('mediaUnavailable')}</p>:!message.content_text?<p className="text-xs opacity-70">[{message.content_type}]</p>:null}</>}
    {!!message.reactions.length&&<div className="flex flex-wrap gap-1">{message.reactions.map(r=><span key={r.emoji} className={cn('rounded-full border px-1.5 text-xs',r.mine?'border-primary bg-primary/10':'border-border bg-muted')}>{r.emoji} {r.count}</span>)}</div>}
    <div className={cn('mt-1 flex flex-wrap items-center gap-1 text-[10px]',incoming?'justify-start text-muted-foreground':'justify-end text-primary-foreground/70')}><span>{time&&!Number.isNaN(time.getTime())?new Intl.DateTimeFormat(locale,{hour:'2-digit',minute:'2-digit'}).format(time):''}</span>{!incoming&&<span className={cn('rounded px-1',message.status==='failed'?'text-red-300':'text-primary-foreground/70')} aria-label={t('actionDeliveryStatus')+': '+deliveryLabel} title={deliveryLabel}><span className="inline-flex items-center gap-1">{message.status==='sending'?<Clock className="size-3"/>:message.status==='failed'?<XCircle className="size-3"/>:message.status==='sent'?<Check className="size-3"/>:['delivered','read'].includes(message.status)?<CheckCheck className={cn('size-3',message.status==='read'&&'text-blue-500')}/>:null}<span className="sr-only">{deliveryLabel}</span></span></span>}</div>
   </div>
@@ -54,6 +61,7 @@ export function ScopedHistoryPane({row,ctx,revision,onRefresh,actions}:{row:Scop
  const t=useTranslations('Inbox.scoped'),locale=useLocale()
  const scroll=useRef<HTMLDivElement>(null),anchor=useRef<Anchor|null>(null),request=useRef<AbortController|null>(null)
  const [reading,setReading]=useState(false),[readError,setReadError]=useState(false)
+ const [mediaId,setMediaId]=useState<string|null>(null)
  const history=useScopedHistory(row,ctx,revision,()=>{
   const el=scroll.current
   if(!el)return
@@ -83,6 +91,11 @@ export function ScopedHistoryPane({row,ctx,revision,onRefresh,actions}:{row:Scop
  }
  const chronological=[...history.items].reverse()
  const byId=new Map(history.items.map(m=>[m.id,m]))
+ const gallery:MediaGalleryItem[]=chronological.flatMap(m=>{
+  const media=scopedMedia(m)
+  if(!media?.media_url||(media.content_type!=='image'&&media.content_type!=='video')||!m.created_at||!Number.isFinite(Date.parse(m.created_at)))return []
+  return [{messageId:m.id,url:media.media_url,kind:media.content_type,caption:m.content_text??undefined,createdAt:m.created_at,fromCustomer:m.sender_type==='customer',message:media}]
+ })
  const jump=(id:string)=>{
   const target=Array.from(scroll.current?.querySelectorAll<HTMLElement>('[data-message-id]')??[]).find(node=>node.dataset.messageId===id)
   target?.scrollIntoView({block:'center'})
@@ -103,9 +116,10 @@ export function ScopedHistoryPane({row,ctx,revision,onRefresh,actions}:{row:Scop
     {chronological.map((message,index)=>{
      const day=conversationDay(message.created_at,locale)
      const previous=index?conversationDay(chronological[index-1].created_at,locale):null
-     return <div key={message.id} className="space-y-2">{day&&day!==previous&&<div className="flex justify-center"><span className="rounded-full border border-border/70 bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-sm">{day}</span></div>}<Message message={message} quote={message.reply_to_message_id?byId.get(message.reply_to_message_id):undefined} actions={actions} onJump={jump}/></div>
+     return <div key={message.id} className="space-y-2">{day&&day!==previous&&<div className="flex justify-center"><span className="rounded-full border border-border/70 bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-sm">{day}</span></div>}<Message message={message} quote={message.reply_to_message_id?byId.get(message.reply_to_message_id):undefined} actions={actions} onJump={jump} onOpenMedia={setMediaId}/></div>
     })}
    </div>
   </div>
+  <MediaLightbox items={gallery} activeId={mediaId} onActiveIdChange={setMediaId} contactLabel={row.contact.name||row.contact.phone} fresh/>
  </div>
 }

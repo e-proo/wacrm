@@ -49,6 +49,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  const draftKey=scopedDraftKey(ctx,row.id,row.channel_id),key=outcomeStorage(ctx,row.id)
  const list=useInboxPages<Connection>('connections?scope=active&channel_id='+(row.channel_id??''),ctx,
   c=>c.channel_id===row.channel_id&&c.provider===row.provider,revision)
+ const [policyError,setPolicyError]=useState(false)
  const [policy,setPolicy]=useState<{key:string;capabilities:InboxCapabilities;seen:number}|null>(null)
  const [tick,setTick]=useState(0)
  const [mode,setMode]=useState<Mode>(()=>getScopedAttachment(draftKey)?'media':'text')
@@ -85,7 +86,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  const policyKey=ctx.accountId+':'+ctx.userId+':'+row.id+':'+row.channel_id+':'+(selectedConnection??'')+':'+revision
  useEffect(()=>{
   const ctl=new AbortController()
-  setPolicy(null)
+  setPolicy(null);setPolicyError(false)
   onScopeChange(null)
   if(!row.channel_id||!selectedConnection||row.scope!=='active')return()=>ctl.abort()
    const url='threads/'+row.id+'/capabilities?channel_id='+encodeURIComponent(row.channel_id)+'&connection_id='+encodeURIComponent(selectedConnection)
@@ -96,7 +97,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
    const next={key:policyKey,capabilities:c,seen:performance.now()}
    setPolicy(next)
    onScopeChange({scope:{threadId:row.id,channelId:row.channel_id!,connectionId:selectedConnection,membershipId:c.membership_id!,provider:c.provider},capabilities:c})
-  }).catch(()=>{if(!ctl.signal.aborted){setPolicy(null);onScopeChange(null)}})
+  }).catch(()=>{if(!ctl.signal.aborted){setPolicy(null);setPolicyError(true);onScopeChange(null)}})
   return()=>{ctl.abort();onScopeChange(null)}
  },[ctx.accountId,ctx.userId,row.id,row.channel_id,row.provider,row.scope,selectedConnection,revision,policyKey,onScopeChange])
  const connections=list.items
@@ -207,10 +208,10 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   {list.busy&&<p className="text-xs text-muted-foreground">{t('policyChecking')}</p>}
   {list.error&&<p role="alert" className="text-xs text-destructive">{t('policyUnavailable')}</p>}
   {!list.busy&&!list.error&&connections.length===0&&<p className="text-xs text-muted-foreground">{t('actionNoSender')}</p>}
-  {selectedConnection&&!c&&<div className="flex items-center gap-2 text-xs text-muted-foreground"><span role="status">{t('policyChecking')}</span><Button type="button" variant="ghost" size="sm" onClick={onRefresh} aria-label={t('retry')}><RefreshCw className="size-3"/></Button></div>}
+  {selectedConnection&&!c&&<div className="flex items-center gap-2 text-xs text-muted-foreground"><span role="status">{t(policyError?'policyUnavailable':'policyChecking')}</span><Button type="button" variant="ghost" size="sm" onClick={onRefresh} aria-label={t('retry')}><RefreshCw className="size-3"/></Button></div>}
   {c&&<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
    {isMeta&&<span className="rounded-full bg-muted px-2 py-1 tabular-nums">{windowInfo?.open?t('policyWindowOpen',{time:new Date(remaining).toISOString().slice(11,19)}):t('policyWindowClosed')}</span>}
-   {c.blocked_reason&&<span role="status" className="rounded-md border border-border px-2 py-0.5">{t('policyDenied')}: {c.blocked_reason}</span>}{c.blocked_reason&&row.provider==='openwa'&&<a href="/settings?tab=whatsapp" className="text-primary underline">{t('actionChooseSender')}</a>}
+   {c.blocked_reason&&<span role="status" className="rounded-md border border-border px-2 py-0.5">{t('policyDenied')}: {c.blocked_reason}</span>}{c.blocked_reason&&row.provider==='openwa'&&<a href="/settings?tab=whatsapp" className="text-primary underline">{t('actionChooseSender')} ↗</a>}
    {!c.dispatch_enabled&&<span>{t('actionDisabled')}</span>}
    {c.dispatch_enabled&&c.ready&&<span>{t('actionVerified')}</span>}
   </div>}
@@ -238,7 +239,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
      <Button type="button" variant="ghost" size="sm" className={iconClass} disabled={!canDraft||draftLocked} aria-label={t('actionEmoji')} aria-expanded={emojiOpen} onClick={()=>setEmojiOpen(v=>!v)}><Smile className="size-4"/></Button>
     </>}
    </div>
-   {!attachment&&mode==='text'&&<ScopedVoiceRecorder key={selectedConnection??'none'} compact disabled={!canAttach||!c?.media_kinds.includes('audio')||Boolean(attempt)||busy||(uploading&&!recording)} onBusyChange={setRecording} onFile={file=>stage(file,'audio')}/>}
+   {(recording||(!attachment&&mode==='text'))&&<ScopedVoiceRecorder key={selectedConnection??'none'} compact disabled={!canAttach||!c?.media_kinds.includes('audio')||Boolean(attempt)||busy||(uploading&&!recording)} onBusyChange={setRecording} onFile={file=>stage(file,'audio')}/>}
    {mode==='text'&&!recording&&<div className="flex min-w-[min(100%,12rem)] flex-1 items-end gap-2">
     <textarea ref={textarea} rows={1} maxLength={4096} value={text} onChange={e=>{setText(e.target.value);e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,96)+'px'}} disabled={!canDraft||draftLocked}
      onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&(e.ctrlKey||e.metaKey||window.matchMedia('(pointer:fine)').matches)){e.preventDefault();void send()}}}

@@ -45,6 +45,9 @@ describe('FIX-07 conversation presentation',()=>{
   expect(history).toContain("bg-[url('/inbox-doodle.svg')]")
   expect(history).toContain('bg-primary text-primary-foreground')
   expect(history).toContain('absolute -top-3')
+  expect(history).toContain('<MediaLightbox items={gallery}')
+  expect(history).toContain('fresh onOpen=')
+  expect(composer).toContain("recording||(!attachment&&mode==='text')")
   expect(history).toContain('submitScopedRead(row,ctx,')
  })
  it('rejects a reply from any other conversation, channel or provider',()=>{

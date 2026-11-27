@@ -12,7 +12,7 @@ import {
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
-import type { Message } from "@/types";
+import type { MediaFilenameInput } from "@/lib/media/filename";
 import { downloadMediaMessage } from "@/lib/media/download";
 import { useMediaBlobUrl } from "@/hooks/use-media-blob-url";
 
@@ -31,7 +31,7 @@ import { useMediaBlobUrl } from "@/hooks/use-media-blob-url";
 type Translator = ReturnType<typeof useTranslations>;
 
 /** Inline media size cap, shared so the four bubbles can't drift apart. */
-const MEDIA_BOX = "max-h-64 max-w-60";
+const MEDIA_BOX = "max-h-64 max-w-full sm:max-w-60";
 
 export function MediaUnavailable({
   label,
@@ -53,20 +53,20 @@ export function MediaUnavailable({
  * each bubble owns its own in-flight state — a slow 16 MB video shouldn't
  * put a spinner on every other attachment in the thread.
  */
-function useMediaDownload(message: Message, t: Translator) {
+function useMediaDownload(message: MediaFilenameInput, t: Translator, fresh = false) {
   const [downloading, setDownloading] = useState(false);
 
   const download = useCallback(async () => {
     if (downloading) return;
     setDownloading(true);
     try {
-      await downloadMediaMessage(message);
+      await downloadMediaMessage(message, fresh);
     } catch {
       toast.error(t("downloadFailed"));
     } finally {
       setDownloading(false);
     }
-  }, [downloading, message, t]);
+  }, [downloading, message, t, fresh]);
 
   return { downloading, download };
 }
@@ -115,16 +115,19 @@ export function MediaImageBubble({
   message,
   onOpen,
   t,
+  fresh = false,
 }: {
-  message: Message;
+  message: MediaFilenameInput;
+  fresh?: boolean;
   /** Opens the thread's lightbox on this message. Omitted ⇒ not clickable. */
   onOpen?: () => void;
   t: Translator;
 }) {
-  const { src, status } = useMediaBlobUrl(message.media_url);
+  const resolved = useMediaBlobUrl(fresh ? undefined : message.media_url);
+  const {src,status} = fresh ? {src:message.media_url,status:'ready'} : resolved;
   // The fetch can succeed and the bytes still not be a decodable image.
   const [broken, setBroken] = useState(false);
-  const { downloading, download } = useMediaDownload(message, t);
+  const { downloading, download } = useMediaDownload(message, t, fresh);
 
   if (status === "error" || broken) {
     return (
@@ -184,12 +187,14 @@ export function MediaVideoBubble({
   message,
   onOpen,
   t,
+  fresh = false,
 }: {
-  message: Message;
+  message: MediaFilenameInput;
+  fresh?: boolean;
   onOpen?: () => void;
   t: Translator;
 }) {
-  const { downloading, download } = useMediaDownload(message, t);
+  const { downloading, download } = useMediaDownload(message, t, fresh);
 
   return (
     <div className="relative w-fit">
@@ -226,11 +231,13 @@ export function MediaVideoBubble({
 export function MediaAudioBubble({
   message,
   t,
+  fresh = false,
 }: {
-  message: Message;
+  message: MediaFilenameInput;
+  fresh?: boolean;
   t: Translator;
 }) {
-  const { downloading, download } = useMediaDownload(message, t);
+  const { downloading, download } = useMediaDownload(message, t, fresh);
 
   return (
     <div className="flex items-center gap-2">
@@ -248,11 +255,13 @@ export function MediaAudioBubble({
 export function MediaDocumentBubble({
   message,
   t,
+  fresh = false,
 }: {
-  message: Message;
+  message: MediaFilenameInput;
+  fresh?: boolean;
   t: Translator;
 }) {
-  const { downloading, download } = useMediaDownload(message, t);
+  const { downloading, download } = useMediaDownload(message, t, fresh);
 
   return (
     <div className="flex items-center gap-2">
