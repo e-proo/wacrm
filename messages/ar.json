@@ -165,7 +165,7 @@
       "nativeEnrollExplanation": "يتحقق من المحرك والإصدار ويعين هذه الجلسة الأساسية فقط. لا يفعّل الإرسال ولا يدمج جلسات أخرى.",
       "nativeEnrollmentSuccess": "تم توثيق نطاق الرسائل للجلسة الأساسية.",
       "nativeEngineUnverified": "تعذر التحقق من محرك OpenWA بالمفتاح الحالي.",
-      "nativeVersionUnsupported": "إصدار OpenWA غير موثق لهذا المسار. الإصدار المدقق حاليًا 0.29.1.",
+      "nativeVersionUnsupported": "إصدار OpenWA غير موثق لهذا المسار. الإصداران المدققان: 0.29.1 و0.32.1.",
       "nativeEngineUnsupported": "محرك OpenWA غير مدعوم للتوثيق الأساسي حاليًا.",
       "nativeSessionNotLive": "المحرك ليس نشطًا لهذه الجلسة.",
       "nativeWebhookUnconfigured": "اضبط Webhook الموقّع قبل توثيق الاستقبال.",

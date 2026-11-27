@@ -165,7 +165,7 @@
       "nativeEnrollExplanation": "Verifies the engine and version and designates only this session as primary. Does not enable sending or merge other sessions.",
       "nativeEnrollmentSuccess": "Primary session native message scope verified.",
       "nativeEngineUnverified": "Could not authenticate the OpenWA engine with the current key.",
-      "nativeVersionUnsupported": "This gateway release is not verified for this path. Reviewed release: 0.29.1.",
+      "nativeVersionUnsupported": "This gateway release is not verified for this path. Reviewed releases: 0.29.1 and 0.32.1.",
       "nativeEngineUnsupported": "This OpenWA engine is not supported for primary native proof yet.",
       "nativeSessionNotLive": "The session does not have a live engine.",
       "nativeWebhookUnconfigured": "Configure a signed webhook before verifying intake.",

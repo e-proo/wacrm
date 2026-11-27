@@ -165,7 +165,7 @@
       "nativeEnrollExplanation": "엔진 및 버전을 확인하고 이 세션만 기본 세션으로 지정합니다. 발송을 활성화하거나 다른 세션을 병합하지 않습니다.",
       "nativeEnrollmentSuccess": "기본 세션의 메시지 식별자 범위를 검증했습니다.",
       "nativeEngineUnverified": "현재 키로 OpenWA 엔진을 인증할 수 없습니다.",
-      "nativeVersionUnsupported": "이 게이트웨이 버전은 검증되지 않았습니다. 검토된 버전: 0.29.1.",
+      "nativeVersionUnsupported": "이 게이트웨이 버전은 이 경로에서 검증되지 않았습니다. 검토된 버전: 0.29.1 및 0.32.1.",
       "nativeEngineUnsupported": "이 OpenWA 엔진은 기본 수신 검증에 아직 지원되지 않습니다.",
       "nativeSessionNotLive": "세션 엔진이 활성 상태가 아닙니다.",
       "nativeWebhookUnconfigured": "수신 검증 전에 서명된 웹훅을 설정하세요.",
