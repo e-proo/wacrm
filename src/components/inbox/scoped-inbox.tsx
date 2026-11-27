@@ -2,7 +2,7 @@
 import { useEffect,useRef,useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useTranslations,useLocale } from 'next-intl'
-import { ArrowLeft, ChevronDown, CircleHelp, Filter, Inbox, RefreshCw, Search, ShieldCheck, Smartphone, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, CircleHelp, Filter, Inbox, RefreshCw, Search, ShieldCheck, Smartphone, X, Info } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import {useCan} from '@/hooks/use-can'
 import { Button } from '@/components/ui/button'
@@ -202,7 +202,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
    <div aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 font-semibold text-primary">{(row.contact.name||row.contact.phone).slice(0,1).toUpperCase()}</div>
    <div className="min-w-0 flex-1"><h2 ref={titleRef} tabIndex={-1} className="truncate rounded-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}{row.assigned_agent_name?' · '+row.assigned_agent_name:''}</p></div>
    <ProviderLabel provider={row.provider}/>
-   <Button type="button" variant="outline" size="sm" className="min-h-11 shrink-0" onClick={()=>setContactOpen(v=>!v)} aria-expanded={contactOpen} aria-label={t('actionContactDetails')}>{t('actionContactDetails')}</Button>
+   <Button type="button" variant="outline" size="sm" className="min-h-11 shrink-0" onClick={()=>setContactOpen(v=>!v)} aria-expanded={contactOpen} aria-label={t('actionContactDetails')}><Info className="size-4"/><span className="hidden sm:inline">{t('actionContactDetails')}</span></Button>
   </div>
   {nativeOutcome&&<div role="status" className="border-b border-border bg-muted/50 px-4 py-2 text-xs text-muted-foreground">{t('actionProviderResult')}: {t('actionState_'+nativeOutcome.state)}{nativeOutcome.code?' · '+nativeOutcome.code:''}</div>}
   <ScopedHistoryPane key={row.scope+':'+row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}

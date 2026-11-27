@@ -1,4 +1,5 @@
 import {describe,expect,it} from 'vitest'
+import {readFileSync} from 'node:fs'
 import {conversationDay,metaWindow,quotePreview,sameReplyLane} from './scoped-conversation-model'
 import {deriveInboxCapabilities} from './provider-policy-model'
 import type {HistoryMessage} from './scoped-history-model'
@@ -17,6 +18,23 @@ describe('FIX-07 conversation presentation',()=>{
   expect(conversationDay(policy.server_now,'ko')).toBeTruthy()
   expect(quotePreview({content_text:null,content_type:'document'},'missing')).toBe('[document]')
   expect(quotePreview({content_text:'x'.repeat(500),content_type:'text'},'missing')).toHaveLength(240)
+ })
+ it('retains the scoped dispatch boundary and immutable attempt journal',()=>{
+  const composer=readFileSync('src/components/inbox/scoped-action-pane.tsx','utf8')
+  const recorder=readFileSync('src/components/inbox/scoped-voice-recorder.tsx','utf8')
+  expect(composer).toContain('submitScopedAction(ctx,')
+  expect(composer).toContain('inspectScopedAction(ctx,')
+  expect(composer).toContain('finishAccepted(attempt.mode)')
+  expect(composer).toContain('uploadAccountMedia(\'chat-media\',file,ctx)')
+  expect(composer).not.toContain('policyNoWindow')
+  expect(recorder).not.toContain('submitScopedAction')
+  expect(recorder).not.toContain('fetch(')
+  expect(recorder).toContain("type:'audio/ogg'")
+  for(const locale of ['ar','en','ko']){
+   const dict=JSON.parse(readFileSync('messages/'+locale+'.json','utf8'))
+   expect(dict.Inbox.scoped.actionEmoji).toBeTruthy()
+   expect(dict.Inbox.scoped.actionRecordingFailed).toBeTruthy()
+  }
  })
  it('rejects a reply from any other conversation, channel or provider',()=>{
   const message={conversation_id:'p',channel_id:'c',provider:'openwa'} as HistoryMessage
