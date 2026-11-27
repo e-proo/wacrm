@@ -1,6 +1,6 @@
 BEGIN;
 DO $test$
-DECLARE u uuid:='00000000-0000-4000-8000-000000002331'; a uuid;s uuid; ch uuid; ep uuid; d timestamptz;cv timestamptz;v jsonb;p uuid;conv uuid;can uuid;mid uuid;rid uuid;tok uuid;cl uuid;before_at timestamptz;next_rid uuid; next_tok uuid;
+DECLARE u uuid:='00000000-0000-4000-8000-000000002331'; a uuid;s uuid; ch uuid; ep uuid; d timestamptz;cv timestamptz;v jsonb;p uuid;conv uuid;can uuid;mid uuid;rid uuid;tok uuid;cl uuid;before_at timestamptz;next_rid uuid; next_tok uuid; stale_id uuid; stale_token uuid; old_at timestamptz; hist_id uuid; hist_token uuid; hist_can uuid; hist_mid uuid; hist_claim uuid;
 BEGIN
  INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES(u,'inbox233@example.test','{"full_name":"Inbox 233"}');
  SELECT account_id INTO STRICT a FROM public.profiles WHERE user_id=u;
@@ -38,6 +38,31 @@ BEGIN
  IF (SELECT count(*) FROM public.inbox_canonical_messages WHERE account_id=a)<>1 OR public.inbox_claim_canonical_effect(a,can,s,'long-video',tok) IS NOT NULL THEN RAISE EXCEPTION 'effect replay'; END IF;
  IF public.openwa_finish_signed_intake(next_rid,next_tok,'processing_uncertain')<>'review' OR public.openwa_recover_returned_intake(a,s,next_rid) OR public.openwa_renew_signed_intake(next_rid,next_tok,true,false) THEN RAISE EXCEPTION 'uncertain event replayed'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=next_rid AND intake_state='review' AND intake_ciphertext IS NOT NULL AND processed_at IS NULL) THEN RAISE EXCEPTION 'uncertain evidence lost'; END IF;
+ -- Real historical proof after credential rotation: no replay under new credentials.
+ IF public.openwa_intake_close_unverified(a,u,next_rid)<>'closed_unverified' THEN RAISE EXCEPTION 'fixture review close'; END IF;
+ IF public.openwa_enqueue_signed_intake(a,s,'historical','intake233',NULL,cv,true,repeat('c',64),repeat('c',100))<>'accepted' THEN RAISE EXCEPTION 'historical enqueue'; END IF;
+ v=public.openwa_claim_signed_intake(true);hist_id=(v->>'id')::uuid;hist_token=(v->>'token')::uuid;
+ v=public.inbox_commit_canonical_inbound_context(a,s,'historical',hist_token,conv,'intake233',NULL,'false_15550000333@c.us_233DEF',true,'text','fixture',NULL,'15550000333@c.us',clock_timestamp(),NULL,'{"chatId":"15550000333@c.us","type":"text","text":"fixture"}',false,false);
+ IF v->>'state'<>'inserted' THEN RAISE EXCEPTION 'historical source'; END IF;
+ hist_can=(v->>'canonicalId')::uuid;hist_mid=(v->>'messageId')::uuid;
+ hist_claim=public.inbox_claim_canonical_effect(a,hist_can,s,'historical',hist_token);
+ IF hist_claim IS NULL OR NOT public.inbox_begin_canonical_stage(a,hist_can,hist_claim,'message_received') OR NOT public.inbox_finish_canonical_stage(a,hist_can,hist_claim,'message_received',true) OR NOT public.inbox_finish_canonical_effect(a,hist_can,hist_claim,true) THEN RAISE EXCEPTION 'historical effect'; END IF;
+ IF public.openwa_finish_signed_intake(hist_id,hist_token,'processing_uncertain')<>'review' THEN RAISE EXCEPTION 'historical review'; END IF;
+ -- This credential change closes the old epoch. Receipt-only recovery must
+ -- not authorize new processing under it.
+ UPDATE public.whatsapp_connection_credentials SET api_key_encrypted='rotated-fixture' WHERE account_id=a AND connection_id=s RETURNING updated_at INTO cv;
+ IF NOT EXISTS(SELECT 1 FROM public.whatsapp_channel_memberships WHERE id=ep AND valid_until IS NOT NULL AND NOT is_primary) THEN RAISE EXCEPTION 'credential did not close epoch'; END IF;
+ IF public.inbox_validate_canonical_route(a,conv,hist_mid,s) OR public.openwa_returned_intake_evidence(hist_id) IS NULL OR NOT public.openwa_recover_returned_intake(a,s,hist_id) THEN RAISE EXCEPTION 'historical receipt recovery'; END IF;
+ -- A never-claimed event with stale credentials remains blocked, not rebound.
+ INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,intake_state,intake_canonical_mode,intake_ciphertext,intake_digest,intake_session,intake_phone,intake_credential_version,processing_attempts)
+ VALUES(a,s,'stale-binding',clock_timestamp(),'pending',true,repeat('d',100),repeat('d',64),'intake233','15550000233',cv-interval '1 second',0) RETURNING id INTO stale_id;
+ IF public.openwa_claim_signed_intake(true)->>'state'<>'review' OR NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=stale_id AND intake_reason='binding_changed' AND processing_attempts=0 AND intake_ciphertext IS NOT NULL) THEN RAISE EXCEPTION 'stale binding replayed'; END IF;
+ IF public.openwa_intake_close_unverified(a,u,stale_id)<>'closed_unverified' THEN RAISE EXCEPTION 'stale fixture close'; END IF;
+ -- Seed an expired lease without touching a live row or sleeping 90 seconds.
+ stale_token=gen_random_uuid();old_at=clock_timestamp()-interval '91 seconds';
+ INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,intake_state,intake_canonical_mode,intake_ciphertext,intake_digest,intake_session,intake_phone,intake_credential_version,processing_attempts,processing_token,processing_started_at,intake_claim_token,intake_claimed_at)
+ VALUES(a,s,'expired-lease',old_at,'running',true,repeat('e',100),repeat('e',64),'intake233','15550000233',cv,1,stale_token,old_at,stale_token,old_at) RETURNING id INTO stale_id;
+ IF public.openwa_renew_signed_intake(stale_id,stale_token,true,false) OR public.openwa_claim_signed_intake(true)->>'state'<>'idle' OR NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=stale_id AND intake_state='review' AND intake_reason='lease_expired' AND intake_ciphertext IS NOT NULL) THEN RAISE EXCEPTION 'expired lease revived'; END IF;
  IF has_function_privilege('authenticated','public.openwa_renew_signed_intake(uuid,uuid,boolean,boolean)','EXECUTE') OR has_function_privilege('anon','public.openwa_recover_returned_intake(uuid,uuid,uuid)','EXECUTE') OR has_function_privilege('authenticated','public.openwa_returned_intake_evidence(uuid)','EXECUTE') THEN RAISE EXCEPTION 'browser ACL'; END IF;
 END $test$;
 SET CONSTRAINTS ALL IMMEDIATE;

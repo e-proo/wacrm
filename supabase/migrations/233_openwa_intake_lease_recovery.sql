@@ -12,6 +12,7 @@ ALTER TABLE public.whatsapp_webhook_event_receipts
 
 -- Conservative proof of the exact *inbound* event. A visible source alone,
 -- another receipt's observation, missing media, or a partial effect is not proof.
+-- A closed historical epoch is accepted only if it covered the completed effect.
 -- No content, credentials, native identifiers or delivery claims are returned.
 CREATE FUNCTION public.openwa_returned_intake_evidence(p_id uuid) RETURNS timestamptz
 LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
@@ -22,23 +23,28 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog,public AS $$
    AND cm.provider=o.provider AND cm.direction=o.direction AND cm.origin_connection_id=o.connection_id AND cm.origin_membership_id=o.membership_id AND cm.native_message_id=o.native_message_id
  JOIN public.inbox_canonical_effects e ON e.account_id=cm.account_id AND e.canonical_id=cm.id AND e.channel_id=cm.channel_id AND e.provider=cm.provider
  JOIN public.messages m ON m.id=cm.source_message_id AND m.conversation_id=cm.conversation_id AND m.connection_id=cm.origin_connection_id
-   AND m.provider=cm.provider AND m.provider_message_id=cm.native_message_id AND m.sender_type='contact'
- JOIN public.whatsapp_connections c ON c.account_id=r.account_id AND c.id=r.connection_id AND c.provider='openwa' AND c.archived_at IS NULL
- JOIN public.whatsapp_connection_credentials k ON k.account_id=r.account_id AND k.connection_id=r.connection_id AND k.provider='openwa'
+   AND m.provider=cm.provider AND m.provider_message_id=cm.native_message_id AND m.sender_type='customer'
+ JOIN public.inbox_message_memberships im ON im.account_id=cm.account_id AND im.message_id=cm.source_message_id AND im.conversation_id=cm.conversation_id
+   AND im.channel_id=cm.channel_id AND im.connection_id=cm.origin_connection_id AND im.membership_id=cm.origin_membership_id
+   AND im.provider=cm.provider AND im.evidence_kind='verified_current_ingress' AND im.evidence_ref=cm.id::text
+ JOIN public.whatsapp_channels ch ON ch.account_id=cm.account_id AND ch.id=cm.channel_id AND ch.provider=cm.provider
  JOIN public.whatsapp_channel_memberships ep ON ep.account_id=r.account_id AND ep.id=o.membership_id AND ep.connection_id=r.connection_id AND ep.channel_id=o.channel_id AND ep.provider='openwa'
  JOIN public.inbox_native_namespace_proofs np ON np.account_id=r.account_id AND np.membership_id=ep.id AND np.connection_id=r.connection_id AND np.channel_id=o.channel_id AND np.namespace_key=cm.namespace_key
  WHERE r.id=p_id AND r.provider='openwa' AND r.intake_state='review' AND r.intake_canonical_mode=true
  AND r.intake_reason IN ('processing_uncertain','lease_expired') AND r.processing_error IS NULL AND r.processed_at IS NULL
  AND r.processing_started_at IS NULL AND r.intake_claim_token IS NOT NULL AND r.processing_token=r.intake_claim_token AND r.processing_attempts=1
  AND r.intake_ciphertext IS NOT NULL AND r.intake_recovered_at IS NULL
- AND c.status IN ('ready','connected') AND c.session_id=r.intake_session AND c.instance_id IS NOT DISTINCT FROM r.intake_instance
- AND c.phone_identity IS NOT DISTINCT FROM r.intake_phone AND k.updated_at=r.intake_credential_version
- AND ep.valid_until IS NULL AND ep.is_primary AND ep.valid_from<=r.received_at
- AND np.scope_kind='single_connection' AND np.engine=c.engine AND np.gateway_version IN ('0.29.1','0.32.1')
+ -- Receipt-only settlement is historical proof, NOT authority to use a
+ -- new credential or epoch. The exact epoch must cover the whole effect.
+ AND ep.session_snapshot=r.intake_session AND ep.instance_snapshot IS NOT DISTINCT FROM r.intake_instance
+ AND ch.identity_key='e164:'||regexp_replace(coalesce(r.intake_phone,''),'^[+]','')
+ AND ep.evidence_kind='authenticated_openwa_status' AND ep.valid_from<=r.received_at
+ AND (ep.valid_until>=e.returned_at OR (ep.valid_until IS NULL AND ep.is_primary))
+ AND np.scope_kind='single_connection' AND np.engine='whatsapp-web.js' AND np.gateway_version IN ('0.29.1','0.32.1') AND np.verified_at<=r.received_at
+ AND im.recorded_at<=e.returned_at
  AND e.state='returned' AND e.claimed_at>=r.intake_claimed_at AND e.returned_at>=e.claimed_at
  AND o.observed_at>=r.intake_claimed_at AND o.observed_at<=e.returned_at
  AND (m.content_type NOT IN ('image','video','audio','document','sticker') OR nullif(m.media_url,'') IS NOT NULL)
- AND public.inbox_validate_canonical_route(r.account_id,cm.conversation_id,cm.source_message_id,r.connection_id)
  AND (SELECT count(*) FROM public.inbox_message_connection_observations x WHERE x.account_id=r.account_id AND x.receipt_id=r.id)=1
  AND EXISTS(SELECT 1 FROM public.inbox_canonical_effect_stages s WHERE s.account_id=e.account_id AND s.canonical_id=e.canonical_id
     AND s.claim_token=e.claim_token AND s.stage_key='message_received' AND s.state='returned' AND s.finished_at<=e.returned_at)
@@ -142,12 +148,12 @@ BEGIN
  JOIN public.inbox_canonical_messages cm ON cm.account_id=o.account_id AND cm.id=o.canonical_id
  JOIN public.inbox_canonical_effects e ON e.account_id=cm.account_id AND e.canonical_id=cm.id
  JOIN public.messages m ON m.id=cm.source_message_id
- JOIN public.whatsapp_connections c ON c.account_id=r.account_id AND c.id=r.connection_id
- JOIN public.whatsapp_connection_credentials k ON k.account_id=r.account_id AND k.connection_id=r.connection_id AND k.provider='openwa'
+ JOIN public.inbox_message_memberships im ON im.account_id=cm.account_id AND im.message_id=cm.source_message_id
+ JOIN public.whatsapp_channels ch ON ch.account_id=cm.account_id AND ch.id=cm.channel_id
  JOIN public.whatsapp_channel_memberships ep ON ep.account_id=o.account_id AND ep.id=o.membership_id
  JOIN public.inbox_native_namespace_proofs np ON np.account_id=ep.account_id AND np.membership_id=ep.id
  WHERE o.account_id=r.account_id AND o.connection_id=r.connection_id AND o.receipt_id=r.id
- FOR SHARE OF o,cm,e,m,c,k,ep,np;
+ FOR SHARE OF o,cm,e,m,im,ch,ep,np;
  proof=public.openwa_returned_intake_evidence(r.id);
  IF proof IS NULL THEN RETURN false; END IF;
  t=clock_timestamp();
