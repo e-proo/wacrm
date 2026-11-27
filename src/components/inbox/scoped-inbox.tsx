@@ -2,7 +2,7 @@
 import { useEffect,useRef,useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useTranslations,useLocale } from 'next-intl'
-import { ArrowLeft, ChevronDown, CircleHelp, Filter, Inbox, RefreshCw, Search, ShieldCheck, Smartphone, X, Info } from 'lucide-react'
+import { ArrowLeft, ChevronDown, CircleHelp, Filter, Inbox, RefreshCw, Search, ShieldCheck, Smartphone, X, Info, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import {useCan} from '@/hooks/use-can'
 import { Button } from '@/components/ui/button'
@@ -164,6 +164,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
  const canPrepareReply=useCan('send-messages')&&row.scope==='active'
  const [nativeBusy,setNativeBusy]=useState(false)
  const [contactOpen,setContactOpen]=useState(false)
+ const [desktopContactOpen,setDesktopContactOpen]=useState(false)
  const [nativeOutcome,setNativeOutcome]=useState<ScopedActionOutcome|null>(null)
  const locks=useRef(new Map<string,{key:string;state:ScopedActionOutcome['state']}>())
  async function nativeAction(kind:'provider_read'|'reaction',message:HistoryMessage,emoji=''){
@@ -197,12 +198,23 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
  }
  return <div className="relative flex h-full min-h-0 min-w-0">
   <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-  <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-3 sm:gap-3 sm:px-4">
-   <Button variant="ghost" size="icon-lg" className="min-h-11 min-w-11 lg:hidden" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button>
-   <div aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">{(row.contact.name||row.contact.phone).slice(0,1).toUpperCase()}</div>
-   <div className="min-w-0 flex-1"><h2 ref={titleRef} tabIndex={-1} className="truncate rounded-sm text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring" dir="auto">{row.contact.name||row.contact.phone}</h2><p className="truncate text-xs text-muted-foreground" dir="ltr">{row.contact.phone}</p><p className="truncate text-xs text-muted-foreground" dir="auto">{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')} · {status(row.status)}{row.assigned_agent_name?' · '+row.assigned_agent_name:''}</p></div>
-   <ProviderLabel provider={row.provider}/>
-   <Button type="button" variant="outline" size="sm" className="min-h-11 shrink-0" onClick={()=>setContactOpen(v=>!v)} aria-expanded={contactOpen} aria-label={t('actionContactDetails')}><Info className="size-4"/><span className="hidden sm:inline">{t('actionContactDetails')}</span></Button>
+  <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
+   <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+    <Button variant="ghost" size="icon-lg" className="min-h-11 min-w-11 lg:hidden" onClick={onBack} aria-label={t('back')}><ArrowLeft className="size-4 rtl:rotate-180"/></Button>
+    <div aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">{(row.contact.name||row.contact.phone).slice(0,1).toUpperCase()}</div>
+    <div className="min-w-0 text-start">
+     <h2 ref={titleRef} tabIndex={-1} className="truncate rounded-sm text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"><bdi>{row.contact.name||row.contact.phone}</bdi></h2>
+     {row.contact.name&&row.contact.name!==row.contact.phone&&<p className="truncate text-xs text-muted-foreground"><bdi dir="ltr">{row.contact.phone}</bdi></p>}
+     <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground"><ProviderLabel provider={row.provider}/><span className="truncate"><bdi>{row.channel_name||row.own_phone||t(row.scope==='unknown'?'unverified':'verifiedChannel')}</bdi></span></div>
+    </div>
+   </div>
+   <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+    <span className="hidden max-w-24 truncate rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground sm:inline" title={status(row.status)}>{status(row.status)}</span>
+    {row.assigned_agent_name&&<span className="hidden max-w-28 truncate text-xs text-muted-foreground xl:inline" title={row.assigned_agent_name}><bdi>{row.assigned_agent_name}</bdi></span>}
+    <Button type="button" variant="ghost" size="sm" className="h-9 w-9 p-0 text-muted-foreground" onClick={onRefresh} aria-label={t('refresh')} title={t('refresh')}><RefreshCw className="size-4"/></Button>
+    <Button type="button" variant="ghost" size="sm" className="hidden h-9 w-9 p-0 lg:inline-flex" onClick={()=>setDesktopContactOpen(v=>!v)} aria-pressed={desktopContactOpen} aria-label={t('actionContactDetails')} title={t('actionContactDetails')}>{desktopContactOpen?<PanelRightClose className="size-4 rtl:rotate-180"/>:<PanelRightOpen className="size-4 rtl:rotate-180"/>}</Button>
+    <Button type="button" variant="ghost" size="sm" className="h-9 w-9 p-0 lg:hidden" onClick={()=>setContactOpen(true)} aria-expanded={contactOpen} aria-label={t('actionContactDetails')}><Info className="size-4"/></Button>
+   </div>
   </div>
   {nativeOutcome&&<div role="status" className="border-b border-border bg-muted/50 px-4 py-2 text-xs text-muted-foreground">{t('actionProviderResult')}: {t('actionState_'+nativeOutcome.state)}{nativeOutcome.code?' · '+nativeOutcome.code:''}</div>}
   <ScopedHistoryPane key={row.scope+':'+row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}
@@ -215,6 +227,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
   {row.scope==='active'&&<ScopedActionPane row={row} ctx={ctx} revision={revision} selectedConnection={selectedConnection} onSelectConnection={value=>{if(selectedConnection&&value!==selectedConnection)setReply(null);setSelectedConnection(value)}}
    reply={reply} onClearReply={()=>setReply(null)} onScopeChange={setActiveAction} onRefresh={onRefresh}/>}
   </div>
+  {desktopContactOpen&&<aside aria-label={t('actionContactDetails')} className="hidden min-h-0 w-72 shrink-0 overflow-y-auto border-s border-border bg-card lg:block xl:w-80"><ScopedContactPanel row={row} ctx={ctx}/></aside>}
   <Sheet open={contactOpen} onOpenChange={setContactOpen}>
    <SheetContent side={locale==='ar'?'left':'right'} showCloseButton={false} className="h-[100dvh] w-[min(92vw,22rem)] gap-0 overflow-hidden p-0 sm:max-w-[22rem]">
     <SheetHeader className="flex-row items-center justify-between gap-2 border-b border-border px-3 py-2">
@@ -303,7 +316,7 @@ function Workspace({ctx}:{ctx:InboxContext}){
    </aside>
    <main id="scoped-inbox-main" className={cn('min-h-0 min-w-0 flex-1 overflow-hidden',hasSelection?'block':'hidden lg:block')}>
     {hasSelection?(loc.legacy?<LegacyChoices key={query+':'+revision} ctx={ctx} loc={loc} onSelect={choose} onBack={close} onRetry={refresh}/>:<SelectedDetail key={query} revision={revision} ctx={ctx} loc={loc} onBack={close} onRetry={refresh}/>):
-     <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center"><div className="rounded-full bg-muted p-5 text-muted-foreground"><CircleHelp className="size-8"/></div><h2 className="font-medium">{t('selectThread')}</h2><p className="max-w-sm text-sm text-muted-foreground">{t('selectHelp')}</p></div>}
+     <div className="flex h-full flex-col items-center justify-center gap-3 bg-background bg-[url('/inbox-doodle.svg')] bg-repeat p-6 text-center"><div className="rounded-full bg-muted p-5 text-muted-foreground"><CircleHelp className="size-8"/></div><h2 className="font-medium">{t('selectThread')}</h2><p className="max-w-sm text-sm text-muted-foreground">{t('selectHelp')}</p></div>}
    </main>
   </div>}
   <ScopedNewThreadDialog open={newThreadOpen} onOpenChange={setNewThreadOpen} ctx={ctx} onCreated={href=>{go(href);refresh()}}/>

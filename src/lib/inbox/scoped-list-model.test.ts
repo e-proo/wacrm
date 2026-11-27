@@ -43,6 +43,27 @@ describe('scoped inbox selection and fetch boundary',()=>{
   await expect(pending).rejects.toThrow()
   expect(mock).toHaveBeenCalledWith('/api/inbox/threads?scope=active',expect.objectContaining({method:'GET',cache:'no-store',headers:{'x-wacrm-inbox-account':a,'x-wacrm-inbox-actor':b}}))
  })
+ it('retries only transient scoped GETs once and never retries authorization failures',async()=>{
+  const mock=vi.fn().mockResolvedValueOnce(new Response(null,{status:503})).mockResolvedValueOnce(Response.json({read_only:true,items:[]}))
+  vi.stubGlobal('fetch',mock)
+  const signal=new AbortController().signal
+  await expect(fetchInbox('threads?scope=active',ctx,signal,{retryTransient:true})).resolves.toMatchObject({items:[]})
+  expect(mock).toHaveBeenCalledTimes(2)
+  expect(mock.mock.calls[0]).toEqual(mock.mock.calls[1])
+  mock.mockReset().mockResolvedValue(new Response(null,{status:403}))
+  await expect(fetchInbox('threads?scope=active',ctx,signal,{retryTransient:true})).rejects.toMatchObject({code:'HTTP_403'})
+  expect(mock).toHaveBeenCalledTimes(1)
+ })
+ it('does not retry after cancellation during the backoff',async()=>{
+  const mock=vi.fn().mockResolvedValue(new Response(null,{status:503}))
+  vi.stubGlobal('fetch',mock)
+  const ctl=new AbortController()
+  const pending=fetchInbox('threads?scope=active',ctx,ctl.signal,{retryTransient:true})
+  const assertion=expect(pending).rejects.toMatchObject({code:'CANCELLED'})
+  await Promise.resolve();await Promise.resolve();ctl.abort()
+  await assertion
+  expect(mock).toHaveBeenCalledTimes(1)
+ })
  it('fails closed if either flag is absent or project differs',()=>{
   const env: NodeJS.ProcessEnv={NODE_ENV:'test',NEXT_PUBLIC_SUPABASE_URL:'https://pqirsnfupofhulmewakq.supabase.co',WACRM_INBOX_READ_API:'test_only',WACRM_INBOX_SCOPED_UI:'test_only'}
   expect(scopedInboxEnabled(env)).toBe(true)

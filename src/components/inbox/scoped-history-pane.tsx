@@ -1,7 +1,7 @@
 'use client'
 import { useEffect,useLayoutEffect,useRef,useState } from 'react'
 import { useLocale,useTranslations } from 'next-intl'
-import { Check,CheckCheck,Clock,Reply,XCircle,Copy,SmilePlus } from 'lucide-react'
+import { Check,CheckCheck,Clock,Reply,XCircle,Copy,SmilePlus,AlertCircle,RefreshCw,Info } from 'lucide-react'
 import { ReplyQuote } from './reply-quote'
 import {MediaAudioBubble,MediaDocumentBubble,MediaImageBubble,MediaVideoBubble,MediaUnavailable} from './message-media'
 import {MediaLightbox} from './media-lightbox'
@@ -102,21 +102,21 @@ export function ScopedHistoryPane({row,ctx,revision,onRefresh,actions}:{row:Scop
   target?.focus({preventScroll:true})
  }
  return <div className="flex min-h-0 flex-1 flex-col">
-  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2">
-   <span className="text-xs text-muted-foreground">{row.scope==='active'?t('localReadNotice'):t('readOnly')}</span>
-   {row.scope==='active'&&history.token&&<Button size="sm" variant="outline" className="min-h-11" disabled={reading||history.busy||history.error} onClick={()=>void read()}>{reading?t('loading'):t('markRead')}</Button>}
-  </div>
+  {(row.scope!=='active'||history.token)&&<div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-card px-4 py-1">
+   <span className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground"><Info className="size-3 shrink-0"/>{row.scope==='active'?t('localReadNotice'):t('readOnly')}</span>
+   {row.scope==='active'&&history.token&&<Button size="sm" variant="ghost" className="min-h-8 shrink-0 text-xs" disabled={reading||history.busy||history.error} onClick={()=>void read()}>{reading?t('loading'):t('markRead')}</Button>}
+  </div>}
   {readError&&<p role="alert" className="px-4 py-2 text-xs text-destructive">{t('readFailed')}</p>}
   <div ref={scroll} role="log" aria-label={t('actionMessageHistory')} aria-live="off" className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-background bg-[url('/inbox-doodle.svg')] bg-repeat p-4" aria-busy={history.busy}>
    <div className="space-y-2">
     {history.cursor&&<div className="text-center"><Button size="sm" variant="outline" disabled={history.busy} onClick={history.more}>{t('olderMessages')}</Button></div>}
-    {history.busy&&<p role="status" className="text-center text-xs text-muted-foreground">{t('loading')}</p>}
-    {history.error&&<div role="alert" className="space-y-2 text-center text-sm text-destructive"><p>{t('error')}</p><Button onClick={history.retry} variant="outline">{t('retry')}</Button></div>}
+    {history.busy&&<div role="status" className="flex items-center justify-center py-8"><div className="size-5 animate-spin rounded-full border-2 border-primary border-t-transparent"/><span className="sr-only">{t('loading')}</span></div>}
+    {history.error&&<div role="alert" className="mx-auto mt-8 flex max-w-sm flex-col items-center gap-3 rounded-xl border border-border bg-card p-5 text-center text-sm shadow-sm"><AlertCircle className="size-6 text-muted-foreground"/><p className="text-foreground">{t('error')}</p><code dir="ltr" className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">{history.errorCode??'INVALID_SCOPE'}</code><Button onClick={history.retry} variant="outline" size="sm"><RefreshCw className="size-3.5"/>{t('retry')}</Button></div>}
     {!history.busy&&!history.error&&!chronological.length&&<p className="py-8 text-center text-sm text-muted-foreground">{t('emptyHistory')}</p>}
     {chronological.map((message,index)=>{
      const day=conversationDay(message.created_at,locale)
      const previous=index?conversationDay(chronological[index-1].created_at,locale):null
-     return <div key={message.id} className="space-y-2">{day&&day!==previous&&<div className="flex justify-center"><span className="rounded-full border border-border/70 bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-sm">{day}</span></div>}<Message message={message} quote={message.reply_to_message_id?byId.get(message.reply_to_message_id):undefined} actions={actions} onJump={jump} onOpenMedia={setMediaId}/></div>
+     return <div key={message.id} className="space-y-2">{day&&day!==previous&&<div className="mb-4 mt-2 flex justify-center"><span className="rounded-full bg-muted px-3 py-1 text-[10px] font-medium text-muted-foreground">{day}</span></div>}<Message message={message} quote={message.reply_to_message_id?byId.get(message.reply_to_message_id):undefined} actions={actions} onJump={jump} onOpenMedia={setMediaId}/></div>
     })}
    </div>
   </div>

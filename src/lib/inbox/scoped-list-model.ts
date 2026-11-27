@@ -53,12 +53,40 @@ export function mergePage<T extends {id:string}>(old:T[],next:T[]):T[]{
  for(const row of next)map.set(row.id,row)
  return [...map.values()]
 }
-export async function fetchInbox<T>(path:string,ctx:InboxContext,signal:AbortSignal):Promise<T>{
- const response=await fetch('/api/inbox/'+path,{method:'GET',cache:'no-store',credentials:'same-origin',signal,headers:{'x-wacrm-inbox-account':ctx.accountId,'x-wacrm-inbox-actor':ctx.userId}})
- if(!response.ok)throw new Error('Inbox read failed')
- const body=await response.json()
- if(signal.aborted||body?.read_only!==true)throw new Error('Inbox read cancelled or invalid')
- return body as T
+// Safe, bounded diagnostics: no URL, response body, account ID, or credentials.
+export class InboxReadError extends Error {
+ constructor(readonly code:string,readonly retryable=false){super(code);this.name='InboxReadError'}
+}
+export function inboxReadErrorCode(error:unknown):string{
+ return error instanceof InboxReadError?error.code:'INVALID_SCOPE'
+}
+function retryDelay(signal:AbortSignal){
+ return new Promise<void>((resolve,reject)=>{
+  if(signal.aborted){reject(new InboxReadError('CANCELLED'));return}
+  const cancel=()=>{clearTimeout(timer);signal.removeEventListener('abort',cancel);reject(new InboxReadError('CANCELLED'))}
+  const timer=setTimeout(()=>{signal.removeEventListener('abort',cancel);resolve()},350)
+  signal.addEventListener('abort',cancel,{once:true})
+ })
+}
+export async function fetchInbox<T>(path:string,ctx:InboxContext,signal:AbortSignal,options:{retryTransient?:boolean}={}):Promise<T>{
+ const once=async()=>{
+  if(signal.aborted)throw new InboxReadError('CANCELLED')
+  let response:Response
+  try{response=await fetch('/api/inbox/'+path,{method:'GET',cache:'no-store',credentials:'same-origin',signal,headers:{'x-wacrm-inbox-account':ctx.accountId,'x-wacrm-inbox-actor':ctx.userId}})}
+  catch{throw new InboxReadError(signal.aborted?'CANCELLED':'NETWORK',!signal.aborted)}
+  if(signal.aborted)throw new InboxReadError('CANCELLED')
+  if(!response.ok)throw new InboxReadError('HTTP_'+response.status,[502,503,504,500].includes(response.status))
+  let body:unknown
+  try{body=await response.json()}catch{throw new InboxReadError('INVALID_RESPONSE')}
+  if(signal.aborted)throw new InboxReadError('CANCELLED')
+  if(!body||typeof body!=='object'||!('read_only' in body)||body.read_only!==true)throw new InboxReadError('INVALID_RESPONSE')
+  return body as T
+ }
+ try{return await once()}catch(error){
+  if(!options.retryTransient||signal.aborted||!(error instanceof InboxReadError)||!error.retryable)throw error
+  await retryDelay(signal)
+  return once()
+ }
 }
 export function pagePath(path:string,cursor:string|null){
  if(!cursor)return path

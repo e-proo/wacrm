@@ -1,9 +1,9 @@
 'use client'
 import { useEffect,useRef,useState } from 'react'
-import { fetchInbox,pagePath,type InboxContext } from './scoped-list-model'
+import { fetchInbox,pagePath,inboxReadErrorCode,type InboxContext } from './scoped-list-model'
 import { historyKey,historyPath,mergeHistory,validateHistory,type HistoryMessage,type HistoryPage,type HistoryScope } from './scoped-history-model'
 
-type State={key:string;items:HistoryMessage[];cursor:string|null;token:string|null;busy:boolean;error:boolean}
+type State={key:string;items:HistoryMessage[];cursor:string|null;token:string|null;busy:boolean;error:boolean;errorCode?:string}
 type Session={key:string;controller:AbortController;reload:()=>void;more:()=>void}
 const empty=(key:string):State=>({key,items:[],cursor:null,token:null,busy:true,error:false})
 export function useScopedHistory(row:HistoryScope,ctx:InboxContext,revision:number,beforeChange:()=>void){
@@ -23,7 +23,7 @@ export function useScopedHistory(row:HistoryScope,ctx:InboxContext,revision:numb
    setState(next)
   }
   async function page(cursor:string|null){
-   const result=await fetchInbox<HistoryPage>(pagePath(path,cursor),{accountId,userId},signal)
+   const result=await fetchInbox<HistoryPage>(pagePath(path,cursor),{accountId,userId},signal,{retryTransient:true})
    if(!validateHistory(result,expected)||cursor!==null&&cursor===result.next_cursor)throw new Error('Invalid history page')
    return result
   }
@@ -51,8 +51,8 @@ export function useScopedHistory(row:HistoryScope,ctx:InboxContext,revision:numb
      depth=loaded
      commit({key,items,cursor,token,busy:false,error:false})
     }
-   }catch{
-    if(!signal.aborted){depth=1;commit({...empty(key),busy:false,error:true})}
+   }catch(error){
+    if(!signal.aborted){depth=1;commit({...empty(key),busy:false,error:true,errorCode:inboxReadErrorCode(error)})}
    }finally{
     pending=false
     if(queued&&!signal.aborted){queued=false;void load(false)}

@@ -5,7 +5,7 @@ import {AlertTriangle,Paperclip,RefreshCw,Send,ShieldCheck,X,Smile,Zap,LayoutTem
 import {Button} from '@/components/ui/button'
 import {DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuItem} from '@/components/ui/dropdown-menu'
 import {useInboxPages} from '@/lib/inbox/use-scoped-list'
-import {fetchInbox,validId,type Connection,type InboxContext,type ScopedRow} from '@/lib/inbox/scoped-list-model'
+import {fetchInbox,validId,inboxReadErrorCode,type Connection,type InboxContext,type ScopedRow} from '@/lib/inbox/scoped-list-model'
 import {uploadAccountMedia,deleteAccountMedia,MEDIA_MAX_BYTES_BY_KIND} from '@/lib/storage/upload-media'
 import {submitScopedAction,inspectScopedAction,type ScopedActionOutcome,type ScopedActionRequest} from '@/lib/inbox/scoped-action-client'
 import type {ActionScope} from '@/lib/inbox/action-intent-model'
@@ -49,7 +49,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  const draftKey=scopedDraftKey(ctx,row.id,row.channel_id),key=outcomeStorage(ctx,row.id)
  const list=useInboxPages<Connection>('connections?scope=active&channel_id='+(row.channel_id??''),ctx,
   c=>c.channel_id===row.channel_id&&c.provider===row.provider,revision)
- const [policyError,setPolicyError]=useState(false)
+ const [policyError,setPolicyError]=useState<string|null>(null)
  const [policy,setPolicy]=useState<{key:string;capabilities:InboxCapabilities;seen:number}|null>(null)
  const [tick,setTick]=useState(0)
  const [mode,setMode]=useState<Mode>(()=>getScopedAttachment(draftKey)?'media':'text')
@@ -86,18 +86,18 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  const policyKey=ctx.accountId+':'+ctx.userId+':'+row.id+':'+row.channel_id+':'+(selectedConnection??'')+':'+revision
  useEffect(()=>{
   const ctl=new AbortController()
-  setPolicy(null);setPolicyError(false)
+  setPolicy(null);setPolicyError(null)
   onScopeChange(null)
   if(!row.channel_id||!selectedConnection||row.scope!=='active')return()=>ctl.abort()
    const url='threads/'+row.id+'/capabilities?channel_id='+encodeURIComponent(row.channel_id)+'&connection_id='+encodeURIComponent(selectedConnection)
-  void fetchInbox<{capabilities:InboxCapabilities}>(url,ctx,ctl.signal).then(response=>{
+  void fetchInbox<{capabilities:InboxCapabilities}>(url,ctx,ctl.signal,{retryTransient:true}).then(response=>{
    const c=response.capabilities
    if(!c||c.thread_id!==row.id||c.channel_id!==row.channel_id||c.connection_id!==selectedConnection||c.provider!==row.provider||!validId(c.membership_id))throw Error('Sender changed')
    if(ctl.signal.aborted)return
    const next={key:policyKey,capabilities:c,seen:performance.now()}
    setPolicy(next)
    onScopeChange({scope:{threadId:row.id,channelId:row.channel_id!,connectionId:selectedConnection,membershipId:c.membership_id!,provider:c.provider},capabilities:c})
-  }).catch(()=>{if(!ctl.signal.aborted){setPolicy(null);setPolicyError(true);onScopeChange(null)}})
+  }).catch(error=>{if(!ctl.signal.aborted){setPolicy(null);setPolicyError(inboxReadErrorCode(error));onScopeChange(null)}})
   return()=>{ctl.abort();onScopeChange(null)}
  },[ctx.accountId,ctx.userId,row.id,row.channel_id,row.provider,row.scope,selectedConnection,revision,policyKey,onScopeChange])
  const connections=list.items
@@ -208,7 +208,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
   {list.busy&&<p className="text-xs text-muted-foreground">{t('policyChecking')}</p>}
   {list.error&&<p role="alert" className="text-xs text-destructive">{t('policyUnavailable')}</p>}
   {!list.busy&&!list.error&&connections.length===0&&<p className="text-xs text-muted-foreground">{t('actionNoSender')}</p>}
-  {selectedConnection&&!c&&<div className="flex items-center gap-2 text-xs text-muted-foreground"><span role="status">{t(policyError?'policyUnavailable':'policyChecking')}</span><Button type="button" variant="ghost" size="sm" onClick={onRefresh} aria-label={t('retry')}><RefreshCw className="size-3"/></Button></div>}
+  {selectedConnection&&!c&&<div className="flex items-center gap-2 text-xs text-muted-foreground"><span role="status">{t(policyError?'policyUnavailable':'policyChecking')}</span>{policyError&&<code dir="ltr" className="rounded bg-muted px-1.5 py-0.5">{policyError}</code>}<Button type="button" variant="ghost" size="sm" onClick={onRefresh} aria-label={t('retry')}><RefreshCw className="size-3"/></Button></div>}
   {c&&<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
    {isMeta&&<span className="rounded-full bg-muted px-2 py-1 tabular-nums">{windowInfo?.open?t('policyWindowOpen',{time:new Date(remaining).toISOString().slice(11,19)}):t('policyWindowClosed')}</span>}
    {c.blocked_reason&&<span role="status" className="rounded-md border border-border px-2 py-0.5">{t('policyDenied')}: {c.blocked_reason}</span>}{c.blocked_reason&&row.provider==='openwa'&&<a href="/settings?tab=whatsapp" className="text-primary underline">{t('actionChooseSender')} ↗</a>}
