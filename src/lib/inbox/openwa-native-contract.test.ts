@@ -7,6 +7,9 @@ const health = { status: 'ok', version: '0.29.1' }
 describe('single connection native namespace contract', () => {
   it('requires authenticated exact reviewed version and live engine', () => {
     expect(parseOpenWANativeContract(auth, health, ready)).toEqual(OPENWA_NATIVE_CONTRACT)
+    expect(parseOpenWANativeContract(auth,{...health,version:'0.32.1'},ready)).toEqual({...OPENWA_NATIVE_CONTRACT,version:'0.32.1'})
+    expect(()=>parseOpenWANativeContract({...auth,engineType:'baileys'},{...health,version:'0.32.1'},ready)).toThrow('namespace_engine_unsupported')
+    expect(()=>parseOpenWANativeContract(auth,{...health,version:'0.32.2'},ready)).toThrow('namespace_version_unsupported')
     for (const a of [null, {}, { ...auth, valid: false }, { ...auth, engineType: null }])
       expect(() => parseOpenWANativeContract(a, health, ready)).toThrow('namespace_engine_unverified')
     for (const engineType of ['baileys', 'mock', 'WHATSAPP-WEB.JS'])

@@ -48,6 +48,25 @@ BEGIN
  IF (SELECT count(*) FROM public.inbox_native_namespace_proofs WHERE account_id=a)<>1 OR NOT EXISTS(SELECT 1 FROM public.whatsapp_channel_memberships WHERE id=ep AND is_primary AND valid_until IS NULL)
  OR EXISTS(SELECT 1 FROM public.whatsapp_channel_memberships WHERE connection_id=c2 AND valid_until IS NULL)
  THEN RAISE EXCEPTION 'handover conflict changed state'; END IF;
+ -- The new exact reviewed version is allowed on a distinct fresh channel,
+ -- but not as a substitute for an existing version or same-number proof.
+ BEGIN
+  PERFORM public.inbox_enroll_verified_openwa_namespace(a,u,c,'15550000124','inbox224-a',NULL,d,cv,clock_timestamp(),gen_random_uuid(),'whatsapp-web.js','0.32.1');
+  RAISE EXCEPTION 'cross-version proof reused';
+ EXCEPTION WHEN check_violation THEN NULL; END;
+ BEGIN
+  PERFORM public.inbox_enroll_verified_openwa_namespace(a,u,c2,'15550000124','inbox224-b',NULL,d2,cv2,clock_timestamp(),gen_random_uuid(),'whatsapp-web.js','0.32.1');
+  RAISE EXCEPTION 'cross-version second route promoted';
+ EXCEPTION WHEN check_violation THEN NULL; END;
+ INSERT INTO public.whatsapp_connections(account_id,provider,status,session_id,phone_identity) VALUES(a,'openwa','ready','inbox232-fresh','15550000132') RETURNING id,updated_at INTO c2,d2;
+ INSERT INTO public.whatsapp_connection_credentials(account_id,connection_id,provider,base_url,api_key_encrypted,webhook_secret_encrypted,webhook_url)
+ VALUES(a,c2,'openwa','https://example.test','fixture','fixture-secret','https://wacrm.example.test/api/whatsapp/openwa/webhook') RETURNING updated_at INTO cv2;
+ EXECUTE 'SET LOCAL ROLE service_role';
+ v=public.inbox_enroll_verified_openwa_namespace(a,u,c2,'15550000132','inbox232-fresh',NULL,d2,cv2,clock_timestamp(),gen_random_uuid(),'whatsapp-web.js','0.32.1');
+ IF v->>'gateway_version'<>'0.32.1' OR v->>'namespace_verified'<>'true' THEN RAISE EXCEPTION 'new release not enrolled %',v; END IF;
+ v=public.inbox_admin_channel_readiness(a,u,NULL,20);
+ EXECUTE 'RESET ROLE';
+ IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(v->'rows') x WHERE x->>'id'=c2::text AND x->>'gateway_version'='0.32.1' AND x->>'namespace_contract_verified'='true') THEN RAISE EXCEPTION 'new release readiness missing'; END IF;
  INSERT INTO public.contacts(user_id,account_id,phone,name) VALUES(u,a,'+15550000224','Fixture') RETURNING id INTO contact;
  INSERT INTO public.conversations(user_id,account_id,contact_id) VALUES(u,a,contact) RETURNING id INTO conv;
  tok=gen_random_uuid();

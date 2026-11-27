@@ -5,7 +5,7 @@ import { verifyPhoneNumber } from '@/lib/whatsapp/meta-api'
 import { resolveOpenWAClient } from '@/lib/whatsapp/transport/openwa/credentials'
 import { normalizeOpenWAConnectionState } from '@/lib/whatsapp/transport/openwa/session-lifecycle'
 import { WhatsAppTransportError } from '@/lib/whatsapp/transport/types'
-import { InboxNamespaceEnrollmentError, verifyOpenWANativeContract, type OPENWA_NATIVE_CONTRACT } from './openwa-native-contract'
+import { InboxNamespaceEnrollmentError, verifyOpenWANativeContract, type OpenWANativeContract } from './openwa-native-contract'
 
 const notVerified = () => new WhatsAppTransportError('connection_restricted', 'The exact connected sender identity could not be verified. Refresh the connection and try again.')
 export function strictOwnPhone(value: unknown): string | null {
@@ -28,7 +28,7 @@ export async function enrollVerifiedInboxChannel(db: SupabaseClient, input: {
   let credentialVersion: string
   let session: string | null = null
   let instance: string | null = null
-  let nativeContract: typeof OPENWA_NATIVE_CONTRACT | null = null
+  let nativeContract: OpenWANativeContract | null = null
   const checkedAt = new Date().toISOString()
   if (c.provider === 'openwa') {
     const { data: credential, error: credentialError } = await db.from('whatsapp_connection_credentials')
