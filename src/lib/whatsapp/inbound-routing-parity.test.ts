@@ -12,8 +12,17 @@ describe('OW-6 shared inbound routing parity', () => {
 
     expect(metaRoute).toContain('normalizeMetaInboundMessage')
     expect(metaRoute).toContain('processNormalizedInboundMessage')
-    expect(openwaRoute).toContain('normalizeOpenWAInboundMessage')
-    expect(openwaRoute).toContain('processNormalizedInboundMessage')
+    const openwaProcessor = source('./transport/openwa/webhook-processing.ts')
+    const intakeWorker = source('./transport/openwa/intake-worker.ts')
+    const deferredWorker = source('./transport/openwa/deferred-worker.ts')
+    expect(openwaRoute).toContain('processReservedOpenWAWebhook(')
+    expect(intakeWorker).toContain('processReservedOpenWAWebhook(')
+    expect(openwaProcessor).toContain('normalizeOpenWAInboundMessage(')
+    expect(openwaProcessor).toContain('processNormalizedInboundMessage(')
+    expect(deferredWorker).toContain('processNormalizedInboundMessage(')
+    expect(openwaRoute).not.toContain('processNormalizedInboundMessage(')
+    expect(intakeWorker).not.toContain('processNormalizedInboundMessage(')
+    expect(openwaRoute.indexOf('if (reservation.queued)')).toBeLessThan(openwaRoute.indexOf('return processReservedOpenWAWebhook('))
   })
 
   it('keeps provider-neutral persistence in the shared processor', () => {

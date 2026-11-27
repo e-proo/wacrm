@@ -42,3 +42,10 @@ it('does not process a changed route even after a valid queue claim',async()=>{
  expect(h.process).not.toHaveBeenCalled()
  expect(rpc).toHaveBeenLastCalledWith('openwa_finish_signed_intake',{p_id:'fixture',p_token:'lease',p_reason:'processing_uncertain'})
 })
+
+it('recognizes session lifecycle aliases before applying the ready-session fence',async()=>{
+ h.open.mockReturnValueOnce({eventId:'evt',event:'session status'})
+ const rpc=vi.fn().mockResolvedValueOnce({data:claim,error:null}).mockResolvedValueOnce({data:true,error:null}).mockResolvedValueOnce({data:'completed',error:null})
+ expect((await processOpenWAIntakeTick({rpc} as never)).completed).toBe(1)
+ expect(rpc).toHaveBeenCalledWith('openwa_check_claimed_intake',{p_id:'fixture',p_token:'lease',p_canonical:true,p_lifecycle:true})
+})
