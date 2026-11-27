@@ -73,7 +73,9 @@ BEGIN
  j=public.openwa_claim_signed_intake(true);rid=(j->>'id')::uuid;tok=(j->>'token')::uuid;
  PERFORM public.inbox_hold_signed_observation(a,c,'canonical-review',tok,'intake229',NULL,'peer_conflict','{}');
  UPDATE public.whatsapp_webhook_event_receipts SET processed_at=clock_timestamp(),processing_started_at=NULL WHERE id=rid AND processing_token=tok;
+ IF public.inbox_review_decision(a,rid)<>'busy' THEN RAISE EXCEPTION 'review allowed before durable finalization'; END IF;
  IF public.openwa_finish_signed_intake(rid,tok,NULL)<>'completed' THEN RAISE EXCEPTION 'review handoff'; END IF;
+ IF public.inbox_review_decision(a,rid)<>'unverified' THEN RAISE EXCEPTION 'review unavailable after finalization'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=rid AND intake_state='completed' AND intake_ciphertext=cipher) THEN RAISE EXCEPTION 'canonical review lost evidence'; END IF;
  IF public.openwa_enqueue_signed_intake(a,c,'rotation','intake229',NULL,cv,true,d,cipher)<>'accepted' THEN RAISE EXCEPTION 'rotation fixture'; END IF;
  UPDATE public.whatsapp_connections SET session_id='intake229-rotated' WHERE account_id=a AND id=c;

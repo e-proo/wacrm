@@ -36,6 +36,14 @@ BEGIN
  v=public.inbox_admin_revoke_openwa_enrollment(a,u,c,ep,true,gen_random_uuid());
  IF v->>'state'<>'busy' OR NOT EXISTS(SELECT 1 FROM public.whatsapp_channel_memberships WHERE id=ep AND valid_until IS NULL AND is_primary) THEN RAISE EXCEPTION 'pending action not fenced'; END IF;
  UPDATE public.inbox_action_intents SET state='blocked',finished_at=clock_timestamp() WHERE account_id=a AND membership_id=ep;
+ -- Simulated pending durable event: nested transaction is rolled back.
+ BEGIN
+  SELECT updated_at INTO cv FROM public.whatsapp_connection_credentials WHERE account_id=a AND connection_id=c AND provider='openwa';
+  IF public.openwa_enqueue_signed_intake(a,c,'pending-revoke','fixture-private-session',NULL,cv,true,repeat('a',64),repeat('a',100))<>'accepted' THEN RAISE EXCEPTION 'pending fixture not accepted'; END IF;
+  v=public.inbox_admin_revoke_openwa_enrollment(a,u,c,ep,true,gen_random_uuid());
+  IF v->>'state'<>'busy' THEN RAISE EXCEPTION 'pending durable event not fenced'; END IF;
+  RAISE SQLSTATE 'P0002';
+ EXCEPTION WHEN no_data_found THEN NULL; END;
  k=gen_random_uuid();
  EXECUTE 'SET LOCAL ROLE service_role';
  v=public.inbox_admin_revoke_openwa_enrollment(a,u,c,ep,true,k);

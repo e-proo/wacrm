@@ -24,6 +24,12 @@ BEGIN
  j=public.openwa_intake_health(a,u,false);
  EXECUTE 'RESET ROLE';
  IF (j->>'legacy_unfinished')::int<>1 OR (j->>'legacy_closed')::int<>1 THEN RAISE EXCEPTION 'health %',j; END IF;
+ INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at)
+ VALUES(a,c,'openwa','linked-old',clock_timestamp()-interval '2 days') RETURNING id INTO r2;
+ INSERT INTO public.inbox_canonical_intake_review(receipt_id,account_id,connection_id,provider,reason,normalized_payload) VALUES(r2,a,c,'openwa','namespace_unverified','{}');
+ j=public.openwa_intake_review_page(a,u,NULL,20);
+ IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(j->'rows') x WHERE x->>'id'=r2::text AND x->>'can_close'='false') THEN RAISE EXCEPTION 'linked receipt advertised as eligible'; END IF;
+ IF public.openwa_intake_close_unverified(a,u,r2)<>'conflict' THEN RAISE EXCEPTION 'linked receipt closed'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=r AND legacy_closed_by=u AND processed_at IS NULL AND processing_token=tok AND processing_attempts=2 AND processing_error='processing_failed') THEN RAISE EXCEPTION 'original evidence lost'; END IF;
 END $test$;
 SET CONSTRAINTS ALL IMMEDIATE;
