@@ -63,26 +63,26 @@ BEGIN
  EXECUTE 'RESET ROLE';
  -- A never-claimed event with stale credentials remains blocked, not rebound.
  INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,intake_state,intake_canonical_mode,intake_ciphertext,intake_digest,intake_session,intake_phone,intake_credential_version,processing_attempts)
- VALUES(a,s,'stale-binding',clock_timestamp(),'pending',true,repeat('d',100),repeat('d',64),'intake233','15550000233',cv-interval '1 second',0) RETURNING id INTO stale_id;
+ VALUES(a,s,'openwa','stale-binding',clock_timestamp(),'pending',true,repeat('d',100),repeat('d',64),'intake233','15550000233',cv-interval '1 second',0) RETURNING id INTO stale_id;
  IF public.openwa_claim_signed_intake(true)->>'state'<>'review' OR NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=stale_id AND intake_reason='binding_changed' AND processing_attempts=0 AND intake_ciphertext IS NOT NULL) THEN RAISE EXCEPTION 'stale binding replayed'; END IF;
  IF public.openwa_intake_close_unverified(a,u,stale_id)<>'closed_unverified' THEN RAISE EXCEPTION 'stale fixture close'; END IF;
  -- Seed an expired lease without touching a live row or sleeping 90 seconds.
  stale_token=gen_random_uuid();old_at=clock_timestamp()-interval '91 seconds';
  INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,intake_state,intake_canonical_mode,intake_ciphertext,intake_digest,intake_session,intake_phone,intake_credential_version,processing_attempts,processing_token,processing_started_at,intake_claim_token,intake_claimed_at)
- VALUES(a,s,'expired-lease',old_at,'running',true,repeat('e',100),repeat('e',64),'intake233','15550000233',cv,1,stale_token,old_at,stale_token,old_at) RETURNING id INTO stale_id;
+ VALUES(a,s,'openwa','expired-lease',old_at,'running',true,repeat('e',100),repeat('e',64),'intake233','15550000233',cv,1,stale_token,old_at,stale_token,old_at) RETURNING id INTO stale_id;
  IF public.openwa_renew_signed_intake(stale_id,stale_token,true,false) OR public.openwa_claim_signed_intake(true)->>'state'<>'idle' OR NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=stale_id AND intake_state='review' AND intake_reason='lease_expired' AND intake_ciphertext IS NOT NULL) THEN RAISE EXCEPTION 'expired lease revived'; END IF;
  -- A long-lived renewed lease can still be finalized; the original age
  -- is preserved and the heartbeat cannot extend beyond the hard cap.
  IF public.openwa_intake_close_unverified(a,u,stale_id)<>'closed_unverified' THEN RAISE EXCEPTION 'expired fixture close'; END IF;
  stale_token=gen_random_uuid();old_at=clock_timestamp()-interval '110 seconds';
  INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,intake_state,intake_canonical_mode,intake_ciphertext,intake_digest,intake_session,intake_phone,intake_credential_version,processing_attempts,processing_token,processing_started_at,intake_claim_token,intake_claimed_at)
- VALUES(a,s,'renewed-long',old_at,'running',true,repeat('f',100),repeat('f',64),'intake233','15550000233',cv,1,stale_token,clock_timestamp()-interval '5 seconds',stale_token,old_at) RETURNING id INTO stale_id;
+ VALUES(a,s,'openwa','renewed-long',old_at,'running',true,repeat('f',100),repeat('f',64),'intake233','15550000233',cv,1,stale_token,clock_timestamp()-interval '5 seconds',stale_token,old_at) RETURNING id INTO stale_id;
  IF NOT public.openwa_renew_signed_intake(stale_id,stale_token,true,false) OR public.openwa_claim_signed_intake_v2(true)->>'state'<>'idle' THEN RAISE EXCEPTION 'long renewed lease lost'; END IF;
  UPDATE public.whatsapp_webhook_event_receipts SET processed_at=clock_timestamp(),processing_started_at=NULL WHERE id=stale_id AND processing_token=stale_token;
  IF public.openwa_finish_signed_intake(stale_id,stale_token,NULL)<>'completed' THEN RAISE EXCEPTION 'long finalization failed'; END IF;
  stale_token=gen_random_uuid();old_at=clock_timestamp()-interval '301 seconds';
  INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,intake_state,intake_canonical_mode,intake_ciphertext,intake_digest,intake_session,intake_phone,intake_credential_version,processing_attempts,processing_token,processing_started_at,intake_claim_token,intake_claimed_at)
- VALUES(a,s,'hard-cap',old_at,'running',true,repeat('a',100),repeat('a',64),'intake233','15550000233',cv,1,stale_token,clock_timestamp()-interval '5 seconds',stale_token,old_at) RETURNING id INTO stale_id;
+ VALUES(a,s,'openwa','hard-cap',old_at,'running',true,repeat('a',100),repeat('a',64),'intake233','15550000233',cv,1,stale_token,clock_timestamp()-interval '5 seconds',stale_token,old_at) RETURNING id INTO stale_id;
  IF public.openwa_renew_signed_intake(stale_id,stale_token,true,false) THEN RAISE EXCEPTION 'unbounded lease renewal'; END IF;
  IF has_function_privilege('anon','public.openwa_claim_signed_intake_v2(boolean)','EXECUTE') OR has_function_privilege('authenticated','public.openwa_claim_signed_intake_v2(boolean)','EXECUTE') THEN RAISE EXCEPTION 'v2 claim ACL'; END IF;
  IF has_function_privilege('authenticated','public.openwa_renew_signed_intake(uuid,uuid,boolean,boolean)','EXECUTE') OR has_function_privilege('anon','public.openwa_recover_returned_intake(uuid,uuid,uuid)','EXECUTE') OR has_function_privilege('authenticated','public.openwa_returned_intake_evidence(uuid)','EXECUTE') THEN RAISE EXCEPTION 'browser ACL'; END IF;
