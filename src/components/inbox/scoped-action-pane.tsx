@@ -22,6 +22,7 @@ import {metaWindow,quotePreview,sameReplyLane} from '@/lib/inbox/scoped-conversa
 import type {HistoryMessage} from '@/lib/inbox/scoped-history-model'
 import {scopedDraftKey,getScopedDraft,saveScopedDraft,clearScopedDraft,containsUnsentDraft} from '@/lib/inbox/scoped-draft-memory'
 import {useBrowserOnline} from '@/lib/inbox/scoped-connectivity'
+import {uploadScopedVideo,scopedVideoMime} from '@/lib/inbox/scoped-video-upload'
 
 export type ActiveActionScope={scope:ActionScope;capabilities:InboxCapabilities}
 type Mode='text'|'media'|'template'|'interactive'
@@ -164,9 +165,10 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
    if(file&&file.size>MEDIA_MAX_BYTES_BY_KIND[kind])setFileError(t('actionFileTooLarge'))
    return
   }
+  if(kind==='video'&&!scopedVideoMime(file.name,file.type)){setFileError(t('actionVideoFormat'));return}
   uploadLock.current=true;setUploading(true);setFileError(null)
   try{
-   const result=await uploadAccountMedia('chat-media',file,ctx)
+   const result=kind==='video'&&scope?await uploadScopedVideo(file,ctx,scope):await uploadAccountMedia('chat-media',file,ctx)
    // A late upload on a departed account must not repopulate its draft.
    // No provider request has been made, and no existing object is deleted.
    if(!mounted.current)return
@@ -174,7 +176,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
    if(attachment)void deleteAccountMedia('chat-media',attachment.path).catch(()=>{})
    setAttachment({kind,url:result.publicUrl,path:result.path,filename:file.name})
    setMediaKind(kind);setMode('media');setCaption('')
-  }catch{if(mounted.current)setFileError(t('actionUploadFailed'))}
+  }catch(error){if(mounted.current){const code=error instanceof Error&&/^VIDEO_(?:HTTP_\d{3}|NETWORK|FORMAT|SIZE|RESPONSE)$/.test(error.message)?error.message:null;setFileError(t('actionUploadFailed')+(code?' · '+code:''))}}
   finally{uploadLock.current=false;if(mounted.current)setUploading(false)}
  }
  async function discard(){
@@ -188,7 +190,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
  const canAttach=Boolean(canDraft&&enabled&&c?.may_send_media&&!expired)
  const draftLocked=Boolean(attempt)||busy||uploading||recording
  const iconClass='inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
- const mediaOptions=[{kind:'image',Icon:ImageIcon,accept:'image/png,image/jpeg,image/webp'},{kind:'video',Icon:Video,accept:'video/mp4,video/3gpp'},{kind:'document',Icon:FileText,accept:'.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt'},{kind:'audio',Icon:FileText,accept:'audio/ogg,audio/mpeg'}] as const
+ const mediaOptions=[{kind:'image',Icon:ImageIcon,accept:'image/png,image/jpeg,image/webp'},{kind:'video',Icon:Video,accept:'video/mp4,video/3gpp,video/3gp,.mp4,.3gp,.3gpp'},{kind:'document',Icon:FileText,accept:'.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt'},{kind:'audio',Icon:FileText,accept:'audio/ogg,audio/mpeg'}] as const
  return <section className="shrink-0 max-h-[min(55dvh,30rem)] space-y-2 overflow-y-auto overscroll-contain border-t border-border bg-card p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]" aria-label={t('actionTitle')}>
   <div className="flex flex-wrap items-center justify-between gap-2">
    <div className="flex min-w-0 items-center gap-2 text-xs font-medium"><ShieldCheck className="size-4 text-muted-foreground"/>{t('actionTitle')}</div>
@@ -261,6 +263,7 @@ export function ScopedActionPane({row,ctx,revision,selectedConnection,onSelectCo
     <Button type="button" size="sm" className="ms-auto h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90" onClick={()=>void send()} disabled={!canSubmit} aria-label={t('actionSend')}><Send className="size-4 rtl:rotate-180"/></Button>
    </div>
   </div>}
+  {uploading&&<p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><RefreshCw className="size-3 animate-spin"/>{t('actionUploading')}</p>}
   {fileError&&<p role="alert" className="text-xs text-destructive">{fileError}</p>}
   {mode==='template'&&isMeta&&<p className="text-xs text-muted-foreground" dir="auto">{template?template.name+' · '+template.language:t('actionSelectTemplate')}</p>}
   {mode==='interactive'&&isMeta&&<div className="max-h-44 overflow-y-auto rounded-lg border border-border p-2"><InteractiveBuilder value={interactive} onChange={setInteractive}/></div>}

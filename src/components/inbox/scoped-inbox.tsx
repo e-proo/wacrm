@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { useInboxPages,useInboxCounts } from '@/lib/inbox/use-scoped-list'
 import { useScopedInboxRealtime } from '@/lib/inbox/use-scoped-realtime'
 import { ScopedHistoryPane } from './scoped-history-pane'
+import {ScopedAiThreadBanner} from './scoped-ai-thread-banner'
 import {ScopedActionPane,type ActiveActionScope} from './scoped-action-pane'
 import {ScopedContactPanel} from './scoped-contact-panel'
 import {ScopedNewThreadDialog} from './scoped-new-thread-dialog'
@@ -224,6 +225,7 @@ function DetailCard({row,ctx,revision,onBack,onRefresh}:{row:ScopedRow;ctx:Inbox
     canReply:canPrepareReply,canRead:Boolean(online&&activeAction?.capabilities.dispatch_enabled&&activeAction.capabilities.may_read),canReact:Boolean(online&&activeAction?.capabilities.dispatch_enabled&&activeAction.capabilities.may_react),
     onReply:setReply,onNative:(kind,message,emoji)=>{void nativeAction(kind,message,emoji)},busy:nativeBusy
    }:undefined}/>
+  {row.scope==='active'&&<ScopedAiThreadBanner key={row.id+':'+row.channel_id} row={row} ctx={ctx} revision={revision} onRefresh={onRefresh}/>}
   {row.scope==='active'&&<ScopedActionPane row={row} ctx={ctx} revision={revision} selectedConnection={selectedConnection} onSelectConnection={value=>{if(selectedConnection&&value!==selectedConnection)setReply(null);setSelectedConnection(value)}}
    reply={reply} onClearReply={()=>setReply(null)} onScopeChange={setActiveAction} onRefresh={onRefresh}/>}
   </div>
