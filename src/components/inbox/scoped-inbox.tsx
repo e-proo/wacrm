@@ -94,9 +94,9 @@ function ChannelSelector({ctx,loc,revision,onChange,onRetry}:{ctx:InboxContext;l
   </>}
   <Button variant="ghost" className="w-full justify-between" onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}><span className="flex items-center gap-2"><Smartphone className="size-4"/>{t('sessions')}</span><ChevronDown className={cn('size-4 transition-transform',expanded&&'rotate-180')}/></Button>
   {expanded&&<SessionList key={loc.scope+':'+loc.channel} ctx={ctx} loc={loc} revision={revision} onRetry={onRetry}/>}
-  <ScopedChannelReadiness ctx={ctx} revision={revision} onChanged={onRetry}/>
-  <ScopedIntakeReview ctx={ctx} revision={revision} onChanged={onRetry}/>
-  <ScopedOpenWAIntakeHealth ctx={ctx} revision={revision} onChanged={onRetry}/>
+  <ScopedChannelReadiness ctx={ctx} onChanged={onRetry}/>
+  <ScopedIntakeReview ctx={ctx} onChanged={onRetry}/>
+  <ScopedOpenWAIntakeHealth ctx={ctx} onChanged={onRetry}/>
  </div>
 }
 function SessionList({ctx,loc,revision,onRetry}:{ctx:InboxContext;loc:InboxSelection;revision:number;onRetry:()=>void}){

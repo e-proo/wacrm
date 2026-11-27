@@ -1,12 +1,17 @@
 'use client'
-import {useEffect,useState} from 'react'
+import {useState} from 'react'
 import {useLocale,useTranslations} from 'next-intl'
 import {ClipboardCheck,RefreshCw} from 'lucide-react'
 import {useCan} from '@/hooks/use-can'
 import {Button} from '@/components/ui/button'
 import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle,DialogTrigger} from '@/components/ui/dialog'
-import {fetchInbox,type InboxContext} from '@/lib/inbox/scoped-list-model'
+import type {InboxContext} from '@/lib/inbox/scoped-list-model'
+import {useAdminSnapshot} from '@/lib/inbox/use-admin-snapshot'
 import {normalizeReviewPage,reviewAction,type ReviewPage,type ReviewRow,type ReviewOutcome} from '@/lib/inbox/intake-review-model'
+
+// A response for the other tab must never be shown in this tab.
+function normalizePendingReview(raw:unknown):ReviewPage|null{const p=normalizeReviewPage(raw);return p?.closed===false?p:null}
+function normalizeClosedReview(raw:unknown):ReviewPage|null{const p=normalizeReviewPage(raw);return p?.closed===true?p:null}
 
 const reasonKeys={
  missing_verified_epoch:'reviewMissingEpoch',event_only_identity:'reviewEventOnly',namespace_unverified:'reviewMissingNamespace',peer_conflict:'reviewPeerConflict',
@@ -61,39 +66,32 @@ function ReviewCard({row,maintenance,ctx,onSettled}:{row:ReviewRow;maintenance:b
   </div>}
  </article>
 }
-export function ScopedIntakeReview({ctx,revision,onChanged}:{ctx:InboxContext;revision:number;onChanged:()=>void}){
+export function ScopedIntakeReview({ctx,onChanged}:{ctx:InboxContext;onChanged:()=>void}){
  const t=useTranslations('Inbox.scoped'),authorized=useCan('edit-settings')
  const [open,setOpen]=useState(false),[closed,setClosed]=useState(false),[localRevision,setLocalRevision]=useState(0),[trail,setTrail]=useState<(string|null)[]>([null])
- const [snapshot,setSnapshot]=useState<{key:string;page:ReviewPage|null;error:boolean}|null>(null)
  const [notice,setNotice]=useState<ReviewOutcome|null>(null)
- const after=trail.at(-1)??null,key=[ctx.accountId,ctx.userId,revision,localRevision,closed,after].join(':')
- useEffect(()=>{
-  if(!open||!authorized)return
-  const ctl=new AbortController(),q=new URLSearchParams({closed:String(closed)})
-  if(after)q.set('after',after)
-  void fetchInbox<unknown>('intake-review?'+q.toString(),{accountId:ctx.accountId,userId:ctx.userId},ctl.signal)
-   .then(raw=>{const page=normalizeReviewPage(raw);if(!page||page.closed!==closed)throw Error('invalid review');if(!ctl.signal.aborted)setSnapshot({key,page,error:false})})
-   .catch(()=>{if(!ctl.signal.aborted)setSnapshot({key,page:null,error:true})})
-  return()=>ctl.abort()
- },[open,authorized,key,closed,after,ctx.accountId,ctx.userId])
+ const after=trail.at(-1)??null
+ const q=new URLSearchParams({closed:String(closed)})
+ if(after)q.set('after',after)
+ const {page,refreshing,error}=useAdminSnapshot(ctx,open&&authorized,'intake-review?'+q.toString(),localRevision,closed?normalizeClosedReview:normalizePendingReview)
  if(!authorized)return null
- const current=snapshot?.key===key?snapshot:null,page=current?.page
+
  function changed(outcome:ReviewOutcome){setNotice(outcome);setTrail([null]);setLocalRevision(x=>x+1);onChanged()}
  return <Dialog open={open} onOpenChange={v=>{setOpen(v);if(v){setClosed(false);setTrail([null]);setLocalRevision(x=>x+1);setNotice(null)}}}>
   <DialogTrigger render={<Button type="button" variant="outline" className="min-h-11 w-full justify-start gap-2"/>}><ClipboardCheck className="size-4 shrink-0"/>{t('reviewTitle')}</DialogTrigger>
   <DialogContent className="max-h-[min(90dvh,54rem)] overflow-y-auto overscroll-contain pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-3xl">
    <DialogHeader className="pe-8"><DialogTitle>{t('reviewTitle')} · TEST</DialogTitle><DialogDescription>{t('reviewDescription')}</DialogDescription></DialogHeader>
    <div className="flex flex-wrap items-center justify-between gap-2"><div role="group" aria-label={t('reviewTitle')} className="flex gap-1 rounded-lg bg-muted p-1">{([false,true] as const).map(v=><Button key={String(v)} type="button" variant={closed===v?'default':'ghost'} className="min-h-11" aria-pressed={closed===v} onClick={()=>{setClosed(v);setTrail([null]);setNotice(null);setLocalRevision(x=>x+1)}}>{t(v?'reviewClosed':'reviewPending')}</Button>)}</div>
-    <Button type="button" variant="outline" className="min-h-11 gap-1.5" onClick={()=>setLocalRevision(x=>x+1)}><RefreshCw className="size-4"/>{t('readinessRefresh')}</Button></div>
+    <Button type="button" variant="outline" className="min-h-11 gap-1.5" disabled={refreshing} aria-busy={refreshing} onClick={()=>setLocalRevision(x=>x+1)}><RefreshCw aria-hidden="true" className={refreshing?'size-4 animate-spin motion-reduce:animate-none':'size-4'}/>{t('readinessRefresh')}</Button></div>
    {notice&&<p role="status" className="rounded-lg bg-muted p-3 text-sm">{t(outcomeKeys[notice])}</p>}
-   {!current&&<p role="status" className="p-4 text-center text-sm">{t('loading')}</p>}
-   {current?.error&&<div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm">{t('reviewLoadFailed')} <Button type="button" variant="outline" className="mt-2 min-h-11" onClick={()=>setLocalRevision(x=>x+1)}>{t('retry')}</Button></div>}
-   {page&&<>
+   {refreshing&&!page&&<p role="status" className="p-4 text-center text-sm">{t('loading')}</p>}
+   {error&&<div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm">{t('reviewLoadFailed')} <Button type="button" variant="outline" className="mt-2 min-h-11" onClick={()=>setLocalRevision(x=>x+1)}>{t('retry')}</Button></div>}
+   {page&&<fieldset disabled={refreshing} aria-busy={refreshing} className="min-w-0 space-y-3 border-0 p-0">
     {!page.maintenance_ready&&!closed&&<p className="rounded-lg border border-amber-500/30 p-3 text-xs">{t('reviewMaintenanceRequired')}</p>}
     {page.items.length===0&&<p className="p-5 text-center text-sm text-muted-foreground">{t(closed?'reviewEmptyClosed':'reviewEmptyPending')}</p>}
-    <div className="space-y-3">{page.items.map(row=><ReviewCard key={key+':'+row.id} row={row} ctx={ctx} maintenance={page.maintenance_ready} onSettled={changed}/>)}</div>
-    <nav aria-label={t('readinessPages')} className="flex flex-wrap justify-between gap-2"><Button type="button" variant="outline" className="min-h-11" disabled={trail.length<2} onClick={()=>setTrail(x=>x.slice(0,-1))}>{t('readinessPrevious')}</Button><span className="self-center text-xs text-muted-foreground">{trail.length}</span><Button type="button" variant="outline" className="min-h-11" disabled={!page.next_after} onClick={()=>{if(page.next_after)setTrail(x=>[...x,page.next_after])}}>{t('readinessNext')}</Button></nav>
-   </>}
+    <div className="space-y-3">{page.items.map(row=><ReviewCard key={row.id+':'+row.decision+':'+row.reason+':'+row.outcome+':'+page.maintenance_ready} row={row} ctx={ctx} maintenance={page.maintenance_ready} onSettled={changed}/>)}</div>
+    <nav aria-label={t('readinessPages')} className="flex flex-wrap justify-between gap-2"><Button type="button" variant="outline" className="min-h-11" disabled={trail.length<2} onClick={()=>{setTrail(x=>x.slice(0,-1));setLocalRevision(x=>x+1)}}>{t('readinessPrevious')}</Button><span className="self-center text-xs text-muted-foreground">{trail.length}</span><Button type="button" variant="outline" className="min-h-11" disabled={!page.next_after} onClick={()=>{if(page.next_after){setTrail(x=>[...x,page.next_after]);setLocalRevision(x=>x+1)}}}>{t('readinessNext')}</Button></nav>
+   </fieldset>}
   </DialogContent>
  </Dialog>
 }

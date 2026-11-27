@@ -1,12 +1,13 @@
 'use client'
-import { useEffect,useState } from 'react'
+import {useState} from 'react'
 import { useLocale,useTranslations } from 'next-intl'
 import { CheckCircle2,AlertCircle,RefreshCw,ShieldCheck } from 'lucide-react'
 import { useCan } from '@/hooks/use-can'
 import { Button } from '@/components/ui/button'
 import { Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle,DialogTrigger } from '@/components/ui/dialog'
-import { fetchInbox,type InboxContext } from '@/lib/inbox/scoped-list-model'
-import { normalizeReadinessPage,readinessReasons,readinessCapabilities,type ReadinessPage,type ReadinessGates,type ReadinessRow } from '@/lib/inbox/channel-readiness-model'
+import type {InboxContext} from '@/lib/inbox/scoped-list-model'
+import {useAdminSnapshot} from '@/lib/inbox/use-admin-snapshot'
+import { normalizeReadinessPage,readinessReasons,readinessCapabilities,type ReadinessGates,type ReadinessRow } from '@/lib/inbox/channel-readiness-model'
 import { ScopedVerifyChannel } from './scoped-verify-channel'
 import { cn } from '@/lib/utils'
 
@@ -75,41 +76,33 @@ function ReadinessCard({row,gates,ctx,onChanged}:{row:ReadinessRow;gates:Readine
   </div>}
  </article>
 }
-export function ScopedChannelReadiness({ctx,revision,onChanged}:{ctx:InboxContext;revision:number;onChanged:()=>void}){
+export function ScopedChannelReadiness({ctx,onChanged}:{ctx:InboxContext;onChanged:()=>void}){
  const t=useTranslations('Inbox.scoped')
  const authorized=useCan('edit-settings')
  const [open,setOpen]=useState(false),[localRevision,setLocalRevision]=useState(0),[trail,setTrail]=useState<(string|null)[]>([null])
- const [snapshot,setSnapshot]=useState<{key:string;page:ReadinessPage|null;error:boolean}|null>(null)
  const [notice,setNotice]=useState<'verified'|'revoked'|null>(null)
- const after=trail.at(-1)??null,key=[ctx.accountId,ctx.userId,revision,localRevision,after].join(':')
- useEffect(()=>{
-  if(!open||!authorized)return
-  const ctl=new AbortController()
-  void fetchInbox<unknown>('channel-readiness'+(after?'?after='+encodeURIComponent(after):''),{accountId:ctx.accountId,userId:ctx.userId},ctl.signal)
-   .then(raw=>{const page=normalizeReadinessPage(raw);if(!page)throw Error('invalid readiness');if(!ctl.signal.aborted)setSnapshot({key,page,error:false})})
-   .catch(()=>{if(!ctl.signal.aborted)setSnapshot({key,page:null,error:true})})
-  return()=>ctl.abort()
- },[open,authorized,key,after,ctx.accountId,ctx.userId])
+ const after=trail.at(-1)??null
+ const {page,refreshing,error}=useAdminSnapshot(ctx,open&&authorized,'channel-readiness'+(after?'?after='+encodeURIComponent(after):''),localRevision,normalizeReadinessPage)
  if(!authorized)return null
- const current=snapshot?.key===key?snapshot:null,page=current?.page
+
  function changed(kind:'verified'|'revoked'){setNotice(kind);setLocalRevision(x=>x+1);onChanged()}
  return <Dialog open={open} onOpenChange={v=>{setOpen(v);if(v){setTrail([null]);setLocalRevision(x=>x+1);setNotice(null)}}}>
   <DialogTrigger render={<Button type="button" variant="outline" className="min-h-11 w-full justify-start gap-2"/>}><ShieldCheck className="size-4 shrink-0"/>{t('readinessTitle')}</DialogTrigger>
   <DialogContent className="max-h-[min(90dvh,54rem)] overflow-y-auto overscroll-contain pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-3xl">
    <DialogHeader className="pe-8"><DialogTitle>{t('readinessTitle')} · TEST</DialogTitle><DialogDescription>{t('readinessDescription')}</DialogDescription></DialogHeader>
-   <div className="flex items-center justify-between gap-2"><p className="text-xs text-muted-foreground">{t('readinessSnapshotNotice')}</p><Button type="button" variant="outline" size="sm" className="min-h-11 shrink-0 gap-1.5" onClick={()=>setLocalRevision(x=>x+1)}><RefreshCw className="size-4"/>{t('readinessRefresh')}</Button></div>
+   <div className="flex items-center justify-between gap-2"><p className="text-xs text-muted-foreground">{t('readinessSnapshotNotice')}</p><Button type="button" variant="outline" size="sm" className="min-h-11 shrink-0 gap-1.5" disabled={refreshing} aria-busy={refreshing} onClick={()=>setLocalRevision(x=>x+1)}><RefreshCw aria-hidden="true" className={refreshing?'size-4 animate-spin motion-reduce:animate-none':'size-4'}/>{t('readinessRefresh')}</Button></div>
    {notice&&<p role="status" className="rounded-md bg-muted p-2 text-sm">{t(notice==='verified'?'readinessUpdated':'readinessRevoked')}</p>}
-   {!current&&<p role="status" className="rounded-lg bg-muted/40 p-4 text-center text-sm">{t('loading')}</p>}
-   {current?.error&&<div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm">{t('readinessLoadFailed')} <Button type="button" variant="outline" className="mt-2 min-h-11" onClick={()=>setLocalRevision(x=>x+1)}>{t('retry')}</Button></div>}
-   {page&&<>
+   {refreshing&&!page&&<p role="status" className="rounded-lg bg-muted/40 p-4 text-center text-sm">{t('loading')}</p>}
+   {error&&<div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm">{t('readinessLoadFailed')} <Button type="button" variant="outline" className="mt-2 min-h-11" onClick={()=>setLocalRevision(x=>x+1)}>{t('retry')}</Button></div>}
+   {page&&<fieldset disabled={refreshing} aria-busy={refreshing} className="min-w-0 space-y-3 border-0 p-0">
     <section className="rounded-xl border border-border bg-muted/30 p-3 space-y-2"><h3 className="text-xs font-semibold">{t('readinessRuntime')}</h3>
      <div className="flex flex-wrap gap-2"><Indicator ok={page.gates.shadow} label={t(page.gates.shadow?'readinessShadowOn':'readinessShadowOff')}/><Indicator ok={page.gates.canonical} label={t(page.gates.canonical?'readinessCanonicalOn':'readinessCanonicalOff')}/><span className="rounded-md border px-2 py-1 text-xs">{t(page.gates.actions?'readinessActionsOn':'readinessActionsOff')}</span><span className="rounded-md border px-2 py-1 text-xs">{t(page.gates.durable?'intakeEnabled':'intakeDisabled')}</span></div>
      <p className="text-xs text-muted-foreground">{t('readinessGateNotice')}</p>
     </section>
     {page.items.length===0&&<p className="py-6 text-center text-sm text-muted-foreground">{t('emptySessions')}</p>}
-    <div className="space-y-3">{page.items.map(row=><ReadinessCard key={row.id+':'+(row.membership_id??'none')+':'+row.primary} row={row} gates={page.gates} ctx={ctx} onChanged={changed}/>)}</div>
-    <nav aria-label={t('readinessPages')} className="flex flex-wrap justify-between gap-2"><Button type="button" variant="outline" className="min-h-11" disabled={trail.length<2} onClick={()=>setTrail(x=>x.slice(0,-1))}>{t('readinessPrevious')}</Button><span className="self-center text-xs text-muted-foreground tabular-nums">{trail.length}</span><Button type="button" variant="outline" className="min-h-11" disabled={!page.next_after} onClick={()=>{if(page.next_after)setTrail(x=>[...x,page.next_after])}}>{t('readinessNext')}</Button></nav>
-   </>}
+    <div className="space-y-3">{page.items.map(row=><ReadinessCard key={row.id+':'+(row.membership_id??'none')+':'+row.primary+':'+page.gates.shadow+':'+page.gates.canonical+':'+page.gates.actions+':'+page.gates.durable} row={row} gates={page.gates} ctx={ctx} onChanged={changed}/>)}</div>
+    <nav aria-label={t('readinessPages')} className="flex flex-wrap justify-between gap-2"><Button type="button" variant="outline" className="min-h-11" disabled={trail.length<2} onClick={()=>{setTrail(x=>x.slice(0,-1));setLocalRevision(x=>x+1)}}>{t('readinessPrevious')}</Button><span className="self-center text-xs text-muted-foreground tabular-nums">{trail.length}</span><Button type="button" variant="outline" className="min-h-11" disabled={!page.next_after} onClick={()=>{if(page.next_after){setTrail(x=>[...x,page.next_after]);setLocalRevision(x=>x+1)}}}>{t('readinessNext')}</Button></nav>
+   </fieldset>}
   </DialogContent>
  </Dialog>
 }
