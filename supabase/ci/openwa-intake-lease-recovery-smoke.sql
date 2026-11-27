@@ -64,13 +64,17 @@ BEGIN
  -- A never-claimed event with stale credentials remains blocked, not rebound.
  INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,intake_state,intake_canonical_mode,intake_ciphertext,intake_digest,intake_session,intake_phone,intake_credential_version,processing_attempts)
  VALUES(a,s,'openwa','stale-binding',clock_timestamp(),'pending',true,repeat('d',100),repeat('d',64),'intake233','15550000233',cv-interval '1 second',0) RETURNING id INTO stale_id;
- IF public.openwa_claim_signed_intake(true)->>'state'<>'review' OR NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=stale_id AND intake_reason='binding_changed' AND processing_attempts=0 AND intake_ciphertext IS NOT NULL) THEN RAISE EXCEPTION 'stale binding replayed'; END IF;
+ v=public.openwa_claim_signed_intake(true);
+ IF v->>'state'<>'review' THEN RAISE EXCEPTION 'stale binding claim returned %',v->>'state'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=stale_id AND intake_reason='binding_changed' AND processing_attempts=0 AND intake_ciphertext IS NOT NULL) THEN RAISE EXCEPTION 'stale binding not held'; END IF;
  IF public.openwa_intake_close_unverified(a,u,stale_id)<>'closed_unverified' THEN RAISE EXCEPTION 'stale fixture close'; END IF;
  -- Seed an expired lease without touching a live row or sleeping 90 seconds.
  stale_token=gen_random_uuid();old_at=clock_timestamp()-interval '91 seconds';
  INSERT INTO public.whatsapp_webhook_event_receipts(account_id,connection_id,provider,provider_event_id,received_at,intake_state,intake_canonical_mode,intake_ciphertext,intake_digest,intake_session,intake_phone,intake_credential_version,processing_attempts,processing_token,processing_started_at,intake_claim_token,intake_claimed_at)
  VALUES(a,s,'openwa','expired-lease',old_at,'running',true,repeat('e',100),repeat('e',64),'intake233','15550000233',cv,1,stale_token,old_at,stale_token,old_at) RETURNING id INTO stale_id;
- IF public.openwa_renew_signed_intake(stale_id,stale_token,true,false) OR public.openwa_claim_signed_intake(true)->>'state'<>'idle' OR NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=stale_id AND intake_state='review' AND intake_reason='lease_expired' AND intake_ciphertext IS NOT NULL) THEN RAISE EXCEPTION 'expired lease revived'; END IF;
+ IF public.openwa_renew_signed_intake(stale_id,stale_token,true,false) THEN RAISE EXCEPTION 'expired lease revived'; END IF;
+ v=public.openwa_claim_signed_intake(true);
+ IF v->>'state'<>'idle' OR NOT EXISTS(SELECT 1 FROM public.whatsapp_webhook_event_receipts WHERE id=stale_id AND intake_state='review' AND intake_reason='lease_expired' AND intake_ciphertext IS NOT NULL) THEN RAISE EXCEPTION 'expired lease not held'; END IF;
  -- A long-lived renewed lease can still be finalized; the original age
  -- is preserved and the heartbeat cannot extend beyond the hard cap.
  IF public.openwa_intake_close_unverified(a,u,stale_id)<>'closed_unverified' THEN RAISE EXCEPTION 'expired fixture close'; END IF;
